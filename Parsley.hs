@@ -24,6 +24,7 @@ import System.Mem.StableName
 import Data.Hashable
 import Data.HashSet hiding (empty, null)
 import qualified Data.HashSet as HashSet
+import Data.HList.HList
 
 -- AST
 data Parser a where
@@ -145,7 +146,6 @@ optimise ((p :<*: q) :<*: r)              = optimise (p <* optimise (q <* r))
 optimise p                                = p
 
 data M state input output where
-  --Ret         :: M s (a ': xs) (a ': xs)
   Halt        :: M s '[a] '[a]
   Push        :: a -> M s (a ': xs) ys -> M s xs ys
   Pop         :: M s xs ys -> M s (a ': xs) ys
@@ -155,20 +155,9 @@ data M state input output where
   Cut         :: M s xs ys -> M s xs ys
   Try         :: M s xs ys -> M s xs ys -> M s xs ys
   TryCut      :: M s xs ys -> M s xs ys -> M s xs ys
-  -- VERSION 1
-  --Many'    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
-  --ManyCut' :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
-  -- VERSION 2
-  --ManyIter    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s (a ': xs) (a ': xs)
-  --ManyIterCut :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s (a ': xs) (a ': xs)
-  --ManyInit    :: STRef s [a] -> M s (a ': xs) (a ': xs) -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
-  -- VERSION 3
   ManyIter    :: STRef s [a] -> M s xs (a ': xs) -> M s (a ': xs) (a ': xs)
   ManyInit    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
   ManyInitCut :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
-
---halt :: M s '[a] '[a]
---halt = Ret
 
 -- ts ++ ts' == ts''
 class Append (ts :: [*]) (ts' :: [*]) (ts'' :: [*]) | ts ts' -> ts''
@@ -185,47 +174,38 @@ compile' (p :*>: q) m    = do qc <- compile' @xs q m; compile' @xs p (Pop qc)
 compile' (p :<*: q) m    = do qc <- compile' @(a ': xs) q (Pop m); compile' @xs p qc
 compile' Empty m         = do return Empt
 compile' (p :<|>: q) m   = do TryCut <$> compile' @xs p (Cut m) <*> compile' @xs q m
--- FIXME Preprocessing needs to be performed
-compile' (p :>>=: f) m   = do compile' @xs p (Bind (flip (compile' @xs) m . f))
+compile' (p :>>=: f) m   = do compile' @xs p (Bind (flip (compile' @xs) m . preprocess . f))
 compile' (Fix p) m       = do compile' @xs p m
---compile' (Many p) m      = do Many' <$> newSTRef [] <*> compile' @'[] p Ret <*> pure m
-{-compile' (Many p) m      =
-  mdo st <- newSTRef []
-      manyp <- compile' @'[] p manyp'
-      let manyp' = (ManyIterCut st manyp m)
-      return (ManyInit st manyp' manyp m)-}
 compile' (Many p) m      =
   mdo st <- newSTRef []
       manyp <- compile' @'[] p (ManyIter st manyp)
       return (ManyInitCut st manyp m)
 
-type X' = ()
-type H s a = STRef s [(ST s (Maybe a), X')]
-type X s = STRef s X'
+type H s a = STRef s [ST s (Maybe a)]
+type X = HList
 type C s = STRef s [Int]
 data Status = Good | Bad deriving (Show, Eq)
 type S s = STRef s Status
 
-makeX :: ST s (X s)
-makeX = newSTRef ()
-pushX :: a -> X s -> ST s ()
-pushX = undefined
-popX :: X s -> ST s a
-popX = undefined
-pokeX :: a -> X s -> ST s ()
+makeX :: ST s (X '[])
+makeX = return HNil
+pushX :: a -> X xs -> X (a ': xs)
+pushX = HCons
+popX :: X (a ': xs) -> (a, X xs)
+popX (HCons x xs) = (x, xs)
+pokeX :: a -> X (a ': xs) -> X (a ': xs)
 pokeX = undefined
 
 makeH :: ST s (H s a)
 makeH = newSTRef []
 emptyH :: H s a -> ST s Bool
 emptyH = fmap null . readSTRef
-pushH :: X s -> C s -> S s -> String -> M s xs ys -> H s a -> ST s ()
-pushH xs cs s input m hs = do xs' <- readSTRef xs; modifySTRef' hs ((eval' xs hs cs s input m, xs') :)
-popH :: X s -> H s a -> ST s (Maybe a)
-popH xref href =
-  do ((h, xs):hs) <- readSTRef href
+pushH :: X xs -> C s -> S s -> String -> M s xs '[a] -> H s a -> ST s ()
+pushH xs cs s input m hs = modifySTRef' hs (eval' xs hs cs s input m :)
+popH :: H s a -> ST s (Maybe a)
+popH href =
+  do (h:hs) <- readSTRef href
      writeSTRef href hs
-     writeSTRef xref xs
      h
 
 makeC :: ST s (C s)
@@ -248,7 +228,6 @@ oops ref = writeSTRef ref Bad
 ok :: S s -> ST s ()
 ok ref = writeSTRef ref Good
 
--- TODO Obviously, this will have setup code for the stack etc
 eval :: String -> M s '[] '[a] -> ST s (Maybe a)
 eval input m =
   do xs <- makeX
@@ -258,12 +237,20 @@ eval input m =
      eval' xs hs cs s input m
 
 -- TODO Implement semantics of the machine
-eval' :: X s -> H s a -> C s -> S s -> String -> M s xs ys -> ST s (Maybe a)
-eval' xs hs cs s input Halt = status s (fmap Just (popX xs)) (return Nothing)
+eval' :: X xs -> H s a -> C s -> S s -> String -> M s xs '[a] -> ST s (Maybe a)
+eval' xs hs cs s input Halt       = status s (return (Just (fst (popX xs)))) (return Nothing)
+eval' xs hs cs s input (Push x k) = eval' (pushX x xs) hs cs s input k
+eval' xs hs cs s input (Pop k)    = eval' (snd (popX xs)) hs cs s input k
+eval' xs hs cs s input (App k)    = let (x, xs') = popX xs
+                                        (f, xs'') = popX xs'
+                                    in eval' (pushX (f x) xs'') hs cs s input k
+eval' xs hs cs s input (Bind f)   = do let (x, xs') = popX xs
+                                       k <- f x
+                                       eval' xs' hs cs s input k
 eval' xs hs cs s input Empt =
   do noHandler <- emptyH hs
      if noHandler then return Nothing
-     else do oops s; popH xs hs
+     else do oops s; popH hs
 eval' xs hs cs s input _ = return Nothing
 
 runParser :: Parser a -> String -> Maybe a

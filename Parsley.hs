@@ -124,11 +124,17 @@ data M state input output where
   Cut         :: M s xs ys -> M s xs ys
   Try         :: M s xs ys -> M s xs ys -> M s xs ys
   TryCut      :: M s xs ys -> M s xs ys -> M s xs ys
+  -- VERSION 1
   --Many'    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
   --ManyCut' :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
-  ManyIter    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s (a ': xs) (a ': xs)
-  ManyIterCut :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s (a ': xs) (a ': xs)
-  ManyInit    :: STRef s [a] -> M s (a ': xs) (a ': xs) -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
+  -- VERSION 2
+  --ManyIter    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s (a ': xs) (a ': xs)
+  --ManyIterCut :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s (a ': xs) (a ': xs)
+  --ManyInit    :: STRef s [a] -> M s (a ': xs) (a ': xs) -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
+  -- VERSION 3
+  ManyIter    :: STRef s [a] -> M s xs (a ': xs) -> M s (a ': xs) (a ': xs)
+  ManyInit    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
+  ManyInitCut :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
 
 halt :: M s '[a] '[a]
 halt = Halt
@@ -151,17 +157,21 @@ compile' (p :<|>: q) m   = do TryCut <$> compile' @xs p (Cut m) <*> compile' @xs
 compile' (p :>>=: f) m   = do compile' @xs p (Bind (flip (compile' @xs) m . f))
 compile' (Fix p) m       = do compile' @xs p m
 --compile' (Many p) m      = do Many' <$> newSTRef [] <*> compile' @'[] p Ret <*> pure m
-compile' (Many p) m      =
+{-compile' (Many p) m      =
   mdo st <- newSTRef []
       manyp <- compile' @'[] p manyp'
       let manyp' = (ManyIterCut st manyp m)
-      return (ManyInit st manyp' manyp m)
+      return (ManyInit st manyp' manyp m)-}
+compile' (Many p) m      =
+  mdo st <- newSTRef []
+      manyp <- compile' @'[] p (ManyIter st manyp)
+      return (ManyInitCut st manyp m)
 
--- Obviously, this will have setup code for the stack etc
+-- TODO Obviously, this will have setup code for the stack etc
 eval :: String -> M s '[] '[a] -> ST s (Maybe a)
 eval = eval'
 
--- This is the operational semantics of the instruction set!
+-- TODO Implement semantics of the machine
 eval' :: String -> M s '[] '[a] -> ST s (Maybe a)
 eval' _ _ = return Nothing
 

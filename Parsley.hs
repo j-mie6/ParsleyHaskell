@@ -91,14 +91,14 @@ preprocess p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (preproc
     preprocess' :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
     preprocess' p = fix p >>= preprocess''
     preprocess'' :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
-    preprocess'' (pf :<*>: px) = do pf' <- preprocess' pf; px' <- preprocess' px; return (optimise (pf' :<*>: px'))
-    preprocess'' (p :*>: q)    = do p' <- preprocess' p;   q' <- preprocess' q;   return (optimise (p' :*>: q'))
-    preprocess'' (p :<*: q)    = do p' <- preprocess' p;   q' <- preprocess' q;   return (optimise (p' :<*: q'))
-    preprocess'' (p :>>=: f)   = do p' <- preprocess' p;                          return (optimise (p' :>>=: f))
-    preprocess'' (p :<|>: q)   = do p' <- preprocess' p;   q' <- preprocess' q;   return (optimise (p' :<|>: q'))
-    preprocess'' Empty         = do return Empty
-    preprocess'' (Many p)      = do p' <- preprocess' p;                          return (Many p')
-    preprocess'' p             = do return p
+    preprocess'' (pf :<*>: px) = fmap optimise (liftM2 (:<*>:)  (preprocess' pf) (preprocess' px))
+    preprocess'' (p :*>: q)    = fmap optimise (liftM2 (:*>:)   (preprocess' p)  (preprocess' q))
+    preprocess'' (p :<*: q)    = fmap optimise (liftM2 (:<*:)   (preprocess' p)  (preprocess' q))
+    preprocess'' (p :>>=: f)   = fmap optimise (liftM (:>>=: f) (preprocess' p))
+    preprocess'' (p :<|>: q)   = fmap optimise (liftM2 (:<|>:)  (preprocess' p)  (preprocess' q))
+    preprocess'' Empty         = return Empty
+    preprocess'' (Many p)      = liftM Many (preprocess' p)
+    preprocess'' p             = return p
 
     fix :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
     -- Force evaluation of p to ensure that the stableName is correct first time

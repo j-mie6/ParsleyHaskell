@@ -22,7 +22,7 @@ import System.IO.Unsafe
 import Data.IORef
 import System.Mem.StableName
 import Data.Hashable
-import Data.HashSet hiding (empty)
+import Data.HashSet hiding (empty, null)
 import qualified Data.HashSet as HashSet
 
 -- AST
@@ -128,7 +128,6 @@ optimise ((u :<|>: v) :<|>: w)            = u <|> optimise (v <|> w)
 -- Monadic Optimisation
 optimise (Pure x :>>=: f)                 = f x
 optimise ((q :*>: p) :>>=: f)             = q *> optimise (p >>= f)
---optimise ((m :>>=: g) :>>=: f)            = m >>= (\x -> optimise (g x >>= f)) -- Compiler does this for us?
 optimise (Empty :>>=: f)                  = Empty
 -- Sequential Optimisation
 optimise (Pure _ :*>: p)                  = p
@@ -186,6 +185,7 @@ compile' (p :*>: q) m    = do qc <- compile' @xs q m; compile' @xs p (Pop qc)
 compile' (p :<*: q) m    = do qc <- compile' @(a ': xs) q (Pop m); compile' @xs p qc
 compile' Empty m         = do return Empt
 compile' (p :<|>: q) m   = do TryCut <$> compile' @xs p (Cut m) <*> compile' @xs q m
+-- FIXME Preprocessing needs to be performed
 compile' (p :>>=: f) m   = do compile' @xs p (Bind (flip (compile' @xs) m . f))
 compile' (Fix p) m       = do compile' @xs p m
 --compile' (Many p) m      = do Many' <$> newSTRef [] <*> compile' @'[] p Ret <*> pure m
@@ -199,13 +199,72 @@ compile' (Many p) m      =
       manyp <- compile' @'[] p (ManyIter st manyp)
       return (ManyInitCut st manyp m)
 
+type X' = ()
+type H s a = STRef s [(ST s (Maybe a), X')]
+type X s = STRef s X'
+type C s = STRef s [Int]
+data Status = Good | Bad deriving (Show, Eq)
+type S s = STRef s Status
+
+makeX :: ST s (X s)
+makeX = newSTRef ()
+pushX :: a -> X s -> ST s ()
+pushX = undefined
+popX :: X s -> ST s a
+popX = undefined
+pokeX :: a -> X s -> ST s ()
+pokeX = undefined
+
+makeH :: ST s (H s a)
+makeH = newSTRef []
+emptyH :: H s a -> ST s Bool
+emptyH = fmap null . readSTRef
+pushH :: X s -> C s -> S s -> String -> M s xs ys -> H s a -> ST s ()
+pushH xs cs s input m hs = do xs' <- readSTRef xs; modifySTRef' hs ((eval' xs hs cs s input m, xs') :)
+popH :: X s -> H s a -> ST s (Maybe a)
+popH xref href =
+  do ((h, xs):hs) <- readSTRef href
+     writeSTRef href hs
+     writeSTRef xref xs
+     h
+
+makeC :: ST s (C s)
+makeC = newSTRef []
+pushC :: Int -> C s -> ST s ()
+pushC c cs = modifySTRef' cs (c:)
+popC :: C s -> ST s Int
+popC ref = do (c:cs) <- readSTRef ref; writeSTRef ref cs; return c
+
+makeS :: ST s (S s)
+makeS = newSTRef Good
+status :: S s -> ST s a -> ST s a -> ST s a
+status ref good bad =
+  do s <- readSTRef ref
+     case s of
+       Good -> good
+       Bad -> bad
+oops :: S s -> ST s ()
+oops ref = writeSTRef ref Bad
+ok :: S s -> ST s ()
+ok ref = writeSTRef ref Good
+
 -- TODO Obviously, this will have setup code for the stack etc
 eval :: String -> M s '[] '[a] -> ST s (Maybe a)
-eval = eval'
+eval input m =
+  do xs <- makeX
+     hs <- makeH
+     cs <- makeC
+     s <- makeS
+     eval' xs hs cs s input m
 
 -- TODO Implement semantics of the machine
-eval' :: String -> M s '[] '[a] -> ST s (Maybe a)
-eval' _ _ = return Nothing
+eval' :: X s -> H s a -> C s -> S s -> String -> M s xs ys -> ST s (Maybe a)
+eval' xs hs cs s input Halt = status s (fmap Just (popX xs)) (return Nothing)
+eval' xs hs cs s input Empt =
+  do noHandler <- emptyH hs
+     if noHandler then return Nothing
+     else do oops s; popH xs hs
+eval' xs hs cs s input _ = return Nothing
 
 runParser :: Parser a -> String -> Maybe a
 runParser p input = runST (compile (preprocess p) >>= eval input)

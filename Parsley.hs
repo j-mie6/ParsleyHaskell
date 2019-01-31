@@ -12,19 +12,20 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE BangPatterns #-}
-import Prelude hiding ((*>), (<*), (>>))
+import Prelude hiding ((*>), (<*), (>>), traverse, sequence)
 import Control.Applicative hiding ((<*), (*>), many, some)
-import Control.Monad hiding ((>>))
-import Control.Monad.ST
-import Control.Monad.Reader
-import Data.STRef
+import Control.Monad hiding ((>>), sequence)
+import Control.Monad.ST.Lazy
+import Control.Monad.Reader hiding (sequence)
+import Data.STRef.Lazy
 import System.IO.Unsafe
 import Data.IORef
 import System.Mem.StableName
 import Data.Hashable
-import Data.HashSet hiding (empty, null)
+import Data.HashSet hiding (empty, null, size, map, foldr)
 import qualified Data.HashSet as HashSet
 import Data.HList.HList
+import Data.Array.Unboxed
 
 -- AST
 data Parser a where
@@ -37,6 +38,7 @@ data Parser a where
   Empty   :: Parser a
   Fix     :: Parser a -> Parser a
   Many    :: Parser a -> Parser [a]
+  Satisfy :: (Char -> Bool) -> Parser Char
 
 instance Show (Parser a) where
   show (Pure _) = "pure x"
@@ -48,6 +50,7 @@ instance Show (Parser a) where
   show Empty = "empty"
   show (Fix _) = "fix!"
   show (Many p) = concat ["(many ", show p, "]"]
+  show (Satisfy _) = "satisfy f"
 
 -- Smart Constructors
 instance Functor Parser where fmap = liftA
@@ -79,6 +82,24 @@ some p = p <:> many p
 
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
 (<:>) = liftA2 (:)
+
+satisfy :: (Char -> Bool) -> Parser Char
+satisfy = Satisfy
+
+char :: Char -> Parser Char
+char c = satisfy (== c)
+
+item :: Parser Char
+item = satisfy (const True)
+
+sequence :: [Parser a] -> Parser [a]
+sequence = foldr (<:>) (pure [])
+
+traverse :: (a -> Parser b) -> [a] -> Parser [b]
+traverse f = sequence . map f
+
+string :: String -> Parser String
+string = traverse char
 
 data StableParserName = forall a. StableParserName (StableName (Parser a))
 instance Eq StableParserName where (StableParserName n) == (StableParserName m) = eqStableName n m
@@ -150,6 +171,7 @@ data M state input output where
   Push        :: a -> M s (a ': xs) ys -> M s xs ys
   Pop         :: M s xs ys -> M s (a ': xs) ys
   App         :: M s (b ': xs) ys -> M s (a ': (a -> b) ': xs) ys
+  Sat         :: (Char -> Bool) -> M s (Char ': xs) ys -> M s xs ys
   Bind        :: (a -> ST s (M s xs ys)) -> M s (a ': xs) ys
   Empt        :: M s xs ys
   Cut         :: M s xs ys -> M s xs ys
@@ -175,6 +197,7 @@ compile' (p :<*: q) m    = do qc <- compile' @(a ': xs) q (Pop m); compile' @xs 
 compile' Empty m         = do return Empt
 compile' (p :<|>: q) m   = do TryCut <$> compile' @xs p (Cut m) <*> compile' @xs q m
 compile' (p :>>=: f) m   = do compile' @xs p (Bind (flip (compile' @xs) m . preprocess . f))
+compile' (Satisfy p) m   = do return (Sat p m)
 compile' (Fix p) m       = do compile' @xs p m
 compile' (Many p) m      =
   mdo st <- newSTRef []
@@ -186,6 +209,7 @@ type X = HList
 type C s = STRef s [Int]
 data Status = Good | Bad deriving (Show, Eq)
 type S s = STRef s Status
+type O s = STRef s Int
 
 makeX :: ST s (X '[])
 makeX = return HNil
@@ -200,8 +224,8 @@ makeH :: ST s (H s a)
 makeH = newSTRef []
 emptyH :: H s a -> ST s Bool
 emptyH = fmap null . readSTRef
-pushH :: X xs -> C s -> S s -> String -> M s xs '[a] -> H s a -> ST s ()
-pushH xs cs s input m hs = modifySTRef' hs (eval' xs hs cs s input m :)
+pushH :: X xs -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> H s a -> ST s ()
+pushH xs cs s o input m hs = modifySTRef hs (eval' xs hs cs s o input m :)
 popH :: H s a -> ST s (Maybe a)
 popH href =
   do (h:hs) <- readSTRef href
@@ -211,7 +235,7 @@ popH href =
 makeC :: ST s (C s)
 makeC = newSTRef []
 pushC :: Int -> C s -> ST s ()
-pushC c cs = modifySTRef' cs (c:)
+pushC c cs = modifySTRef cs (c:)
 popC :: C s -> ST s Int
 popC ref = do (c:cs) <- readSTRef ref; writeSTRef ref cs; return c
 
@@ -228,30 +252,63 @@ oops ref = writeSTRef ref Bad
 ok :: S s -> ST s ()
 ok ref = writeSTRef ref Good
 
+makeO :: ST s (O s)
+makeO = newSTRef 0
+incO :: O s -> ST s ()
+incO o = modifySTRef o (+1)
+getO :: O s -> ST s Int
+getO = readSTRef
+more :: UArray Int Char -> O s -> ST s Bool
+more input = fmap (size input >) . readSTRef
+next :: UArray Int Char -> O s -> ST s Char
+next input o = fmap (input !) (readSTRef o)
+nextSafe :: UArray Int Char -> O s -> (Char -> Bool) -> (Char -> ST s (Maybe a)) -> ST s (Maybe a) -> ST s (Maybe a)
+nextSafe input o p good bad =
+  do b <- more input o
+     if b then do c <- next input o; if p c then do incO o; good c else bad
+     else bad
+
+size :: UArray Int Char -> Int
+size = snd . bounds
+
 eval :: String -> M s '[] '[a] -> ST s (Maybe a)
 eval input m =
   do xs <- makeX
      hs <- makeH
      cs <- makeC
      s <- makeS
-     eval' xs hs cs s input m
+     o <- makeO
+     eval' xs hs cs s o (listArray (0, length input) input) m
+
+setupTry :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> ST s ()
+setupTry xs hs cs s o input self =
+  do pushH xs cs s o input self hs
+     o' <- getO o
+     pushC o' cs
 
 -- TODO Implement semantics of the machine
-eval' :: X xs -> H s a -> C s -> S s -> String -> M s xs '[a] -> ST s (Maybe a)
-eval' xs hs cs s input Halt       = status s (return (Just (fst (popX xs)))) (return Nothing)
-eval' xs hs cs s input (Push x k) = eval' (pushX x xs) hs cs s input k
-eval' xs hs cs s input (Pop k)    = eval' (snd (popX xs)) hs cs s input k
-eval' xs hs cs s input (App k)    = let (x, xs') = popX xs
-                                        (f, xs'') = popX xs'
-                                    in eval' (pushX (f x) xs'') hs cs s input k
-eval' xs hs cs s input (Bind f)   = do let (x, xs') = popX xs
-                                       k <- f x
-                                       eval' xs' hs cs s input k
-eval' xs hs cs s input Empt =
-  do noHandler <- emptyH hs
-     if noHandler then return Nothing
-     else do oops s; popH hs
-eval' xs hs cs s input _ = return Nothing
+eval' :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> ST s (Maybe a)
+eval' xs hs cs s o input Halt             = status s (return (Just (fst (popX xs)))) (return Nothing)
+eval' xs hs cs s o input (Push x k)       = eval' (pushX x xs) hs cs s o input k
+eval' xs hs cs s o input (Pop k)          = eval' (snd (popX xs)) hs cs s o input k
+eval' xs hs cs s o input (App k)          = let (x, xs') = popX xs
+                                                (f, xs'') = popX xs'
+                                            in eval' (pushX (f x) xs'') hs cs s o input k
+eval' xs hs cs s o input (Sat p k)        = nextSafe input o p (\c -> eval' (pushX c xs) hs cs s o input k) (eval' xs hs cs s o input Empt)
+eval' xs hs cs s o input (Bind f)         = do let (x, xs') = popX xs
+                                               k <- f x
+                                               eval' xs' hs cs s o input k
+eval' xs hs cs s o input Empt             = do noHandler <- emptyH hs
+                                               if noHandler then return Nothing
+                                               else do oops s; popH hs
+eval' xs hs cs s o input (Cut k)           = do popH hs; popC cs; eval' xs hs cs s o input k
+eval' xs hs cs s o input self@(TryCut p q) = status s (do setupTry xs hs cs s o input self
+                                                          eval' xs hs cs s o input p)
+                                                      (do o' <- getO o
+                                                          c <- popC cs
+                                                          if c == o' then do ok s; eval' xs hs cs s o input q
+                                                          else eval' xs hs cs s o input Empt)
+eval' xs hs cs s o input _                 = undefined
 
 runParser :: Parser a -> String -> Maybe a
 runParser p input = runST (compile (preprocess p) >>= eval input)

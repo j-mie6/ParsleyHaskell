@@ -10,12 +10,20 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE BangPatterns #-}
 import Prelude hiding ((*>), (<*), (>>))
 import Control.Applicative hiding ((<*), (*>), many, some)
 import Control.Monad hiding ((>>))
 import Control.Monad.ST
+import Control.Monad.Reader
 import Data.STRef
 import System.IO.Unsafe
+import Data.IORef
+import System.Mem.StableName
+import Data.Hashable
+import Data.HashSet hiding (empty)
+import qualified Data.HashSet as HashSet
 
 -- AST
 data Parser a where
@@ -38,6 +46,7 @@ instance Show (Parser a) where
   show (p :<|>: q) = concat ["(", show p, " <|> ", show q, ")"]
   show Empty = "empty"
   show (Fix _) = "fix!"
+  show (Many p) = concat ["(many ", show p, "]"]
 
 -- Smart Constructors
 instance Functor Parser where fmap = liftA
@@ -70,13 +79,36 @@ some p = p <:> many p
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
 (<:>) = liftA2 (:)
 
--- TODO: Stable name and unsafePerformIO!
---       we have to find recursion points and perform optimisation in here, aux required
+data StableParserName = forall a. StableParserName (StableName (Parser a))
+instance Eq StableParserName where (StableParserName n) == (StableParserName m) = eqStableName n m
+instance Hashable StableParserName where
+  hash (StableParserName n) = hashStableName n
+  hashWithSalt salt (StableParserName n) = hashWithSalt salt n
+
 preprocess :: Parser a -> Parser a
-preprocess = unsafePerformIO . preprocess'
+preprocess p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (preprocess' p))
   where
-    preprocess' :: Parser a -> IO (Parser a)
-    preprocess' = return
+    preprocess' :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
+    preprocess' p = fix p >>= preprocess''
+    preprocess'' :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
+    preprocess'' (pf :<*>: px) = do pf' <- preprocess' pf; px' <- preprocess' px; return (optimise (pf' :<*>: px'))
+    preprocess'' (p :*>: q)    = do p' <- preprocess' p;   q' <- preprocess' q;   return (optimise (p' :*>: q'))
+    preprocess'' (p :<*: q)    = do p' <- preprocess' p;   q' <- preprocess' q;   return (optimise (p' :<*: q'))
+    preprocess'' (p :>>=: f)   = do p' <- preprocess' p;                          return (optimise (p' :>>=: f))
+    preprocess'' (p :<|>: q)   = do p' <- preprocess' p;   q' <- preprocess' q;   return (optimise (p' :<|>: q'))
+    preprocess'' Empty         = do return Empty
+    preprocess'' (Many p)      = do p' <- preprocess' p;                          return (Many p')
+    preprocess'' p             = do return p
+
+    fix :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
+    -- Force evaluation of p to ensure that the stableName is correct first time
+    fix !p =
+      do seenRef <- ask
+         seen <- lift (readIORef seenRef)
+         name <- StableParserName <$> lift (makeStableName p)
+         if member name seen then return (Fix p)
+         else do lift (writeIORef seenRef (insert name seen))
+                 return p
 
 optimise :: Parser a -> Parser a
 -- Applicative Optimisation
@@ -136,8 +168,8 @@ data M state input output where
   ManyInit    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
   ManyInitCut :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
 
-halt :: M s '[a] '[a]
-halt = Halt
+--halt :: M s '[a] '[a]
+--halt = Ret
 
 -- ts ++ ts' == ts''
 class Append (ts :: [*]) (ts' :: [*]) (ts'' :: [*]) | ts ts' -> ts''
@@ -145,7 +177,7 @@ instance ts ~ ts' => Append '[] ts ts'
 instance {-# OVERLAPPABLE #-} (Append ts ts' ts'', xs ~ (t ': ts), ys ~ (t ': ts'')) => Append xs ts' ys
 
 compile :: Parser a -> ST s (M s '[] '[a])
-compile = flip (compile' @'[]) halt
+compile = flip (compile' @'[]) Halt
 
 compile' :: forall xs ys xys a b s. Append xs ys xys => Parser a -> M s (a ': xys) (b ': ys) -> ST s (M s xys (b ': ys))
 compile' (Pure x) m      = do return (Push x m)

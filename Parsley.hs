@@ -265,6 +265,8 @@ incO :: O s -> ST s ()
 incO o = modifySTRef' o (+1)
 getO :: O s -> ST s Int
 getO = readSTRef
+setO :: Int -> O s -> ST s ()
+setO = flip writeSTRef
 more :: UArray Int Char -> O s -> ST s Bool
 more input = fmap (size input >) . readSTRef
 next :: UArray Int Char -> O s -> ST s Char
@@ -274,7 +276,6 @@ nextSafe input o p good bad =
   do b <- more input o
      if b then do c <- next input o; if p c then do incO o; good c else bad
      else bad
-
 size :: UArray Int Char -> Int
 size = snd . bounds
 
@@ -287,35 +288,60 @@ eval input m =
      o <- makeO
      eval' xs hs cs s o (listArray (0, length input) input) m
 
-setupTry :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> ST s ()
-setupTry xs hs cs s o input self =
+setupHandler :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> ST s ()
+setupHandler xs hs cs s o input self =
   do pushH xs cs s o input self hs
      o' <- getO o
      pushC o' cs
 
 -- TODO Implement semantics of the machine
 eval' :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> ST s (Maybe a)
-eval' xs hs cs s o input Halt              = do writeSTRef hs []; status s (return (Just (fst (popX xs)))) (return Nothing)
-eval' xs hs cs s o input (Push x k)        = eval' (pushX x xs) hs cs s o input k
-eval' xs hs cs s o input (Pop k)           = eval' (snd (popX xs)) hs cs s o input k
-eval' xs hs cs s o input (App k)           = let (x, xs') = popX xs
-                                                 (f, xs'') = popX xs'
-                                             in eval' (pushX (f x) xs'') hs cs s o input k
-eval' xs hs cs s o input (Sat p k)         = nextSafe input o p (\c -> eval' (pushX c xs) hs cs s o input k) (eval' xs hs cs s o input Empt)
-eval' xs hs cs s o input (Bind f)          = do let (x, xs') = popX xs
-                                                k <- f x
-                                                eval' xs' hs cs s o input k
-eval' xs hs cs s o input Empt              = do noHandler <- emptyH hs
-                                                if noHandler then return Nothing
-                                                else do oops s; handle hs
-eval' xs hs cs s o input (Cut k)           = do popH hs; popC cs; eval' xs hs cs s o input k
-eval' xs hs cs s o input self@(TryCut p q) = status s (do setupTry xs hs cs s o input self
-                                                          eval' xs hs cs s o input p)
-                                                      (do o' <- getO o
-                                                          c <- popC cs
-                                                          if c == o' then do ok s; eval' xs hs cs s o input q
-                                                          else eval' xs hs cs s o input Empt)
-eval' xs hs cs s o input _                 = undefined
+eval' xs hs cs s o input Halt = do writeSTRef hs []; status s (return (Just (fst (popX xs)))) (return Nothing)
+eval' xs hs cs s o input (Push x k) = eval' (pushX x xs) hs cs s o input k
+eval' xs hs cs s o input (Pop k) = eval' (snd (popX xs)) hs cs s o input k
+eval' xs hs cs s o input (App k) =
+  let (x, xs') = popX xs
+      (f, xs'') = popX xs'
+  in eval' (pushX (f x) xs'') hs cs s o input k
+eval' xs hs cs s o input (Sat p k) = nextSafe input o p (\c -> eval' (pushX c xs) hs cs s o input k) (eval' xs hs cs s o input Empt)
+eval' xs hs cs s o input (Bind f) =
+  do let (x, xs') = popX xs
+     k <- f x
+     eval' xs' hs cs s o input k
+eval' xs hs cs s o input Empt =
+  do noHandler <- emptyH hs
+     if noHandler then return Nothing
+     else do oops s; handle hs
+eval' xs hs cs s o input (Cut k) = do popH hs; popC cs; eval' xs hs cs s o input k
+eval' xs hs cs s o input self@(Try p q) =
+  status s (do setupHandler xs hs cs s o input self
+               eval' xs hs cs s o input p)
+           (do o' <- popC cs
+               setO o' o
+               ok s
+               eval' xs hs cs s o input q)
+eval' xs hs cs s o input self@(TryCut p q) =
+  status s (do setupHandler xs hs cs s o input self
+               eval' xs hs cs s o input p)
+           (do o' <- getO o
+               c <- popC cs
+               if c == o' then do ok s; eval' xs hs cs s o input q
+               else eval' xs hs cs s o input Empt)
+eval' xs hs cs s o input (ManyIter σ k) =
+  do let (x, xs') = popX xs
+     modifySTRef' σ (x:)
+     eval' xs' hs cs s o input k
+{-eval' xs hs cs s o input self@(ManyInitCut σ l k) =
+  status s (do setupHandler xs hs cs s o input self
+               eval' xs hs cs s o input l)
+           (do o' <- getO o
+               c <- popC cs
+               if c == o' then do ok s
+                                  ys <- readSTRef σ
+                                  writeSTRef σ []
+                                  eval' (pushX (reverse ys) xs) hs cs s o input k
+               else do writeSTRef σ []; eval' xs hs cs s o input Empt)-}
+eval' xs hs cs s o input _ = undefined
 
 runParser :: Parser a -> String -> Maybe a
 runParser p input = runST (compile (preprocess p) >>= eval input)

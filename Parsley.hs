@@ -12,12 +12,13 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE BangPatterns #-}
-import Prelude hiding ((*>), (<*), (>>), traverse, sequence)
-import Control.Applicative hiding ((<*), (*>), many, some)
+import Prelude hiding ((*>), (<*), (>>), traverse, sequence, (<$))
+import Control.Applicative hiding ((<*), (*>), many, some, (<$))
 import Control.Monad hiding ((>>), sequence)
-import Control.Monad.ST.Lazy
-import Control.Monad.Reader hiding (sequence)
-import Data.STRef.Lazy
+import Control.Monad.ST
+import Control.Monad.ST.Unsafe
+import Control.Monad.Reader hiding (sequence, (>>))
+import Data.STRef
 import System.IO.Unsafe
 import Data.IORef
 import System.Mem.StableName
@@ -82,6 +83,9 @@ some p = p <:> many p
 
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
 (<:>) = liftA2 (:)
+
+(<$) :: a -> Parser b -> Parser a
+x <$ p = p *> pure x
 
 satisfy :: (Char -> Bool) -> Parser Char
 satisfy = Satisfy
@@ -198,7 +202,8 @@ compile' Empty m         = do return Empt
 compile' (p :<|>: q) m   = do TryCut <$> compile' @xs p (Cut m) <*> compile' @xs q m
 compile' (p :>>=: f) m   = do compile' @xs p (Bind (flip (compile' @xs) m . preprocess . f))
 compile' (Satisfy p) m   = do return (Sat p m)
-compile' (Fix p) m       = do compile' @xs p m
+--                            Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
+compile' (Fix p) m       = do unsafeInterleaveST (compile' @xs (preprocess p) m)
 compile' (Many p) m      =
   mdo st <- newSTRef []
       manyp <- compile' @'[] p (ManyIter st manyp)
@@ -225,9 +230,11 @@ makeH = newSTRef []
 emptyH :: H s a -> ST s Bool
 emptyH = fmap null . readSTRef
 pushH :: X xs -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> H s a -> ST s ()
-pushH xs cs s o input m hs = modifySTRef hs (eval' xs hs cs s o input m :)
-popH :: H s a -> ST s (Maybe a)
-popH href =
+pushH xs cs s o input m hs = modifySTRef' hs (eval' xs hs cs s o input m :)
+popH :: H s a -> ST s ()
+popH href = modifySTRef' href tail
+handle :: H s a -> ST s (Maybe a)
+handle href =
   do (h:hs) <- readSTRef href
      writeSTRef href hs
      h
@@ -255,7 +262,7 @@ ok ref = writeSTRef ref Good
 makeO :: ST s (O s)
 makeO = newSTRef 0
 incO :: O s -> ST s ()
-incO o = modifySTRef o (+1)
+incO o = modifySTRef' o (+1)
 getO :: O s -> ST s Int
 getO = readSTRef
 more :: UArray Int Char -> O s -> ST s Bool
@@ -288,19 +295,19 @@ setupTry xs hs cs s o input self =
 
 -- TODO Implement semantics of the machine
 eval' :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> ST s (Maybe a)
-eval' xs hs cs s o input Halt             = status s (return (Just (fst (popX xs)))) (return Nothing)
-eval' xs hs cs s o input (Push x k)       = eval' (pushX x xs) hs cs s o input k
-eval' xs hs cs s o input (Pop k)          = eval' (snd (popX xs)) hs cs s o input k
-eval' xs hs cs s o input (App k)          = let (x, xs') = popX xs
-                                                (f, xs'') = popX xs'
-                                            in eval' (pushX (f x) xs'') hs cs s o input k
-eval' xs hs cs s o input (Sat p k)        = nextSafe input o p (\c -> eval' (pushX c xs) hs cs s o input k) (eval' xs hs cs s o input Empt)
-eval' xs hs cs s o input (Bind f)         = do let (x, xs') = popX xs
-                                               k <- f x
-                                               eval' xs' hs cs s o input k
-eval' xs hs cs s o input Empt             = do noHandler <- emptyH hs
-                                               if noHandler then return Nothing
-                                               else do oops s; popH hs
+eval' xs hs cs s o input Halt              = do writeSTRef hs []; status s (return (Just (fst (popX xs)))) (return Nothing)
+eval' xs hs cs s o input (Push x k)        = eval' (pushX x xs) hs cs s o input k
+eval' xs hs cs s o input (Pop k)           = eval' (snd (popX xs)) hs cs s o input k
+eval' xs hs cs s o input (App k)           = let (x, xs') = popX xs
+                                                 (f, xs'') = popX xs'
+                                             in eval' (pushX (f x) xs'') hs cs s o input k
+eval' xs hs cs s o input (Sat p k)         = nextSafe input o p (\c -> eval' (pushX c xs) hs cs s o input k) (eval' xs hs cs s o input Empt)
+eval' xs hs cs s o input (Bind f)          = do let (x, xs') = popX xs
+                                                k <- f x
+                                                eval' xs' hs cs s o input k
+eval' xs hs cs s o input Empt              = do noHandler <- emptyH hs
+                                                if noHandler then return Nothing
+                                                else do oops s; handle hs
 eval' xs hs cs s o input (Cut k)           = do popH hs; popC cs; eval' xs hs cs s o input k
 eval' xs hs cs s o input self@(TryCut p q) = status s (do setupTry xs hs cs s o input self
                                                           eval' xs hs cs s o input p)

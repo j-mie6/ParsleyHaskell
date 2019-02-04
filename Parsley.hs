@@ -1,16 +1,8 @@
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE BangPatterns #-}
 import Prelude hiding ((*>), (<*), (>>), traverse, sequence, (<$))
 import Control.Applicative hiding ((<*), (*>), many, some, (<$))
@@ -27,6 +19,7 @@ import Data.HashSet hiding (empty, null, size, map, foldr)
 import qualified Data.HashSet as HashSet
 import Data.HList.HList
 import Data.Array.Unboxed
+import Debug.Trace
 
 -- AST
 data Parser a where
@@ -76,7 +69,7 @@ instance MonadPlus Parser where
 
 -- Additional Combinators
 many :: Parser a -> Parser [a]
-many p = let manyp = (p <:> manyp) <|> pure [] in manyp --Many p
+many p = {-let manyp = p <:> manyp <|> pure [] in manyp--}Many p
 
 some :: Parser a -> Parser [a]
 some p = p <:> many p
@@ -132,9 +125,10 @@ preprocess p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (preproc
       do seenRef <- ask
          seen <- lift (readIORef seenRef)
          name <- StableParserName <$> lift (makeStableName p)
-         if member name seen then return (Fix p)
-         else do lift (writeIORef seenRef (insert name seen))
-                 return p
+         if member name seen
+           then return (Fix p)
+           else do lift (writeIORef seenRef (insert name seen))
+                   return p
 
 optimise :: Parser a -> Parser a
 -- Applicative Optimisation
@@ -170,44 +164,44 @@ optimise (Empty :<*: _)                   = Empty
 optimise ((p :<*: q) :<*: r)              = optimise (p <* optimise (q <* r))
 optimise p                                = p
 
-data M state input output where
-  Halt        :: M s '[a] '[a]
-  Push        :: a -> M s (a ': xs) ys -> M s xs ys
-  Pop         :: M s xs ys -> M s (a ': xs) ys
-  App         :: M s (b ': xs) ys -> M s (a ': (a -> b) ': xs) ys
-  Sat         :: (Char -> Bool) -> M s (Char ': xs) ys -> M s xs ys
-  Bind        :: (a -> ST s (M s xs ys)) -> M s (a ': xs) ys
-  Empt        :: M s xs ys
-  Cut         :: M s xs ys -> M s xs ys
-  Try         :: M s xs ys -> M s xs ys -> M s xs ys
-  TryCut      :: M s xs ys -> M s xs ys -> M s xs ys
-  ManyIter    :: STRef s [a] -> M s xs (a ': xs) -> M s (a ': xs) (a ': xs)
-  ManyInit    :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
-  ManyInitCut :: STRef s [a] -> M s xs (a ': xs) -> M s ([a] ': xs) ys -> M s xs ys
+data M s xs a where
+  Halt        :: M s '[a] a
+  Push        :: x -> M s (x ': xs) a -> M s xs a
+  Pop         :: M s xs a -> M s (b ': xs) a
+  App         :: M s (y ': xs) a -> M s (x ': (x -> y) ': xs) a
+  Sat         :: (Char -> Bool) -> M s (Char ': xs) a -> M s xs a
+  Bind        :: (x -> ST s (M s xs a)) -> M s (x ': xs) a
+  Empt        :: M s xs a
+  Cut         :: M s xs a -> M s xs a
+  Try         :: M s xs a -> M s xs a -> M s xs a
+  TryCut      :: M s xs a -> M s xs a -> M s xs a
+  ManyIter    :: STRef s [x] -> M s xs a -> M s (x ': xs) a
+  ManyInit    :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
+  ManyInitCut :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
 
 -- ts ++ ts' == ts''
-class Append (ts :: [*]) (ts' :: [*]) (ts'' :: [*]) | ts ts' -> ts''
-instance ts ~ ts' => Append '[] ts ts'
-instance {-# OVERLAPPABLE #-} (Append ts ts' ts'', xs ~ (t ': ts), ys ~ (t ': ts'')) => Append xs ts' ys
+--class Append (ts :: [*]) (ts' :: [*]) (ts'' :: [*]) | ts ts' -> ts''
+--instance ts ~ ts' => Append '[] ts ts'
+--instance {-# OVERLAPPABLE #-} (Append ts ts' ts'', xs ~ (t ': ts), ys ~ (t ': ts'')) => Append xs ts' ys
 
-compile :: Parser a -> ST s (M s '[] '[a])
-compile = flip (compile' @'[]) Halt
+compile :: Parser a -> ST s (M s '[] a)
+compile = flip compile' Halt
 
-compile' :: forall xs ys xys a b s. Append xs ys xys => Parser a -> M s (a ': xys) (b ': ys) -> ST s (M s xys (b ': ys))
+compile' :: Parser a -> M s (a ': xs) b -> ST s (M s xs b)
 compile' (Pure x) m      = do return (Push x m)
-compile' (pf :<*>: px) m = do pxc <- compile' @(_ ': xs) px (App m); compile' @xs pf pxc
-compile' (p :*>: q) m    = do qc <- compile' @xs q m; compile' @xs p (Pop qc)
-compile' (p :<*: q) m    = do qc <- compile' @(a ': xs) q (Pop m); compile' @xs p qc
+compile' (pf :<*>: px) m = do pxc <- compile' px (App m); compile' pf pxc
+compile' (p :*>: q) m    = do qc <- compile' q m; compile' p (Pop qc)
+compile' (p :<*: q) m    = do qc <- compile' q (Pop m); compile' p qc
 compile' Empty m         = do return Empt
-compile' (p :<|>: q) m   = do TryCut <$> compile' @xs p (Cut m) <*> compile' @xs q m
-compile' (p :>>=: f) m   = do compile' @xs p (Bind (flip (compile' @xs) m . preprocess . f))
+compile' (p :<|>: q) m   = do TryCut <$> compile' p (Cut m) <*> compile' q m
+compile' (p :>>=: f) m   = do compile' p (Bind (flip compile' m . preprocess . f))
 compile' (Satisfy p) m   = do return (Sat p m)
 --                            Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
-compile' (Fix p) m       = do unsafeInterleaveST (compile' @xs (preprocess p) m)
+compile' (Fix p) m       = do unsafeInterleaveST (compile' (preprocess p) m)
 compile' (Many p) m      =
-  mdo st <- newSTRef []
-      manyp <- compile' @'[] p (ManyIter st manyp)
-      return (ManyInitCut st manyp m)
+  mdo σ <- newSTRef []
+      manyp <- compile' p (ManyIter σ manyp)
+      return (ManyInitCut σ manyp m)
 
 type H s a = STRef s [ST s (Maybe a)]
 type X = HList
@@ -223,13 +217,13 @@ pushX = HCons
 popX :: X (a ': xs) -> (a, X xs)
 popX (HCons x xs) = (x, xs)
 pokeX :: a -> X (a ': xs) -> X (a ': xs)
-pokeX = undefined
+pokeX y (HCons x xs) = HCons y xs
 
 makeH :: ST s (H s a)
 makeH = newSTRef []
 emptyH :: H s a -> ST s Bool
 emptyH = fmap null . readSTRef
-pushH :: X xs -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> H s a -> ST s ()
+pushH :: X xs -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> H s a -> ST s ()
 pushH xs cs s o input m hs = modifySTRef' hs (eval' xs hs cs s o input m :)
 popH :: H s a -> ST s ()
 popH href = modifySTRef' href tail
@@ -242,9 +236,11 @@ handle href =
 makeC :: ST s (C s)
 makeC = newSTRef []
 pushC :: Int -> C s -> ST s ()
-pushC c cs = modifySTRef cs (c:)
+pushC c cs = modifySTRef' cs (c:)
 popC :: C s -> ST s Int
 popC ref = do (c:cs) <- readSTRef ref; writeSTRef ref cs; return c
+pokeC :: Int -> C s -> ST s ()
+pokeC c cs = modifySTRef' cs ((c:) . tail)
 
 makeS :: ST s (S s)
 makeS = newSTRef Good
@@ -279,7 +275,7 @@ nextSafe input o p good bad =
 size :: UArray Int Char -> Int
 size = snd . bounds
 
-eval :: String -> M s '[] '[a] -> ST s (Maybe a)
+eval :: String -> M s '[] a -> ST s (Maybe a)
 eval input m =
   do xs <- makeX
      hs <- makeH
@@ -288,15 +284,15 @@ eval input m =
      o <- makeO
      eval' xs hs cs s o (listArray (0, length input) input) m
 
-setupHandler :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> ST s ()
+setupHandler :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> ST s ()
 setupHandler xs hs cs s o input self =
   do pushH xs cs s o input self hs
      o' <- getO o
      pushC o' cs
 
 -- TODO Implement semantics of the machine
-eval' :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs '[a] -> ST s (Maybe a)
-eval' xs hs cs s o input Halt = do writeSTRef hs []; status s (return (Just (fst (popX xs)))) (return Nothing)
+eval' :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> ST s (Maybe a)
+eval' xs hs cs s o input Halt = status s (return (Just (fst (popX xs)))) (return Nothing)
 eval' xs hs cs s o input (Push x k) = eval' (pushX x xs) hs cs s o input k
 eval' xs hs cs s o input (Pop k) = eval' (snd (popX xs)) hs cs s o input k
 eval' xs hs cs s o input (App k) =
@@ -330,8 +326,10 @@ eval' xs hs cs s o input self@(TryCut p q) =
 eval' xs hs cs s o input (ManyIter σ k) =
   do let (x, xs') = popX xs
      modifySTRef' σ (x:)
+     o' <- getO o
+     pokeC o' cs
      eval' xs' hs cs s o input k
-{-eval' xs hs cs s o input self@(ManyInitCut σ l k) =
+eval' xs hs cs s o input self@(ManyInitCut σ l k) =
   status s (do setupHandler xs hs cs s o input self
                eval' xs hs cs s o input l)
            (do o' <- getO o
@@ -340,7 +338,7 @@ eval' xs hs cs s o input (ManyIter σ k) =
                                   ys <- readSTRef σ
                                   writeSTRef σ []
                                   eval' (pushX (reverse ys) xs) hs cs s o input k
-               else do writeSTRef σ []; eval' xs hs cs s o input Empt)-}
+               else do writeSTRef σ []; eval' xs hs cs s o input Empt)
 eval' xs hs cs s o input _ = undefined
 
 runParser :: Parser a -> String -> Maybe a

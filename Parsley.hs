@@ -69,7 +69,7 @@ instance MonadPlus Parser where
 
 -- Additional Combinators
 many :: Parser a -> Parser [a]
-many p = {-let manyp = p <:> manyp <|> pure [] in manyp--}Many p
+many p = let manyp = p <:> manyp <|> pure [] in manyp--Many p
 
 some :: Parser a -> Parser [a]
 some p = p <:> many p
@@ -179,11 +179,6 @@ data M s xs a where
   ManyInit    :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
   ManyInitCut :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
 
--- ts ++ ts' == ts''
---class Append (ts :: [*]) (ts' :: [*]) (ts'' :: [*]) | ts ts' -> ts''
---instance ts ~ ts' => Append '[] ts ts'
---instance {-# OVERLAPPABLE #-} (Append ts ts' ts'', xs ~ (t ': ts), ys ~ (t ': ts'')) => Append xs ts' ys
-
 compile :: Parser a -> ST s (M s '[] a)
 compile = flip compile' Halt
 
@@ -218,6 +213,10 @@ popX :: X (a ': xs) -> (a, X xs)
 popX (HCons x xs) = (x, xs)
 pokeX :: a -> X (a ': xs) -> X (a ': xs)
 pokeX y (HCons x xs) = HCons y xs
+modX :: (a -> b) -> X (a ': xs) -> X (b ': xs)
+modX f (HCons x xs) = HCons (f x) xs
+peekX :: X (a ': xs) -> a
+peekX (HCons x xs) = x
 
 makeH :: ST s (H s a)
 makeH = newSTRef []
@@ -295,7 +294,7 @@ eval' :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> ST
 eval' xs hs cs s o input Halt = status s (return (Just (fst (popX xs)))) (return Nothing)
 eval' xs hs cs s o input (Push x k) = eval' (pushX x xs) hs cs s o input k
 eval' xs hs cs s o input (Pop k) = eval' (snd (popX xs)) hs cs s o input k
-eval' xs hs cs s o input (App k) =
+eval' xs hs cs s o input (App k) = --let (x, xs') = popX xs in eval' (modX ($ x) xs') hs cs s o input k
   let (x, xs') = popX xs
       (f, xs'') = popX xs'
   in eval' (pushX (f x) xs'') hs cs s o input k

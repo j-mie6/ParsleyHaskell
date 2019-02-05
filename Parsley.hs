@@ -2,7 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE BangPatterns #-}
 import Prelude hiding ((*>), (<*), (>>), traverse, sequence, (<$))
 import Control.Applicative hiding ((<*), (*>), many, some, (<$))
@@ -20,19 +20,22 @@ import qualified Data.HashSet as HashSet
 import Data.HList.HList
 import Data.Array.Unboxed
 import Debug.Trace
+import Unsafe.Coerce
 
 -- AST
 data Parser a where
-  Pure    :: a -> Parser a
-  (:<*>:) :: Parser (a -> b) -> Parser a -> Parser b
-  (:*>:)  :: Parser a -> Parser b -> Parser b
-  (:<*:)  :: Parser a -> Parser b -> Parser a
-  (:>>=:) :: Parser a -> (a -> Parser b) -> Parser b
-  (:<|>:) :: Parser a -> Parser a -> Parser a
-  Empty   :: Parser a
-  Fix     :: Parser a -> Parser a
-  Many    :: Parser a -> Parser [a]
-  Satisfy :: (Char -> Bool) -> Parser Char
+  Pure      :: a -> Parser a
+  Satisfy   :: (Char -> Bool) -> Parser Char
+  (:<*>:)   :: Parser (a -> b) -> Parser a -> Parser b
+  (:*>:)    :: Parser a -> Parser b -> Parser b
+  (:<*:)    :: Parser a -> Parser b -> Parser a
+  (:>>=:)   :: Parser a -> (a -> Parser b) -> Parser b
+  (:<|>:)   :: Parser a -> Parser a -> Parser a
+  Empty     :: Parser a
+  Try       :: Parser a -> Parser a
+  LookAhead :: Parser a -> Parser a
+  Rec       :: Parser a -> Parser a
+  Many      :: Parser a -> Parser [a]
 
 instance Show (Parser a) where
   show (Pure _) = "pure x"
@@ -42,7 +45,9 @@ instance Show (Parser a) where
   show (p :>>=: f) = concat ["(", show p, " >>= f)"]
   show (p :<|>: q) = concat ["(", show p, " <|> ", show q, ")"]
   show Empty = "empty"
-  show (Fix _) = "fix!"
+  show (Try p) = concat ["(try ", show p, ")"]
+  show (LookAhead p) = concat ["(lookAhead ", show p, ")"]
+  show (Rec _) = "recursion point!"
   show (Many p) = concat ["(many ", show p, "]"]
   show (Satisfy _) = "satisfy f"
 
@@ -116,6 +121,8 @@ preprocess p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (preproc
     preprocess'' (p :>>=: f)   = fmap optimise (liftM (:>>=: f) (preprocess' p))
     preprocess'' (p :<|>: q)   = fmap optimise (liftM2 (:<|>:)  (preprocess' p)  (preprocess' q))
     preprocess'' Empty         = return Empty
+    preprocess'' (Try p)       = liftM Try (preprocess' p)
+    preprocess'' (LookAhead p) = liftM LookAhead (preprocess' p)
     preprocess'' (Many p)      = liftM Many (preprocess' p)
     preprocess'' p             = return p
 
@@ -126,7 +133,7 @@ preprocess p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (preproc
          seen <- lift (readIORef seenRef)
          name <- StableParserName <$> lift (makeStableName p)
          if member name seen
-           then return (Fix p)
+           then return (Rec p)
            else do lift (writeIORef seenRef (insert name seen))
                    return p
 
@@ -165,38 +172,49 @@ optimise ((p :<*: q) :<*: r)              = optimise (p <* optimise (q <* r))
 optimise p                                = p
 
 data M s xs a where
-  Halt        :: M s '[a] a
-  Push        :: x -> M s (x ': xs) a -> M s xs a
-  Pop         :: M s xs a -> M s (b ': xs) a
-  App         :: M s (y ': xs) a -> M s (x ': (x -> y) ': xs) a
-  Sat         :: (Char -> Bool) -> M s (Char ': xs) a -> M s xs a
-  Bind        :: (x -> ST s (M s xs a)) -> M s (x ': xs) a
-  Empt        :: M s xs a
-  Cut         :: M s xs a -> M s xs a
-  Try         :: M s xs a -> M s xs a -> M s xs a
-  TryCut      :: M s xs a -> M s xs a -> M s xs a
-  ManyIter    :: STRef s [x] -> M s xs a -> M s (x ': xs) a
-  ManyInit    :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
-  ManyInitCut :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
+  Halt         :: M s '[a] a
+  Push         :: x -> M s (x ': xs) a -> M s xs a
+  Pop          :: M s xs a -> M s (b ': xs) a
+  App          :: M s (y ': xs) a -> M s (x ': (x -> y) ': xs) a
+  Sat          :: (Char -> Bool) -> M s (Char ': xs) a -> M s xs a
+  Bind         :: (x -> ST s (M s xs a)) -> M s (x ': xs) a
+  Empt         :: M s xs a
+  Commit       :: M s xs a -> M s xs a
+  SoftFork     :: M s xs a -> M s xs a -> M s xs a
+  HardFork     :: M s xs a -> M s xs a -> M s xs a
+  Attempt      :: M s xs a -> M s xs a
+  Look         :: M s xs a -> M s xs a
+  Restore      :: M s xs a -> M s xs a
+  ManyIter     :: STRef s [x] -> M s xs a -> M s (x ': xs) a
+  ManyInitSoft :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
+  ManyInitHard :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
 
 compile :: Parser a -> ST s (M s '[] a)
 compile = flip compile' Halt
 
 compile' :: Parser a -> M s (a ': xs) b -> ST s (M s xs b)
-compile' (Pure x) m      = do return (Push x m)
-compile' (pf :<*>: px) m = do pxc <- compile' px (App m); compile' pf pxc
-compile' (p :*>: q) m    = do qc <- compile' q m; compile' p (Pop qc)
-compile' (p :<*: q) m    = do qc <- compile' q (Pop m); compile' p qc
-compile' Empty m         = do return Empt
-compile' (p :<|>: q) m   = do TryCut <$> compile' p (Cut m) <*> compile' q m
-compile' (p :>>=: f) m   = do compile' p (Bind (flip compile' m . preprocess . f))
-compile' (Satisfy p) m   = do return (Sat p m)
---                            Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
-compile' (Fix p) m       = do unsafeInterleaveST (compile' (preprocess p) m)
-compile' (Many p) m      =
+compile' (Pure x) m        = do return (Push x m)
+compile' (Satisfy p) m     = do return (Sat p m)
+compile' (pf :<*>: px) m   = do pxc <- compile' px (App m); compile' pf pxc
+compile' (p :*>: q) m      = do qc <- compile' q m; compile' p (Pop qc)
+compile' (p :<*: q) m      = do qc <- compile' q (Pop m); compile' p qc
+compile' Empty m           = do return Empt
+compile' (Try p :<|>: q) m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
+compile' (p :<|>: q) m     = do HardFork <$> compile' p (Commit m) <*> compile' q m
+compile' (p :>>=: f) m     = do compile' p (Bind (flip compile' m . preprocess . f))
+compile' (Try p) m         = do Attempt <$> compile' p (Commit m)
+compile' (LookAhead p) m   = do Look <$> compile' p (Restore m)
+--                              Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
+compile' (Rec p) m         = do unsafeInterleaveST (compile' (preprocess p) m)
+compile' (Many (Try p)) m  =
   mdo σ <- newSTRef []
       manyp <- compile' p (ManyIter σ manyp)
-      return (ManyInitCut σ manyp m)
+      return (ManyInitSoft σ manyp m)
+compile' (Many p) m        =
+  mdo σ <- newSTRef []
+      manyp <- compile' p (ManyIter σ manyp)
+      return (ManyInitHard σ manyp m)
+
 
 type H s a = STRef s [ST s (Maybe a)]
 type X = HList
@@ -283,11 +301,12 @@ eval input m =
      o <- makeO
      eval' xs hs cs s o (listArray (0, length input) input) m
 
-setupHandler :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> ST s ()
-setupHandler xs hs cs s o input self =
+setupHandler :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> M s xs a -> ST s (Maybe a)
+setupHandler xs hs cs s o input self k =
   do pushH xs cs s o input self hs
      o' <- getO o
      pushC o' cs
+     eval' xs hs cs s o input k
 
 -- TODO Implement semantics of the machine
 eval' :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> ST s (Maybe a)
@@ -307,30 +326,37 @@ eval' xs hs cs s o input Empt =
   do noHandler <- emptyH hs
      if noHandler then return Nothing
      else do oops s; handle hs
-eval' xs hs cs s o input (Cut k) = do popH hs; popC cs; eval' xs hs cs s o input k
-eval' xs hs cs s o input self@(Try p q) =
-  status s (do setupHandler xs hs cs s o input self
-               eval' xs hs cs s o input p)
+eval' xs hs cs s o input (Commit k) = do popH hs; popC cs; eval' xs hs cs s o input k
+eval' xs hs cs s o input self@(SoftFork p q) =
+  status s (setupHandler xs hs cs s o input self p)
            (do o' <- popC cs
                setO o' o
                ok s
                eval' xs hs cs s o input q)
-eval' xs hs cs s o input self@(TryCut p q) =
-  status s (do setupHandler xs hs cs s o input self
-               eval' xs hs cs s o input p)
+eval' xs hs cs s o input self@(HardFork p q) =
+  status s (setupHandler xs hs cs s o input self p)
            (do o' <- getO o
                c <- popC cs
                if c == o' then do ok s; eval' xs hs cs s o input q
                else eval' xs hs cs s o input Empt)
+eval' xs hs cs s o input self@(Attempt k) =
+  status s (setupHandler xs hs cs s o input self k)
+           (do o' <- popC cs
+               setO o' o
+               eval' xs hs cs s o input Empt)
+eval' xs hs cs s o input self@(Look k) =
+  status s (setupHandler xs hs cs s o input self k)
+           (do popC cs
+               eval' xs hs cs s o input Empt)
+eval' xs hs cs s o input (Restore k) = do popH hs; o' <- popC cs; setO o' o; eval' xs hs cs s o input k
 eval' xs hs cs s o input (ManyIter σ k) =
   do let (x, xs') = popX xs
      modifySTRef' σ (x:)
      o' <- getO o
      pokeC o' cs
      eval' xs' hs cs s o input k
-eval' xs hs cs s o input self@(ManyInitCut σ l k) =
-  status s (do setupHandler xs hs cs s o input self
-               eval' xs hs cs s o input l)
+eval' xs hs cs s o input self@(ManyInitHard σ l k) =
+  status s (setupHandler xs hs cs s o input self l)
            (do o' <- getO o
                c <- popC cs
                if c == o' then do ok s
@@ -338,7 +364,27 @@ eval' xs hs cs s o input self@(ManyInitCut σ l k) =
                                   writeSTRef σ []
                                   eval' (pushX (reverse ys) xs) hs cs s o input k
                else do writeSTRef σ []; eval' xs hs cs s o input Empt)
-eval' xs hs cs s o input _ = undefined
+eval' xs hs cs s o input self@(ManyInitSoft σ l k) =
+  status s (setupHandler xs hs cs s o input self l)
+           (do o' <-popC cs
+               setO o' o
+               ok s
+               ys <- readSTRef σ
+               writeSTRef σ []
+               eval' (pushX (reverse ys) xs) hs cs s o input k)
+--eval' xs hs cs s o input _ = undefined
 
 runParser :: Parser a -> String -> Maybe a
 runParser p input = runST (compile (preprocess p) >>= eval input)
+{-
+data CompiledParser a = Compiled (forall s. M s '[] a)
+
+mkParser :: Parser a -> CompiledParser a
+mkParser p = Compiled (runST (slightyUnsafeLeak (compile (preprocess p))))
+  where
+    slightyUnsafeLeak :: (forall s. ST s (M s '[] a)) -> (forall s. ST s (M s' '[] a))
+    slightyUnsafeLeak = unsafeCoerce
+
+runCompiledParser :: CompiledParser a -> String -> Maybe a
+runCompiledParser (Compiled p) input = runST (eval input p)
+-}

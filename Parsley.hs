@@ -4,8 +4,10 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE BangPatterns #-}
-import Prelude hiding ((*>), (<*), (>>), traverse, sequence, (<$))
-import Control.Applicative hiding ((<*), (*>), many, some, (<$))
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
+import Prelude hiding ((*>), (<*), (>>), traverse, sequence, (<$), (<**>))
+import Control.Applicative hiding ((<*), (*>), many, some, (<$), (<**>))
 import Control.Monad hiding ((>>), sequence)
 import Control.Monad.ST
 import Control.Monad.ST.Unsafe
@@ -82,6 +84,17 @@ some p = p <:> many p
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
 (<:>) = liftA2 (:)
 
+(<**>) :: Parser a -> Parser (a -> b) -> Parser b
+(<**>) = liftA2 (flip ($))
+
+class Monoidal f where
+  unit :: f ()
+  (<~>) :: f a -> f b -> f (a, b)
+
+instance Applicative f => Monoidal f where
+  unit = pure ()
+  (<~>) = liftA2 (,)
+
 (<$) :: a -> Parser b -> Parser a
 x <$ p = p *> pure x
 
@@ -94,6 +107,12 @@ char c = satisfy (== c)
 item :: Parser Char
 item = satisfy (const True)
 
+try :: Parser a -> Parser a
+try = Try
+
+lookAhead :: Parser a -> Parser a
+lookAhead = LookAhead
+
 sequence :: [Parser a] -> Parser [a]
 sequence = foldr (<:>) (pure [])
 
@@ -102,6 +121,15 @@ traverse f = sequence . map f
 
 string :: String -> Parser String
 string = traverse char
+
+void :: Parser a -> Parser ()
+void = (() <$)
+
+notFollowedBy :: Parser a -> Parser ()
+notFollowedBy p = try (join (try p *> return empty <|> return unit))
+
+eof :: Parser ()
+eof = notFollowedBy item
 
 data StableParserName = forall a. StableParserName (StableName (Parser a))
 instance Eq StableParserName where (StableParserName n) == (StableParserName m) = eqStableName n m
@@ -189,6 +217,21 @@ data M s xs a where
   ManyInitSoft :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
   ManyInitHard :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
 
+instance Show (M ss xs a) where
+  show Halt = "Halt"
+  show (Push _ k) = "(Push x " ++ show k ++ ")"
+  show (Pop k) = "(Pop " ++ show k ++ ")"
+  show (App k) = "(App " ++ show k ++ ")"
+  show (Sat _ k) = "(Sat f " ++ show k ++ ")"
+  show (Bind _) = "Bind ?"
+  show Empt = "Empt"
+  show (Commit k) = "(Commit " ++ show k ++ ")"
+  show (SoftFork p q) = "(SoftFork " ++ show p ++ " " ++ show q ++ ")"
+  show (HardFork p q) = "(HardFork " ++ show p ++ " " ++ show q ++ ")"
+  show (Attempt k) = "(Try " ++ show k ++ ")"
+  show (Look k) = "(Look " ++ show k ++ ")"
+  show (Restore k) = "(Restore " ++ show k ++ ")"
+
 compile :: Parser a -> ST s (M s '[] a)
 compile = flip compile' Halt
 
@@ -199,17 +242,17 @@ compile' (pf :<*>: px) m   = do pxc <- compile' px (App m); compile' pf pxc
 compile' (p :*>: q) m      = do qc <- compile' q m; compile' p (Pop qc)
 compile' (p :<*: q) m      = do qc <- compile' q (Pop m); compile' p qc
 compile' Empty m           = do return Empt
-compile' (Try p :<|>: q) m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
+--compile' (Try p :<|>: q) m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
 compile' (p :<|>: q) m     = do HardFork <$> compile' p (Commit m) <*> compile' q m
 compile' (p :>>=: f) m     = do compile' p (Bind (flip compile' m . preprocess . f))
 compile' (Try p) m         = do Attempt <$> compile' p (Commit m)
 compile' (LookAhead p) m   = do Look <$> compile' p (Restore m)
 --                              Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
 compile' (Rec p) m         = do unsafeInterleaveST (compile' (preprocess p) m)
-compile' (Many (Try p)) m  =
+{-compile' (Many (Try p)) m  =
   mdo σ <- newSTRef []
       manyp <- compile' p (ManyIter σ manyp)
-      return (ManyInitSoft σ manyp m)
+      return (ManyInitSoft σ manyp m)-}
 compile' (Many p) m        =
   mdo σ <- newSTRef []
       manyp <- compile' p (ManyIter σ manyp)

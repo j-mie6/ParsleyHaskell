@@ -95,7 +95,7 @@ instance MonadPlus Parser where
 
 -- Additional Combinators
 many :: Parser a -> Parser [a]
-many p = let manyp = p <:> manyp <|> pure [] in manyp--Many p
+many p = {-let manyp = p <:> manyp <|> pure [] in manyp--}Many p
 
 some :: Parser a -> Parser [a]
 some p = p <:> many p
@@ -292,7 +292,6 @@ compile' (Many p) m        =
       manyp <- compile' p (ManyIter σ manyp)
       return (ManyInitHard σ manyp m)
 
-
 type H s a = STRef s [ST s (Maybe a)]
 type X = HList
 type C s = STRef s [Int]
@@ -359,9 +358,8 @@ eval input m =
   do xs <- makeX
      hs <- makeH
      cs <- makeC
-     --s <- makeS
      o <- makeO
-     eval' xs hs cs {-s-} o (listArray (0, length input) input) m
+     eval' xs hs cs o (listArray (0, length input) input) m
 
 setupHandler :: H s a -> C s -> O s -> (ST s (Maybe a))-> ST s ()
 setupHandler hs cs o h =
@@ -439,97 +437,6 @@ eval' xs hs cs o input (ManyInitSoft σ l k) =
                      writeSTRef σ []
                      eval' (pushX (reverse ys) xs) hs cs o input k
 --eval' xs hs cs s o input _ = undefined
-
-{-
-data Status = Good | Bad deriving (Show, Eq)
-type S s = STRef s Status
-
-makeS :: ST s (S s)
-makeS = newSTRef Good
-status :: S s -> ST s a -> ST s a -> ST s a
-status ref good bad =
-  do s <- readSTRef ref
-     case s of
-       Good -> good
-       Bad -> bad
-oops :: S s -> ST s ()
-oops ref = writeSTRef ref Bad
-ok :: S s -> ST s ()
-ok ref = writeSTRef ref Good
-
-raise :: H s a -> S s -> ST s (Maybe a)
-raise hs s =
-  do noHandler <- emptyH hs
-     if noHandler then return Nothing
-     else do oops s; handle hs
-
-setupHandler :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> M s xs a -> ST s (Maybe a)
-setupHandler xs hs cs s o input self k =
-  do pushH (eval' xs hs cs s o input self) hs
-     o' <- getO o
-     pushC o' cs
-     eval' xs hs cs s o input k
-
-eval' :: X xs -> H s a -> C s -> S s -> O s -> UArray Int Char -> M s xs a -> ST s (Maybe a)
-eval' xs _ _ s _ _ Halt = status s (return (Just (fst (popX xs)))) (return Nothing)
-eval' xs hs cs s o input (Push x k) = eval' (pushX x xs) hs cs s o input k
-eval' xs hs cs s o input (Pop k) = eval' (snd (popX xs)) hs cs s o input k
-eval' xs hs cs s o input (App k) = --let (x, xs') = popX xs in eval' (modX ($ x) xs') hs cs s o input k
-  let (x, xs') = popX xs
-      (f, xs'') = popX xs'
-  in eval' (pushX (f x) xs'') hs cs s o input k
-eval' xs hs cs s o input (Sat p k) = nextSafe input o p (\c -> eval' (pushX c xs) hs cs s o input k) (raise hs s)
-eval' xs hs cs s o input (Bind f) =
-  do let (x, xs') = popX xs
-     k <- f x
-     eval' xs' hs cs s o input k
-eval' _ hs _ s _ _ Empt = raise hs s
-eval' xs hs cs s o input (Commit k) = do popH hs; popC cs; eval' xs hs cs s o input k
-eval' xs hs cs s o input self@(SoftFork p q) =
-  status s (setupHandler xs hs cs s o input self p)
-           (do o' <- popC cs
-               setO o' o
-               ok s
-               eval' xs hs cs s o input q)
-eval' xs hs cs s o input self@(HardFork p q) =
-  status s (setupHandler xs hs cs s o input self p)
-           (do o' <- getO o
-               c <- popC cs
-               if c == o' then do ok s; eval' xs hs cs s o input q
-               else raise hs s)
-eval' xs hs cs s o input self@(Attempt k) =
-  status s (setupHandler xs hs cs s o input self k)
-           (do o' <- popC cs
-               setO o' o
-               raise hs s)
-eval' xs hs cs s o input self@(Look k) =
-  status s (setupHandler xs hs cs s o input self k)
-           (do popC cs
-               raise hs s)
-eval' xs hs cs s o input (Restore k) = do popH hs; o' <- popC cs; setO o' o; eval' xs hs cs s o input k
-eval' xs hs cs s o input (ManyIter σ k) =
-  do let (x, xs') = popX xs
-     modifySTRef' σ (x:)
-     o' <- getO o
-     pokeC o' cs
-     eval' xs' hs cs s o input k
-eval' xs hs cs s o input self@(ManyInitHard σ l k) =
-  status s (setupHandler xs hs cs s o input self l)
-           (do o' <- getO o
-               c <- popC cs
-               if c == o' then do ok s
-                                  ys <- readSTRef σ
-                                  writeSTRef σ []
-                                  eval' (pushX (reverse ys) xs) hs cs s o input k
-               else do writeSTRef σ []; raise hs s)
-eval' xs hs cs s o input self@(ManyInitSoft σ l k) =
-  status s (setupHandler xs hs cs s o input self l)
-           (do o' <-popC cs
-               setO o' o
-               ok s
-               ys <- readSTRef σ
-               writeSTRef σ []
-               eval' (pushX (reverse ys) xs) hs cs s o input k)-}
 
 runParser :: Parser a -> String -> Maybe a
 runParser p input = runST (compile (preprocess p) >>= eval input)

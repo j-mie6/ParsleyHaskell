@@ -6,22 +6,42 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
-import Prelude hiding ((*>), (<*), (>>), traverse, sequence, (<$), (<**>))
-import Control.Applicative hiding ((<*), (*>), many, some, (<$), (<**>))
-import Control.Monad hiding ((>>), sequence)
-import Control.Monad.ST
-import Control.Monad.ST.Unsafe
-import Control.Monad.Reader hiding (sequence, (>>))
-import Data.STRef
-import System.IO.Unsafe
-import Data.IORef
-import System.Mem.StableName
-import Data.Hashable
-import Data.HashSet hiding (empty, null, size, map, foldr)
+module Parsley ( Parser
+               , runParser
+               -- Functor
+               , fmap, (<$>), (<$), void
+               -- Applicative
+               , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
+               -- Alternative
+               , empty, (<|>), some, many, optional, choice
+               -- Monoidal
+               , Monoidal, unit, (<~>), (<~), (~>)
+               -- Monadic
+               , return, (>>=), (>>), mzero, mplus, join
+               -- Primitives
+               , satisfy, item, char
+               , lookAhead, try
+               -- Composites
+               , eof, notFollowedBy
+               , traverse, sequence, string
+               ) where
+
+import Prelude hiding          ((*>), (<*), (>>), traverse, sequence, (<$), (<**>))
+import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA)
+import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, join)
+import Control.Monad.ST        (ST, runST)
+import Control.Monad.ST.Unsafe (unsafeInterleaveST)
+import Control.Monad.Reader    (ReaderT, lift, ask, runReaderT)
+import Data.STRef              (STRef, writeSTRef, readSTRef, modifySTRef', newSTRef)
+import System.IO.Unsafe        (unsafePerformIO)
+import Data.IORef              (IORef, writeIORef, readIORef, newIORef)
+import System.Mem.StableName   (StableName, makeStableName, hashStableName, eqStableName)
+import Data.Hashable           (Hashable, hashWithSalt, hash)
+import Data.HashSet            (HashSet)
 import qualified Data.HashSet as HashSet
-import Data.HList.HList
-import Data.Array.Unboxed
---import Unsafe.Coerce
+import Data.HList.HList        (HList(HCons, HNil))
+import Data.Array.Unboxed      (UArray, listArray, (!), bounds)
+--import Unsafe.Coerce           (unsafeCoerce)
 
 -- AST
 data Parser a where
@@ -38,19 +58,19 @@ data Parser a where
   Rec       :: Parser a -> Parser a
   Many      :: Parser a -> Parser [a]
 
-instance Show (Parser a) where
-  show (Pure _) = "(pure x)"
-  show (pf :<*>: px) = concat ["(", show pf, " <*> ", show px, ")"]
-  show (p :*>: q) = concat ["(", show p, " *> ", show q, ")"]
-  show (p :<*: q) = concat ["(", show p, " <* ", show q, ")"]
-  show (p :>>=: f) = concat ["(", show p, " >>= f)"]
-  show (p :<|>: q) = concat ["(", show p, " <|> ", show q, ")"]
-  show Empty = "empty"
-  show (Try p) = concat ["(try ", show p, ")"]
-  show (LookAhead p) = concat ["(lookAhead ", show p, ")"]
-  show (Rec _) = "recursion point!"
-  show (Many p) = concat ["(many ", show p, "]"]
-  show (Satisfy _) = "(satisfy f)"
+showAST :: Parser a -> String
+showAST (Pure _) = "(pure x)"
+showAST (pf :<*>: px) = concat ["(", showAST pf, " <*> ", showAST px, ")"]
+showAST (p :*>: q) = concat ["(", showAST p, " *> ", showAST q, ")"]
+showAST (p :<*: q) = concat ["(", showAST p, " <* ", showAST q, ")"]
+showAST (p :>>=: f) = concat ["(", showAST p, " >>= f)"]
+showAST (p :<|>: q) = concat ["(", showAST p, " <|> ", showAST q, ")"]
+showAST Empty = "empty"
+showAST (Try p) = concat ["(try ", showAST p, ")"]
+showAST (LookAhead p) = concat ["(lookAhead ", showAST p, ")"]
+showAST (Rec _) = "recursion point!"
+showAST (Many p) = concat ["(many ", showAST p, "]"]
+showAST (Satisfy _) = "(satisfy f)"
 
 -- Smart Constructors
 instance Functor Parser where fmap = liftA
@@ -86,11 +106,17 @@ some p = p <:> many p
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
 (<**>) = liftA2 (flip ($))
 
-class Monoidal f where
+class Functor f => Monoidal f where
   unit :: f ()
   (<~>) :: f a -> f b -> f (a, b)
 
-instance Applicative f => Monoidal f where
+(<~) :: Monoidal f => f a -> f b -> f a
+p <~ q = fst <$> (p <~> q)
+
+(~>) :: Monoidal f => f a -> f b -> f b
+p ~> q = snd <$> (p <~> q)
+
+instance (Functor f, Applicative f) => Monoidal f where
   unit = pure ()
   (<~>) = liftA2 (,)
 
@@ -124,6 +150,14 @@ string = traverse char
 void :: Parser a -> Parser ()
 void = (() <$)
 
+optional :: Parser a -> Parser ()
+optional p = void p <|> unit
+
+choice :: [Parser a] -> Parser a
+choice = foldr (<|>) empty
+
+-- NOTE: When the intrinsic is introduced to fix this properly, prove the law:
+--   notFollowedBy . notFollowedBy = lookAhead
 notFollowedBy :: Parser a -> Parser ()
 notFollowedBy p = try (join ((try p *> return empty) <|> return unit))
                   --try ((try p *> empty) <|> unit)
@@ -160,9 +194,9 @@ preprocess p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (preproc
       do seenRef <- ask
          seen <- lift (readIORef seenRef)
          name <- StableParserName <$> lift (makeStableName p)
-         if member name seen
+         if HashSet.member name seen
            then return (Rec p)
-           else do lift (writeIORef seenRef (insert name seen))
+           else do lift (writeIORef seenRef (HashSet.insert name seen))
                    return p
 
 optimise :: Parser a -> Parser a

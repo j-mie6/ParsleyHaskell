@@ -40,6 +40,7 @@ import Data.Hashable           (Hashable, hashWithSalt, hash)
 import Data.HashSet            (HashSet)
 import qualified Data.HashSet as HashSet
 import Data.Array.Unboxed      (UArray, listArray, (!), bounds)
+import Data.Array.Base         (unsafeAt)
 --import Unsafe.Coerce           (unsafeCoerce)
 
 data HList xs where
@@ -98,7 +99,7 @@ instance MonadPlus Parser where
 
 -- Additional Combinators
 many :: Parser a -> Parser [a]
-many p = {-let manyp = p <:> manyp <|> pure [] in manyp--}Many p
+many p = let manyp = p <:> manyp <|> pure [] in manyp--Many p
 
 some :: Parser a -> Parser [a]
 some p = p <:> many p
@@ -238,7 +239,7 @@ optimise p                                = p
 
 data M s xs a where
   Halt         :: M s '[a] a
-  Push         :: x -> M s (x ': xs) a -> M s xs a
+  Push         :: !x -> M s (x ': xs) a -> M s xs a
   Pop          :: M s xs a -> M s (b ': xs) a
   App          :: M s (y ': xs) a -> M s (x ': (x -> y) ': xs) a
   Sat          :: (Char -> Bool) -> M s (Char ': xs) a -> M s xs a
@@ -325,7 +326,7 @@ emptyH !hs = null <$!> readSTRef hs
 pushH :: ST s (Maybe a) -> H s a -> ST s ()
 pushH h hs = modifySTRef' hs (h:)
 popH :: H s a -> ST s (Maybe a)
-popH href =
+popH !href =
   do !(h:hs) <- readSTRef href
      writeSTRef href hs
      h
@@ -337,7 +338,7 @@ makeC = newSTRef []
 pushC :: Int -> C s -> ST s ()
 pushC c cs = modifySTRef' cs (c:)
 popC :: C s -> ST s Int
-popC ref = do (c:cs) <- readSTRef ref; writeSTRef ref cs; return c
+popC ref = do !(c:cs) <- readSTRef ref; writeSTRef ref cs; return c
 popC_ :: C s -> ST s ()
 popC_ ref = modifySTRef' ref tail
 pokeC :: Int -> C s -> ST s ()
@@ -349,16 +350,16 @@ incO :: O s -> ST s ()
 incO o = modifySTRef' o (+1)
 getO :: O s -> ST s Int
 getO = readSTRef
-setO :: Int -> O s -> ST s ()
-setO = flip writeSTRef
+setO :: O s -> Int -> ST s ()
+setO = writeSTRef
 more :: UArray Int Char -> O s -> ST s Bool
-more input = fmap (size input >) . readSTRef
+more input o = (size input >) <$!> readSTRef o
 next :: UArray Int Char -> O s -> ST s Char
-next input o = fmap (input !) (readSTRef o)
+next input o = (unsafeAt input) <$!> readSTRef o
 nextSafe :: UArray Int Char -> O s -> (Char -> Bool) -> (Char -> ST s (Maybe a)) -> ST s (Maybe a) -> ST s (Maybe a)
 nextSafe input o p !good !bad =
-  do b <- more input o
-     if b then do c <- next input o; if p c then do incO o; good c else bad
+  do o' <-getO o
+     if size input > o' then let !c = unsafeAt input o' in if p c then do setO o (o' + 1); good c else bad
      else bad
 size :: UArray Int Char -> Int
 size = snd . bounds
@@ -378,32 +379,34 @@ setupHandler hs cs o h =
      pushC o' cs
 
 raise :: H s a -> ST s (Maybe a)
-raise hs =
-  do noHandler <- emptyH hs
-     if noHandler then return Nothing
-     else popH hs
+raise href =
+  do hs <- readSTRef href
+     case hs of
+       [] -> return Nothing
+       h:hs' -> do writeSTRef href hs'
+                   h
 
 -- NOTE: For performance, we might want to force evaluation of arguments
 eval' :: X xs -> H s a -> C s -> O s -> UArray Int Char -> M s xs a -> ST s (Maybe a)
-eval' xs _ _ _ _ Halt = return (Just (fst (popX xs)))
+eval' xs _ _ _ _ Halt = return (Just (peekX xs))
 eval' xs hs cs o input (Push x k) = eval' (pushX x xs) hs cs o input k
 eval' xs hs cs o input (Pop k) = eval' (popX_ xs) hs cs o input k
-eval' xs hs cs o input (App k) = --let (x, xs') = popX xs in eval' (modX ($ x) xs') hs cs o input k
-  let (x, xs') = popX xs
-      (f, xs'') = popX xs'
+eval' xs hs cs o input (App k) = --let !(x, xs') = popX xs in eval' (modX ($ x) xs') hs cs o input k
+  let !(x, xs') = popX xs
+      !(f, xs'') = popX xs'
   in eval' (pushX (f x) xs'') hs cs o input k
 eval' xs hs cs o input (Sat p k) = nextSafe input o p (\c -> eval' (pushX c xs) hs cs o input k) (raise hs)
 eval' xs hs cs o input (Bind f) =
-  do let (x, xs') = popX xs
+  do let !(x, xs') = popX xs
      k <- f x
      eval' xs' hs cs o input k
 eval' _ hs _ _ _ Empt = raise hs
-eval' xs hs cs o input (Commit k) = do popH_ hs; popC cs; eval' xs hs cs o input k
+eval' xs hs cs o input (Commit k) = do popH_ hs; popC_ cs; eval' xs hs cs o input k
 eval' xs hs cs o input (SoftFork p q) =
   do setupHandler hs cs o handler
      eval' xs hs cs o input p
   where handler = do o' <- popC cs
-                     setO o' o
+                     setO o o'
                      eval' xs hs cs o input q
 eval' xs hs cs o input (HardFork p q) =
   do setupHandler hs cs o handler
@@ -416,13 +419,13 @@ eval' xs hs cs o input (Attempt k) =
   do setupHandler hs cs o handler
      eval' xs hs cs o input k
   where handler = do o' <- popC cs
-                     setO o' o
+                     setO o o'
                      raise hs
 eval' xs hs cs o input (Look k) =
   do setupHandler hs cs o handler
      eval' xs hs cs o input k
   where handler = do popC cs; raise hs
-eval' xs hs cs o input (Restore k) = do popH_ hs; o' <- popC cs; setO o' o; eval' xs hs cs o input k
+eval' xs hs cs o input (Restore k) = do popH_ hs; o' <- popC cs; setO o o'; eval' xs hs cs o input k
 eval' xs hs cs o input (ManyIter σ k) =
   do let !(x, xs') = popX xs
      modifySTRef' σ (x:)
@@ -442,7 +445,7 @@ eval' xs hs cs o input (ManyInitSoft σ l k) =
   do setupHandler hs cs o handler
      eval' xs hs cs o input l
   where handler = do o' <-popC cs
-                     setO o' o
+                     setO o o'
                      ys <- readSTRef σ
                      writeSTRef σ []
                      eval' (pushX (reverse ys) xs) hs cs o input k

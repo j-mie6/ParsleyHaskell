@@ -31,7 +31,7 @@ crossMany = env (return $ replicate 1000 'a') $ \input -> bgroup "many" [
   ]
 
 main :: IO ()
-main = {-rnf (Parsley.runParser (manyTestParsley) (replicate 5000000 'a')) `seq` return ()-}defaultMain [
+main = {-rnf (Parsley.runParser (manyTestParsley) (replicate 500000 'a')) `seq` return ()-}defaultMain [
     combinatorGroup,
     crossMany
   ]

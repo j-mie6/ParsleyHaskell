@@ -1,7 +1,8 @@
 module Main where
 import qualified Parsley
-import qualified Yoda
-import Criterion.Main (Benchmark, bgroup, bench, whnf, nf, defaultMain)
+import qualified Text.Yoda as Yoda
+import Criterion.Main (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
+import Control.DeepSeq (NFData(rnf))
 
 manyTestParsley :: Parsley.Parser [Char]
 manyTestParsley = Parsley.many (Parsley.char 'a')
@@ -23,14 +24,14 @@ combinatorGroup = bgroup "combinators" [
   ]
 
 crossMany :: Benchmark
-crossMany = bgroup "many" [
-    bench "manyParsley 1000" $ nf (Parsley.runParser manyTestParsley) (replicate 1000 'a'),
-    bench "manyYodaBad 1000" $ nf (Yoda.parse manyTestYodaBad)        (replicate 1000 'a'),
-    bench "manyYodaOk 1000"  $ nf (Yoda.parse manyTestYodaOk)         (replicate 1000 'a')
+crossMany = env (return $ replicate 1000 'a') $ \input -> bgroup "many" [
+    bench "manyParsley 1000" $ nf (Parsley.runParser manyTestParsley) input,
+    bench "manyYodaBad 1000" $ nf (Yoda.parse manyTestYodaBad)        input,
+    bench "manyYodaOk 1000"  $ nf (Yoda.parse manyTestYodaOk)         input
   ]
 
 main :: IO ()
-main = defaultMain [
+main = {-rnf (Parsley.runParser (manyTestParsley) (replicate 5000000 'a')) `seq` return ()-}defaultMain [
     combinatorGroup,
     crossMany
   ]

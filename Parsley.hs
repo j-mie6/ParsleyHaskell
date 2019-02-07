@@ -28,7 +28,7 @@ module Parsley ( Parser
 
 import Prelude hiding          ((*>), (<*), (>>), traverse, sequence, (<$), (<**>))
 import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA)
-import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, join)
+import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, join, (<$!>))
 import Control.Monad.ST        (ST, runST)
 import Control.Monad.ST.Unsafe (unsafeInterleaveST)
 import Control.Monad.Reader    (ReaderT, lift, ask, runReaderT)
@@ -39,9 +39,12 @@ import System.Mem.StableName   (StableName, makeStableName, hashStableName, eqSt
 import Data.Hashable           (Hashable, hashWithSalt, hash)
 import Data.HashSet            (HashSet)
 import qualified Data.HashSet as HashSet
-import Data.HList.HList        (HList(HCons, HNil))
 import Data.Array.Unboxed      (UArray, listArray, (!), bounds)
 --import Unsafe.Coerce           (unsafeCoerce)
+
+data HList xs where
+  HNil :: HList '[]
+  HCons :: !a -> !(HList as) -> HList (a ': as)
 
 -- AST
 data Parser a where
@@ -265,6 +268,9 @@ instance Show (M ss xs a) where
   show (Attempt k) = "(Try " ++ show k ++ ")"
   show (Look k) = "(Look " ++ show k ++ ")"
   show (Restore k) = "(Restore " ++ show k ++ ")"
+  show (ManyIter _ k) = "(ManyIter " ++ show k ++ ")"
+  show (ManyInitSoft _ l k) = "(ManyInitSoft " ++ show l ++ " " ++ show k ++ ")"
+  show (ManyInitHard _ l k) = "(ManyInitHard " ++ show l ++ " " ++ show k ++ ")"
 
 compile :: Parser a -> ST s (M s '[] a)
 compile = flip compile' Halt
@@ -288,13 +294,16 @@ compile' (Rec p) m         = do unsafeInterleaveST (compile' (preprocess p) m)
       manyp <- compile' p (ManyIter σ manyp)
       return (ManyInitSoft σ manyp m)-}
 compile' (Many p) m        =
-  mdo σ <- newSTRef []
-      manyp <- compile' p (ManyIter σ manyp)
-      return (ManyInitHard σ manyp m)
+  do σ <- newSTRef []
+     mdo manyp <- compile' p (ManyIter σ manyp)
+         return (ManyInitHard σ manyp m)
 
-type H s a = STRef s [ST s (Maybe a)]
+data List a = Cons a (List a) | Nil
+data List' a = Cons' a (List' a) | Nil'
+
+type H s a = STRef s (List (ST s (Maybe a)))
 type X = HList
-type C s = STRef s [Int]
+type C s = STRef s (List' Int)
 type O s = STRef s Int
 
 makeX :: ST s (X '[])
@@ -303,6 +312,8 @@ pushX :: a -> X xs -> X (a ': xs)
 pushX = HCons
 popX :: X (a ': xs) -> (a, X xs)
 popX (HCons x xs) = (x, xs)
+popX_ :: X (a ': xs) -> X xs
+popX_ (HCons x xs) = xs
 pokeX :: a -> X (a ': xs) -> X (a ': xs)
 pokeX y (HCons x xs) = HCons y xs
 modX :: (a -> b) -> X (a ': xs) -> X (b ': xs)
@@ -310,28 +321,34 @@ modX f (HCons x xs) = HCons (f x) xs
 peekX :: X (a ': xs) -> a
 peekX (HCons x xs) = x
 
+null' :: List a -> Bool
+null' Nil = True
+null' _ = False
+
 makeH :: ST s (H s a)
-makeH = newSTRef []
+makeH = newSTRef Nil
 emptyH :: H s a -> ST s Bool
-emptyH = fmap null . readSTRef
+emptyH !hs = null' <$!> readSTRef hs
 pushH :: ST s (Maybe a) -> H s a -> ST s ()
-pushH h hs = modifySTRef' hs (h :)
-popH :: H s a -> ST s ()
-popH href = modifySTRef' href tail
-handle :: H s a -> ST s (Maybe a)
-handle href =
-  do (h:hs) <- readSTRef href
+pushH h hs = modifySTRef' hs (Cons h)
+popH :: H s a -> ST s (Maybe a)
+popH href =
+  do !(Cons h hs) <- readSTRef href
      writeSTRef href hs
      h
+popH_ :: H s a -> ST s ()
+popH_ href = modifySTRef' href (\(Cons _ hs) -> hs)
 
 makeC :: ST s (C s)
-makeC = newSTRef []
+makeC = newSTRef Nil'
 pushC :: Int -> C s -> ST s ()
-pushC c cs = modifySTRef' cs (c:)
+pushC c cs = modifySTRef' cs (Cons' c)
 popC :: C s -> ST s Int
-popC ref = do (c:cs) <- readSTRef ref; writeSTRef ref cs; return c
+popC ref = do (Cons' c cs) <- readSTRef ref; writeSTRef ref cs; return c
+popC_ :: C s -> ST s ()
+popC_ ref = modifySTRef' ref (\(Cons' _ cs) -> cs)
 pokeC :: Int -> C s -> ST s ()
-pokeC c cs = modifySTRef' cs ((c:) . tail)
+pokeC c cs = modifySTRef' cs (\(Cons' _ cs') -> Cons' c cs')--do popC_ cs; pushC c cs --modifySTRef' cs ((c:) . tail)
 
 makeO :: ST s (O s)
 makeO = newSTRef 0
@@ -346,7 +363,7 @@ more input = fmap (size input >) . readSTRef
 next :: UArray Int Char -> O s -> ST s Char
 next input o = fmap (input !) (readSTRef o)
 nextSafe :: UArray Int Char -> O s -> (Char -> Bool) -> (Char -> ST s (Maybe a)) -> ST s (Maybe a) -> ST s (Maybe a)
-nextSafe input o p good bad =
+nextSafe input o p !good !bad =
   do b <- more input o
      if b then do c <- next input o; if p c then do incO o; good c else bad
      else bad
@@ -371,13 +388,13 @@ raise :: H s a -> ST s (Maybe a)
 raise hs =
   do noHandler <- emptyH hs
      if noHandler then return Nothing
-     else handle hs
+     else popH hs
 
 -- NOTE: For performance, we might want to force evaluation of arguments
 eval' :: X xs -> H s a -> C s -> O s -> UArray Int Char -> M s xs a -> ST s (Maybe a)
 eval' xs _ _ _ _ Halt = return (Just (fst (popX xs)))
 eval' xs hs cs o input (Push x k) = eval' (pushX x xs) hs cs o input k
-eval' xs hs cs o input (Pop k) = eval' (snd (popX xs)) hs cs o input k
+eval' xs hs cs o input (Pop k) = eval' (popX_ xs) hs cs o input k
 eval' xs hs cs o input (App k) = --let (x, xs') = popX xs in eval' (modX ($ x) xs') hs cs o input k
   let (x, xs') = popX xs
       (f, xs'') = popX xs'
@@ -388,7 +405,7 @@ eval' xs hs cs o input (Bind f) =
      k <- f x
      eval' xs' hs cs o input k
 eval' _ hs _ _ _ Empt = raise hs
-eval' xs hs cs o input (Commit k) = do popH hs; popC cs; eval' xs hs cs o input k
+eval' xs hs cs o input (Commit k) = do popH_ hs; popC cs; eval' xs hs cs o input k
 eval' xs hs cs o input (SoftFork p q) =
   do setupHandler hs cs o handler
      eval' xs hs cs o input p
@@ -412,9 +429,9 @@ eval' xs hs cs o input (Look k) =
   do setupHandler hs cs o handler
      eval' xs hs cs o input k
   where handler = do popC cs; raise hs
-eval' xs hs cs o input (Restore k) = do popH hs; o' <- popC cs; setO o' o; eval' xs hs cs o input k
+eval' xs hs cs o input (Restore k) = do popH_ hs; o' <- popC cs; setO o' o; eval' xs hs cs o input k
 eval' xs hs cs o input (ManyIter σ k) =
-  do let (x, xs') = popX xs
+  do let !(x, xs') = popX xs
      modifySTRef' σ (x:)
      o' <- getO o
      pokeC o' cs

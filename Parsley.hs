@@ -298,12 +298,9 @@ compile' (Many p) m        =
      mdo manyp <- compile' p (ManyIter σ manyp)
          return (ManyInitHard σ manyp m)
 
-data List a = Cons a (List a) | Nil
-data List' a = Cons' a (List' a) | Nil'
-
-type H s a = STRef s (List (ST s (Maybe a)))
+type H s a = STRef s [ST s (Maybe a)]
 type X = HList
-type C s = STRef s (List' Int)
+type C s = STRef s [Int]
 type O s = STRef s Int
 
 makeX :: ST s (X '[])
@@ -321,34 +318,30 @@ modX f (HCons x xs) = HCons (f x) xs
 peekX :: X (a ': xs) -> a
 peekX (HCons x xs) = x
 
-null' :: List a -> Bool
-null' Nil = True
-null' _ = False
-
 makeH :: ST s (H s a)
-makeH = newSTRef Nil
+makeH = newSTRef []
 emptyH :: H s a -> ST s Bool
-emptyH !hs = null' <$!> readSTRef hs
+emptyH !hs = null <$!> readSTRef hs
 pushH :: ST s (Maybe a) -> H s a -> ST s ()
-pushH h hs = modifySTRef' hs (Cons h)
+pushH h hs = modifySTRef' hs (h:)
 popH :: H s a -> ST s (Maybe a)
 popH href =
-  do !(Cons h hs) <- readSTRef href
+  do !(h:hs) <- readSTRef href
      writeSTRef href hs
      h
 popH_ :: H s a -> ST s ()
-popH_ href = modifySTRef' href (\(Cons _ hs) -> hs)
+popH_ href = modifySTRef' href tail
 
 makeC :: ST s (C s)
-makeC = newSTRef Nil'
+makeC = newSTRef []
 pushC :: Int -> C s -> ST s ()
-pushC c cs = modifySTRef' cs (Cons' c)
+pushC c cs = modifySTRef' cs (c:)
 popC :: C s -> ST s Int
-popC ref = do (Cons' c cs) <- readSTRef ref; writeSTRef ref cs; return c
+popC ref = do (c:cs) <- readSTRef ref; writeSTRef ref cs; return c
 popC_ :: C s -> ST s ()
-popC_ ref = modifySTRef' ref (\(Cons' _ cs) -> cs)
+popC_ ref = modifySTRef' ref tail
 pokeC :: Int -> C s -> ST s ()
-pokeC c cs = modifySTRef' cs (\(Cons' _ cs') -> Cons' c cs')--do popC_ cs; pushC c cs --modifySTRef' cs ((c:) . tail)
+pokeC c cs = modifySTRef' cs (\(_:cs') -> c:cs')
 
 makeO :: ST s (O s)
 makeO = newSTRef 0

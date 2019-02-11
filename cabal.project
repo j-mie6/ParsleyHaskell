@@ -1,5 +1,5 @@
 packages:.
-profiling:true
+--profiling:true
 optimization:2
 allow-newer:yoda:all
 profiling-detail:all-functions

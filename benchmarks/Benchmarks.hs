@@ -20,7 +20,7 @@ combinatorGroup :: Benchmark
 combinatorGroup =
   let longChoice' = Parsley.mkParser longChoice in
   bgroup "combinators" [
-    bench "longChoice"             $ nf (Parsley.runCompiledParser longChoice') "b",
+    --bench "longChoice"             $ nf (Parsley.runCompiledParser longChoice') "b",
     bench "manyTestParsley 0"      $ nf (Parsley.runParser manyTestParsley) (replicate 0 'a'),
     bench "manyTestParsley 1"      $ nf (Parsley.runParser manyTestParsley) (replicate 1 'a'),
     bench "manyTestParsley 10"     $ nf (Parsley.runParser manyTestParsley) (replicate 10 'a'),

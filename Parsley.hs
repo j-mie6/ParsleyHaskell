@@ -24,7 +24,7 @@ module Parsley ( Parser, CompiledParser(..)
                , lookAhead, try
                -- Composites
                , eof, notFollowedBy
-               , traverse, sequence, string
+               , traverse, sequence, string--, manyUnrolled
                ) where
 
 import Prelude hiding          ((*>), (<*), (>>), traverse, sequence, (<$), (<**>))
@@ -43,8 +43,8 @@ import qualified Data.HashSet as HashSet
 import Data.Array.Unboxed      (UArray, listArray)
 import Data.Array.ST           (STArray, STUArray)
 import Data.Array.Base         (unsafeAt, newArray_, unsafeNewArray_, unsafeRead, unsafeWrite, MArray, getNumElements, numElements)
-import GHC.Prim                (Int#)
-import GHC.Exts                (Int(..), (-#), (+#))
+import GHC.Prim                (Int#, Char#)
+import GHC.Exts                (Int(..), Char(..), (-#), (+#))
 import Unsafe.Coerce           (unsafeCoerce)
 
 data HList xs where
@@ -54,6 +54,7 @@ data HList xs where
 -- AST
 data Parser a where
   Pure      :: a -> Parser a
+  Char      :: Char -> Parser Char
   Satisfy   :: (Char -> Bool) -> Parser Char
   (:<*>:)   :: Parser (a -> b) -> Parser a -> Parser b
   (:*>:)    :: Parser a -> Parser b -> Parser b
@@ -68,6 +69,8 @@ data Parser a where
 
 showAST :: Parser a -> String
 showAST (Pure _) = "(pure x)"
+showAST (Char c) = "(char " ++ show c ++ ")"
+showAST (Satisfy _) = "(satisfy f)"
 showAST (pf :<*>: px) = concat ["(", showAST pf, " <*> ", showAST px, ")"]
 showAST (p :*>: q) = concat ["(", showAST p, " *> ", showAST q, ")"]
 showAST (p :<*: q) = concat ["(", showAST p, " <* ", showAST q, ")"]
@@ -78,7 +81,6 @@ showAST (Try p) = concat ["(try ", showAST p, ")"]
 showAST (LookAhead p) = concat ["(lookAhead ", showAST p, ")"]
 showAST (Rec _) = "recursion point!"
 showAST (Many p) = concat ["(many ", showAST p, "]"]
-showAST (Satisfy _) = "(satisfy f)"
 
 -- Smart Constructors
 instance Functor Parser where fmap = liftA
@@ -103,7 +105,7 @@ instance MonadPlus Parser where
 
 -- Additional Combinators
 many :: Parser a -> Parser [a]
-many p = let manyp = p <:> manyp <|> pure [] in manyp--}Many p
+many p = {-let manyp = p <:> manyp <|> pure [] in manyp--}Many p
 
 some :: Parser a -> Parser [a]
 some p = p <:> many p
@@ -135,7 +137,7 @@ satisfy :: (Char -> Bool) -> Parser Char
 satisfy = Satisfy
 
 char :: Char -> Parser Char
-char c = satisfy (== c)
+char = Char--satisfy (== c)
 
 item :: Parser Char
 item = satisfy (const True)
@@ -246,6 +248,7 @@ data M s xs a where
   Push         :: !x -> M s (x ': xs) a -> M s xs a
   Pop          :: M s xs a -> M s (b ': xs) a
   App          :: M s (y ': xs) a -> M s (x ': (x -> y) ': xs) a
+  Chr          :: Char# -> M s (Char ': xs) a -> M s xs a
   Sat          :: (Char -> Bool) -> M s (Char ': xs) a -> M s xs a
   Bind         :: (x -> ST s (M s xs a)) -> M s (x ': xs) a
   Empt         :: M s xs a
@@ -264,6 +267,7 @@ instance Show (M ss xs a) where
   show (Push _ k) = "(Push x " ++ show k ++ ")"
   show (Pop k) = "(Pop " ++ show k ++ ")"
   show (App k) = "(App " ++ show k ++ ")"
+  show (Chr c k) = "(Chr " ++ show (C# c) ++ " " ++ show k ++ ")"
   show (Sat _ k) = "(Sat f " ++ show k ++ ")"
   show (Bind _) = "(Bind ?)"
   show Empt = "Empt"
@@ -282,6 +286,7 @@ compile = flip compile' Halt
 
 compile' :: Parser a -> M s (a ': xs) b -> ST s (M s xs b)
 compile' (Pure x) m        = do return (Push x m)
+compile' (Char (C# c)) m   = do return (Chr c m)
 compile' (Satisfy p) m     = do return (Sat p m)
 compile' (pf :<*>: px) m   = do pxc <- compile' px (App m); compile' pf pxc
 compile' (p :*>: q) m      = do qc <- compile' q m; compile' p (Pop qc)
@@ -295,13 +300,13 @@ compile' (LookAhead p) m   = do Look <$> compile' p (Restore m)
 --                              Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
 compile' (Rec p) m         = do unsafeInterleaveST (compile' (preprocess p) m)
 {-compile' (Many (Try p)) m  =
-  mdo σ <- newSTRef []
-      manyp <- compile' p (ManyIter σ manyp)
-      return (ManyInitSoft σ manyp m)-}
+  do σ <- newSTRef []
+     rec manyp <- compile' p (ManyIter σ manyp)
+     return (ManyInitSoft σ manyp m)-}
 compile' (Many p) m        =
   do σ <- newSTRef id
-     mdo manyp <- compile' p (ManyIter σ manyp)
-         return (ManyInitHard σ manyp m)
+     rec manyp <- compile' p (ManyIter σ manyp)
+     return (ManyInitHard σ manyp m)
 
 data SList a = !a ::: !(SList a) | SNil
 type Input = UArray Int Char
@@ -354,7 +359,7 @@ makeH = return $! (H SNil)
 pushH :: (O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)) -> H s a -> H s a
 pushH !h !(H hs) = H (h:::hs)
 --popH :: H s a -> CIdx -> C s -> O -> ST s (Maybe a)
---popH !(H (h:::hs)) !cidx !cs !o = h o (H hs) cidx cs
+--popH !(H (h:::hs)) cidx !cs o = h o (H hs) cidx cs
 popH_ :: H s a -> H s a
 popH_ !(H (_:::hs)) = H hs
 
@@ -362,9 +367,8 @@ makeC :: ST s (CIdx, C s)
 makeC = do cs <- newArray_ (0, 3)
            return $! (-1, cs)
 pushC :: O# -> CIdx# -> C s -> ST s (CIdx, C s)
-pushC !c !i !cs =
-  do let !j = (I# i) + 1
-     sz <- getNumElements cs
+pushC c i !cs = let !j = (I# i) + 1 in
+  do sz <- getNumElements cs
      if j == sz then do cs' <- double cs
                         unsafeWrite cs' j (I# c)
                         return $! (j, cs')
@@ -382,6 +386,7 @@ makeO = return 0
 --more input o = (size input >) <$!> readSTRefU o
 --next :: UArray Int Char -> O s -> ST s Char
 --next input o = (unsafeAt input) <$!> readSTRefU o
+{-# INLINE nextSafe #-}
 nextSafe :: Input -> O# -> (Char -> Bool) -> (O# -> Char -> ST s (Maybe a)) -> (O# -> ST s (Maybe a)) -> ST s (Maybe a)
 nextSafe !input !o !p !good !bad =
   if  numElements input > (I# o) then let !c = unsafeAt input (I# o) in if p c then good (o +# 1#) c else bad o
@@ -391,7 +396,7 @@ eval :: String -> M s '[] a -> ST s (Maybe a)
 eval input m =
   do xs <- makeX
      hs <- makeH
-     (I# cidx, cs) <- makeC
+     !(I# cidx, cs) <- makeC
      I# o <- makeO
      eval' m (listArray (0, length input-1) input) xs o hs cidx cs
 
@@ -403,81 +408,85 @@ setupHandler !hs !cidx !cs !o !h !k =
      !(I# cidx', cs') <- pushC o cidx cs
      k hs' cidx' cs'
 
+{-# INLINE raise #-}
 raise :: H s a -> CIdx# -> C s -> O# -> ST s (Maybe a)
 raise (H SNil) !_ !_ !_          = return Nothing
 raise (H (h:::hs')) !cidx !cs !o = h o (H hs') cidx cs
 
 evalHalt :: Input -> X (a ': xs) -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalHalt _ !(HCons x _) !_ _ !_ _ = return (Just x)
+evalHalt _ !(HCons x _) _ _ _ _ = return (Just x)
 
 evalPush :: x -> M s (x ': xs) a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalPush !x !k input !xs !o hs !cidx cs = eval' k input (pushX x xs) o hs cidx cs
+evalPush x k input !xs o hs cidx cs = eval' k input (pushX x xs) o hs cidx cs
 
 evalPop :: M s xs a -> Input -> X (x ': xs) -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalPop !k input !xs !o hs !cidx cs = eval' k input (popX_ xs) o hs cidx cs
+evalPop k input !xs o hs cidx cs = eval' k input (popX_ xs) o hs cidx cs
 
 evalApp :: M s (y ': xs) a -> Input -> X (x ': (x -> y) ': xs) -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalApp !k input !xs !o hs !cidx cs =
+evalApp k input !xs o hs cidx cs =
   let !(x, xs') = popX xs
       !(f, xs'') = popX xs'
   in eval' k input (pushX (f x) xs'') o hs cidx cs
 
 evalSat :: (Char -> Bool) -> M s (Char ': xs) a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalSat p !k input !xs !o hs !cidx cs = nextSafe input o p (\o c -> eval' k input (pushX c xs) o hs cidx cs) (raise hs cidx cs)
+evalSat p k input !xs o hs cidx cs = nextSafe input o p (\o c -> eval' k input (pushX c xs) o hs cidx cs) (raise hs cidx cs)
+
+evalChr :: Char# -> M s (Char ': xs) a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
+evalChr c k input !xs o hs cidx cs = nextSafe input o (== (C# c)) (\o c -> eval' k input (pushX c xs) o hs cidx cs) (raise hs cidx cs)
 
 evalBind :: (x -> ST s (M s xs a)) -> Input -> X (x ': xs) -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalBind f input !xs !o hs !cidx cs =
+evalBind f input !xs o hs cidx cs =
   do let !(x, xs') = popX xs
      k <- f x
      eval' k input xs' o hs cidx cs
 
 evalEmpt :: Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalEmpt _ !_ !o hs !cidx cs = raise hs cidx cs o
+evalEmpt _ !_ o hs cidx cs = raise hs cidx cs o
 
 evalCommit :: M s xs a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalCommit k input !xs !o hs !cidx cs = eval' k input xs o (popH_ hs) (popC_ cidx) cs
+evalCommit k input !xs o hs cidx cs = eval' k input xs o (popH_ hs) (popC_ cidx) cs
 
 evalHardFork :: M s xs a -> M s xs a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalHardFork p q input !xs !o hs !cidx cs = setupHandler hs cidx cs o handler (eval' p input xs o)
+evalHardFork p q input !xs o hs cidx cs = setupHandler hs cidx cs o handler (eval' p input xs o)
   where
-    handler !o hs !cidx cs =
+    handler o hs cidx cs =
       do !(c, I# cidx') <- popC cidx cs
          if c == (I# o) then eval' q input xs o hs cidx' cs
          else raise hs cidx' cs o
 
 evalSoftFork :: M s xs a -> M s xs a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalSoftFork p q input !xs !o hs !cidx cs = setupHandler hs cidx cs o handler (eval' p input xs o)
+evalSoftFork p q input !xs o hs cidx cs = setupHandler hs cidx cs o handler (eval' p input xs o)
   where
-    handler !_ hs !cidx cs =
+    handler _ hs cidx cs =
       do !(I# o', I# cidx') <- popC cidx cs
          eval' q input xs o' hs cidx' cs
 
 evalAttempt :: M s xs a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalAttempt k input !xs !o hs !cidx cs = setupHandler hs cidx cs o handler (eval' k input xs o)
+evalAttempt k input !xs o hs cidx cs = setupHandler hs cidx cs o handler (eval' k input xs o)
   where
     handler :: O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-    handler !_ hs !cidx cs =
+    handler _ hs cidx cs =
       do !(I# o, I# cidx') <- popC cidx cs
          raise hs cidx' cs o
 
 evalLook :: M s xs a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalLook k input !xs !o hs !cidx cs = setupHandler hs cidx cs o handler (eval' k input xs o)
-  where handler !o hs !cidx cs = raise hs (popC_ cidx) cs o
+evalLook k input !xs o hs cidx cs = setupHandler hs cidx cs o handler (eval' k input xs o)
+  where handler o hs cidx cs = raise hs (popC_ cidx) cs o
 
 evalRestore :: M s xs a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalRestore k input !xs !_ hs !cidx cs = do (I# o, I# cidx') <- popC cidx cs; eval' k input xs o (popH_ hs) cidx' cs
+evalRestore k input !xs _ hs cidx cs = do (I# o, I# cidx') <- popC cidx cs; eval' k input xs o (popH_ hs) cidx' cs
 
 evalManyIter :: STRef s ([x] -> [x]) -> M s xs a -> Input -> X (x ': xs) -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalManyIter σ k input !xs !o hs !cidx cs =
+evalManyIter σ k input !xs o hs cidx cs =
   do let !(x, xs') = popX xs
      modifySTRef' σ ((x :) .)
      pokeC o cidx cs
      eval' k input xs' o hs cidx cs
 
 evalManyInitHard :: STRef s ([x] -> [x]) -> M s xs a -> M s ([x] ': xs) a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalManyInitHard σ l k input !xs !o hs !cidx cs = setupHandler hs cidx cs o handler (eval' l input xs o)
+evalManyInitHard σ l k input !xs o hs cidx cs = setupHandler hs cidx cs o handler (eval' l input xs o)
   where
-    handler !o hs !cidx cs =
+    handler o hs cidx cs =
       do !(c, I# cidx') <- popC cidx cs
          if c == (I# o) then do ys <- readSTRef σ
                                 writeSTRef σ id
@@ -485,31 +494,64 @@ evalManyInitHard σ l k input !xs !o hs !cidx cs = setupHandler hs cidx cs o han
          else do writeSTRef σ id; raise hs cidx' cs o
 
 evalManyInitSoft :: STRef s ([x] -> [x]) -> M s xs a -> M s ([x] ': xs) a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-evalManyInitSoft σ l k input !xs !o hs !cidx cs = setupHandler hs cidx cs o handler (eval' l input xs o)
+evalManyInitSoft σ l k input !xs o hs cidx cs = setupHandler hs cidx cs o handler (eval' l input xs o)
   where
-    handler !_ hs !cidx cs =
+    handler _ hs cidx cs =
       do !(I# o, I# cidx') <- popC cidx cs
          ys <- readSTRef σ
          writeSTRef σ id
          eval' k input (pushX (ys []) xs) o hs cidx' cs
 
 eval' :: M s xs a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
-eval' Halt input !xs !o hs !cidx cs                 = evalHalt input xs o hs cidx cs
-eval' (Push x k) input !xs !o hs !cidx cs           = evalPush x k input xs o hs cidx cs
-eval' (Pop k) input !xs !o hs !cidx cs              = evalPop k input xs o hs cidx cs
-eval' (App k) input !xs !o hs !cidx cs              = evalApp k input xs o hs cidx cs
-eval' (Sat p k) input !xs !o hs !cidx cs            = evalSat p k input xs o hs cidx cs
-eval' (Bind f) input !xs !o hs !cidx cs             = evalBind f input xs o hs cidx cs
-eval' Empt input !xs !o hs !cidx cs                 = evalEmpt input xs o hs cidx cs
-eval' (Commit k) input !xs !o hs !cidx cs           = evalCommit k input xs o hs cidx cs
-eval' (HardFork p q) input !xs !o hs !cidx cs       = evalHardFork p q input xs o hs cidx cs
-eval' (SoftFork p q) input !xs !o hs !cidx cs       = evalSoftFork p q input xs o hs cidx cs
-eval' (Attempt k) input !xs !o hs !cidx cs          = evalAttempt k input xs o hs cidx cs
-eval' (Look k) input !xs !o hs !cidx cs             = evalLook k input xs o hs cidx cs
-eval' (Restore k) input !xs !o hs !cidx cs          = evalRestore k input xs o hs cidx cs
-eval' (ManyIter σ k) input !xs !o hs !cidx cs       = evalManyIter σ k input xs o hs cidx cs
-eval' (ManyInitHard σ l k) input !xs !o hs !cidx cs = evalManyInitHard σ l k input xs o hs cidx cs
-eval' (ManyInitSoft σ l k) input !xs !o hs !cidx cs = evalManyInitSoft σ l k input xs o hs cidx cs
+eval' Halt input xs o hs cidx cs                 = evalHalt input xs o hs cidx cs
+eval' (Push x k) input xs o hs cidx cs           = evalPush x k input xs o hs cidx cs
+eval' (Pop k) input xs o hs cidx cs              = evalPop k input xs o hs cidx cs
+eval' (App k) input xs o hs cidx cs              = evalApp k input xs o hs cidx cs
+eval' (Sat p k) input xs o hs cidx cs            = evalSat p k input xs o hs cidx cs
+eval' (Chr c k) input xs o hs cidx cs            = evalChr c k input xs o hs cidx cs
+eval' (Bind f) input xs o hs cidx cs             = evalBind f input xs o hs cidx cs
+eval' Empt input xs o hs cidx cs                 = evalEmpt input xs o hs cidx cs
+eval' (Commit k) input xs o hs cidx cs           = evalCommit k input xs o hs cidx cs
+eval' (HardFork p q) input xs o hs cidx cs       = evalHardFork p q input xs o hs cidx cs
+eval' (SoftFork p q) input xs o hs cidx cs       = evalSoftFork p q input xs o hs cidx cs
+eval' (Attempt k) input xs o hs cidx cs          = evalAttempt k input xs o hs cidx cs
+eval' (Look k) input xs o hs cidx cs             = evalLook k input xs o hs cidx cs
+eval' (Restore k) input xs o hs cidx cs          = evalRestore k input xs o hs cidx cs
+eval' (ManyIter σ k) input xs o hs cidx cs       = evalManyIter σ k input xs o hs cidx cs
+eval' (ManyInitHard σ l k) input xs o hs cidx cs = evalManyInitHard σ l k input xs o hs cidx cs
+eval' (ManyInitSoft σ l k) input xs o hs cidx cs = evalManyInitSoft σ l k input xs o hs cidx cs
+
+{-
+manyUnrolled :: String -> Maybe [Char]
+manyUnrolled input = runST $
+  do xs <- makeX
+     hs <- makeH
+     (I# cidx, cs) <- makeC
+     I# o <- makeO
+     σ <- newSTRef id
+     manyUnrolled' σ (listArray (0, length input-1) input) xs o hs cidx cs
+  where
+    manyUnrolled' :: STRef s ([Char] -> [Char]) -> Input -> X '[] -> O# -> H s [Char] -> CIdx# -> C s -> ST s (Maybe [Char])
+    manyUnrolled' σ input xs o hs cidx cs =
+      let
+        --sat :: forall s. (Char -> Bool) -> Input -> X '[] -> O# -> H s [Char] -> CIdx# -> C s -> ST s (Maybe [Char])
+        sat p input !xs o hs cidx cs = nextSafe input o p (\o c -> loop input (pushX c xs) o hs cidx cs) (raise hs cidx cs)
+        --loop :: forall s. Input -> X '[Char] -> O# -> H s [Char] -> CIdx# -> C s -> ST s (Maybe [Char])
+        loop input !xs o hs cidx cs =
+          do let !(x, xs') = popX xs
+             modifySTRef' σ ((x :) .)
+             pokeC o cidx cs
+             sat (== 'a') input xs' o hs cidx cs
+      in
+      setupHandler hs cidx cs o handler (sat (== 'a') input xs o)
+        where
+          handler o hs cidx cs =
+            do !(c, I# cidx') <- popC cidx cs
+               if c == (I# o) then do ys <- readSTRef σ
+                                      writeSTRef σ id
+                                      evalHalt input (pushX (ys []) xs) o hs cidx' cs
+               else do writeSTRef σ id; raise hs cidx' cs o
+-}
 
 runParser :: Parser a -> String -> Maybe a
 runParser p input = runST (compile (preprocess p) >>= eval input)

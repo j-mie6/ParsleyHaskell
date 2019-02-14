@@ -38,14 +38,15 @@ import System.IO.Unsafe        (unsafePerformIO)
 import Data.IORef              (IORef, writeIORef, readIORef, newIORef)
 import GHC.StableName          (StableName(..), makeStableName, hashStableName, eqStableName)
 import Data.Hashable           (Hashable, hashWithSalt, hash)
-import Data.HashSet            (HashSet)
-import qualified Data.HashSet as HashSet
+import Data.HashMap.Lazy       (HashMap)
+import qualified Data.HashMap.Lazy as HashMap
 import Data.Array.Unboxed      (UArray, listArray)
 import Data.Array.ST           (STArray, STUArray)
 import Data.Array.Base         (unsafeAt, newArray_, unsafeNewArray_, unsafeRead, unsafeWrite, MArray, getNumElements, numElements)
 import GHC.Prim                (Int#, Char#, StableName#)
 import GHC.Exts                (Int(..), Char(..), (-#), (+#))
 import Unsafe.Coerce           (unsafeCoerce)
+import Safe.Coerce             (coerce)
 
 data HList xs where
   HNil :: HList '[]
@@ -105,7 +106,7 @@ instance MonadPlus Parser where
 
 -- Additional Combinators
 many :: Parser a -> Parser [a]
-many p = {-let manyp = p <:> manyp <|> pure [] in manyp--}Many p
+many p = let manyp = p <:> manyp <|> pure [] in manyp--}Many p
 
 some :: Parser a -> Parser [a]
 some p = p <:> many p
@@ -176,17 +177,28 @@ eof :: Parser ()
 eof = notFollowedBy item
 
 data StableParserName = forall a. StableParserName (StableName# (Parser a))
+data GenParser = forall a. GenParser (Parser a)
 instance Eq StableParserName where (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)
 instance Hashable StableParserName where
   hash (StableParserName n) = hashStableName (StableName n)
   hashWithSalt salt (StableParserName n) = hashWithSalt salt (StableName n)
 
 preprocess :: Parser a -> Parser a
-preprocess !p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (preprocess' p))
+preprocess !p = unsafePerformIO ((newIORef HashMap.empty) >>= runReaderT (preprocess' p))
   where
-    preprocess' :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
-    preprocess' !p = fix p >>= preprocess''
-    preprocess'' :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
+    preprocess' :: Parser a -> ReaderT (IORef (HashMap StableParserName GenParser)) IO (Parser a)
+    -- Force evaluation of p to ensure that the stableName is correct first time
+    preprocess' !p =
+      do !seenRef <- ask
+         !seen <- lift (readIORef seenRef)
+         (StableName _name) <- lift (makeStableName p)
+         let !name = StableParserName _name
+         case HashMap.lookup name seen of
+           Just (GenParser q) -> return $! (Rec (coerce q))
+           Nothing -> mdo lift (writeIORef seenRef (HashMap.insert name (GenParser q) seen))
+                          q <- preprocess'' p
+                          return $! q
+    preprocess'' :: Parser a -> ReaderT (IORef (HashMap StableParserName GenParser)) IO (Parser a)
     preprocess'' !(pf :<*>: px) = fmap optimise (liftM2 (:<*>:)  (preprocess' pf) (preprocess' px))
     preprocess'' !(p :*>: q)    = fmap optimise (liftM2 (:*>:)   (preprocess' p)  (preprocess' q))
     preprocess'' !(p :<*: q)    = fmap optimise (liftM2 (:<*:)   (preprocess' p)  (preprocess' q))
@@ -197,18 +209,6 @@ preprocess !p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (prepro
     preprocess'' !(LookAhead p) = liftM LookAhead (preprocess' p)
     preprocess'' !(Many p)      = liftM Many (preprocess' p)
     preprocess'' !p             = return p
-
-    fix :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
-    -- Force evaluation of p to ensure that the stableName is correct first time
-    fix !p =
-      do !seenRef <- ask
-         !seen <- lift (readIORef seenRef)
-         !(StableName _name) <- lift (makeStableName p)
-         let !name = StableParserName _name
-         if (HashSet.member name) seen
-           then return $! (Rec p)
-           else do lift (writeIORef seenRef ((HashSet.insert $! name) seen))
-                   return $! p
 
 optimise :: Parser a -> Parser a
 -- Applicative Optimisation
@@ -242,6 +242,11 @@ optimise (p :<*: Empty)                   = p *> empty
 optimise (Pure x :<*: p)                  = optimise (p *> pure x)
 optimise (Empty :<*: _)                   = Empty
 optimise ((p :<*: q) :<*: r)              = optimise (p <* optimise (q <* r))
+-- TODO There are a few more laws to address when the instrinsics come in:
+-- notFollowedBy . notFollowedBy = lookAhead
+-- eof *> eof | eof <* eof = eof
+-- p <*> eof = (p <*> unit) <* eof
+-- notFollowedBy eof = lookAhead item
 optimise p                                = p
 
 data M s xs a where
@@ -299,7 +304,7 @@ compile' (p :>>=: f) m     = do compile' p (Bind (flip compile' m . preprocess .
 compile' (Try p) m         = do Attempt <$> compile' p (Commit m)
 compile' (LookAhead p) m   = do Look <$> compile' p (Restore m)
 --                              Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
-compile' (Rec p) m         = do unsafeInterleaveST (compile' (preprocess p) m)
+compile' (Rec p) m         = do unsafeInterleaveST (compile' p m)
 {-compile' (Many (Try p)) m  =
   do σ <- newSTRef []
      rec manyp <- compile' p (ManyIter σ manyp)

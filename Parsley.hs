@@ -31,7 +31,7 @@ import Prelude hiding          ((*>), (<*), (>>), traverse, sequence, (<$), (<**
 import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA)
 import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, join, (<$!>))
 import Control.Monad.ST        (ST, runST)
-import Control.Monad.ST.Unsafe (unsafeInterleaveST)
+import Control.Monad.ST.Unsafe (unsafeInterleaveST, unsafeIOToST)
 import Control.Monad.Reader    (ReaderT, lift, ask, runReaderT)
 import Data.STRef              (STRef, writeSTRef, readSTRef, modifySTRef', newSTRef)
 import System.IO.Unsafe        (unsafePerformIO)
@@ -287,32 +287,48 @@ instance Show (M ss xs a) where
   show (ManyInitSoft _ l k) = "(ManyInitSoft " ++ show l ++ " " ++ show k ++ ")"
   show (ManyInitHard _ l k) = "(ManyInitHard " ++ show l ++ " " ++ show k ++ ")"
 
+data GenM s a = forall xs. GenM (M s xs a)
 compile :: Parser a -> ST s (M s '[] a)
-compile = flip compile' Halt
+compile p = (newSTRef HashMap.empty) >>= runReaderT (compile' p Halt)
 
-compile' :: Parser a -> M s (a ': xs) b -> ST s (M s xs b)
-compile' (Pure x) m        = do return (Push x m)
-compile' (Char (C# c)) m   = do return (Chr c m)
-compile' (Satisfy p) m     = do return (Sat p m)
-compile' (pf :<*>: px) m   = do pxc <- compile' px (App m); compile' pf pxc
-compile' (p :*>: q) m      = do qc <- compile' q m; compile' p (Pop qc)
-compile' (p :<*: q) m      = do qc <- compile' q (Pop m); compile' p qc
-compile' Empty m           = do return Empt
---compile' (Try p :<|>: q) m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
-compile' (p :<|>: q) m     = do HardFork <$> compile' p (Commit m) <*> compile' q m
-compile' (p :>>=: f) m     = do compile' p (Bind (flip compile' m . preprocess . f))
-compile' (Try p) m         = do Attempt <$> compile' p (Commit m)
-compile' (LookAhead p) m   = do Look <$> compile' p (Restore m)
+cache :: Parser a -> M s xs b -> ReaderT (STRef s (HashMap StableParserName (GenM s b))) (ST s) ()
+cache !p !m =
+  do (StableName name) <- lift (unsafeIOToST (makeStableName p))
+     !ref <- ask
+     lift (modifySTRef' ref (HashMap.insert (StableParserName name) (GenM m)))
+
+compile' :: Parser a -> M s (a ': xs) b -> ReaderT (STRef s (HashMap StableParserName (GenM s b))) (ST s) (M s xs b)
+compile' self@(Pure x) m        = do return $! (Push x m)
+compile' self@(Char (C# c)) m   = do return $! (Chr c m)
+compile' self@(Satisfy p) m     = do return $! (Sat p m)
+compile' self@(pf :<*>: px) m   = do pxc <- compile' px (App m); n <- compile' pf pxc; cache self n; return $! n
+compile' self@(p :*>: q) m      = do qc <- compile' q m; n <- compile' p (Pop qc); cache self n; return $! n
+compile' self@(p :<*: q) m      = do qc <- compile' q (Pop m); n <- compile' p qc; cache self n; return $! n
+compile' self@Empty m           = do return $! Empt
+--compile' self@(Try p :<|>: q) m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
+compile' self@(p :<|>: q) m     = do n <- HardFork <$> compile' p (Commit m) <*> compile' q m; cache self n; return $! n
+compile' self@(p :>>=: f) m     = do n <- compile' p (Bind f'); cache self n; return $! n
+  where f' x = (newSTRef HashMap.empty) >>= runReaderT (compile' (preprocess (f x)) m)
+compile' self@(Try p) m         = do n <- Attempt <$> compile' p (Commit m); cache self n; return $! n
+compile' self@(LookAhead p) m   = do n <- Look <$> compile' p (Restore m); cache self n; return $! n
 --                              Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
-compile' (Rec p) m         = do unsafeInterleaveST (compile' p m)
+compile' self@(Rec p) m         = --do seen <- ask; lift (unsafeInterleaveST (runReaderT (compile' p m) seen))
+  do (StableName name) <- lift (unsafeIOToST (makeStableName p))
+     !ref <- ask
+     seen <- lift (readSTRef ref)
+     let GenM !n = undefined --ahhh crap...
+     return $! seen Map.! name
+
 {-compile' (Many (Try p)) m  =
   do σ <- newSTRef []
      rec manyp <- compile' p (ManyIter σ manyp)
      return (ManyInitSoft σ manyp m)-}
-compile' (Many p) m        =
-  do σ <- newSTRef id
+compile' self@(Many p) m        =
+  do σ <- lift (newSTRef id)
      rec manyp <- compile' p (ManyIter σ manyp)
-     return (ManyInitHard σ manyp m)
+     let! n = ManyInitHard σ manyp m
+     cache self n
+     return $! n
 
 data SList a = !a ::: !(SList a) | SNil
 type Input = UArray Int Char

@@ -251,11 +251,13 @@ optimise p                                = p
 
 data M s xs a where
   Halt         :: M s '[a] a
+  Ret          :: M s (a ': xs) a
   Push         :: !x -> M s (x ': xs) a -> M s xs a
   Pop          :: M s xs a -> M s (b ': xs) a
   App          :: M s (y ': xs) a -> M s (x ': (x -> y) ': xs) a
   Chr          :: Char# -> M s (Char ': xs) a -> M s xs a
   Sat          :: (Char -> Bool) -> M s (Char ': xs) a -> M s xs a
+  Call         :: M s xs b -> M s (b ': xs) a -> M s xs a
   Bind         :: (x -> ST s (M s xs a)) -> M s (x ': xs) a
   Empt         :: M s xs a
   Commit       :: M s xs a -> M s xs a
@@ -287,37 +289,35 @@ instance Show (M ss xs a) where
   show (ManyInitSoft _ l k) = "(ManyInitSoft " ++ show l ++ " " ++ show k ++ ")"
   show (ManyInitHard _ l k) = "(ManyInitHard " ++ show l ++ " " ++ show k ++ ")"
 
-data GenM s a = forall xs. GenM (M s xs a)
+data GenM s = forall xs a. GenM (M s xs a)
 compile :: Parser a -> ST s (M s '[] a)
 compile p = (newSTRef HashMap.empty) >>= runReaderT (compile' p Halt)
 
-cache :: Parser a -> M s xs b -> ReaderT (STRef s (HashMap StableParserName (GenM s b))) (ST s) ()
-cache !p !m =
-  do (StableName name) <- lift (unsafeIOToST (makeStableName p))
-     !ref <- ask
-     lift (modifySTRef' ref (HashMap.insert (StableParserName name) (GenM m)))
-
-compile' :: Parser a -> M s (a ': xs) b -> ReaderT (STRef s (HashMap StableParserName (GenM s b))) (ST s) (M s xs b)
+compile' :: Parser a -> M s (a ': xs) b -> ReaderT (STRef s (HashMap StableParserName (GenM s))) (ST s) (M s xs b)
 compile' self@(Pure x) m        = do return $! (Push x m)
 compile' self@(Char (C# c)) m   = do return $! (Chr c m)
 compile' self@(Satisfy p) m     = do return $! (Sat p m)
-compile' self@(pf :<*>: px) m   = do pxc <- compile' px (App m); n <- compile' pf pxc; cache self n; return $! n
-compile' self@(p :*>: q) m      = do qc <- compile' q m; n <- compile' p (Pop qc); cache self n; return $! n
-compile' self@(p :<*: q) m      = do qc <- compile' q (Pop m); n <- compile' p qc; cache self n; return $! n
+compile' self@(pf :<*>: px) m   = do pxc <- compile' px (App m); compile' pf pxc
+compile' self@(p :*>: q) m      = do qc <- compile' q m; compile' p (Pop qc)
+compile' self@(p :<*: q) m      = do qc <- compile' q (Pop m); compile' p qc
 compile' self@Empty m           = do return $! Empt
 --compile' self@(Try p :<|>: q) m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
-compile' self@(p :<|>: q) m     = do n <- HardFork <$> compile' p (Commit m) <*> compile' q m; cache self n; return $! n
-compile' self@(p :>>=: f) m     = do n <- compile' p (Bind f'); cache self n; return $! n
+compile' self@(p :<|>: q) m     = do HardFork <$> compile' p (Commit m) <*> compile' q m
+compile' self@(p :>>=: f) m     = do compile' p (Bind f')
   where f' x = (newSTRef HashMap.empty) >>= runReaderT (compile' (preprocess (f x)) m)
-compile' self@(Try p) m         = do n <- Attempt <$> compile' p (Commit m); cache self n; return $! n
-compile' self@(LookAhead p) m   = do n <- Look <$> compile' p (Restore m); cache self n; return $! n
+compile' self@(Try p) m         = do Attempt <$> compile' p (Commit m)
+compile' self@(LookAhead p) m   = do Look <$> compile' p (Restore m)
 --                              Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
 compile' self@(Rec p) m         = --do seen <- ask; lift (unsafeInterleaveST (runReaderT (compile' p m) seen))
-  do (StableName name) <- lift (unsafeIOToST (makeStableName p))
+  do (StableName _name) <- lift (unsafeIOToST (makeStableName p))
      !ref <- ask
      seen <- lift (readSTRef ref)
-     let GenM !n = undefined --ahhh crap...
-     return $! seen Map.! name
+     let !name = StableParserName _name
+     case HashMap.lookup name seen of
+       Just (GenM n) -> return $! Call (coerce n) m
+       Nothing -> mdo lift (writeSTRef ref (HashMap.insert name (GenM n) seen))
+                      n <- compile' p Ret
+                      return $! Call n m
 
 {-compile' (Many (Try p)) m  =
   do σ <- newSTRef []
@@ -326,9 +326,7 @@ compile' self@(Rec p) m         = --do seen <- ask; lift (unsafeInterleaveST (ru
 compile' self@(Many p) m        =
   do σ <- lift (newSTRef id)
      rec manyp <- compile' p (ManyIter σ manyp)
-     let! n = ManyInitHard σ manyp m
-     cache self n
-     return $! n
+     return $! ManyInitHard σ manyp m
 
 data SList a = !a ::: !(SList a) | SNil
 type Input = UArray Int Char
@@ -435,8 +433,20 @@ raise :: H s a -> CIdx# -> C s -> O# -> ST s (Maybe a)
 raise (H SNil) !_ !_ !_          = return Nothing
 raise (H (h:::hs')) !cidx !cs !o = h o (H hs') cidx cs
 
-evalHalt :: Input -> X (a ': xs) -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
+evalHalt :: Input -> X '[a] -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
 evalHalt _ !(HCons x _) _ _ _ _ = return (Just x)
+
+-- TODO: This will require a state restore later down the line
+evalRet :: Input -> X (a ': xs) -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
+evalRet _ !(HCons x _) _ _ _ _ = return (Just x)
+
+evalCall :: M s xs b -> M s (b ': xs) a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
+evalCall m k input !xs o hs cidx cs =
+  do hs' <- makeH
+     r <- eval' m input xs o hs' cidx cs
+     case r of
+       Just x -> eval' k input (pushX x xs) o hs cidx cs
+       Nothing -> raise hs cidx cs o
 
 evalPush :: x -> M s (x ': xs) a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
 evalPush x k input !xs o hs cidx cs = eval' k input (pushX x xs) o hs cidx cs
@@ -526,6 +536,8 @@ evalManyInitSoft σ l k input !xs o hs cidx cs = setupHandler hs cidx cs o handl
 
 eval' :: M s xs a -> Input -> X xs -> O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)
 eval' Halt input xs o hs cidx cs                 = evalHalt input xs o hs cidx cs
+eval' Ret input xs o hs cidx cs                  = evalRet input xs o hs cidx cs
+eval' (Call m k) input xs o hs cidx cs           = evalCall m k input xs o hs cidx cs
 eval' (Push x k) input xs o hs cidx cs           = evalPush x k input xs o hs cidx cs
 eval' (Pop k) input xs o hs cidx cs              = evalPop k input xs o hs cidx cs
 eval' (App k) input xs o hs cidx cs              = evalApp k input xs o hs cidx cs

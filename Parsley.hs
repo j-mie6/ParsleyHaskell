@@ -252,26 +252,28 @@ optimise p                                = p
 data M s xs a where
   Halt         :: M s '[a] a
   Ret          :: M s (a ': xs) a
-  Push         :: !x -> M s (x ': xs) a -> M s xs a
-  Pop          :: M s xs a -> M s (b ': xs) a
-  App          :: M s (y ': xs) a -> M s (x ': (x -> y) ': xs) a
-  Chr          :: Char# -> M s (Char ': xs) a -> M s xs a
-  Sat          :: (Char -> Bool) -> M s (Char ': xs) a -> M s xs a
-  Call         :: M s xs b -> M s (b ': xs) a -> M s xs a
-  Bind         :: (x -> ST s (M s xs a)) -> M s (x ': xs) a
+  Push         :: !x -> !(M s (x ': xs) a) -> M s xs a
+  Pop          :: !(M s xs a) -> M s (b ': xs) a
+  App          :: !(M s (y ': xs) a) -> M s (x ': (x -> y) ': xs) a
+  Chr          :: !Char# -> !(M s (Char ': xs) a) -> M s xs a
+  Sat          :: !(Char -> Bool) -> !(M s (Char ': xs) a) -> M s xs a
+  Call         :: M s xs b -> !(M s (b ': xs) a) -> M s xs a
+  Bind         :: !(x -> ST s (M s xs a)) -> M s (x ': xs) a
   Empt         :: M s xs a
-  Commit       :: M s xs a -> M s xs a
-  SoftFork     :: M s xs a -> M s xs a -> M s xs a
-  HardFork     :: M s xs a -> M s xs a -> M s xs a
-  Attempt      :: M s xs a -> M s xs a
-  Look         :: M s xs a -> M s xs a
-  Restore      :: M s xs a -> M s xs a
-  ManyIter     :: STRef s ([x] -> [x]) -> M s xs a -> M s (x ': xs) a
-  ManyInitSoft :: STRef s ([x] -> [x]) -> M s xs a -> M s ([x] ': xs) a -> M s xs a
-  ManyInitHard :: STRef s ([x] -> [x]) -> M s xs a -> M s ([x] ': xs) a -> M s xs a
+  Commit       :: !(M s xs a) -> M s xs a
+  SoftFork     :: !(M s xs a) -> M s xs a -> M s xs a
+  HardFork     :: !(M s xs a) -> M s xs a -> M s xs a
+  Attempt      :: !(M s xs a) -> M s xs a
+  Look         :: !(M s xs a) -> M s xs a
+  Restore      :: !(M s xs a) -> M s xs a
+  ManyIter     :: !(STRef s ([x] -> [x])) -> !(M s xs a) -> M s (x ': xs) a
+  ManyInitSoft :: !(STRef s ([x] -> [x])) -> !(M s xs a) -> !(M s ([x] ': xs) a) -> M s xs a
+  ManyInitHard :: !(STRef s ([x] -> [x])) -> !(M s xs a) -> !(M s ([x] ': xs) a) -> M s xs a
 
 instance Show (M ss xs a) where
   show Halt = "Halt"
+  show Ret = "Ret"
+  show (Call _ k) = "(Call ? " ++ show k ++ ")"
   show (Push _ k) = "(Push x " ++ show k ++ ")"
   show (Pop k) = "(Pop " ++ show k ++ ")"
   show (App k) = "(App " ++ show k ++ ")"
@@ -294,21 +296,21 @@ compile :: Parser a -> ST s (M s '[] a)
 compile p = (newSTRef HashMap.empty) >>= runReaderT (compile' p Halt)
 
 compile' :: Parser a -> M s (a ': xs) b -> ReaderT (STRef s (HashMap StableParserName (GenM s))) (ST s) (M s xs b)
-compile' self@(Pure x) m        = do return $! (Push x m)
-compile' self@(Char (C# c)) m   = do return $! (Chr c m)
-compile' self@(Satisfy p) m     = do return $! (Sat p m)
-compile' self@(pf :<*>: px) m   = do pxc <- compile' px (App m); compile' pf pxc
-compile' self@(p :*>: q) m      = do qc <- compile' q m; compile' p (Pop qc)
-compile' self@(p :<*: q) m      = do qc <- compile' q (Pop m); compile' p qc
-compile' self@Empty m           = do return $! Empt
---compile' self@(Try p :<|>: q) m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
-compile' self@(p :<|>: q) m     = do HardFork <$> compile' p (Commit m) <*> compile' q m
-compile' self@(p :>>=: f) m     = do compile' p (Bind f')
+compile' !(Pure x) !m        = do return $! (Push x m)
+compile' !(Char (C# c)) !m   = do return $! (Chr c m)
+compile' !(Satisfy p) !m     = do return $! (Sat p m)
+compile' !(pf :<*>: px) !m   = do !pxc <- compile' px (App m); compile' pf pxc
+compile' !(p :*>: q) !m      = do !qc <- compile' q m; compile' p (Pop qc)
+compile' !(p :<*: q) !m      = do !qc <- compile' q (Pop m); compile' p qc
+compile' !Empty !m           = do return $! Empt
+--compile' !(Try p :<|>: q) !m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
+compile' !(p :<|>: q) !m     = do HardFork <$> compile' p (Commit m) <*> compile' q m
+compile' !(p :>>=: f) !m     = do compile' p (Bind f')
   where f' x = (newSTRef HashMap.empty) >>= runReaderT (compile' (preprocess (f x)) m)
-compile' self@(Try p) m         = do Attempt <$> compile' p (Commit m)
-compile' self@(LookAhead p) m   = do Look <$> compile' p (Restore m)
---                              Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
-compile' self@(Rec p) m         = --do seen <- ask; lift (unsafeInterleaveST (runReaderT (compile' p m) seen))
+compile' !(Try p) !m         = do Attempt <$> compile' p (Commit m)
+compile' !(LookAhead p) !m   = do Look <$> compile' p (Restore m)
+--                                                     Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
+compile' !(Rec p) !m         = --do seen <- ask; lift (unsafeInterleaveST (runReaderT (compile' p m) seen))
   do (StableName _name) <- lift (unsafeIOToST (makeStableName p))
      !ref <- ask
      seen <- lift (readSTRef ref)
@@ -323,7 +325,7 @@ compile' self@(Rec p) m         = --do seen <- ask; lift (unsafeInterleaveST (ru
   do σ <- newSTRef []
      rec manyp <- compile' p (ManyIter σ manyp)
      return (ManyInitSoft σ manyp m)-}
-compile' self@(Many p) m        =
+compile' !(Many p) !m        =
   do σ <- lift (newSTRef id)
      rec manyp <- compile' p (ManyIter σ manyp)
      return $! ManyInitHard σ manyp m
@@ -339,18 +341,18 @@ type O = Int
 type O# = Int#
 
 double :: (Monad m, MArray a e m) => a Int e -> m (a Int e)
-double arr =
-  do sz <- getNumElements arr
+double !arr =
+  do !sz <- getNumElements arr
      resize arr sz (sz * 2)
 
 resize :: (Monad m, MArray a e m) => a Int e -> Int -> Int -> m (a Int e)
 resize arr old new =
-  do arr' <- unsafeNewArray_ (0, new-1)
-     let copy from to n = do x <- unsafeRead from n
-                             unsafeWrite to n x
-                             if n == 0 then return ()
-                             else copy from to $! (n-1)
-                          in copy arr arr' (old-1)
+  do !arr' <- unsafeNewArray_ (0, new-1)
+     let copy !from !to !n = do !x <- unsafeRead from n
+                                unsafeWrite to n x
+                                if n == 0 then return $! ()
+                                else copy from to $! (n-1)
+                             in copy arr arr' $! (old-1)
      return $! arr'
 
 makeX :: ST s (X '[])
@@ -389,7 +391,7 @@ makeC = do cs <- newArray_ (0, 3)
 pushC :: O# -> CIdx# -> C s -> ST s (CIdx, C s)
 pushC c i !cs = let !j = (I# i) + 1 in
   do sz <- getNumElements cs
-     if j == sz then do cs' <- double cs
+     if j == sz then do !cs' <- double cs
                         unsafeWrite cs' j (I# c)
                         return $! (j, cs')
      else do unsafeWrite cs j (I# c); return $! (j, cs)
@@ -424,9 +426,8 @@ eval input m =
 setupHandler :: H s a -> CIdx# -> C s -> O# -> (O# -> H s a -> CIdx# -> C s -> ST s (Maybe a)) ->
                                                (H s a -> CIdx# -> C s -> ST s (Maybe a)) -> ST s (Maybe a)
 setupHandler !hs !cidx !cs !o !h !k =
-  do let !hs' = pushH h hs
-     !(I# cidx', cs') <- pushC o cidx cs
-     k hs' cidx' cs'
+  do !(I# cidx', !cs') <- pushC o cidx cs
+     (k $! (pushH h hs)) cidx' cs'
 
 {-# INLINE raise #-}
 raise :: H s a -> CIdx# -> C s -> O# -> ST s (Maybe a)
@@ -600,3 +601,6 @@ mkParser p = Compiled (runST (slightyUnsafeLeak (compile (preprocess p))))
 
 runCompiledParser :: CompiledParser a -> String -> Maybe a
 runCompiledParser (Compiled p) input = runST (eval input p)
+
+showM :: Parser a -> String
+showM p = runST $ fmap show (compile (preprocess p))

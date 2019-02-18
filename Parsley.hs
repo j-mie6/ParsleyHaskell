@@ -7,6 +7,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Parsley ( Parser, CompiledParser(..)
                , runParser, mkParser, runCompiledParser
                -- Functor
@@ -25,6 +26,7 @@ module Parsley ( Parser, CompiledParser(..)
                -- Composites
                , eof, notFollowedBy
                , traverse, sequence, string--, manyUnrolled
+               , save, restore
                ) where
 
 import Prelude hiding          ((*>), (<*), (>>), traverse, sequence, (<$), (<**>))
@@ -41,6 +43,7 @@ import Data.Hashable           (Hashable, hashWithSalt, hash)
 import Data.HashMap.Lazy       (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import Data.Array.Unboxed      (UArray, listArray)
+import Data.Array.ST           (STArray, Ix)
 import Data.Array.Base         (STUArray(..), unsafeAt, newArray_, unsafeRead, unsafeWrite, MArray, getNumElements, numElements)
 import GHC.Prim                (Int#, Char#, StableName#, newByteArray#)
 import GHC.Exts                (Int(..), Char(..), (-#), (+#), (*#))
@@ -109,7 +112,7 @@ instance MonadPlus Parser where
 
 -- Additional Combinators
 many :: Parser a -> Parser [a]
-many p = {-let manyp = p <:> manyp <|> pure [] in manyp--}Many p
+many p = let manyp = p <:> manyp <|> pure [] in manyp--}Many p
 
 some :: Parser a -> Parser [a]
 some p = p <:> many p
@@ -252,6 +255,7 @@ optimise ((p :<*: q) :<*: r)              = optimise (p <* optimise (q <* r))
 -- notFollowedBy eof = lookAhead item
 optimise p                                = p
 
+newtype IRef = IRef Int deriving (Num, Eq, Ord, Ix)
 data M s xs ks a where
   Halt         :: M s '[a] ks a
   Ret          :: M s (b ': xs) ((b ': xs) ': ks) a
@@ -341,6 +345,8 @@ type CIdx# = Int#
 type C s = STUArray s Int Int
 type O = Int
 type O# = Int#
+data State s = forall a. State a (STRef s [a])
+type Σ s = STArray s IRef (State s)
 
 double :: STUArray s Int Int -> ST s (STUArray s Int Int)
 double !arr =
@@ -417,6 +423,24 @@ nextSafe :: Input -> O# -> (Char -> Bool) -> (O# -> Char -> ST s (Maybe a)) -> (
 nextSafe !input !o !p !good !bad =
   if  numElements input > (I# o) then let !c = unsafeAt input (I# o) in if p c then good (o +# 1#) c else bad o
   else bad o
+
+forArray_ :: Σ s -> (State s -> ST s ()) -> ST s ()
+forArray_ arr f =
+  do sz <- getNumElements arr
+     let go !n = do !x <- unsafeRead arr n
+                    f x
+                    if n == 0 then return $! ()
+                    else go $! (n-1)
+     go (sz-1)
+
+--makeΣ :: [State s] -> ST s (Σ s)
+--makeΣ σs =
+
+save :: Σ s -> ST s ()
+save σs = forArray_ σs up where up (State x σ) = modifySTRef' σ (x:)
+
+restore :: Σ s -> ST s ()
+restore σs = forArray_ σs down where down (State x σ) = modifySTRef' σ (\(_:xs) -> xs)
 
 eval :: String -> M s '[] '[] a -> ST s (Maybe a)
 eval input m =

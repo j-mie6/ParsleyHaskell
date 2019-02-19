@@ -18,7 +18,7 @@ longChoice = Parsley.choice (map Parsley.char (replicate 1000000 'a' ++ "b"))
 
 combinatorGroup :: Benchmark
 combinatorGroup =
-  let longChoice' = Parsley.mkParser longChoice in
+  --let longChoice' = Parsley.mkParser longChoice in
   bgroup "combinators" [
     --bench "longChoice"             $ nf (Parsley.runCompiledParser longChoice') "b",
     bench "manyTestParsley 0"      $ nf (Parsley.runParser manyTestParsley) (replicate 0 'a'),

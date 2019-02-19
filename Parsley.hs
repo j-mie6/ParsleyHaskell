@@ -8,10 +8,10 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Parsley ( Parser, CompiledParser(..)
-               , runParser, mkParser, runCompiledParser
+module Parsley ( Parser--, CompiledParser
+               , runParser--, mkParser, runCompiledParser
                -- Functor
-               , fmap, (<$>), (<$), void
+               , fmap, (<$>), (<$), ($>), (<&>), void
                -- Applicative
                , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
                -- Alternative
@@ -26,15 +26,15 @@ module Parsley ( Parser, CompiledParser(..)
                -- Composites
                , eof, notFollowedBy
                , traverse, sequence, string--, manyUnrolled
-               , save, restore
                ) where
 
-import Prelude hiding          ((*>), (<*), (>>), traverse, sequence, (<$), (<**>))
-import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA)
+import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA, (<**>), many, some)
 import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, join, (<$!>))
+import Data.Functor            ((<$>), (<$), ($>), (<&>), void)
 import GHC.ST                  (ST(..), runST)
 import Control.Monad.ST.Unsafe (unsafeIOToST)
-import Control.Monad.Reader    (ReaderT, lift, ask, runReaderT)
+import Control.Monad.Reader    (ReaderT, ask, runReaderT)
+import qualified Control.Monad.Reader as Reader
 import Data.STRef              (STRef, writeSTRef, readSTRef, modifySTRef', newSTRef)
 import System.IO.Unsafe        (unsafePerformIO)
 import Data.IORef              (IORef, writeIORef, readIORef, newIORef)
@@ -72,7 +72,7 @@ data Parser a where
   Try       :: Parser a -> Parser a
   LookAhead :: Parser a -> Parser a
   Rec       :: Parser a -> Parser a
-  Many      :: Parser a -> Parser [a]
+  --Many      :: Parser a -> Parser [a]
 
 showAST :: Parser a -> String
 showAST (Pure _) = "(pure x)"
@@ -87,64 +87,51 @@ showAST Empty = "empty"
 showAST (Try p) = concat ["(try ", showAST p, ")"]
 showAST (LookAhead p) = concat ["(lookAhead ", showAST p, ")"]
 showAST (Rec _) = "recursion point!"
-showAST (Many p) = concat ["(many ", showAST p, "]"]
+--showAST (Many p) = concat ["(many ", showAST p, "]"]
 
 -- Smart Constructors
-instance Functor Parser where fmap = liftA
+instance Functor Parser where
+  fmap = liftA
+  x <$ p = p *> pure x
 instance Applicative Parser where
   pure = Pure
   (<*>) = (:<*>:)
-(<*) :: Parser a -> Parser b -> Parser a
-(<*) = (:<*:)
-(*>) :: Parser a -> Parser b -> Parser b
-(*>) = (:*>:)
+  (<*) = (:<*:)
+  (*>) = (:*>:)
 instance Monad Parser where
   return = Pure
   (>>=) = (:>>=:)
-(>>) :: Parser a -> Parser b -> Parser b
-(>>) = (*>)
+  (>>) = (*>)
 instance Alternative Parser where
   empty = Empty
   (<|>) = (:<|>:)
-instance MonadPlus Parser where
-  mzero = empty
-  mplus = (<|>)
+  --many = Many
+  some p = p <:> many p
+instance MonadPlus Parser
 
 -- Additional Combinators
-many :: Parser a -> Parser [a]
-many p = let manyp = p <:> manyp <|> pure [] in manyp--}Many p
-
-some :: Parser a -> Parser [a]
-some p = p <:> many p
-
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
 (<:>) = liftA2 (:)
-
-(<**>) :: Parser a -> Parser (a -> b) -> Parser b
-(<**>) = liftA2 (flip ($))
 
 class Functor f => Monoidal f where
   unit :: f ()
   (<~>) :: f a -> f b -> f (a, b)
-
-(<~) :: Monoidal f => f a -> f b -> f a
-p <~ q = fst <$> (p <~> q)
-
-(~>) :: Monoidal f => f a -> f b -> f b
-p ~> q = snd <$> (p <~> q)
+  (<~) :: f a -> f b -> f a
+  p <~ q = fst <$> (p <~> q)
+  (~>) :: f a -> f b -> f b
+  p ~> q = snd <$> (p <~> q)
 
 instance (Functor f, Applicative f) => Monoidal f where
   unit = pure ()
   (<~>) = liftA2 (,)
-
-(<$) :: a -> Parser b -> Parser a
-x <$ p = p *> pure x
+  (<~) = (<*)
+  (~>) = (*>)
 
 satisfy :: (Char -> Bool) -> Parser Char
 satisfy = Satisfy
 
 char :: Char -> Parser Char
-char = Char--satisfy (== c)
+char = Char
 
 item :: Parser Char
 item = satisfy (const True)
@@ -155,17 +142,8 @@ try = Try
 lookAhead :: Parser a -> Parser a
 lookAhead = LookAhead
 
-sequence :: [Parser a] -> Parser [a]
-sequence = foldr (<:>) (pure [])
-
-traverse :: (a -> Parser b) -> [a] -> Parser [b]
-traverse f = sequence . map f
-
 string :: String -> Parser String
 string = traverse char
-
-void :: Parser a -> Parser ()
-void = (() <$)
 
 optional :: Parser a -> Parser ()
 optional p = void p <|> unit
@@ -196,12 +174,12 @@ preprocess !p = unsafePerformIO ((newIORef HashMap.empty) >>= runReaderT (prepro
     -- Force evaluation of p to ensure that the stableName is correct first time
     preprocess' !p =
       do !seenRef <- ask
-         !seen <- lift (readIORef seenRef)
-         (StableName _name) <- lift (makeStableName p)
+         !seen <- Reader.lift (readIORef seenRef)
+         (StableName _name) <- Reader.lift (makeStableName p)
          let !name = StableParserName _name
          case HashMap.lookup name seen of
            Just (GenParser q) -> return $! (Rec (coerce q))
-           Nothing -> mdo lift (writeIORef seenRef (HashMap.insert name (GenParser q) seen))
+           Nothing -> mdo Reader.lift (writeIORef seenRef (HashMap.insert name (GenParser q) seen))
                           q <- preprocess'' p
                           return $! q
     preprocess'' :: Parser a -> ReaderT (IORef (HashMap StableParserName GenParser)) IO (Parser a)
@@ -213,7 +191,7 @@ preprocess !p = unsafePerformIO ((newIORef HashMap.empty) >>= runReaderT (prepro
     preprocess'' !Empty         = return Empty
     preprocess'' !(Try p)       = liftM Try (preprocess' p)
     preprocess'' !(LookAhead p) = liftM LookAhead (preprocess' p)
-    preprocess'' !(Many p)      = liftM Many (preprocess' p)
+    --preprocess'' !(Many p)      = liftM Many (preprocess' p)
     preprocess'' !p             = return p
 
 optimise :: Parser a -> Parser a
@@ -225,7 +203,7 @@ optimise ((q :*>: pf) :<*>: px)           = q *> (optimise (pf <*> px))
 optimise (pf :<*>: (px :<*: q))           = optimise (optimise (pf <*> px) <* q)
 optimise (pf :<*>: (q :*>: Pure x))       = optimise (optimise (pf <*> pure x) <* q)
 optimise (pf :<*>: Empty)                 = pf *> empty
-optimise (pf :<*>: Pure x)                = ($x) <$> pf
+optimise (pf :<*>: Pure x)                = ($ x) <$> pf
 -- Alternative Optimisation
 optimise (Pure x :<|>: _)                 = pure x
 optimise (Empty :<|>: p)                  = p
@@ -273,9 +251,9 @@ data M s xs ks a where
   Attempt      :: !(M s xs ks a) -> M s xs ks a
   Look         :: !(M s xs ks a) -> M s xs ks a
   Restore      :: !(M s xs ks a) -> M s xs ks a
-  ManyIter     :: !(STRef s ([x] -> [x])) -> (M s xs ks a) -> M s (x ': xs) ks a
-  ManyInitSoft :: !(STRef s ([x] -> [x])) -> !(M s xs ks a) -> !(M s ([x] ': xs) ks a) -> M s xs ks a
-  ManyInitHard :: !(STRef s ([x] -> [x])) -> !(M s xs ks a) -> !(M s ([x] ': xs) ks a) -> M s xs ks a
+  --ManyIter     :: !(STRef s ([x] -> [x])) -> (M s xs ks a) -> M s (x ': xs) ks a
+  --ManyInitSoft :: !(STRef s ([x] -> [x])) -> !(M s xs ks a) -> !(M s ([x] ': xs) ks a) -> M s xs ks a
+  --ManyInitHard :: !(STRef s ([x] -> [x])) -> !(M s xs ks a) -> !(M s ([x] ': xs) ks a) -> M s xs ks a
 
 instance Show (M ss xs ks a) where
   show Halt = "Halt"
@@ -294,9 +272,9 @@ instance Show (M ss xs ks a) where
   show (Attempt k) = "(Try " ++ show k ++ ")"
   show (Look k) = "(Look " ++ show k ++ ")"
   show (Restore k) = "(Restore " ++ show k ++ ")"
-  show (ManyIter _ k) = "(ManyIter " ++ show k ++ ")"
-  show (ManyInitSoft _ l k) = "(ManyInitSoft " ++ show l ++ " " ++ show k ++ ")"
-  show (ManyInitHard _ l k) = "(ManyInitHard " ++ show l ++ " " ++ show k ++ ")"
+  --show (ManyIter _ k) = "(ManyIter " ++ show k ++ ")"
+  --show (ManyInitSoft _ l k) = "(ManyInitSoft " ++ show l ++ " " ++ show k ++ ")"
+  --show (ManyInitHard _ l k) = "(ManyInitHard " ++ show l ++ " " ++ show k ++ ")"
 
 data GenM s a = forall xs ks. GenM (M s xs ks a)
 compile :: Parser a -> ST s (M s '[] '[] a)
@@ -317,23 +295,23 @@ compile' !(p :>>=: f) !m     = do compile' p (Bind f')
 compile' !(Try p) !m         = do Attempt <$> compile' p (Commit m)
 compile' !(LookAhead p) !m   = do Look <$> compile' p (Restore m)
 compile' !(Rec p) !m         =
-  do (StableName _name) <- lift (unsafeIOToST (makeStableName p))
+  do (StableName _name) <- Reader.lift (unsafeIOToST (makeStableName p))
      !ref <- ask
-     seen <- lift (readSTRef ref)
+     seen <- Reader.lift (readSTRef ref)
      let !name = StableParserName _name
      case HashMap.lookup name seen of
        Just (GenM n) -> return $! Call (coerce n) m
-       Nothing -> mdo lift (writeSTRef ref (HashMap.insert name (GenM n) seen))
+       Nothing -> mdo Reader.lift (writeSTRef ref (HashMap.insert name (GenM n) seen))
                       n <- compile' p Ret
                       return $! Call n m
 {-compile' (Many (Try p)) m  =
-  do σ <- newSTRef []
+  do σ <- lift (newSTRef id)
      rec manyp <- compile' p (ManyIter σ manyp)
-     return (ManyInitSoft σ manyp m)-}
+     return $! (ManyInitSoft σ manyp m)
 compile' !(Many p) !m        =
   do σ <- lift (newSTRef id)
      rec manyp <- compile' p (ManyIter σ manyp)
-     return $! ManyInitHard σ manyp m
+     return $! ManyInitHard σ manyp m-}
 
 data SList a = !a ::: !(SList a) | SNil
 type Input = UArray Int Char
@@ -576,9 +554,9 @@ eval' (SoftFork p q) input xs ks o hs cidx cs       = evalSoftFork p q input xs 
 eval' (Attempt k) input xs ks o hs cidx cs          = evalAttempt k input xs ks o hs cidx cs
 eval' (Look k) input xs ks o hs cidx cs             = evalLook k input xs ks o hs cidx cs
 eval' (Restore k) input xs ks o hs cidx cs          = evalRestore k input xs ks o hs cidx cs
-eval' (ManyIter σ k) input xs ks o hs cidx cs       = evalManyIter σ k input xs ks o hs cidx cs
-eval' (ManyInitHard σ l k) input xs ks o hs cidx cs = evalManyInitHard σ l k input xs ks o hs cidx cs
-eval' (ManyInitSoft σ l k) input xs ks o hs cidx cs = evalManyInitSoft σ l k input xs ks o hs cidx cs
+--eval' (ManyIter σ k) input xs ks o hs cidx cs       = evalManyIter σ k input xs ks o hs cidx cs
+--eval' (ManyInitHard σ l k) input xs ks o hs cidx cs = evalManyInitHard σ l k input xs ks o hs cidx cs
+--eval' (ManyInitSoft σ l k) input xs ks o hs cidx cs = evalManyInitSoft σ l k input xs ks o hs cidx cs
 
 {-
 manyUnrolled :: String -> Maybe [Char]
@@ -615,7 +593,7 @@ manyUnrolled input = runST $
 runParser :: Parser a -> String -> Maybe a
 runParser p input = runST (compile (preprocess p) >>= eval input)
 
-data CompiledParser a = Compiled (forall s. M s '[] '[] a)
+{-data CompiledParser a = Compiled (forall s. M s '[] '[] a)
 
 mkParser :: Parser a -> CompiledParser a
 mkParser p = Compiled (runST (slightyUnsafeLeak (compile (preprocess p))))
@@ -624,7 +602,7 @@ mkParser p = Compiled (runST (slightyUnsafeLeak (compile (preprocess p))))
     slightyUnsafeLeak = unsafeCoerce
 
 runCompiledParser :: CompiledParser a -> String -> Maybe a
-runCompiledParser (Compiled p) input = runST (eval input p)
+runCompiledParser (Compiled p) input = runST (eval input p)-}
 
 showM :: Parser a -> String
-showM p = runST $ fmap show (compile (preprocess p))
+showM p = runST (fmap show (compile (preprocess p)))

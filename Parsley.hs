@@ -138,7 +138,7 @@ class (Monad p, Alternative p) => MonadParser p where
   {-
   These combinators should adhere to the following laws:
     double negation: notFollowedBy . notFollowedBy         = lookAhead . void
-    transparency:    lookAhead . lookAhead                 = lookAhead
+    idempotence:     lookAhead . lookAhead                 = lookAhead
     right-identity:  notFollowedBy . lookAhead             = notFollowedBy
     left-identity:   lookAhead . notFollowedBy             = notFollowedBy
     transparency:    notFollowedBy p *>/<* notFollowedBy p = notFollowedBy p

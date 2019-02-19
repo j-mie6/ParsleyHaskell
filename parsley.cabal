@@ -51,7 +51,7 @@ executable benchmarks
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010
-  ghc-options:         -rtsopts
+  ghc-options:         -rtsopts -ddump-splices
 
 library
   -- Modules exported by the library.
@@ -72,4 +72,4 @@ library
   -- Base language which the package is written in.
   default-language:    Haskell2010
   --ghc-options:         -g -fplugin=DumpCore -ddump-simpl -ddump-stg -ddump-to-file -dumpdir=. -fforce-recomp
-  ghc-options:         -fplugin=DumpCore -ddump-simpl -ddump-stg -ddump-to-file -dumpdir=. -fforce-recomp -ddump-rule-rewrites -ddump-rule-firings -ddump-rules
+  ghc-options:         -fplugin=DumpCore -ddump-simpl -ddump-stg -ddump-to-file -dumpdir=. -fforce-recomp -ddump-rule-rewrites -ddump-rule-firings -ddump-rules -ddump-splices

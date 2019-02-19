@@ -8,6 +8,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Parsley ( Parser--, CompiledParser
                , runParser--, mkParser, runCompiledParser
                -- Functor
@@ -21,10 +22,10 @@ module Parsley ( Parser--, CompiledParser
                -- Monadic
                , return, (>>=), (>>), mzero, mplus, join
                -- Primitives
-               , satisfy, item, char
-               , lookAhead, try
+               , satisfy, item
+               , lookAhead, notFollowedBy, try
                -- Composites
-               , eof, notFollowedBy
+               , char, eof, more
                , traverse, sequence, string--, manyUnrolled
                ) where
 
@@ -127,38 +128,52 @@ instance (Functor f, Applicative f) => Monoidal f where
   (<~) = (<*)
   (~>) = (*>)
 
-satisfy :: (Char -> Bool) -> Parser Char
-satisfy = Satisfy
+class (Monad p, Alternative p) => MonadParser p where
+  {-# MINIMAL (satisfy | item), notFollowedBy, lookAhead #-}
+  satisfy :: (Char -> Bool) -> p Char
+  satisfy p = item >>= (\x -> if p x then return x else empty)
+  item :: p Char
+  item = satisfy (const True)
 
-char :: Char -> Parser Char
-char = Char
+  {-
+  These combinators should adhere to the following laws:
+    double negation: notFollowedBy . notFollowedBy         = lookAhead . void
+    transparency:    lookAhead . lookAhead                 = lookAhead
+    right-identity:  notFollowedBy . lookAhead             = notFollowedBy
+    left-identity:   lookAhead . notFollowedBy             = notFollowedBy
+    transparency:    notFollowedBy p *>/<* notFollowedBy p = notFollowedBy p
 
-item :: Parser Char
-item = satisfy (const True)
+  As a consequence of these laws:
+    notFollowedBy eof = more
+    notFollowedBy more = eof
+  -}
+  lookAhead :: p a -> p a
+  notFollowedBy :: p a -> p ()
+
+  -- Auxillary functions
+  char :: Char -> p Char
+  char c = satisfy (== c)
+  string :: String -> p String
+  string = traverse char
+  eof :: p ()
+  eof = notFollowedBy item
+  more :: p ()
+  more = lookAhead (void item)
+
+instance MonadParser Parser where
+  satisfy = Satisfy
+  char = Char
+  lookAhead = LookAhead
+  notFollowedBy p = try (join ((try p *> return empty) <|> return unit))
 
 try :: Parser a -> Parser a
 try = Try
-
-lookAhead :: Parser a -> Parser a
-lookAhead = LookAhead
-
-string :: String -> Parser String
-string = traverse char
 
 optional :: Parser a -> Parser ()
 optional p = void p <|> unit
 
 choice :: [Parser a] -> Parser a
 choice = foldr (<|>) empty
-
--- NOTE: When the intrinsic is introduced to fix this properly, prove the law:
---   notFollowedBy . notFollowedBy = lookAhead
-notFollowedBy :: Parser a -> Parser ()
-notFollowedBy p = try (join ((try p *> return empty) <|> return unit))
-                  --try ((try p *> empty) <|> unit)
-
-eof :: Parser ()
-eof = notFollowedBy item
 
 data StableParserName = forall a. StableParserName (StableName# (Parser a))
 data GenParser = forall a. GenParser (Parser a)
@@ -230,7 +245,7 @@ optimise ((p :<*: q) :<*: r)              = optimise (p <* optimise (q <* r))
 -- notFollowedBy . notFollowedBy = lookAhead
 -- eof *> eof | eof <* eof = eof
 -- p <*> eof = (p <*> unit) <* eof
--- notFollowedBy eof = lookAhead item
+-- notFollowedBy eof = lookAhead (void item)
 optimise p                                = p
 
 newtype IRef = IRef Int deriving (Num, Eq, Ord, Ix)

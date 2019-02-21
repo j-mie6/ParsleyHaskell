@@ -16,10 +16,10 @@ import Criterion.Main (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq (NFData(rnf))
 
 manyTestParsley :: String -> Maybe [Char]
-manyTestParsley = {-}$$(Parsley.runParser (Parsley.skipMany (Parsley.char 'a')))--} $$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
+manyTestParsley = {-$$(Parsley.runParser (Parsley.many (Parsley.char 'a' Parsley.*> Parsley.many (Parsley.char 'b'))))--} $$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
 
-manyTestYodaBad :: Yoda.Parser Char
-manyTestYodaBad = Yoda.char 'a' Yoda.<|> Yoda.char 'b'--Yoda.many (Yoda.char 'a')
+manyTestYodaBad :: Yoda.Parser [Char]
+manyTestYodaBad = Yoda.many (Yoda.char 'a')
 
 manyTestYodaOk :: Yoda.Parser [Char]
 manyTestYodaOk = Yoda.cull (Yoda.many (Yoda.char 'a'))

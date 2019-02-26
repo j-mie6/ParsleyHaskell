@@ -34,7 +34,7 @@ module Parsley {-( Parser--, CompiledParser
 
 import Prelude hiding          (fmap, pure, (<*), (*>), (<*>), (<$>), (<$))
 --import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA, (<**>), many, some)
-import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, join, (<$!>), forM)
+import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, liftM3, join, (<$!>), forM)
 --import Data.Functor            ((<$>), (<$), ($>), (<&>), void)
 import GHC.ST                  (ST(..), runST)
 import Control.Monad.ST.Unsafe (unsafeIOToST)
@@ -67,19 +67,22 @@ import Debug.Trace
 -- AST
 data WQ a = WQ { _val :: a, _code :: TExpQ a }
 data Parser a where
-  Pure      :: WQ a -> Parser a
-  Char      :: Char -> Parser Char
-  Satisfy   :: WQ (Char -> Bool) -> Parser Char
-  (:<*>:)   :: Parser (a -> b) -> Parser a -> Parser b
-  (:*>:)    :: Parser a -> Parser b -> Parser b
-  (:<*:)    :: Parser a -> Parser b -> Parser a
-  --(:>>=:)   :: Parser a -> (a -> Parser b) -> Parser b
-  (:<|>:)   :: Parser a -> Parser a -> Parser a
-  Empty     :: Parser a
-  Try       :: Parser a -> Parser a
-  LookAhead :: Parser a -> Parser a
-  Rec       :: Parser a -> Parser a
-  Many      :: Parser a -> Parser [a]
+  Pure          :: WQ a -> Parser a
+  Char          :: Char -> Parser Char
+  Satisfy       :: WQ (Char -> Bool) -> Parser Char
+  (:<*>:)       :: Parser (a -> b) -> Parser a -> Parser b
+  (:*>:)        :: Parser a -> Parser b -> Parser b
+  (:<*:)        :: Parser a -> Parser b -> Parser a
+  --(:>>=:)       :: Parser a -> (a -> Parser b) -> Parser b
+  (:<|>:)       :: Parser a -> Parser a -> Parser a
+  Empty         :: Parser a
+  Try           :: Parser a -> Parser a
+  LookAhead     :: Parser a -> Parser a
+  Rec           :: Parser a -> Parser a
+  Many          :: Parser a -> Parser [a]
+  NotFollowedBy :: Parser a -> Parser ()
+  Filter        :: WQ (a -> Bool) -> Parser a -> Parser a
+  Ternary       :: Parser Bool -> Parser a -> Parser a -> Parser a
 
 showAST :: Parser a -> String
 showAST (Pure _) = "(pure x)"
@@ -95,6 +98,9 @@ showAST (Try p) = concat ["(try ", showAST p, ")"]
 showAST (LookAhead p) = concat ["(lookAhead ", showAST p, ")"]
 showAST (Rec _) = "recursion point!"
 showAST (Many p) = concat ["(many ", showAST p, ")"]
+showAST (NotFollowedBy p) = concat ["(notFollowedBy ", showAST p, ")"]
+showAST (Filter f p) = concat ["(", showAST p, " >?> f)"]
+showAST (Ternary b p q) = concat ["(", showAST b, " <?|> (", showAST p, ", ", showAST q, "))"]
 
 -- Smart Constructors
 {-instance Functor Parser where
@@ -217,7 +223,7 @@ item = satisfy (WQ (const True) [|| const True ||])
     notFollowedBy more = eof
   -}
 lookAhead :: Parser a -> Parser a
---notFollowedBy :: p a -> p ()
+notFollowedBy :: Parser a -> Parser ()
 
   -- Auxillary functions
 char :: Char -> Parser Char
@@ -225,16 +231,17 @@ char :: Char -> Parser Char
 string :: String -> Parser String
 --string = traverse char
 string = foldr (<:>) (pure (WQ [] [|| [] ||])) . map char
---eof :: Parser ()
---eof = notFollowedBy item
+eof :: Parser ()
+eof = notFollowedBy item
 more :: Parser ()
 more = lookAhead (void item)
 
 --instance MonadParser Parser where
 satisfy = Satisfy
-char = Char
+char c = (WQ c [||c||]) <$ Char c
 lookAhead = LookAhead
 ---notFollowedBy p = try (join ((try p *> return empty) <|> return unit))
+notFollowedBy = NotFollowedBy
 
 try :: Parser a -> Parser a
 try = Try
@@ -244,6 +251,12 @@ optional p = void p <|> unit
 
 choice :: [Parser a] -> Parser a
 choice = foldr (<|>) empty
+
+(<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
+cond <?|> (p, q) = Ternary cond p q
+
+(>?>) :: Parser a -> WQ (a -> Bool) -> Parser a
+p >?> f = Filter f p
 
 data StableParserName = forall a. StableParserName (StableName# (Parser a))
 data GenParser = forall a. GenParser (Parser a)
@@ -266,49 +279,80 @@ preprocess !p = trace "preprocessing" $ unsafePerformIO (runReaderT (preprocess'
            Nothing -> mdo q <- local (HashMap.insert name (GenParser q)) (preprocess'' p)
                           return $! q
     preprocess'' :: Parser a -> ReaderT (HashMap StableParserName GenParser) IO (Parser a)
-    preprocess'' !(pf :<*>: px) = liftM optimise (liftM2 (:<*>:)  (preprocess' pf) (preprocess' px))
-    preprocess'' !(p :*>: q)    = liftM optimise (liftM2 (:*>:)   (preprocess' p)  (preprocess' q))
-    preprocess'' !(p :<*: q)    = liftM optimise (liftM2 (:<*:)   (preprocess' p)  (preprocess' q))
-    --preprocess'' !(p :>>=: f)   = fmap optimise (liftM (:>>=: f) (preprocess' p))
-    preprocess'' !(p :<|>: q)   = liftM optimise (liftM2 (:<|>:)  (preprocess' p)  (preprocess' q))
-    preprocess'' !Empty         = return Empty
-    preprocess'' !(Try p)       = liftM Try (preprocess' p)
-    preprocess'' !(LookAhead p) = liftM LookAhead (preprocess' p)
-    preprocess'' !(Many p)      = liftM Many (preprocess' p)
-    preprocess'' !p             = return p
+    preprocess'' !(pf :<*>: px)     = liftM optimise (liftM2 (:<*>:)  (preprocess' pf) (preprocess' px))
+    preprocess'' !(p :*>: q)        = liftM optimise (liftM2 (:*>:)   (preprocess' p)  (preprocess' q))
+    preprocess'' !(p :<*: q)        = liftM optimise (liftM2 (:<*:)   (preprocess' p)  (preprocess' q))
+    --preprocess'' !(p :>>=: f)       = fmap optimise (liftM (:>>=: f) (preprocess' p))
+    preprocess'' !(p :<|>: q)       = liftM optimise (liftM2 (:<|>:)  (preprocess' p)  (preprocess' q))
+    preprocess'' !Empty             = return Empty
+    preprocess'' !(Try p)           = liftM Try (preprocess' p)
+    preprocess'' !(LookAhead p)     = liftM optimise (liftM LookAhead (preprocess' p))
+    preprocess'' !(Many p)          = liftM Many (preprocess' p)
+    preprocess'' !(NotFollowedBy p) = liftM optimise (liftM NotFollowedBy (preprocess' p))
+    preprocess'' !(Filter f p)      = liftM (Filter f) (preprocess' p)
+    preprocess'' !(Ternary b p q)   = liftM3 Ternary (preprocess' b) (preprocess' p) (preprocess' q)
+    preprocess'' !p                 = return p
 
 optimise :: Parser a -> Parser a
--- Applicative Optimisation
+-- DESTRUCTIVE OPTIMISATION
+-- Right Absorption Law: empty <*> u = empty
+optimise (Empty :<*>: _)           = empty
+-- Failure Weakening Law: u <*> empty = u *> empty
+optimise (u :<*>: Empty)           = u *> empty
+-- Right Absorption Law: empty *> u = empty
+optimise (Empty :*>: _)            = empty
+-- Right Absorption Law: empty <* u = empty
+optimise (Empty :<*: _)            = empty
+-- Failure Weakening Law: u <* empty = u *> empty
+optimise (u :<*: Empty)            = u *> empty
+-- Right Absorption Law: empty >>= f = empty
+--optimise (Empty :>>=: f)           = Empty
+-- APPLICATIVE OPTIMISATION
+-- Homomorphism Law: pure f <*> pure x = pure (f x)
 optimise (Pure (WQ f qf) :<*>: Pure (WQ x qx)) = pure (WQ (f x) [|| $$qf $$qx ||])
-optimise (Pure (WQ f qf) :<*>: (Pure (WQ g qg) :<*>: px)) = WQ (f . g) [|| $$qf . $$qg ||] <$> px
-optimise (Empty :<*>: _)                  = Empty
-optimise ((q :*>: pf) :<*>: px)           = q *> (optimise (pf <*> px))
-optimise (pf :<*>: (px :<*: q))           = optimise (optimise (pf <*> px) <* q)
-optimise (pf :<*>: (q :*>: Pure x))       = optimise (optimise (pf <*> pure x) <* q)
-optimise (pf :<*>: Empty)                 = pf *> empty
-optimise (pf :<*>: Pure (WQ x qx))        = WQ ($ x) [|| \f -> f $$qx ||] <$> pf
--- Alternative Optimisation
-optimise (Pure x :<|>: _)                 = pure x
-optimise (Empty :<|>: p)                  = p
-optimise (p :<|>: Empty)                  = p
-optimise ((u :<|>: v) :<|>: w)            = u <|> optimise (v <|> w)
--- Monadic Optimisation
---optimise (Pure x :>>=: f)                 = f x
---optimise ((q :*>: p) :>>=: f)             = q *> optimise (p >>= f)
---optimise (Empty :>>=: f)                  = Empty
--- Sequential Optimisation
-optimise (Pure _ :*>: p)                  = p
-optimise ((p :*>: Pure _) :*>: q)         = p *> q
+-- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law
+optimise (Pure (WQ f qf) :<*>: (Pure (WQ g qg) :<*>: p)) = optimise (WQ (f . g) [|| $$qf . $$qg ||] <$> p)
+-- Composition Law: u <*> (v <*> w) = pure (.) <*> u <*> v <*> w
+optimise (u :<*>: (v :<*>: w))     = optimise (optimise (optimise (pure (WQ (.) [||(.)||]) <*> u) <*> v) <*> w)
+-- Reassociation Law 1: (u *> v) <*> w = u *> (v <*> w)
+optimise ((u :*>: v) :<*>: w)      = optimise (u *> (optimise (v <*> w)))
+-- Interchange Law: u <*> pure x = pure ($ x) <*> u
+optimise (u :<*>: Pure (WQ x qx))  = optimise (WQ ($ x) [|| \f -> f $$qx ||] <$> u)
+-- Reassociation Law 2: u <*> (v <* w) = (u <*> v) <* w
+optimise (u :<*>: (v :<*: w))      = optimise (optimise (u <*> v) <* w)
+-- Reassociation Law 3: u <*> (v *> pure x) = (u <*> pure x) <* v
+optimise (u :<*>: (v :*>: Pure x)) = optimise (optimise (u <*> pure x) <* v)
+-- ALTERNATIVE OPTIMISATION
+-- Left Catch Law: pure x <|> u = pure x
+optimise (Pure x :<|>: _)          = pure x
+-- Left Neutral Law: empty <|> u = u
+optimise (Empty :<|>: u)           = u
+-- Right Neutral Law: u <|> empty = u
+optimise (u :<|>: Empty)           = u
+-- Associativity Law: (u <|> v) <|> w = u <|> (v <|> w)
+optimise ((u :<|>: v) :<|>: w)     = u <|> optimise (v <|> w)
+-- MONADIC OPTIMISATION
+-- Left Identity Law: pure x >>= f = f x
+--optimise (Pure x :>>=: f)          = f x
+-- Reassociation Law 4: (u *> v) >>= f = u *> (v >>= f)
+--optimise ((u :*>: v) :>>=: f)      = optimise (u *> optimise (v >>= f))
+-- SEQUENCING OPTIMISATION
+-- Identity law: pure x *> u = u
+optimise (Pure _ :*>: u)           = u
+-- Identity law: (u *> pure x) *> v = u *> v
+optimise ((u :*>: Pure _) :*>: v)  = u *> v
 -- TODO Character and string fusion optimisation
-optimise (Empty :*>: _)                   = Empty
-optimise (p :*>: (q :*>: r))              = optimise (optimise (p *> q) *> r)
-optimise (p :<*: Pure _) = p
-optimise (p :<*: (q :*>: Pure _))         = optimise (p <* q)
+-- Associativity Law: u *> (v *> w) = (u *> v) *> w
+optimise (u :*>: (v :*>: w))       = optimise (optimise (u *> v) *> w)
+-- Identity law: u <* pure x = u
+optimise (u :<*: Pure _) = u
+-- Identity law: u <* (v *> pure x) = u <* v
+optimise (u :<*: (v :*>: Pure _))  = optimise (u <* v)
 -- TODO Character and string fusion optimisation
-optimise (p :<*: Empty)                   = p *> empty
-optimise (Pure x :<*: p)                  = optimise (p *> pure x)
-optimise (Empty :<*: _)                   = Empty
-optimise ((p :<*: q) :<*: r)              = optimise (p <* optimise (q <* r))
+-- Commutativity Law: pure x <* u = u *> pure x
+optimise (Pure x :<*: u)           = optimise (u *> pure x)
+-- Associativity Law (u <* v) <* w = u <* (v <* w)
+optimise ((u :<*: v) :<*: w)       = optimise (u <* optimise (v <* w))
 -- TODO There are a few more laws to address when the instrinsics come in:
 -- notFollowedBy . notFollowedBy = lookAhead
 -- eof *> eof | eof <* eof = eof
@@ -363,7 +407,7 @@ instance Show (M xs ks a) where
   show (ManyInitHard σ m v k) = "{ManyInitHard (" ++ show σ ++ ") (" ++ show v ++ ") " ++ show m ++ " " ++ show k ++ "}"
 
 --data GenM s a = forall xs ks. GenM (M xs ks a)
-compile :: Parser a -> (M '[] '[] a, [PState])
+compile :: Parser a -> (M '[] '[] a, [State])
 compile !p = trace (show m) (m, vss)
   where (m, vss) = unsafePerformIO (do σs <- newIORef []
                                        m <- runReaderT (compile' (trace (showAST p) p) Halt) (HashMap.empty, 0, σs)
@@ -374,8 +418,8 @@ compile !p = trace (show m) (m, vss)
 (f >< g) (x, y, z) = (f x, g y, z)
 
 type IMVar = Int
-data PState = forall a. PState a (TExpQ a) (ΣVar a)
-type ΣVars = IORef [PState]
+data State = forall a. State a (TExpQ a) (ΣVar a)
+type ΣVars = IORef [State]
 compile' :: Parser a -> M (a ': xs) ks b -> ReaderT (HashMap StableParserName IMVar, IMVar, ΣVars) IO (M xs ks b)
 compile' !(Pure x) !m        = do return $! (Push x m)
 compile' !(Char c) !m        = do return $! (Chr c m)
@@ -403,18 +447,14 @@ compile' (Many p) m =
      σs <- Reader.lift (readIORef rσs)
      let u = case σs of
                [] -> ΣVar 0
-               (PState _ _ (ΣVar x)):_ -> ΣVar (x+1)
-     Reader.lift (writeIORef rσs (PState id [|| id ||] u:σs))
+               (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
+     Reader.lift (writeIORef rσs (State id [|| id ||] u:σs))
      n <- local (id >< (+1)) (compile' p (ManyIter u (MVar v)))
      return $! (ManyInitHard u n (MVar v) m)
 {-compile' (Many (Try p)) m  =
   do σ <- lift (newSTRef id)
      rec manyp <- compile' p (ManyIter σ manyp)
-     return $! (ManyInitSoft σ manyp m)
-compile' !(Many p) !m        =
-  do σ <- lift (newSTRef id)
-     rec manyp <- compile' p (ManyIter σ manyp)
-     return $! ManyInitHard σ manyp m-}
+     return $! (ManyInitSoft σ manyp m)-}
 
 data SList a = !a ::: !(SList a) | SNil
 data HList xs where
@@ -443,9 +483,7 @@ type QC s = TExpQ (C s)
 type O = Int
 type O# = Int#
 type QO = TExpQ O
-data State s = forall a. State a (STRef s (SList a))
-type QState s = TExpQ (State s)
-type Σ s = SList (State s)--Array Int (State s)
+data Σ s = Σ { save :: ST s (), restore :: ST s (), rollback :: D -> ST s () }
 type D = Int
 type D# = Int#
 type QD = TExpQ D
@@ -557,25 +595,19 @@ instance GCompare ΣVar where
     EQ -> coerce GEQ
     GT -> coerce GGT
 
-makeΣ :: [PState] -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
-makeΣ []                            = makeΣ' [] (-1) (DMap.empty) []
-makeΣ (p@(PState x qx (ΣVar v)):ps) = makeΣ' (p:ps) v (DMap.empty) []
-
--- TODO It would be better to have Σ be a pair of functions, that way we can statically create them...
---      It might also allow us to optimise them away or in?
-makeΣ' :: [PState] -> Int -> DMap ΣVar (QSTRef s) -> [(Int, QState s)] -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
-makeΣ' [] v m vss k = [|| let !σs = $$(weaken vss) in $$(k m [|| σs ||]) ||]
+makeΣ :: [State] -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
+makeΣ ps = makeΣ' ps (DMap.empty) [|| return () ||] [|| return () ||] [|| const (return ()) ||]
   where
-    weaken :: [(Int, QState s)] -> TExpQ (SList (State s))
-    weaken []           = [|| SNil ||]
-    weaken ((_, s):vss) = [|| $$s:::($$(weaken vss)) ||]
-makeΣ' (PState x qx (ΣVar u):ps) v m vss k = [||
-  do σ <- newSTRef ($$qx:::SNil)
-     let s = State $$qx σ
-     $$(let vss' = (u, [|| s ||]):vss
-            m' = DMap.insert (ΣVar u) (QSTRef [|| σ ||]) m
-        in makeΣ' ps v m' vss' k)
-  ||]
+    makeΣ' :: [State] -> DMap ΣVar (QSTRef s) -> QST s () -> QST s () -> TExpQ (D -> ST s ()) -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
+    makeΣ' [] m save restore rollback k = [|| let !σs = Σ $$save $$restore (\n -> if n == 0 then return () else $$rollback n) in $$(k m [|| σs ||]) ||]
+    makeΣ' (State x qx (ΣVar v):ps) m save restore rollback k = [||
+      do σ <- newSTRef ($$qx:::SNil)
+         $$(let save' = [|| do modifySTRef' σ ($$qx:::); $$save ||]
+                restore' = [|| do modifySTRef' σ (\(_:::xs) -> xs); $$restore ||]
+                rollback' = [||\n -> do modifySTRef' σ (sdrop n); $$rollback n ||]
+                m' = DMap.insert (ΣVar v) (QSTRef [|| σ ||]) m
+            in makeΣ' ps m' save' restore' rollback' k)
+      ||]
 
 modifyΣ :: STRef s (SList a) -> (a -> a) -> ST s ()
 modifyΣ σ f =
@@ -596,22 +628,9 @@ pokeΣ σ y =
      writeSTRef σ (y:::xs)
      return $! x
 
-sfor_ :: Σ s -> (State s -> ST s ()) -> ST s ()
-sfor_ !xs !f = go xs
-  where
-    go !SNil = return $! ()
-    go ((!x):::(!xs)) = do f $! x; go xs
-
-save :: Σ s -> ST s ()
-save σs = sfor_ σs up where up (State x σ) = modifySTRef' σ (x:::)
-
 sdrop :: Int -> SList a -> SList a
 sdrop 0 xs = xs
 sdrop n (_ ::: xs) = sdrop (n-1) xs
-
-rollback :: Σ s -> D -> ST s ()
-rollback _ 0 = return $! ()
-rollback σs n = sfor_ σs down where down (State x σ) = modifySTRef' σ (sdrop n)
 
 data GenMVar a = forall xs ks. GenMVar (MVar xs ks a)
 instance Ord (GenMVar a) where compare (GenMVar (MVar u)) (GenMVar (MVar v)) = compare u v
@@ -620,7 +639,7 @@ instance Eq (GenMVar a) where (GenMVar (MVar u)) == (GenMVar (MVar v)) = u == v
 data GenEval s a = forall xs ks. GenEval (TExpQ (Input -> X xs -> K s ks a -> O -> H s a -> CIdx -> C s -> Σ s -> D -> ST s (Maybe a)))
 type FixMap s a = Map (GenMVar a) (GenEval s a)
 type Ctx s a = (FixMap s a, DMap ΣVar (QSTRef s))
-eval :: TExpQ String -> (M '[] '[] a, [PState]) -> QST s (Maybe a)
+eval :: TExpQ String -> (M '[] '[] a, [State]) -> QST s (Maybe a)
 eval input (!m, vss) = [||
   do xs <- makeX
      ks <- makeK
@@ -657,9 +676,8 @@ raise (H (h:::hs')) !(I# cidx) !cs !(I# o) !(I# d)   = h o (H hs') cidx cs d
 evalHalt :: Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalHalt γ = return [|| case $$(xs γ) of HCons x _ -> return (Just (bug x)) ||]
 
--- TODO: This will require a state restore later down the line
 evalRet :: Γ s (b ': xs) ((b ': xs) ': ks) a -> Reader (Ctx s a) (QST s (Maybe a))
-evalRet γ = return (resume γ)
+evalRet γ = return [|| do restore $$(σs γ); $$(resume γ) ||]
 
 fix :: (a -> a) -> a
 fix f = let x = f x in x

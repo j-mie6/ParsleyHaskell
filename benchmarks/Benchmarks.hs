@@ -17,7 +17,7 @@ import Criterion.Main (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq (NFData(rnf))
 
 manyTestParsley :: String -> Maybe [Char]
-manyTestParsley = $$(Parsley.runParser (Parsley.try (Parsley.string "abc") Parsley.<|> Parsley.string "abd"))--} $$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
+manyTestParsley = $$(Parsley.runParser ((Parsley.token "abc" Parsley.<|> Parsley.token "abd") Parsley.<* Parsley.char 'x'))--} $$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
 
 manyTestYodaBad :: Yoda.Parser [Char]
 manyTestYodaBad = Yoda.many (Yoda.char 'a')

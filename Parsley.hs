@@ -88,6 +88,111 @@ data Parser a where
   Filter        :: WQ (a -> Bool) -> Parser a -> Parser a
   Ternary       :: Parser Bool -> Parser a -> Parser a -> Parser a
 
+class IFunctor (f :: (* -> *) -> * -> *) where
+  imap :: (forall i. a i -> b i) -> f a i -> f b i
+
+class IFunctor m => IMonad (m :: (* -> *) -> * -> *) where
+  ipure :: a i -> m a i
+  ibind :: m a j ->(forall i. a i -> m b i) -> m b j
+
+--data Free f i a = Var (a i) | Op (f (Free f i a) a)
+data Free (f :: (* -> *) -> * -> *) (a :: * -> *) (i :: *) where
+  Var :: a i -> Free f a i
+  Op :: f (Free f a) i -> Free f a i
+
+handle :: IFunctor f => (forall j. a j -> b j) -> (forall j. f b j -> b j) -> Free f a i -> b i
+handle gen alg (Var x) = gen x
+handle gen alg (Op x) = alg (imap (handle gen alg) x)
+
+extract :: IFunctor f => (forall j. f a j -> a j) -> Free f a i -> a i
+extract = handle id
+
+instance IFunctor f => IFunctor (Free f) where
+  imap f (Var x) = Var (f x)
+  imap f (Op x) = Op (imap (imap f) x)
+
+instance IFunctor f => IMonad (Free f) where
+  ipure = Var
+  ibind m f = handle f Op m
+
+newtype Const a k = Const { unConst :: a } deriving Functor
+data Unit k = Unit deriving Functor
+data Void k
+instance Functor Void where fmap = undefined
+
+data Parser' (k :: * -> *) (a :: *) where
+  Pure'          :: WQ a -> Parser' k a
+  Char'          :: Char -> Parser' k a
+  Satisfy'       :: WQ (Char -> Bool) -> Parser' k a
+  (:<*>)       :: k (a -> b) -> k a -> Parser' k b
+  (:*>)        :: k a -> k b -> Parser' k b
+  (:<*)        :: k a -> k b -> Parser' k a
+  --(:>>=:)       :: k a -> (a -> k b) -> Parser' k b
+  (:<|>)       :: k a -> k a -> Parser' k a
+  Empty'         :: Parser' a k
+  Try'           :: Maybe Int -> k a -> Parser' k a
+  LookAhead'     :: k a -> Parser' k a
+  Rec'           :: k a -> Parser' k a
+  Many'          :: k a -> Parser' k [a]
+  NotFollowedBy' :: k a -> Parser' k ()
+  Filter'        :: WQ (a -> Bool) -> k a -> Parser' k a
+  Ternary'       :: k Bool -> k a -> k a -> Parser' k a
+
+instance IFunctor Parser' where
+  imap _ (Pure' x) = Pure' x
+  imap _ (Char' c) = Char' c
+  imap _ (Satisfy' p) = Satisfy' p
+  imap f (p :<*> q) = f p :<*> f q
+  imap f (p :*> q) = f p :*> f q
+  imap f (p :<* q) = f p :<* f q
+  imap f (p :<|> q) = f p :<|> f q
+  imap _ Empty' = Empty'
+  imap f (Try' n p) = Try' n (f p)
+  imap f (LookAhead' p) = LookAhead' (f p)
+  imap f (Rec' p) = Rec' (f p)
+  imap f (Many' p) = Many' (f p)
+  imap f (NotFollowedBy' p) = NotFollowedBy' (f p)
+  imap f (Filter' g p) = Filter' g (f p)
+  imap f (Ternary' b p q) = Ternary' (f b) (f p) (f q)
+
+convert :: Parser a -> Free Parser' Void a
+convert (Pure x) = Op (Pure' x)
+convert (Char c) = Op (Char' c)
+convert (Satisfy f) = Op (Satisfy' f)
+convert (pf :<*>: px) = Op (convert pf :<*> convert px)
+convert (p :*>: q) = Op (convert p :*> convert q)
+convert (p :<*: q) = Op (convert p :<* convert q)
+convert (p :<|>: q) = Op (convert p :<|> convert q)
+convert Empty = Op Empty'
+convert (Try n p) = Op (Try' n (convert p))
+convert (LookAhead p) = Op (LookAhead' (convert p))
+convert (Rec p) = Op (Rec' (convert p))
+convert (Many p) = Op (Many' (convert p))
+convert (NotFollowedBy p) = Op (NotFollowedBy' (convert p))
+convert (Filter f p) = Op (Filter' f (convert p))
+convert (Ternary b p q) = Op (Ternary' (convert b) (convert p) (convert q))
+
+showAST' :: Free Parser' Void a -> String
+showAST' = unConst . handle undefined (Const . alg)
+  where
+    alg :: Parser' (Const String) a -> String
+    alg (Pure' x) = "(pure x)"
+    alg (Char' c) = "(char " ++ show c ++ ")"
+    alg (Satisfy' _) = "(satisfy f)"
+    alg (Const pf :<*> Const px) = concat ["(", pf, " <*> ",  px, ")"]
+    alg (Const p :*> Const q) = concat ["(", p, " *> ", q, ")"]
+    alg (Const p :<* Const q) = concat ["(", p, " <* ", q, ")"]
+    alg (Const p :<|> Const q) = concat ["(", p, " <|> ", q, ")"]
+    alg Empty' = "empty"
+    alg (Try' Nothing (Const p)) = concat ["(try ? ", p, ")"]
+    alg (Try' (Just n) (Const p)) = concat ["(try ", show n, " ", p, ")"]
+    alg (LookAhead' (Const p)) = concat ["(lookAhead ", p, ")"]
+    alg (Rec' _) = "recursion point!"
+    alg (Many' (Const p)) = concat ["(many ", p, ")"]
+    alg (NotFollowedBy' (Const p)) = concat ["(notFollowedBy ", p, ")"]
+    alg (Filter' f (Const p)) = concat ["(", p, " >?> f)"]
+    alg (Ternary' (Const b) (Const p) (Const q)) = concat ["(", b, " <?|> (", p, ", ", q, "))"]
+
 showAST :: Parser a -> String
 showAST (Pure _) = "(pure x)"
 showAST (Char c) = "(char " ++ show c ++ ")"
@@ -366,6 +471,38 @@ optimise (Try _ Empty)             = empty
 optimise (Try Nothing p)           = Try (constantInput p) p
 optimise p                         = p
 
+--optimise'' :: Free Parser' Void a -> Free Parser' Void a
+--optimise'' (Op x) = optimise' x
+
+optimise' :: Parser' (Free Parser' f) a -> Free Parser' f a
+optimise' (Op Empty' :<*> _) = Op Empty'
+optimise' (u :<*> Op Empty') = Op (u :*> Op Empty')
+optimise' (Op Empty' :*> _)  = Op Empty'
+optimise' (Op Empty' :<* _)  = Op Empty'
+optimise' (u :<* Op Empty')  = Op (u :*> Op Empty')
+optimise' (Op (Pure' (WQ f qf)) :<*> Op (Pure' (WQ x qx))) = Op (Pure' (WQ (f x) [|| $$qf $$qx ||]))
+optimise' (Op (Pure' (WQ f qf)) :<*> Op (Op (Pure' (WQ g qg)) :<*> p)) = optimise' (Op (Pure' (WQ (f . g) [|| $$qf . $$qg ||])) :<*> p)
+optimise' (u :<*> Op (v :<*> w))          = optimise' (optimise' (optimise' (Op (Pure' (WQ (.) [||(.)||])) :<*> u) :<*> v) :<*> w)
+optimise' (Op (u :*> v) :<*> w)           = optimise' (u :*> (optimise' (v :<*> w)))
+optimise' (u :<*> Op (Pure' (WQ x qx)))     = optimise' (Op (Pure' (WQ ($ x) [|| \f -> f $$qx ||])) :<*> u)
+optimise' (u :<*> Op (v :<* w))           = optimise' (optimise' (u :<*> v) :<* w)
+optimise' (u :<*> Op (v :*> Op (Pure' x))) = optimise' (optimise' (u :<*> Op (Pure' x)) :<* v)
+optimise' (Op (Pure' x) :<|> _)             = Op (Pure' x)
+optimise' (Op Empty' :<|> u)                = u
+optimise' (u :<|> Op Empty')                = u
+optimise' (Op (u :<|> v) :<|> w)          = Op (u :<|> optimise' (v :<|> w))
+optimise' (Op (Pure' _) :*> u)              = u
+optimise' (Op (u :*> Op (Pure' _)) :*> v)  = Op (u :*> v)
+optimise' (u :*> Op (v :*> w))            = optimise' (optimise' (u :*> v) :*> w)
+optimise' (u :<* Op (Pure' _))              = u
+optimise' (u :<* Op (v :*> Op (Pure' _)))  = optimise' (u :<* v)
+optimise' (Op (Pure' x) :<* u)              = optimise' (u :*> Op (Pure' x))
+optimise' (Op (u :<* v) :<* w)            = optimise' (u :<* optimise' (v :<* w))
+optimise' (Try' _ (Op (Pure' x)))            = Op (Pure' x)
+optimise' (Try' _ (Op Empty'))               = Op Empty'
+optimise' (Try' Nothing p)                  = Op (Try' (constantInput' p) p)
+optimise' p                                = Op p
+
 constantInput :: Parser a -> Maybe Int
 constantInput (Pure _) = Just 0
 constantInput (Char _) = Just 1
@@ -381,6 +518,24 @@ constantInput (NotFollowedBy p) = constantInput p
 constantInput (Filter _ p) = constantInput p
 constantInput (Ternary c p q) = constantInput c <+> (constantInput p <==> constantInput q)
 constantInput _ = Nothing
+
+constantInput' :: Free Parser' f a -> Maybe Int
+constantInput' = unConst . handle undefined (Const . alg)
+  where
+    alg (Pure' _) = Just 0
+    alg (Char' _) = Just 1
+    alg (Satisfy' _) = Just 1
+    alg (Const p :<*> Const q) = p <+> q
+    alg (Const p :*> Const q) = p <+> q
+    alg (Const p :<* Const q) = p <+> q
+    alg (Const n :<|> Const q) = n <==> q
+    alg Empty' = Just 0
+    alg (Try' n _) = n
+    alg (LookAhead' (Const p)) = p
+    alg (NotFollowedBy' (Const p)) = p
+    alg (Filter' _ (Const p)) = p
+    alg (Ternary' (Const c) (Const p) (Const q)) = c <+> (p <==> q)
+    alg _ = Nothing
 
 (<+>) :: (Num a, Monad m) => m a -> m a -> m a
 (<+>) = liftM2 (+)

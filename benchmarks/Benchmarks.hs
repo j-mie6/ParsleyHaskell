@@ -16,8 +16,8 @@ import qualified Text.Yoda as Yoda
 import Criterion.Main (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq (NFData(rnf))
 
-manyTestParsley :: String -> Maybe [Char]
-manyTestParsley = $$(Parsley.runParser ((Parsley.token "abc" Parsley.<|> Parsley.token "abd") Parsley.<* Parsley.char 'x'))--} $$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
+manyTestParsley :: String -> Maybe Char
+manyTestParsley = $$(Parsley.runParser (Parsley.item Parsley.>?> Parsley.WQ (\c -> c >= 'a') [||(\c -> c >= 'a')||] Parsley.>?> Parsley.WQ (\c -> c <= 'z') [||(\c -> c <= 'z')||]))--} $$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
 
 manyTestYodaBad :: Yoda.Parser [Char]
 manyTestYodaBad = Yoda.many (Yoda.char 'a')

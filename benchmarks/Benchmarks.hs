@@ -18,8 +18,8 @@ import Control.DeepSeq (NFData(rnf))
 import Language.Haskell.TH.Syntax hiding (Match, match)
 import LiftPlugin
 
-manyTestParsley :: String -> Maybe ()
-manyTestParsley = $$(Parsley.runParser (Parsley.notFollowedBy Parsley.more))--}$$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
+manyTestParsley :: String -> Maybe Int
+manyTestParsley = $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}$$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
 
 manyTestYodaBad :: Yoda.Parser [Char]
 manyTestYodaBad = Yoda.many (Yoda.char 'a')

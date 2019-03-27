@@ -67,10 +67,28 @@ import GHC.Exts                (Int(..), Char(..), (-#), (+#), (*#))
 import Unsafe.Coerce           (unsafeCoerce)
 import Safe.Coerce             (coerce)
 import Data.Maybe              (isJust, fromMaybe)
+import Data.List               (foldl')
 import Language.Haskell.TH hiding (Match, match)
 import Language.Haskell.TH.Syntax hiding (Match, match)
 import Debug.Trace
 import LiftPlugin
+
+isDigit :: Char -> Bool
+isDigit c
+  |    c == '0' || c == '1' || c == '2' || c == '3'
+    || c == '4' || c == '5' || c == '6' || c == '7'
+    || c == '8' || c == '9' = True
+  | otherwise = False
+
+
+toDigit :: Char -> Int
+toDigit c = fromEnum c - fromEnum '0'
+
+digit :: Parser Int
+digit = lift' toDigit <$> satisfy (lift' isDigit)
+
+plus :: Parser (Int -> Int -> Int)
+plus = char '+' $> lift' (+)
 
 selectTest :: Parser (Either Int String)
 selectTest = Parsley.pure (lift' (Left 10))
@@ -419,6 +437,16 @@ select p q = branch p q (pure (lift' id))
 
 fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
 fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
+
+chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
+--chainl1 p op = chainPost p (lift' flip <$> op <*> p)
+chainl1 p op = let rest = (lift' flip >*< lift' (.) <$> (lift' flip <$> op <*> p) <*> rest) <|> pure (lift' id) in p <**> rest
+
+foldl' :: (b -> a -> b) -> b -> [a] -> b
+foldl' = Data.List.foldl'
+
+chainPost :: Parser a -> Parser (a -> a) -> Parser a
+chainPost p op = lift' Parsley.foldl' >*< (lift' flip >*< lift' ($)) <$> p <*> many op
 
 data StableParserName = forall a. StableParserName (StableName# (Parser a))
 data GenParser = forall a. GenParser (Parser a)

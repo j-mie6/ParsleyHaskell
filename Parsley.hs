@@ -11,9 +11,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, DeriveLift #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase, MultiWayIf #-}
 module Parsley {-( Parser--, CompiledParser
                , runParser--, mkParser, runCompiledParser
                -- Functor
@@ -67,21 +67,23 @@ import GHC.Exts                (Int(..), Char(..), (-#), (+#), (*#))
 import Unsafe.Coerce           (unsafeCoerce)
 import Safe.Coerce             (coerce)
 import Data.Maybe              (isJust, fromMaybe)
-import Language.Haskell.TH
-import Language.Haskell.TH.Syntax
+import Language.Haskell.TH hiding (Match, match)
+import Language.Haskell.TH.Syntax hiding (Match, match)
 import Debug.Trace
+import LiftPlugin
 
 selectTest :: Parser (Either Int String)
-selectTest = Parsley.pure (Parsley.WQ (Left 10) [||Left 10||])
+selectTest = Parsley.pure (lift' (Left 10))
 
 showi :: Int -> String
 showi = show
+
+instance Pure WQ where lift' x = WQ x [||x||]
 
 -- AST
 data WQ a = WQ { _val :: a, _code :: TExpQ a }
 data Parser a where
   Pure          :: WQ a -> Parser a
-  Char          :: Char -> Parser Char
   Satisfy       :: WQ (Char -> Bool) -> Parser Char
   (:<*>:)       :: Parser (a -> b) -> Parser a -> Parser b
   (:*>:)        :: Parser a -> Parser b -> Parser b
@@ -94,9 +96,8 @@ data Parser a where
   Rec           :: Parser a -> Parser a
   Many          :: Parser a -> Parser [a]
   NotFollowedBy :: Parser a -> Parser ()
-  Filter        :: WQ (a -> Bool) -> Parser a -> Parser a
-  Ternary       :: Parser Bool -> Parser a -> Parser a -> Parser a
   Branch        :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
+  Match         :: Parser a -> [WQ (a -> Bool)] -> [Parser b] -> Parser b
 
 class IFunctor (f :: (* -> *) -> * -> *) where
   imap :: (forall i. a i -> b i) -> f a i -> f b i
@@ -145,7 +146,6 @@ data Void k deriving Functor
 
 data Parser' (k :: * -> *) (a :: *) where
   Pure'          :: WQ a -> Parser' k a
-  Char'          :: Char -> Parser' k a
   Satisfy'       :: WQ (Char -> Bool) -> Parser' k a
   (:<*>)       :: k (a -> b) -> k a -> Parser' k b
   (:*>)        :: k a -> k b -> Parser' k b
@@ -162,7 +162,6 @@ data Parser' (k :: * -> *) (a :: *) where
 
 instance IFunctor Parser' where
   imap _ (Pure' x) = Pure' x
-  imap _ (Char' c) = Char' c
   imap _ (Satisfy' p) = Satisfy' p
   imap f (p :<*> q) = f p :<*> f q
   imap f (p :*> q) = f p :*> f q
@@ -178,7 +177,6 @@ instance IFunctor Parser' where
 
 convert :: Parser a -> Free Parser' Void a
 convert (Pure x) = Op (Pure' x)
-convert (Char c) = Op (Char' c)
 convert (Satisfy f) = Op (Satisfy' f)
 convert (pf :<*>: px) = Op (convert pf :<*> convert px)
 convert (p :*>: q) = Op (convert p :*> convert q)
@@ -197,7 +195,6 @@ showAST' = getConst . handle (const (Const "")) (Const . alg)
   where
     alg :: Parser' (Const String) a -> String
     alg (Pure' x) = "(pure x)"
-    alg (Char' c) = "(char " ++ show c ++ ")"
     alg (Satisfy' _) = "(satisfy f)"
     alg (Const pf :<*> Const px) = concat ["(", pf, " <*> ",  px, ")"]
     alg (Const p :*> Const q) = concat ["(", p, " *> ", q, ")"]
@@ -214,7 +211,6 @@ showAST' = getConst . handle (const (Const "")) (Const . alg)
 
 showAST :: Parser a -> String
 showAST (Pure _) = "(pure x)"
-showAST (Char c) = "(char " ++ show c ++ ")"
 showAST (Satisfy _) = "(satisfy f)"
 showAST (pf :<*>: px) = concat ["(", showAST pf, " <*> ", showAST px, ")"]
 showAST (p :*>: q) = concat ["(", showAST p, " *> ", showAST q, ")"]
@@ -229,6 +225,7 @@ showAST (Rec _) = "recursion point!"
 showAST (Many p) = concat ["(many ", showAST p, ")"]
 showAST (NotFollowedBy p) = concat ["(notFollowedBy ", showAST p, ")"]
 showAST (Branch b p q) = concat ["(branch ", showAST b, " ", showAST p, " ", showAST q, ")"]
+showAST (Match p fs qs) = concat ["(match ", showAST p, " ", show (map showAST qs), ")"]
 
 -- Smart Constructors
 {-instance Functor Parser where
@@ -300,7 +297,7 @@ skipMany p = let skipp = p *> skipp <|> unit in skipp
 
 -- Additional Combinators
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
-(<:>) = liftA2 (WQ (:) [|| (:) ||])
+(<:>) = liftA2 (lift' (:))
 
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
 (<**>) = liftA2 (WQ (flip ($)) [|| (flip ($)) ||])
@@ -320,10 +317,10 @@ skipMany p = let skipp = p *> skipp <|> unit in skipp
   (~>) = (*>)-}
 
 unit :: Parser ()
-unit = pure (WQ () [|| () ||])
+unit = pure (lift' ())
 
 (<~>) :: Parser a -> Parser b -> Parser (a, b)
-(<~>) = liftA2 (WQ (,) [|| (,) ||])
+(<~>) = liftA2 (lift' (,))
 
 (<~) :: Parser a -> Parser b -> Parser a
 (<~) = (<*)
@@ -356,7 +353,7 @@ notFollowedBy :: Parser a -> Parser ()
   -- Auxillary functions
 char :: Char -> Parser Char
 string :: String -> Parser String
-string = foldr (<:>) (pure (WQ [] [||[]||])) . map char
+string = foldr (<:>) (pure (lift' [])) . map char
 token :: String -> Parser String
 token = try . string
 eof :: Parser ()
@@ -366,7 +363,7 @@ more = lookAhead (void item)
 
 --instance MonadParser Parser where
 satisfy = Satisfy
-char c = (WQ c [||c||]) <$ Char c
+char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
 lookAhead = LookAhead
 ---notFollowedBy p = try (join ((try p *> return empty) <|> return unit))
 notFollowedBy = NotFollowedBy
@@ -385,7 +382,7 @@ bool x y True  = x
 bool x y False = y
 
 constp :: Parser a -> Parser (b -> a)
-constp = (WQ const [||const||] <$>)
+constp = (lift' const <$>)
 
 (<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
 cond <?|> (p, q) = branch (WQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
@@ -395,6 +392,18 @@ p >?> (WQ f qf) = select (WQ g qg <$> p) empty
   where
     g x = if f x then Right x else Left ()
     qg = [||\x -> if $$qf x then Right x else Left ()||]
+
+_match :: Eq a => a -> Either a b -> Either () (Either a b)
+_match _ (Right y) = Right (Right y)
+_match x (Left y)
+  | x == y = Left ()
+  | otherwise = Right (Left y)
+
+match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b
+match vs p f = Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map f vs)
+
+(||=) :: forall a b. (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
+p ||= f = match [minBound..maxBound] p f
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch = Branch
@@ -406,7 +415,7 @@ while :: Parser Bool -> Parser ()
 while x = let w = when x w in w
 
 select :: Parser (Either a b) -> Parser (a -> b) -> Parser b
-select p q = branch p q (pure (WQ id [||id||]))
+select p q = branch p q (pure (lift' id))
 
 fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
 fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
@@ -443,7 +452,13 @@ preprocess !p = trace "preprocessing" $ unsafePerformIO (runReaderT (preprocess'
     preprocess'' !(Many p)          = liftM Many (preprocess' p)
     preprocess'' !(NotFollowedBy p) = liftM optimise (liftM NotFollowedBy (preprocess' p))
     preprocess'' !(Branch b p q)    = liftM optimise (liftM3 Branch (preprocess' b) (preprocess' p) (preprocess' q))
+    preprocess'' !(Match p fs qs)   = liftM optimise (liftM3 Match (preprocess' p) (return fs) (traverse preprocess' qs))
     preprocess'' !p                 = return p
+
+-- pronounced quapp
+(>*<) :: WQ (a -> b) -> WQ a -> WQ b
+WQ f qf >*< WQ x qx = WQ (f x) [||$$qf $$qx||]
+infixl 9 >*<
 
 optimise :: Parser a -> Parser a
 -- DESTRUCTIVE OPTIMISATION
@@ -461,15 +476,15 @@ optimise (u :<*: Empty)            = u *> empty
 --optimise (Empty :>>=: f)           = Empty
 -- APPLICATIVE OPTIMISATION
 -- Homomorphism Law: pure f <*> pure x = pure (f x)
-optimise (Pure (WQ f qf) :<*>: Pure (WQ x qx)) = pure (WQ (f x) [|| $$qf $$qx ||])
+optimise (Pure f :<*>: Pure x) = pure (f >*< x)
 -- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law
-optimise (Pure (WQ f qf) :<*>: (Pure (WQ g qg) :<*>: p)) = optimise (WQ (f . g) [|| $$qf . $$qg ||] <$> p)
+optimise (Pure f :<*>: (Pure g :<*>: p)) = optimise (lift' (.) >*< f >*< g <$> p)
 -- Composition Law: u <*> (v <*> w) = pure (.) <*> u <*> v <*> w
-optimise (u :<*>: (v :<*>: w))     = optimise (optimise (optimise (pure (WQ (.) [||(.)||]) <*> u) <*> v) <*> w)
+optimise (u :<*>: (v :<*>: w))     = optimise (optimise (optimise (pure (lift' (.)) <*> u) <*> v) <*> w)
 -- Reassociation Law 1: (u *> v) <*> w = u *> (v <*> w)
 optimise ((u :*>: v) :<*>: w)      = optimise (u *> (optimise (v <*> w)))
 -- Interchange Law: u <*> pure x = pure ($ x) <*> u
-optimise (u :<*>: Pure (WQ x qx))  = optimise (WQ ($ x) [|| \f -> f $$qx ||] <$> u)
+optimise (u :<*>: Pure x)          = optimise (lift' flip >*< lift' ($) >*< x <$> u)
 -- Reassociation Law 2: u <*> (v <* w) = (u <*> v) <* w
 optimise (u :<*>: (v :<*: w))      = optimise (optimise (u <*> v) <* w)
 -- Reassociation Law 3: u <*> (v *> pure x) = (u <*> pure x) <* v
@@ -503,11 +518,36 @@ optimise (u :<*: (v :*>: Pure _))  = optimise (u <* v)
 optimise (Pure x :<*: u)           = optimise (u *> pure x)
 -- Associativity Law (u <* v) <* w = u <* (v <* w)
 optimise ((u :<*: v) :<*: w)       = optimise (u <* optimise (v <* w))
--- TODO There are a few more laws to address when the instrinsics come in:
--- notFollowedBy . notFollowedBy = lookAhead
--- eof *> eof | eof <* eof = eof
--- p <*> eof = (p <*> unit) <* eof
--- notFollowedBy eof = lookAhead (void item)
+-- Pure lookahead: lookAhead (pure x) = pure x
+optimise (LookAhead (Pure x))      = pure x
+-- Dead lookahead: lookAhead empty = empty
+optimise (LookAhead Empty)         = empty
+-- Pure negative-lookahead: notFollowedBy (pure x) = empty
+optimise (NotFollowedBy (Pure _))  = empty
+-- Dead negative-lookahead: notFollowedBy empty = unit
+optimise (NotFollowedBy Empty)     = unit
+-- Double Negation Law: notFollowedBy . notFollowedBy = lookAhead . try . void
+optimise (NotFollowedBy (NotFollowedBy p)) = optimise (lookAhead (void (try p)))
+-- Zero Consumption Law: notFollowedBy (try p) = notFollowedBy p
+optimise (NotFollowedBy (Try _ p)) = optimise (notFollowedBy p)
+-- Idempotence Law: lookAhead . lookAhead = lookAhead
+optimise (LookAhead (LookAhead p)) = lookAhead p
+-- Right Identity Law: notFollowedBy . lookAhead = notFollowedBy
+optimise (NotFollowedBy (LookAhead p)) = optimise (notFollowedBy p)
+-- Left Identity Law: lookAhead . notFollowedBy = notFollowedBy
+optimise (LookAhead (NotFollowedBy p)) = notFollowedBy p
+-- Transparency Law: notFollowedBy (try p <|> q) = notFollowedBy p *> notFollowedBy q
+optimise (NotFollowedBy (Try _ p :<|>: q)) = optimise (optimise (notFollowedBy p) *> optimise (notFollowedBy q))
+-- Distributivity Law: lookAhead p <|> lookAhead q = lookAhead (p <|> q)
+optimise (LookAhead p :<|>: LookAhead q) = optimise (lookAhead (optimise (p <|> q)))
+-- Absorption Law: p <*> lookAhead (q *> pure x) = (p <*> pure x) <* lookAhead q
+optimise (p :<*>: LookAhead (q :*>: Pure x)) = optimise (optimise (p <*> pure x) <* optimise (lookAhead q))
+-- Absorption Law: p <*> notFollowedBy q = (p <*> unit) <* notFollowedBy q
+optimise (p :<*>: NotFollowedBy q) = optimise (optimise (p <*> unit) <* notFollowedBy q)
+-- Idempotence Law: notFollowedBy (p *> pure x) = notFollowedBy p
+optimise (NotFollowedBy (p :*>: Pure _)) = optimise (notFollowedBy p)
+-- Idempotence Law: notFollowedBy (f <$> p) = notFollowedBy p
+optimise (NotFollowedBy (Pure _ :<*>: p)) = optimise (notFollowedBy p)
 optimise (Try _ (Pure x))          = pure x
 optimise (Try _ Empty)             = empty
 optimise (Try Nothing p)           = Try (constantInput p) p
@@ -516,12 +556,12 @@ optimise (Branch (Pure (WQ (Left x) ql)) p _) = optimise (p <*> pure (WQ x qx)) 
 -- pure Right law: branch (pure (Right x)) p q = q <*> pure x
 optimise (Branch (Pure (WQ (Right x) ql)) _ q) = optimise (q <*> pure (WQ x qx)) where qx = [||case $$ql of Right x -> x||]
 -- Generalised Identity law: branch b (pure f) (pure g) = either f g <$> b
-optimise (Branch b (Pure (WQ f qf)) (Pure (WQ g qg))) = optimise (WQ (either f g) qefg <$> b) where qefg = [||either $$qf $$qg||]
+optimise (Branch b (Pure f) (Pure g)) = optimise (lift' either >*< f >*< g <$> b)
 -- Interchange law: branch (x *> y) p q = x *> branch y p q
 optimise (Branch (x :*>: y) p q)   = optimise (x *> optimise (branch y p q))
--- Negated Branch Law: branch b p empty = branch (swapEither <$> b) empty p
-optimise (Branch b p Empty) = branch (WQ swapEither [||swapEither||] <$> b) empty p
--- Branch Fusion Law: branch (branch b empty (pure f)) empty k = branch (g <$> b) empty k where g is a monad transforming (>>= f)
+-- Negated Branch law: branch b p empty = branch (swapEither <$> b) empty p
+optimise (Branch b p Empty) = branch (WQ (either Right Left) [||either Right Left||] <$> b) empty p
+-- Branch Fusion law: branch (branch b empty (pure f)) empty k = branch (g <$> b) empty k where g is a monad transforming (>>= f)
 optimise (Branch (Branch b Empty (Pure (WQ f qf))) Empty k) = optimise (branch (optimise (WQ g qg <$> b)) empty k)
   where
     g (Left _) = Left ()
@@ -533,12 +573,21 @@ optimise (Branch (Branch b Empty (Pure (WQ f qf))) Empty k) = optimise (branch (
                                Left _ -> Left ()
                                Right y -> Right y||]
 -- Distributivity Law: f <$> branch b p q = branch b ((f .) <$> p) ((f .) <$> q)
-optimise (Pure (WQ f qf) :<*>: Branch b p q) = optimise (branch b (optimise (WQ (f .) [||($$qf .)||] <$> p)) (optimise (WQ (f .) [||($$qf .)||] <$> q)))
-optimise p                         = p
+optimise (Pure f :<*>: Branch b p q)   = optimise (branch b (optimise (lift' (.) >*< f <$> p)) (optimise (lift' (.) >*< f <$> q)))
+-- pure Match law: match vs (pure x) f = if elem x vs then f x else empty
+optimise (Match (Pure (WQ x _)) fs qs) = foldr (\(f, q) k -> if _val f x then q else k) empty (zip fs qs)
+-- Generalised Identity Match law: match vs p (pure . f) = f <$> (p >?> flip elem vs)
+optimise (Match p fs qs)
+  | all (\case {Pure _ -> True; _ -> False}) qs = optimise (WQ apply qapply <$> (p >?> WQ validate qvalidate))
+    where apply x    = foldr (\(f, Pure y) k -> if _val f x then _val y else k) (error "whoopsie") (zip fs qs)
+          qapply     = foldr (\(f, Pure y) k -> [||\x -> if $$(_code f) x then $$(_code y) else $$k x||]) ([||const (error "whoopsie")||]) (zip fs qs)
+          validate x = foldr (\f b -> _val f x || b) False fs
+          qvalidate  = foldr (\f k -> [||\x -> $$(_code f) x || $$k x||]) [||const False||] fs
+-- Distributivity Law: f <$> match vs p g = match vs p ((f <$>) . g)
+optimise (Pure f :<*>: Match p fs qs)  = Match p fs (map (optimise . (f <$>)) qs)
+optimise p                             = p
 
-swapEither :: Either a b -> Either b a
-swapEither (Left x)  = Right x
-swapEither (Right x) = Left x
+-- NOTE: Distributivity Law : branch (pure x) (p *> q) (r *> s) = branch (pure x) p r *> branch (pure x) q s
 
 --optimise'' :: Free Parser' Void a -> Free Parser' Void a
 --optimise'' (Op x) = optimise' x
@@ -574,7 +623,6 @@ optimise' p                                = Op p
 
 constantInput :: Parser a -> Maybe Int
 constantInput (Pure _) = Just 0
-constantInput (Char _) = Just 1
 constantInput (Satisfy _) = Just 1
 constantInput (p :<*>: q) = constantInput p <+> constantInput q
 constantInput (p :*>: q) = constantInput p <+> constantInput q
@@ -585,6 +633,7 @@ constantInput (Try n _) = n
 constantInput (LookAhead p) = constantInput p
 constantInput (NotFollowedBy p) = constantInput p
 constantInput (Branch b p q) = constantInput b <+> (constantInput p <==> constantInput q)
+constantInput (Match p _ qs) = constantInput p <+> (foldr1 (<==>) (map constantInput qs))
 constantInput _ = Nothing
 
 constantInput' :: Free Parser' f a -> Maybe Int
@@ -595,7 +644,6 @@ constantInput' = getConst . pandle (const (Const Nothing)) (alg1 |> (Const . alg
     alg1 _ = Nothing
     alg2 :: Parser' (Const (Maybe Int)) a -> Maybe Int
     alg2 (Pure' _) = Just 0
-    alg2 (Char' _) = Just 1
     alg2 (Satisfy' _) = Just 1
     alg2 (Const p :<*> Const q) = p <+> q
     alg2 (Const p :*> Const q) = p <+> q
@@ -623,7 +671,6 @@ data M xs ks a where
   Push         :: WQ x -> !(M (x ': xs) ks a) -> M xs ks a
   Pop          :: !(M xs ks a) -> M (b ': xs) ks a
   Lift2        :: !(WQ (x -> y -> z)) -> !(M (z ': xs) ks a) -> M (y ': x ': xs) ks a
-  --Chr          :: !Char -> !(M (Char ': xs) ks a) -> M xs ks a
   Sat          :: WQ (Char -> Bool) -> !(M (Char ': xs) ks a) -> M xs ks a
   Call         :: M xs ((b ': xs) ': ks) a -> MVar xs ((b ': xs) ': ks) a -> !(M (b ': xs) ks a) -> M xs ks a
   MuCall       :: MVar xs ((b ': xs) ': ks) a -> !(M (b ': xs) ks a) -> M xs ks a
@@ -634,8 +681,10 @@ data M xs ks a where
   HardFork     :: !(M xs ks a) -> M xs ks a -> M xs ks a
   Attempt      :: !(Maybe Int) -> !(M xs ks a) -> M xs ks a
   Look         :: !(M xs ks a) -> M xs ks a
+  NegLook      :: !(M xs ks a) -> !(M xs ks a) -> M xs ks a
   Restore      :: !(M xs ks a) -> M xs ks a
   Case         :: !(M (x ': xs) ks a) -> !(M (y ': xs) ks a) -> M (Either x y ': xs) ks a
+  Choices      :: ![WQ (x -> Bool)] -> ![M xs ks a] -> M (x ': xs) ks a
   ManyIter     :: !(ΣVar ([x] -> [x])) -> !(MVar xs ks a) -> M (x ': xs) ks a
   ManyInitSoft :: !(ΣVar ([x] -> [x])) -> !(M xs ks a) -> !(MVar xs ks a) -> !(M ([x] ': xs) ks a) -> M xs ks a
   ManyInitHard :: !(ΣVar ([x] -> [x])) -> !(M xs ks a) -> !(MVar xs ks a) -> !(M ([x] ': xs) ks a) -> M xs ks a
@@ -660,8 +709,10 @@ instance Show (M xs ks a) where
   show (Attempt Nothing k) = "(Try " ++ show k ++ ")"
   show (Attempt (Just n) k) = "(Try " ++ show n ++ " " ++ show k ++ ")"
   show (Look k) = "(Look " ++ show k ++ ")"
+  show (NegLook m k) = "(NegLook " ++ show m ++ " " ++ show k ++ ")"
   show (Restore k) = "(Restore " ++ show k ++ ")"
   show (Case m k) = "(Case " ++ show m ++ " " ++ show k ++ ")"
+  show (Choices _ ks) = "(Choices " ++ show ks ++ ")"
   show (ManyIter σ v) = "(ManyIter (" ++ show σ ++ ") (" ++ show v ++ "))"
   show (ManyInitSoft σ m v k) = "{ManyInitSoft (" ++ show σ ++ ") (" ++ show v ++ ") " ++ show m ++ " " ++ show k ++ "}"
   show (ManyInitHard σ m v k) = "{ManyInitHard (" ++ show σ ++ ") (" ++ show v ++ ") " ++ show m ++ " " ++ show k ++ "}"
@@ -682,9 +733,8 @@ data State = forall a. State a (TExpQ a) (ΣVar a)
 type ΣVars = IORef [State]
 compile' :: Parser a -> M (a ': xs) ks b -> ReaderT (HashMap StableParserName IMVar, IMVar, ΣVars) IO (M xs ks b)
 compile' !(Pure x) !m          = do return $! (Push x m)
-compile' !(Char c) !m          = do return $! (Sat (WQ (== c) [||(== c)||]) m)
 compile' !(Satisfy p) !m       = do return $! (Sat p m)
-compile' !(pf :<*>: px) !m     = do !pxc <- compile' px (Lift2 (WQ ($) [||($)||]) m); compile' pf pxc
+compile' !(pf :<*>: px) !m     = do !pxc <- compile' px (Lift2 (lift' ($)) m); compile' pf pxc
 compile' !(p :*>: q) !m        = do !qc <- compile' q m; compile' p (Pop qc)
 compile' !(p :<*: q) !m        = do !qc <- compile' q (Pop m); compile' p qc
 compile' !Empty !m             = do return $! Empt
@@ -694,9 +744,12 @@ compile' !(p :<|>: q) !m       = do liftM2 HardFork (compile' p (Commit False m)
 --  where f' x = runST $ (newSTRef HashMap.empty) >>= runReaderT (compile' (preprocess (f x)) m)
 compile' !(Try n p) !m         = do liftM (Attempt n) (compile' p (Commit (isJust n) m))
 compile' !(LookAhead p) !m     = do liftM Look (compile' p (Restore m))
+compile' !(NotFollowedBy p) !m = do liftM2 NegLook (compile' p (Restore Empt)) (return (Push (lift' ()) m))
 compile' !(Branch b p q) !m    = do !pc <- compile' p (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
                                     !qc <- compile' q (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
                                     compile' b (Case pc qc)
+compile' !(Match p fs qs) !m   = do !qcs <- traverse (flip compile' m) qs
+                                    compile' p (Choices fs qcs)
 compile' !(Rec !p) !m          =
   do (StableName _name) <- Reader.lift (makeStableName p)
      (seen, v, _) <- ask
@@ -1019,9 +1072,9 @@ evalSoftFork :: Maybe Int -> M xs ks a -> M xs ks a -> Γ s xs ks a -> Reader (C
 evalSoftFork constantInput p q γ =
   do ctx <- ask
      let handler = [||\_ hs cidx cs d' ->
-           do !(o', cidx') <- popC (I# cidx) cs
+           do !(o, cidx') <- popC (I# cidx) cs
               rollback $$(σs γ) ((I# d') - $$(d γ))
-              $$(runReader (eval' q (γ {o = [||o'||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]})) ctx)
+              $$(runReader (eval' q (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]})) ctx)
            ||]
      return (setupHandlerΓ γ handler (\hs cidx cs ->
        case constantInput of
@@ -1057,6 +1110,16 @@ evalLook k γ =
      let handler = [||\o hs cidx cs d' -> raise hs (popC_ (I# cidx)) cs (I# o) (I# d')||]
      return (setupHandlerΓ γ handler (\hs cidx cs -> runReader (eval' k (γ {hs = hs, cidx = cidx, cs = cs})) ctx))
 
+evalNegLook :: M xs ks a -> M xs ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
+evalNegLook m k γ =
+  do ctx <- ask
+     let handler = [||\_ hs cidx cs d' ->
+           do (o, cidx') <- popC (I# cidx) cs
+              rollback $$(σs γ) ((I# d') - $$(d γ))
+              $$(runReader (eval' k (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]})) ctx)
+           ||]
+     return (setupHandlerΓ γ handler (\hs cidx cs -> runReader (eval' m (γ {hs = hs, cidx = cidx, cs = cs})) ctx))
+
 evalRestore :: M xs ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalRestore k γ =
   do ctx <- ask
@@ -1074,6 +1137,18 @@ evalCase m k γ =
            Right y  -> $$(runReader (eval' k (γ {xs = [||pushX y xs'||]})) ctx)
            Left x -> $$(runReader (eval' m (γ {xs = [||pushX x xs'||]})) ctx)
        ||]
+
+evalChoices :: forall x xs ks a s. [WQ (x -> Bool)] -> [M xs ks a] -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
+evalChoices fs ks γ = do ctx <- ask; return [|| let (x, xs') = popX $$(bug (xs γ)) in $$(runReader (go [||x||] fs ks (γ {xs = [||xs'||]})) ctx) ||]
+  where
+    go :: TExpQ x -> [WQ (x -> Bool)] -> [M xs ks a] -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
+    go _ [] [] γ = return (raiseΓ γ)
+    go x (f:fs) (k:ks) γ =
+      do ctx <- ask
+         return [||
+             if $$(_code f) $$x then $$(runReader (eval' k γ) ctx)
+             else $$(runReader (go x fs ks γ) ctx)
+           ||]
 
 evalManyIter :: ΣVar ([x] -> [x]) -> MVar xs ks a -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalManyIter u v γ@(Γ input !xs ks o hs cidx cs σs d) =
@@ -1130,7 +1205,6 @@ eval' (Push x k) γ             = trace "PUSH" $ evalPush x k γ
 eval' (Pop k) γ                = trace "POP" $ evalPop k γ
 eval' (Lift2 f k) γ            = trace "LIFT2" $ evalLift2 f k γ
 eval' (Sat p k) γ              = trace "SAT" $ evalSat p k γ
---eval' (Chr c k) γ              = trace ("CHR " ++ show c) $ evalChr c k γ
 --eval' (Bind f) γ               = trace "" $ evalBind f γ
 eval' Empt γ                   = trace "EMPT" $ evalEmpt γ
 eval' (Commit exit k) γ        = trace "COMMIT" $ evalCommit exit k γ
@@ -1138,8 +1212,10 @@ eval' (HardFork p q) γ         = trace "HARDFORK" $ evalHardFork p q γ
 eval' (SoftFork n p q) γ       = trace "SOFTFORK" $ evalSoftFork n p q γ
 eval' (Attempt n k) γ          = trace "ATTEMPT" $ evalAttempt n k γ
 eval' (Look k) γ               = trace "LOOK" $ evalLook k γ
+eval' (NegLook m k) γ          = trace "NEGLOOK" $ evalNegLook m k γ
 eval' (Restore k) γ            = trace "RESTORE" $ evalRestore k γ
 eval' (Case m k) γ             = trace "CASE" $ evalCase m k γ
+eval' (Choices fs ks) γ        = trace "CHOICES" $ evalChoices fs ks γ
 eval' (ManyIter σ v) γ         = trace "MANYITER" $ evalManyIter σ v γ
 eval' (ManyInitHard σ l v k) γ = trace "MANYINITHARD" $ evalManyInitHard σ l v k γ
 --eval' (ManyInitSoft σ l k) γ = trace "MANYINITSOFT" $ evalManyInitSoft σ l k γ

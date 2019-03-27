@@ -15,9 +15,11 @@ import qualified Parsley
 import qualified Text.Yoda as Yoda
 import Criterion.Main (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq (NFData(rnf))
+import Language.Haskell.TH.Syntax hiding (Match, match)
+import LiftPlugin
 
-manyTestParsley :: String -> Maybe Char
-manyTestParsley = $$(Parsley.runParser (Parsley.item Parsley.>?> Parsley.WQ (\c -> c >= 'a') [||(\c -> c >= 'a')||] Parsley.>?> Parsley.WQ (\c -> c <= 'z') [||(\c -> c <= 'z')||]))--} $$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
+manyTestParsley :: String -> Maybe ()
+manyTestParsley = $$(Parsley.runParser (Parsley.notFollowedBy Parsley.more))--}$$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
 
 manyTestYodaBad :: Yoda.Parser [Char]
 manyTestYodaBad = Yoda.many (Yoda.char 'a')

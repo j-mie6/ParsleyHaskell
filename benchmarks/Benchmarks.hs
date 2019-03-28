@@ -21,8 +21,8 @@ import LiftPlugin
 manyTestParsley :: String -> Maybe Int
 manyTestParsley = $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}$$(Parsley.runParser (Parsley.many (Parsley.char 'a')))
 
-manyTestYodaBad :: Yoda.Parser [Char]
-manyTestYodaBad = Yoda.many (Yoda.char 'a')
+manyTestYodaBad :: Yoda.Parser Int
+manyTestYodaBad = Yoda.chainl1 (Parsley.toDigit Yoda.<$> Yoda.satisfy (Parsley.isDigit)) ((+) Yoda.<$ Yoda.char '+')
 
 manyTestYodaOk :: Yoda.Parser [Char]
 manyTestYodaOk = Yoda.cull (Yoda.many (Yoda.char 'a'))
@@ -35,16 +35,16 @@ combinatorGroup =
   --let longChoice' = Parsley.mkParser longChoice in
   bgroup "combinators" [
     --bench "longChoice"             $ nf (Parsley.runCompiledParser longChoice') "b",
-    bench "manyTestParsley 0"      $ nf manyTestParsley (replicate 0 'a'),
-    bench "manyTestParsley 1"      $ nf manyTestParsley (replicate 1 'a'),
-    bench "manyTestParsley 10"     $ nf manyTestParsley (replicate 10 'a'),
-    bench "manyTestParsley 100"    $ nf manyTestParsley (replicate 100 'a'),
-    bench "manyTestParsley 1000"   $ nf manyTestParsley (replicate 1000 'a'),
-    bench "manyTestParsley 10,000" $ nf manyTestParsley (replicate 10000 'a')
+    bench "manyTestParsley 0"      $ nf manyTestParsley (take 0 ('0':cycle "+1")),
+    bench "manyTestParsley 1"      $ nf manyTestParsley (take 1 ('0':cycle "+1")),
+    bench "manyTestParsley 10"     $ nf manyTestParsley (take 11 ('0':cycle "+1")),
+    bench "manyTestParsley 100"    $ nf manyTestParsley (take 101 ('0':cycle "+1")),
+    bench "manyTestParsley 1000"   $ nf manyTestParsley (take 1001 ('0':cycle "+1")),
+    bench "manyTestParsley 10,000" $ nf manyTestParsley (take 10001 ('0':cycle "+1"))
   ]
 
 crossMany :: Benchmark
-crossMany = env (return $ replicate 1000 'a') $ \input -> bgroup "many" [
+crossMany = env (return $ take 1001 ('0':cycle "+1")) $ \input -> bgroup "many" [
     bench "manyParsley 1000" $ nf manyTestParsley input,
     bench "manyYodaBad 1000" $ nf (Yoda.parse manyTestYodaBad)        input,
     bench "manyYodaOk 1000"  $ nf (Yoda.parse manyTestYodaOk)         input
@@ -57,3 +57,4 @@ main = --rnf (Parsley.runParser (manyTestParsley) (replicate 1000000 'a')) `seq`
     combinatorGroup,
     crossMany
   ]--}
+--main = print (manyTestParsley (take 10001 ('0':cycle "+1")))

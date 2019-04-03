@@ -142,6 +142,10 @@ pandle :: IFunctor f => (forall j. a j -> b j) -> (forall j. f (Prod (Free f a) 
 pandle gen alg (Var x) = gen x
 pandle gen alg (Op x) = alg (imap (Prod . (id /\ (pandle gen alg))) x)
 
+pandle' :: IFunctor f => (forall j. a j -> b j) -> (forall j. Free f a j -> f b j -> b j) -> Free f a i -> b i
+pandle' gen alg (Var x) = gen x
+pandle' gen alg op@(Op x) = alg op (imap (pandle' gen alg) x)
+
 extract :: IFunctor f => (forall j. f a j -> a j) -> Free f a i -> a i
 extract = handle id
 
@@ -506,6 +510,44 @@ preprocess !p = trace "preprocessing" $ unsafePerformIO (runReaderT (preprocess'
     preprocess'' !(ChainPost p op)  = liftM2 ChainPost (preprocess' p) (preprocess' op)
     preprocess'' !(Debug name p)    = liftM (Debug name) (preprocess' p)
     preprocess'' !p                 = return p
+
+data StableParserName' f = forall a. StableParserName' (StableName# (Free Parser' f a))
+data GenParser' f = forall a. GenParser' (Free Parser' f a)
+instance Eq (StableParserName' f) where (StableParserName' n) == (StableParserName' m) = eqStableName (StableName n) (StableName m)
+instance Hashable (StableParserName' f) where
+  hash (StableParserName' n) = hashStableName (StableName n)
+  hashWithSalt salt (StableParserName' n) = hashWithSalt salt (StableName n)
+
+newtype Carrier f a = Carrier {unCarrier :: ReaderT (HashMap (StableParserName' f) (GenParser' f)) IO (Free Parser' f a)}
+preprocess' :: Free Parser' f a -> Free Parser' f a
+preprocess' !p = unsafePerformIO (runReaderT (unCarrier (pandle' (Carrier . return . Var) alg p)) (HashMap.empty))
+  where
+    alg :: Free Parser' f a -> Parser' (Carrier f) a -> Carrier f a
+    -- Force evaluation of p to ensure that the stableName is correct first time
+    alg !p q = Carrier $ do
+      !seen <- ask
+      (StableName _name) <- Reader.lift (makeStableName p)
+      let !name = StableParserName' _name
+      case HashMap.lookup name seen of
+        Just (GenParser' q) -> return $! (Op (Rec' (coerce q)))
+        Nothing -> mdo q' <- local (HashMap.insert name (GenParser' q')) (unCarrier $ subalg q)
+                       return $! q'
+    subalg :: Parser' (Carrier f) a -> Carrier f a
+    subalg !(pf :<*> px)     = Carrier (liftM optimise' (liftM2 (:<*>) (unCarrier pf) (unCarrier px)))
+    subalg !(p :*> q)        = Carrier (liftM optimise' (liftM2 (:*>)  (unCarrier p)  (unCarrier q)))
+    subalg !(p :<* q)        = Carrier (liftM optimise' (liftM2 (:<*)  (unCarrier p)  (unCarrier q)))
+    subalg !(p :<|> q)       = Carrier (liftM optimise' (liftM2 (:<|>) (unCarrier p)  (unCarrier q)))
+    subalg !Empty'             = Carrier (return (Op Empty'))
+    subalg !(Try' n p)         = Carrier (liftM optimise' (liftM (Try' n) (unCarrier p)))
+    subalg !(LookAhead' p)     = Carrier (liftM optimise' (liftM LookAhead' (unCarrier p)))
+    subalg !(NotFollowedBy' p) = Carrier (liftM optimise' (liftM NotFollowedBy' (unCarrier p)))
+    subalg !(Branch' b p q)    = Carrier (liftM optimise' (liftM3 Branch' (unCarrier b) (unCarrier p) (unCarrier q)))
+    subalg !(Match' p fs qs)   = Carrier (liftM optimise' (liftM3 Match' (unCarrier p) (return fs) (traverse unCarrier qs)))
+    subalg !(ChainPre' op p)   = Carrier (liftM2 (\op p -> Op (ChainPre' op p)) (unCarrier op) (unCarrier p))
+    subalg !(ChainPost' p op)  = Carrier (liftM2 (\p op -> Op (ChainPost' p op)) (unCarrier p) (unCarrier op))
+    subalg !(Debug' name p)    = Carrier (liftM (Op . Debug' name) (unCarrier p))
+    subalg !(Pure' x)          = Carrier (return (Op (Pure' x)))
+    subalg !(Satisfy' f)       = Carrier (return (Op (Satisfy' f)))
 
 -- pronounced quapp
 (>*<) :: WQ (a -> b) -> WQ a -> WQ b

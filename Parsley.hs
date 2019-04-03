@@ -106,7 +106,6 @@ data Parser a where
   (:<*>:)       :: Parser (a -> b) -> Parser a -> Parser b
   (:*>:)        :: Parser a -> Parser b -> Parser b
   (:<*:)        :: Parser a -> Parser b -> Parser a
-  --(:>>=:)       :: Parser a -> (a -> Parser b) -> Parser b
   (:<|>:)       :: Parser a -> Parser a -> Parser a
   Empty         :: Parser a
   Try           :: Maybe Int -> Parser a -> Parser a
@@ -170,15 +169,17 @@ data Parser' (k :: * -> *) (a :: *) where
   (:<*>)       :: k (a -> b) -> k a -> Parser' k b
   (:*>)        :: k a -> k b -> Parser' k b
   (:<*)        :: k a -> k b -> Parser' k a
-  --(:>>=:)       :: k a -> (a -> k b) -> Parser' k b
   (:<|>)       :: k a -> k a -> Parser' k a
   Empty'         :: Parser' a k
   Try'           :: Maybe Int -> k a -> Parser' k a
   LookAhead'     :: k a -> Parser' k a
   Rec'           :: k a -> Parser' k a
-  ChainPre'      :: k (a -> a) -> k a -> Parser' k a
   NotFollowedBy' :: k a -> Parser' k ()
   Branch'        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Parser' k c
+  Match'         :: k a -> [WQ (a -> Bool)] -> [k b] -> Parser' k b
+  ChainPre'      :: k (a -> a) -> k a -> Parser' k a
+  ChainPost'     :: k a -> k (a -> a) -> Parser' k a
+  Debug'         :: String -> k a -> Parser' k a
 
 instance IFunctor Parser' where
   imap _ (Pure' x) = Pure' x
@@ -191,9 +192,12 @@ instance IFunctor Parser' where
   imap f (Try' n p) = Try' n (f p)
   imap f (LookAhead' p) = LookAhead' (f p)
   imap f (Rec' p) = Rec' (f p)
-  imap f (ChainPre' op p) = ChainPre' (f op) (f p)
   imap f (NotFollowedBy' p) = NotFollowedBy' (f p)
   imap f (Branch' b p q) = Branch' (f b) (f p) (f q)
+  imap f (Match' p fs qs) = Match' (f p) fs (map f qs)
+  imap f (ChainPre' op p) = ChainPre' (f op) (f p)
+  imap f (ChainPost' p op) = ChainPost' (f p) (f op)
+  imap f (Debug' name p) = Debug' name (f p)
 
 convert :: Parser a -> Free Parser' Void a
 convert (Pure x) = Op (Pure' x)
@@ -206,9 +210,12 @@ convert Empty = Op Empty'
 convert (Try n p) = Op (Try' n (convert p))
 convert (LookAhead p) = Op (LookAhead' (convert p))
 convert (Rec p) = Op (Rec' (convert p))
-convert (ChainPre op p) = Op (ChainPre' (convert op) (convert p))
 convert (NotFollowedBy p) = Op (NotFollowedBy' (convert p))
 convert (Branch b p q) = Op (Branch' (convert b) (convert p) (convert q))
+convert (Match p fs qs) = Op (Match' (convert p) fs (map convert qs))
+convert (ChainPre op p) = Op (ChainPre' (convert op) (convert p))
+convert (ChainPost p op) = Op (ChainPost' (convert p) (convert op))
+convert (Debug name p) = Op (Debug' name (convert p))
 
 showAST' :: Free Parser' f a -> String
 showAST' = getConst . handle (const (Const "")) (Const . alg)
@@ -225,9 +232,12 @@ showAST' = getConst . handle (const (Const "")) (Const . alg)
     alg (Try' (Just n) (Const p)) = concat ["(try ", show n, " ", p, ")"]
     alg (LookAhead' (Const p)) = concat ["(lookAhead ", p, ")"]
     alg (Rec' _) = "recursion point!"
-    alg (ChainPre' (Const op) (Const p)) = concat ["(chainPre ", op, " ", p, ")"]
     alg (NotFollowedBy' (Const p)) = concat ["(notFollowedBy ", p, ")"]
     alg (Branch' (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
+    alg (Match' (Const p) fs qs) = concat ["(match ", p, " ", show (map getConst qs), ")"]
+    alg (ChainPre' (Const op) (Const p)) = concat ["(chainPre ", op, " ", p, ")"]
+    alg (ChainPost' (Const p) (Const op)) = concat ["(chainPost ", p, " ", op, ")"]
+    alg (Debug' _ (Const p)) = p
 
 showAST :: Parser a -> String
 showAST (Pure _) = "(pure x)"
@@ -308,13 +318,13 @@ empty = Empty
 (<|>) = (:<|>:)
 
 many :: Parser a -> Parser [a]
-many p = {-let manyp = p <:> manyp <|> pure (WQ [] [|| [] ||]) in manyp--}pfoldr (lift' (:)) (WQ [] [||[]||]) p
+many p = pfoldr (lift' (:)) (WQ [] [||[]||]) p
 
 some :: Parser a -> Parser [a]
 some p = p <:> many p
 
 skipMany :: Parser a -> Parser ()
-skipMany = pfoldr (lift' const >*< lift' id) (lift' ()) --pfoldl (lift' const) (lift' ())
+skipMany = pfoldr (lift' const >*< lift' id) (lift' ())
 
 -- Additional Combinators
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
@@ -386,7 +396,6 @@ more = lookAhead (void item)
 satisfy = Satisfy
 char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
 lookAhead = LookAhead
----notFollowedBy p = try (join ((try p *> return empty) <|> return unit))
 notFollowedBy = NotFollowedBy
 
 try :: Parser a -> Parser a
@@ -433,7 +442,7 @@ when :: Parser Bool -> Parser () -> Parser ()
 when p q = p <?|> (q, unit)
 
 while :: Parser Bool -> Parser ()
-while x = let w = when x w in w
+while x = fix (when x)
 
 select :: Parser (Either a b) -> Parser (a -> b) -> Parser b
 select p q = branch p q (pure (lift' id))
@@ -443,7 +452,6 @@ fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||
 
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 p op = chainPost p (lift' flip <$> op <*> p)
---chainl1 p op = let rest = (lift' flip >*< lift' (.) <$> (lift' flip <$> op <*> p) <*> rest) <|> pure (lift' id) in p <**> rest
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainr1 p op = let go = p <**> ((lift' flip <$> op <*> go) <|> pure (lift' id)) in go
@@ -458,8 +466,7 @@ chainPre :: Parser (a -> a) -> Parser a -> Parser a
 chainPre = ChainPre
 
 chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost = ChainPost-- p <**> chainPre ((lift' flip >*< lift' (.)) <$> op) (pure (lift' id))
-  --ChainPost--p op = lift' Parsley.foldl' >*< (lift' flip >*< lift' ($)) <$> p <*> many op
+chainPost = ChainPost
 
 debug :: String -> Parser a -> Parser a
 debug = Debug
@@ -699,6 +706,8 @@ constantInput' = getConst . pandle (const (Const Nothing)) (alg1 |> (Const . alg
     alg2 (LookAhead' (Const p)) = p
     alg2 (NotFollowedBy' (Const p)) = p
     alg2 (Branch' (Const b) (Const p) (Const q)) = b <+> (p <==> q)
+    alg2 (Match' (Const p) _ qs) = p <+> (foldr1 (<==>) (map getConst qs))
+    alg2 (Debug' _ (Const p)) = p
     alg2 _ = Nothing
 
 (<+>) :: (Num a, Monad m) => m a -> m a -> m a
@@ -732,7 +741,6 @@ data M xs ks a where
   Choices   :: ![WQ (x -> Bool)] -> ![M xs ks a] -> M (x ': xs) ks a
   ChainIter :: !(ΣVar x) -> !(MVar xs ks a) -> M ((x -> x) ': xs) ks a
   ChainInit :: !(WQ x) -> !(ΣVar x) -> !(M xs ks a) -> !(MVar xs ks a) -> M (x ': xs) ks a -> M (x ': xs) ks a
-  --ChainPreInit  :: !(ΣVar (x -> x)) -> !(M xs ks a) -> !(MVar xs ks a) -> !(M ((x -> x) ': xs) ks a) -> M xs ks a
   LogEnter  :: String -> !(M xs ks a) -> M xs ks a
   LogExit   :: String -> !(M xs ks a) -> M xs ks a
 
@@ -785,8 +793,6 @@ compile' !(p :<*: q) !m        = do !qc <- compile' q (Pop m); compile' p qc
 compile' !Empty !m             = do return $! Empt
 compile' !(Try n p :<|>: q) !m = do liftM2 (SoftFork n) (compile' p (Commit (isJust n) m)) (compile' q m)
 compile' !(p :<|>: q) !m       = do liftM2 HardFork (compile' p (Commit False m)) (compile' q m)
---compile' !(p :>>=: f) !m       = do compile' p (Bind f')
---  where f' x = runST $ (newSTRef HashMap.empty) >>= runReaderT (compile' (preprocess (f x)) m)
 compile' !(Try n p) !m         = do liftM (Attempt n) (compile' p (Commit (isJust n) m))
 compile' !(LookAhead p) !m     = do liftM Look (compile' p (Restore m))
 compile' !(NotFollowedBy p) !m = do liftM2 NegLook (compile' p (Restore Empt)) (return (Push (lift' ()) m))
@@ -1161,7 +1167,6 @@ evalAttempt constantInput k γ =
            ||]
        ))
 
-
 evalLook :: M xs ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalLook k γ =
   do ctx <- ask
@@ -1221,29 +1226,6 @@ evalChainIter u v γ@(Γ input !xs ks o hs cidx cs σs d) =
             $$(coerce k) $$input xs' $$ks $$o $$hs $$cidx $$cs $$σs $$d
          ||]
 
-{-evalChainPreInit :: ΣVar (x -> x) -> M xs ks a -> MVar xs ks a -> M ((x -> x) ': xs) ks a
-                 -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-evalChainPreInit u l v k γ@(Γ input !xs ks o _ _ _ σs d) =
-  do ctx <- ask
-     let !(QSTRef σ) = (σm ctx) DMap.! u
-     let handler = [||\o hs cidx cs d' ->
-          do rollback $$σs ((I# d') - $$d)
-             (c, cidx') <- popC (I# cidx) cs
-             if c == (I# o) then do f <- pokeΣ $$σ id
-                                    $$(runReader (eval' k (γ {xs = [|| pushX f $$(bug xs) ||],
-                                                              o = [||I# o||],
-                                                              hs = [||hs||],
-                                                              cidx = [||cidx'||],
-                                                              cs = [||cs||]})) ctx)
-             else do writeΣ $$σ id; raise hs cidx' cs (I# o) $$d
-          ||]
-     return (setupHandlerΓ γ handler (\hs cidx cs -> [||
-       -- NOTE: Only the offset and the cs array can change between interations of a chainPre
-       fix (\r o cs ->
-         $$(let μ' = Map.insert (GenMVar v) (GenEval [|| \_ _ _ o _ _ cs _ _ -> r o cs ||]) (μ ctx)
-            in runReader (eval' l (Γ input (bug xs) (bug ks) [||o||] hs cidx [||cs||] σs d)) (ctx {μ = μ'})))
-       $$o $$cs||]))-}
-
 evalChainInit :: WQ x -> ΣVar x -> M xs ks a -> MVar xs ks a -> M (x ': xs) ks a
                   -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalChainInit deflt u l v k γ@(Γ input !xs ks o _ _ _ σs d) =
@@ -1290,7 +1272,7 @@ eval' (Case m k) γ            = trace "CASE" $ evalCase m k γ
 eval' (Choices fs ks) γ       = trace "CHOICES" $ evalChoices fs ks γ
 eval' (ChainIter σ v) γ       = trace "CHAINITER" $ evalChainIter σ v γ
 eval' (ChainInit x σ l v k) γ = trace "CHAININIT" $ evalChainInit x σ l v k γ
-eval' (LogEnter name k) γ   = trace "LOGENTER" $ evalLogEnter name k γ
+eval' (LogEnter name k) γ     = trace "LOGENTER" $ evalLogEnter name k γ
 eval' (LogExit name k) γ      = trace "LOGEXIT" $ evalLogExit name k γ
 
 runParser :: Parsley.Parser a -> TExpQ (String -> Maybe a)
@@ -1331,7 +1313,7 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
 evalLogEnter :: String -> M xs ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalLogEnter name k γ =
   do ctx <- ask
-     let handler = [||\o hs cidx cs d' -> trace $$(preludeString name '<' (γ {o = [||I# o||]}) (debugDown ctx) (color Red " Fail")) (raise hs (I# cidx) cs (I# o) (I# d')) ||]
+     let handler = [||\o hs cidx cs d' -> trace $$(preludeString name '<' (γ {o = [||I# o||]}) ctx (color Red " Fail")) (raise hs (I# cidx) cs (I# o) (I# d')) ||]
      return (setupHandlerΓ γ handler (\γ' -> [|| trace $$(preludeString name '>' γ ctx "") $$(runReader (eval' k γ') (debugUp ctx))||]))
 
 

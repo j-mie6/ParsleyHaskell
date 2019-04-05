@@ -39,7 +39,7 @@ import Prelude hiding          (fmap, pure, (<*), (*>), (<*>), (<$>), (<$))
 --import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA, (<**>), many, some)
 import qualified Data.Functor as Functor
 import qualified Control.Applicative as Applicative
-import Control.Applicative     (Const(Const), getConst)
+--import Control.Applicative     (Const(Const), getConst)
 import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, liftM3, join, (<$!>), forM)
 --import Data.Functor            ((<$>), (<$), ($>), (<&>), void)
 import GHC.ST                  (ST(..), runST)
@@ -118,36 +118,44 @@ data Parser a where
   ChainPost     :: Parser a -> Parser (a -> a) -> Parser a
   Debug         :: String -> Parser a -> Parser a
 
-class IFunctor (f :: (* -> *) -> * -> *) where
-  imap :: (forall i. a i -> b i) -> f a i -> f b i
+class IFunctor (f :: ([*] -> [*] -> * -> * -> *) -> [*] -> [*] -> * -> * -> *) where
+  imap :: (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l') -> f a i j k l -> f b i j k l
 
-class IFunctor m => IMonad (m :: (* -> *) -> * -> *) where
-  ipure :: a i -> m a i
-  ibind :: m a j ->(forall i. a i -> m b i) -> m b j
+class IFunctor m => IMonad (m :: ([*] -> [*] -> * -> * -> *) -> [*] -> [*] -> * -> * -> *) where
+  ipure :: a i j k l -> m a i j k l
+  ibind :: m a i j k l -> (forall i' j' k' l'. a i' j' k' l' -> m b i' j' k' l') -> m b i j k l
+
+--ithen :: IMonad m => m a i -> m b i -> m b i
+--ithen m n = m `ibind` (const n)
 
 --data Free f i a = Var (a i) | Op (f (Free f i a) a)
-data Free (f :: (* -> *) -> * -> *) (a :: * -> *) (i :: *) where
-  Var :: a i -> Free f a i
-  Op :: f (Free f a) i -> Free f a i
+data Free (f :: ([*] -> [*] -> * -> * -> *) -> [*] -> [*] -> * -> * -> *) (a :: [*] -> [*] -> * -> * -> *) (i :: [*]) (j :: [*]) (k :: *) (l :: *) where
+  Var :: a i j k l -> Free f a i j k l
+  Op :: f (Free f a) i j k l -> Free f a i j k l
 
-handle :: IFunctor f => (forall j. a j -> b j) -> (forall j. f b j -> b j) -> Free f a i -> b i
-handle gen alg (Var x) = gen x
-handle gen alg (Op x) = alg (imap (handle gen alg) x)
+fold :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+                   -> (forall i' j' k' l'. f b i' j' k' l' -> b i' j' k' l') -> Free f a i j k l -> b i j k l
+fold gen alg (Var x) = gen x
+fold gen alg (Op x) = alg (imap (fold gen alg) x)
 
 (/\) :: (a -> b) -> (a -> c) -> a -> (b, c)
 (f /\ g) x = (f x, g x)
 
-newtype Prod f g a = Prod {getProd :: (f a, g a)}
-pandle :: IFunctor f => (forall j. a j -> b j) -> (forall j. f (Prod (Free f a) b) j -> b j) -> Free f a i -> b i
-pandle gen alg (Var x) = gen x
-pandle gen alg (Op x) = alg (imap (Prod . (id /\ (pandle gen alg))) x)
+newtype Prod f g i j k l = Prod {getProd :: (f i j k l, g i j k l)}
+parafold :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+                       -> (forall i' j' k' l'. f (Prod (Free f a) b) i' j' k' l' -> b i' j' k' l')
+                       -> Free f a i j k l -> b i j k l
+parafold gen alg (Var x) = gen x
+parafold gen alg (Op x) = alg (imap (Prod . (id /\ (parafold gen alg))) x)
 
-pandle' :: IFunctor f => (forall j. a j -> b j) -> (forall j. Free f a j -> f b j -> b j) -> Free f a i -> b i
-pandle' gen alg (Var x) = gen x
-pandle' gen alg op@(Op x) = alg op (imap (pandle' gen alg) x)
+fold' :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+                    -> (forall i' j' k' l'. Free f a i' j' k' l' -> f b i' j' k' l' -> b i' j' k' l')
+                    -> Free f a i j k l -> b i j k l
+fold' gen alg (Var x) = gen x
+fold' gen alg op@(Op x) = alg op (imap (fold' gen alg) x)
 
-extract :: IFunctor f => (forall j. f a j -> a j) -> Free f a i -> a i
-extract = handle id
+extract :: IFunctor f => (forall i' j' k' l'. f a i' j' k' l' -> a i' j' k' l') -> Free f a i j k l -> a i j k l
+extract = fold id
 
 instance IFunctor f => IFunctor (Free f) where
   imap f (Var x) = Var (f x)
@@ -155,7 +163,7 @@ instance IFunctor f => IFunctor (Free f) where
 
 instance IFunctor f => IMonad (Free f) where
   ipure = Var
-  ibind m f = handle f Op m
+  ibind m f = fold f Op m
 
 class Chain r k where
   (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
@@ -164,26 +172,27 @@ instance {-# OVERLAPPABLE #-} Chain a a where
 instance {-# OVERLAPS #-} Chain a (Maybe a) where
   (|>) = liftM2 (Applicative.<|>)
 
-data Unit k = Unit deriving Functor
-data Void k deriving Functor
+data Unit i j k l = Unit
+data Void i j k l
+data Const a i j k l = Const {getConst :: a}
 
-data Parser' (k :: * -> *) (a :: *) where
-  Pure'          :: WQ a -> Parser' k a
-  Satisfy'       :: WQ (Char -> Bool) -> Parser' k a
-  (:<*>)       :: k (a -> b) -> k a -> Parser' k b
-  (:*>)        :: k a -> k b -> Parser' k b
-  (:<*)        :: k a -> k b -> Parser' k a
-  (:<|>)       :: k a -> k a -> Parser' k a
-  Empty'         :: Parser' a k
-  Try'           :: Maybe Int -> k a -> Parser' k a
-  LookAhead'     :: k a -> Parser' k a
-  Rec'           :: k a -> Parser' k a
-  NotFollowedBy' :: k a -> Parser' k ()
-  Branch'        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Parser' k c
-  Match'         :: k a -> [WQ (a -> Bool)] -> [k b] -> Parser' k b
-  ChainPre'      :: k (a -> a) -> k a -> Parser' k a
-  ChainPost'     :: k a -> k (a -> a) -> Parser' k a
-  Debug'         :: String -> k a -> Parser' k a
+data Parser' (k :: [*] -> [*] -> * -> * -> *) (xs :: [*]) (ks :: [*]) (a :: *) (i :: *) where
+  Pure'          :: WQ a -> Parser' k xs ks a i
+  Satisfy'       :: WQ (Char -> Bool) -> Parser' k xs ks a i
+  (:<*>)       :: k xs ks (a -> b) i -> k xs ks a i -> Parser' k xs ks b i
+  (:*>)        :: k xs ks a i -> k xs ks b i -> Parser' k xs ks b i
+  (:<*)        :: k xs ks a i -> k xs ks b i -> Parser' k xs ks a i
+  (:<|>)       :: k xs ks a i -> k xs ks a i -> Parser' k xs ks a i
+  Empty'         :: Parser' k xs ks a i
+  Try'           :: Maybe Int -> k xs ks a i -> Parser' k xs ks a i
+  LookAhead'     :: k xs ks a i -> Parser' k xs ks a i
+  Rec'           :: k xs ks a i -> Parser' k xs ks a i
+  NotFollowedBy' :: k xs ks a i -> Parser' k xs ks () i
+  Branch'        :: k xs ks (Either a b) i -> k xs ks (a -> c) i -> k xs ks (b -> c) i -> Parser' k xs ks c i
+  Match'         :: k xs ks a i -> [WQ (a -> Bool)] -> [k xs ks b i] -> Parser' k xs ks b i
+  ChainPre'      :: k xs ks (a -> a) i -> k xs ks a i -> Parser' k xs ks a i
+  ChainPost'     :: k xs ks a i -> k xs ks (a -> a) i -> Parser' k xs ks a i
+  Debug'         :: String -> k xs ks a i -> Parser' k xs ks a i
 
 instance IFunctor Parser' where
   imap _ (Pure' x) = Pure' x
@@ -203,7 +212,7 @@ instance IFunctor Parser' where
   imap f (ChainPost' p op) = ChainPost' (f p) (f op)
   imap f (Debug' name p) = Debug' name (f p)
 
-convert :: Parser a -> Free Parser' Void a
+convert :: Parser a -> Free Parser' Void '[] '[] a i
 convert (Pure x) = Op (Pure' x)
 convert (Satisfy f) = Op (Satisfy' f)
 convert (pf :<*>: px) = Op (convert pf :<*> convert px)
@@ -221,10 +230,10 @@ convert (ChainPre op p) = Op (ChainPre' (convert op) (convert p))
 convert (ChainPost p op) = Op (ChainPost' (convert p) (convert op))
 convert (Debug name p) = Op (Debug' name (convert p))
 
-showAST' :: Free Parser' f a -> String
-showAST' = getConst . handle (const (Const "")) (Const . alg)
+showAST' :: Free Parser' f '[] '[] a i -> String
+showAST' = getConst . fold (const (Const "")) (Const . alg)
   where
-    alg :: Parser' (Const String) a -> String
+    alg :: Parser' (Const String) xs ks a i -> String
     alg (Pure' x) = "(pure x)"
     alg (Satisfy' _) = "(satisfy f)"
     alg (Const pf :<*> Const px) = concat ["(", pf, " <*> ",  px, ")"]
@@ -511,18 +520,18 @@ preprocess !p = trace "preprocessing" $ unsafePerformIO (runReaderT (preprocess'
     preprocess'' !(Debug name p)    = liftM (Debug name) (preprocess' p)
     preprocess'' !p                 = return p
 
-data StableParserName' f = forall a. StableParserName' (StableName# (Free Parser' f a))
-data GenParser' f = forall a. GenParser' (Free Parser' f a)
-instance Eq (StableParserName' f) where (StableParserName' n) == (StableParserName' m) = eqStableName (StableName n) (StableName m)
-instance Hashable (StableParserName' f) where
+data StableParserName' f xs ks i = forall a. StableParserName' (StableName# (Free Parser' f xs ks a i))
+data GenParser' f xs ks i = forall a. GenParser' (Free Parser' f xs ks a i)
+instance Eq (StableParserName' xs ks f i) where (StableParserName' n) == (StableParserName' m) = eqStableName (StableName n) (StableName m)
+instance Hashable (StableParserName' xs ks f i) where
   hash (StableParserName' n) = hashStableName (StableName n)
   hashWithSalt salt (StableParserName' n) = hashWithSalt salt (StableName n)
 
-newtype Carrier f a = Carrier {unCarrier :: ReaderT (HashMap (StableParserName' f) (GenParser' f)) IO (Free Parser' f a)}
-preprocess' :: Free Parser' f a -> Free Parser' f a
-preprocess' !p = unsafePerformIO (runReaderT (unCarrier (pandle' (Carrier . return . Var) alg p)) (HashMap.empty))
+newtype Carrier f xs ks a i = Carrier {unCarrier :: ReaderT (HashMap (StableParserName' f xs ks i) (GenParser' f xs ks i)) IO (Free Parser' f xs ks a i)}
+preprocess' :: Free Parser' f '[] '[] a i -> Free Parser' f '[] '[] a i
+preprocess' !p = unsafePerformIO (runReaderT (unCarrier (fold' (Carrier . return . Var) alg p)) (HashMap.empty))
   where
-    alg :: Free Parser' f a -> Parser' (Carrier f) a -> Carrier f a
+    alg :: Free Parser' f xs ks a i -> Parser' (Carrier f) xs ks a i -> Carrier f xs ks a i
     -- Force evaluation of p to ensure that the stableName is correct first time
     alg !p q = Carrier $ do
       !seen <- ask
@@ -532,7 +541,7 @@ preprocess' !p = unsafePerformIO (runReaderT (unCarrier (pandle' (Carrier . retu
         Just (GenParser' q) -> return $! (Op (Rec' (coerce q)))
         Nothing -> mdo q' <- local (HashMap.insert name (GenParser' q')) (unCarrier $ subalg q)
                        return $! q'
-    subalg :: Parser' (Carrier f) a -> Carrier f a
+    subalg :: Parser' (Carrier f) xs ks a i -> Carrier f xs ks a i
     subalg !(pf :<*> px)     = Carrier (liftM optimise' (liftM2 (:<*>) (unCarrier pf) (unCarrier px)))
     subalg !(p :*> q)        = Carrier (liftM optimise' (liftM2 (:*>)  (unCarrier p)  (unCarrier q)))
     subalg !(p :<* q)        = Carrier (liftM optimise' (liftM2 (:<*)  (unCarrier p)  (unCarrier q)))
@@ -686,7 +695,7 @@ optimise p                             = p
 --optimise'' :: Free Parser' Void a -> Free Parser' Void a
 --optimise'' (Op x) = optimise' x
 
-optimise' :: Parser' (Free Parser' f) a -> Free Parser' f a
+optimise' :: Parser' (Free Parser' f) xs ks a i -> Free Parser' f xs ks a i
 optimise' (Op Empty' :<*> _) = Op Empty'
 optimise' (u :<*> Op Empty') = Op (u :*> Op Empty')
 optimise' (Op Empty' :*> _)  = Op Empty'
@@ -731,26 +740,26 @@ constantInput (Match p _ qs) = constantInput p <+> (foldr1 (<==>) (map constantI
 constantInput (Debug _ p) = constantInput p
 constantInput _ = Nothing
 
-constantInput' :: Free Parser' f a -> Maybe Int
-constantInput' = getConst . pandle (const (Const Nothing)) (alg1 |> (Const . alg2 . imap (snd . getProd)))
+constantInput' :: Free Parser' f xs ks a i -> Maybe Int
+constantInput' = getConst . parafold (const (Const Nothing)) (alg1 |> (Const . alg2 . imap (snd . getProd)))
   where
-    alg1 :: Parser' (Prod (Free Parser' f) (Const (Maybe Int))) a -> Maybe (Const (Maybe Int) a)
+    alg1 :: Parser' (Prod (Free Parser' f) (Const (Maybe Int))) xs ks a i -> Maybe (Const (Maybe Int) xs ks a i)
     alg1 (Prod (Op (Try' _ _), Const n) :<|> Prod (_, Const q)) = Just (Const (n <==> q))
     alg1 _ = Nothing
-    alg2 :: Parser' (Const (Maybe Int)) a -> Maybe Int
-    alg2 (Pure' _) = Just 0
-    alg2 (Satisfy' _) = Just 1
-    alg2 (Const p :<*> Const q) = p <+> q
-    alg2 (Const p :*> Const q) = p <+> q
-    alg2 (Const p :<* Const q) = p <+> q
-    alg2 Empty' = Just 0
-    alg2 (Try' n _) = n
-    alg2 (LookAhead' (Const p)) = p
-    alg2 (NotFollowedBy' (Const p)) = p
+    alg2 :: Parser' (Const (Maybe Int)) xs ks a i -> Maybe Int
+    alg2 (Pure' _)                               = Just 0
+    alg2 (Satisfy' _)                            = Just 1
+    alg2 (Const p :<*> Const q)                  = p <+> q
+    alg2 (Const p :*> Const q)                   = p <+> q
+    alg2 (Const p :<* Const q)                   = p <+> q
+    alg2 Empty'                                  = Just 0
+    alg2 (Try' n _)                              = n
+    alg2 (LookAhead' (Const p))                  = p
+    alg2 (NotFollowedBy' (Const p))              = p
     alg2 (Branch' (Const b) (Const p) (Const q)) = b <+> (p <==> q)
-    alg2 (Match' (Const p) _ qs) = p <+> (foldr1 (<==>) (map getConst qs))
-    alg2 (Debug' _ (Const p)) = p
-    alg2 _ = Nothing
+    alg2 (Match' (Const p) _ qs)                 = p <+> (foldr1 (<==>) (map getConst qs))
+    alg2 (Debug' _ (Const p))                    = p
+    alg2 _                                       = Nothing
 
 (<+>) :: (Num a, Monad m) => m a -> m a -> m a
 (<+>) = liftM2 (+)

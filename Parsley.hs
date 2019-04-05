@@ -118,10 +118,10 @@ data Parser a where
   ChainPost     :: Parser a -> Parser (a -> a) -> Parser a
   Debug         :: String -> Parser a -> Parser a
 
-class IFunctor (f :: ([*] -> [*] -> * -> * -> *) -> [*] -> [*] -> * -> * -> *) where
+class IFunctor (f :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) where
   imap :: (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l') -> f a i j k l -> f b i j k l
 
-class IFunctor m => IMonad (m :: ([*] -> [*] -> * -> * -> *) -> [*] -> [*] -> * -> * -> *) where
+class IFunctor m => IMonad (m :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) where
   ipure :: a i j k l -> m a i j k l
   ibind :: m a i j k l -> (forall i' j' k' l'. a i' j' k' l' -> m b i' j' k' l') -> m b i j k l
 
@@ -129,7 +129,7 @@ class IFunctor m => IMonad (m :: ([*] -> [*] -> * -> * -> *) -> [*] -> [*] -> * 
 --ithen m n = m `ibind` (const n)
 
 --data Free f i a = Var (a i) | Op (f (Free f i a) a)
-data Free (f :: ([*] -> [*] -> * -> * -> *) -> [*] -> [*] -> * -> * -> *) (a :: [*] -> [*] -> * -> * -> *) (i :: [*]) (j :: [*]) (k :: *) (l :: *) where
+data Free (f :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) (a :: [*] -> [[*]] -> * -> * -> *) (i :: [*]) (j :: [[*]]) (k :: *) (l :: *) where
   Var :: a i j k l -> Free f a i j k l
   Op :: f (Free f a) i j k l -> Free f a i j k l
 
@@ -176,9 +176,9 @@ data Unit i j k l = Unit
 data Void i j k l
 data Const a i j k l = Const {getConst :: a}
 
-data Parser' (k :: [*] -> [*] -> * -> * -> *) (xs :: [*]) (ks :: [*]) (a :: *) (i :: *) where
+data Parser' (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: *) (i :: *) where
   Pure'          :: WQ a -> Parser' k xs ks a i
-  Satisfy'       :: WQ (Char -> Bool) -> Parser' k xs ks a i
+  Satisfy'       :: WQ (Char -> Bool) -> Parser' k xs ks Char i
   (:<*>)       :: k xs ks (a -> b) i -> k xs ks a i -> Parser' k xs ks b i
   (:*>)        :: k xs ks a i -> k xs ks b i -> Parser' k xs ks b i
   (:<*)        :: k xs ks a i -> k xs ks b i -> Parser' k xs ks a i
@@ -822,75 +822,90 @@ instance Show (M xs ks a) where
   show (LogEnter _ k) = show k
   show (LogExit _ k) = show k
 
-compile :: Parser a -> (M '[] '[] a, [State])
-compile !p = trace (show m) (m, vss)
-  where (m, vss) = unsafePerformIO (do σs <- newIORef []
-                                       m <- runReaderT (compile' (trace (showAST p) p) Halt) (HashMap.empty, 0, σs)
-                                       vss <- readIORef σs
-                                       return $! (m, vss))
-
 (><) :: (a -> c) -> (b -> d) -> (a, b, x) -> (c, d, x)
 (f >< g) (x, y, z) = (f x, g y, z)
 
 type IMVar = Int
 data State = forall a. State a (TExpQ a) (ΣVar a)
 type ΣVars = IORef [State]
-compile' :: Parser a -> M (a ': xs) ks b -> ReaderT (HashMap StableParserName IMVar, IMVar, ΣVars) IO (M xs ks b)
-compile' !(Pure x) !m          = do return $! (Push x m)
-compile' !(Satisfy p) !m       = do return $! (Sat p m)
-compile' !(pf :<*>: px) !m     = do !pxc <- compile' px (Lift2 (lift' ($)) m); compile' pf pxc
-compile' !(p :*>: q) !m        = do !qc <- compile' q m; compile' p (Pop qc)
-compile' !(p :<*: q) !m        = do !qc <- compile' q (Pop m); compile' p qc
-compile' !Empty !m             = do return $! Empt
-compile' !(Try n p :<|>: q) !m = do liftM2 (SoftFork n) (compile' p (Commit (isJust n) m)) (compile' q m)
-compile' !(p :<|>: q) !m       = do liftM2 HardFork (compile' p (Commit False m)) (compile' q m)
-compile' !(Try n p) !m         = do liftM (Attempt n) (compile' p (Commit (isJust n) m))
-compile' !(LookAhead p) !m     = do liftM Look (compile' p (Restore m))
-compile' !(NotFollowedBy p) !m = do liftM2 NegLook (compile' p (Restore Empt)) (return (Push (lift' ()) m))
-compile' !(Branch b p q) !m    = do !pc <- compile' p (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
-                                    !qc <- compile' q (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
-                                    compile' b (Case pc qc)
-compile' !(Match p fs qs) !m   = do !qcs <- traverse (flip compile' m) qs
-                                    compile' p (Choices fs qcs)
-compile' !(Rec !p) !m          =
-  do (StableName _name) <- Reader.lift (makeStableName p)
-     (seen, v, _) <- ask
-     let !name = StableParserName _name
-     case HashMap.lookup name seen of
-       Just v' -> do return $! MuCall (MVar v') m
-       Nothing -> do n <- local (HashMap.insert name v >< (+1)) (compile' p Ret)
-                     return $! Call n (MVar v) m
-compile' (ChainPre op p) m =
-  do (_, v, rσs) <- ask
-     σs <- Reader.lift (readIORef rσs)
-     let σ = case σs of
-               [] -> ΣVar 0
-               (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-     Reader.lift (writeIORef rσs (State id [|| id ||] σ:σs))
-     opc <- local (id >< (+1)) (compile' op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
-     pc <- local (id >< (+1)) (compile' p (Lift2 (lift' ($)) m))
-     return $! Push (lift' id) (ChainInit (lift' id) σ (Push (lift' flip >*< lift' (.)) opc) (MVar v) pc)
-compile' (ChainPost (Pure x) op) m =
-  do (_, v, rσs) <- ask
-     σs <- Reader.lift (readIORef rσs)
-     let σ = case σs of
-               [] -> ΣVar 0
-               (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-     Reader.lift (writeIORef rσs (State (_val x) (_code x) σ:σs))
-     opc <- local (id >< (+1)) (compile' op (ChainIter σ (MVar v)))
-     return $! Push x (ChainInit x σ opc (MVar v) m)
-compile' (ChainPost p op) m =
-  do (_, v, rσs) <- ask
-     σs <- Reader.lift (readIORef rσs)
-     let σ = case σs of
-               [] -> ΣVar 0
-               (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-     Reader.lift (writeIORef rσs (State Nothing [|| Nothing ||] σ:σs))
-     opc <- local (id >< (+1)) (compile' op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
-     let m' = ChainInit (WQ Nothing [||Nothing||]) σ (Push (lift' (<$!>)) opc) (MVar v) (Lift2 (lift' ($)) m)
-     pc <- local (id >< (+1)) (compile' p (Lift2 (lift' ($)) m'))
-     return $! Push (lift' fromJust) (Push (lift' Just) pc)
-compile' (Debug name p) m = liftM (LogEnter name) (compile' p (LogExit name m))
+
+compile :: Parser a -> (M '[] '[] a, [State])
+compile !p = trace (show m) (m, vss)
+  where (m, vss) = unsafePerformIO (do σs <- newIORef []
+                                       m <- runReaderT (compile' (trace (showAST p) p) Halt) (HashMap.empty, 0, σs)
+                                       vss <- readIORef σs
+                                       return $! (m, vss))
+        compile' :: Parser a -> M (a ': xs) ks b -> ReaderT (HashMap StableParserName IMVar, IMVar, ΣVars) IO (M xs ks b)
+        compile' !(Pure x) !m          = do return $! (Push x m)
+        compile' !(Satisfy p) !m       = do return $! (Sat p m)
+        compile' !(pf :<*>: px) !m     = do !pxc <- compile' px (Lift2 (lift' ($)) m); compile' pf pxc
+        compile' !(p :*>: q) !m        = do !qc <- compile' q m; compile' p (Pop qc)
+        compile' !(p :<*: q) !m        = do !qc <- compile' q (Pop m); compile' p qc
+        compile' !Empty !m             = do return $! Empt
+        compile' !(Try n p :<|>: q) !m = do liftM2 (SoftFork n) (compile' p (Commit (isJust n) m)) (compile' q m)
+        compile' !(p :<|>: q) !m       = do liftM2 HardFork (compile' p (Commit False m)) (compile' q m)
+        compile' !(Try n p) !m         = do liftM (Attempt n) (compile' p (Commit (isJust n) m))
+        compile' !(LookAhead p) !m     = do liftM Look (compile' p (Restore m))
+        compile' !(NotFollowedBy p) !m = do liftM2 NegLook (compile' p (Restore Empt)) (return (Push (lift' ()) m))
+        compile' !(Branch b p q) !m    = do !pc <- compile' p (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
+                                            !qc <- compile' q (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
+                                            compile' b (Case pc qc)
+        compile' !(Match p fs qs) !m   = do !qcs <- traverse (flip compile' m) qs
+                                            compile' p (Choices fs qcs)
+        compile' !(Rec !p) !m          =
+          do (StableName _name) <- Reader.lift (makeStableName p)
+             (seen, v, _) <- ask
+             let !name = StableParserName _name
+             case HashMap.lookup name seen of
+               Just v' -> do return $! MuCall (MVar v') m
+               Nothing -> do n <- local (HashMap.insert name v >< (+1)) (compile' p Ret)
+                             return $! Call n (MVar v) m
+        compile' (ChainPre op p) m =
+          do (_, v, rσs) <- ask
+             σs <- Reader.lift (readIORef rσs)
+             let σ = case σs of
+                       [] -> ΣVar 0
+                       (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
+             Reader.lift (writeIORef rσs (State id [|| id ||] σ:σs))
+             opc <- local (id >< (+1)) (compile' op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
+             pc <- local (id >< (+1)) (compile' p (Lift2 (lift' ($)) m))
+             return $! Push (lift' id) (ChainInit (lift' id) σ (Push (lift' flip >*< lift' (.)) opc) (MVar v) pc)
+        compile' (ChainPost (Pure x) op) m =
+          do (_, v, rσs) <- ask
+             σs <- Reader.lift (readIORef rσs)
+             let σ = case σs of
+                       [] -> ΣVar 0
+                       (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
+             Reader.lift (writeIORef rσs (State (_val x) (_code x) σ:σs))
+             opc <- local (id >< (+1)) (compile' op (ChainIter σ (MVar v)))
+             return $! Push x (ChainInit x σ opc (MVar v) m)
+        compile' (ChainPost p op) m =
+          do (_, v, rσs) <- ask
+             σs <- Reader.lift (readIORef rσs)
+             let σ = case σs of
+                       [] -> ΣVar 0
+                       (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
+             Reader.lift (writeIORef rσs (State Nothing [|| Nothing ||] σ:σs))
+             opc <- local (id >< (+1)) (compile' op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
+             let m' = ChainInit (WQ Nothing [||Nothing||]) σ (Push (lift' (<$!>)) opc) (MVar v) (Lift2 (lift' ($)) m)
+             pc <- local (id >< (+1)) (compile' p (Lift2 (lift' ($)) m'))
+             return $! Push (lift' fromJust) (Push (lift' Just) pc)
+        compile' (Debug name p) m = liftM (LogEnter name) (compile' p (LogExit name m))
+
+newtype CodeGen f b xs ks a i = CodeGen {runCodeGen :: M (a ': xs) ks b -> ReaderT (HashMap (StableParserName' f xs ks i) IMVar, IMVar, ΣVars) IO (M xs ks b)}
+compile' :: Free Parser' f '[] '[] a i -> (M '[] '[] a, [State])
+compile' p = unsafePerformIO (do σs <- newIORef []
+                                 m <- runReaderT (runCodeGen (fold ({-CodeGen . return . Var-}undefined) alg p) Halt) (HashMap.empty, 0, σs)
+                                 vss <- readIORef σs
+                                 return $! (m, vss))
+  where
+    alg :: Parser' (CodeGen f b) xs ks a i -> CodeGen f b xs ks a i
+    alg !(Pure' x)          = CodeGen $ \(!m) -> do return $! (Push x m)
+    alg !(Satisfy' p)       = CodeGen $ \(!m) -> do return $! (Sat p m)
+    --alg !(pf :<*> px)     = CodeGen $ \(!m) -> do !pxc <- runCodeGen px (Lift2 (lift' ($)) m); runCodeGen pf pxc
+    alg !(p :*> q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q m; runCodeGen p (Pop qc)
+    --alg !(p :<* q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q (Pop m); runCodeGen p qc
+    alg !Empty'             = CodeGen $ \(!m) -> do return $! Empt
 
 data SList a = !a ::: !(SList a) | SNil
 data HList xs where
@@ -1326,20 +1341,12 @@ eval' (ChainInit x σ l v k) γ = trace "CHAININIT" $ evalChainInit x σ l v k �
 eval' (LogEnter name k) γ     = trace "LOGENTER" $ evalLogEnter name k γ
 eval' (LogExit name k) γ      = trace "LOGEXIT" $ evalLogExit name k γ
 
-runParser :: Parsley.Parser a -> TExpQ (String -> Maybe a)
+runParser :: Parser a -> TExpQ (String -> Maybe a)
 runParser p = --runST (compile (preprocess p) >>= eval input)
-  [||\input -> runST $$(eval [|| input ||] (compile (preprocess p)))||]
+  [||\input -> runST $$(eval [||input||] (compile (preprocess p)))||]
 
-{-data CompiledParser a = Compiled (forall s. M '[] '[] a)
-
-mkParser :: Parser a -> CompiledParser a
-mkParser p = Compiled (runST (slightyUnsafeLeak (compile (preprocess p))))
-  where
-    slightyUnsafeLeak :: (forall s. ST s (M s '[] '[] a)) -> (forall s. ST s (M s' '[] '[] a))
-    slightyUnsafeLeak = unsafeCoerce
-
-runCompiledParser :: CompiledParser a -> String -> Maybe a
-runCompiledParser (Compiled p) input = runST (eval input p)-}
+runParser' :: Free Parser' f '[] '[] a i -> TExpQ (String -> Maybe a)
+runParser' p = [||\input -> runST $$(eval [||input||] (compile' (preprocess' p)))||]
 
 showM :: Parser a -> String
 showM p = show (fst (compile (preprocess p)))

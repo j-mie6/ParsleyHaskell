@@ -99,24 +99,25 @@ showi = show
 instance Pure WQ where lift' x = WQ x [||x||]
 
 -- AST
+type Parser a = Free Parser' Void '[] '[] a ()
 data WQ a = WQ { _val :: a, _code :: TExpQ a }
-data Parser a where
-  Pure          :: WQ a -> Parser a
-  Satisfy       :: WQ (Char -> Bool) -> Parser Char
-  (:<*>:)       :: Parser (a -> b) -> Parser a -> Parser b
-  (:*>:)        :: Parser a -> Parser b -> Parser b
-  (:<*:)        :: Parser a -> Parser b -> Parser a
-  (:<|>:)       :: Parser a -> Parser a -> Parser a
-  Empty         :: Parser a
-  Try           :: Maybe Int -> Parser a -> Parser a
-  LookAhead     :: Parser a -> Parser a
-  Rec           :: Parser a -> Parser a
-  NotFollowedBy :: Parser a -> Parser ()
-  Branch        :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
-  Match         :: Parser a -> [WQ (a -> Bool)] -> [Parser b] -> Parser b
-  ChainPre      :: Parser (a -> a) -> Parser a -> Parser a
-  ChainPost     :: Parser a -> Parser (a -> a) -> Parser a
-  Debug         :: String -> Parser a -> Parser a
+data Parser' (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: *) (i :: *) where
+  Pure          :: WQ a -> Parser' k xs ks a i
+  Satisfy       :: WQ (Char -> Bool) -> Parser' k xs ks Char i
+  (:<*>:)       :: k xs ks (a -> b) i -> k xs ks a i -> Parser' k xs ks b i
+  (:*>:)        :: k xs ks a i -> k xs ks b i -> Parser' k xs ks b i
+  (:<*:)        :: k xs ks a i -> k xs ks b i -> Parser' k xs ks a i
+  (:<|>:)       :: k xs ks a i -> k xs ks a i -> Parser' k xs ks a i
+  Empty         :: Parser' k xs ks a i
+  Try           :: Maybe Int -> k xs ks a i -> Parser' k xs ks a i
+  LookAhead     :: k xs ks a i -> Parser' k xs ks a i
+  Rec           :: Free Parser' Void xs ks a i -> k xs ks a i -> Parser' k xs ks a i
+  NotFollowedBy :: k xs ks a i -> Parser' k xs ks () i
+  Branch        :: k xs ks (Either a b) i -> k xs ks (a -> c) i -> k xs ks (b -> c) i -> Parser' k xs ks c i
+  Match         :: k xs ks a i -> [WQ (a -> Bool)] -> [k xs ks b i] -> Parser' k xs ks b i
+  ChainPre      :: k xs ks (a -> a) i -> k xs ks a i -> Parser' k xs ks a i
+  ChainPost     :: k xs ks a i -> k xs ks (a -> a) i -> Parser' k xs ks a i
+  Debug         :: String -> k xs ks a i -> Parser' k xs ks a i
 
 class IFunctor (f :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) where
   imap :: (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l') -> f a i j k l -> f b i j k l
@@ -132,6 +133,9 @@ class IFunctor m => IMonad (m :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -
 data Free (f :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) (a :: [*] -> [[*]] -> * -> * -> *) (i :: [*]) (j :: [[*]]) (k :: *) (l :: *) where
   Var :: a i j k l -> Free f a i j k l
   Op :: f (Free f a) i j k l -> Free f a i j k l
+
+unOp :: Free f a i j k l -> f (Free f a) i j k l
+unOp (Op op) = op
 
 fold :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
                    -> (forall i' j' k' l'. f b i' j' k' l' -> b i' j' k' l') -> Free f a i j k l -> b i j k l
@@ -176,120 +180,45 @@ data Unit i j k l = Unit
 data Void i j k l
 data Const a i j k l = Const {getConst :: a}
 
-data Parser' (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: *) (i :: *) where
-  Pure'          :: WQ a -> Parser' k xs ks a i
-  Satisfy'       :: WQ (Char -> Bool) -> Parser' k xs ks Char i
-  (:<*>)       :: k xs ks (a -> b) i -> k xs ks a i -> Parser' k xs ks b i
-  (:*>)        :: k xs ks a i -> k xs ks b i -> Parser' k xs ks b i
-  (:<*)        :: k xs ks a i -> k xs ks b i -> Parser' k xs ks a i
-  (:<|>)       :: k xs ks a i -> k xs ks a i -> Parser' k xs ks a i
-  Empty'         :: Parser' k xs ks a i
-  Try'           :: Maybe Int -> k xs ks a i -> Parser' k xs ks a i
-  LookAhead'     :: k xs ks a i -> Parser' k xs ks a i
-  Rec'           :: Free Parser' Void xs ks a i -> k xs ks a i -> Parser' k xs ks a i
-  NotFollowedBy' :: k xs ks a i -> Parser' k xs ks () i
-  Branch'        :: k xs ks (Either a b) i -> k xs ks (a -> c) i -> k xs ks (b -> c) i -> Parser' k xs ks c i
-  Match'         :: k xs ks a i -> [WQ (a -> Bool)] -> [k xs ks b i] -> Parser' k xs ks b i
-  ChainPre'      :: k xs ks (a -> a) i -> k xs ks a i -> Parser' k xs ks a i
-  ChainPost'     :: k xs ks a i -> k xs ks (a -> a) i -> Parser' k xs ks a i
-  Debug'         :: String -> k xs ks a i -> Parser' k xs ks a i
-
 instance IFunctor Parser' where
-  imap _ (Pure' x) = Pure' x
-  imap _ (Satisfy' p) = Satisfy' p
-  imap f (p :<*> q) = f p :<*> f q
-  imap f (p :*> q) = f p :*> f q
-  imap f (p :<* q) = f p :<* f q
-  imap f (p :<|> q) = f p :<|> f q
-  imap _ Empty' = Empty'
-  imap f (Try' n p) = Try' n (f p)
-  imap f (LookAhead' p) = LookAhead' (f p)
-  imap f (Rec' p q) = Rec' p (f q)
-  imap f (NotFollowedBy' p) = NotFollowedBy' (f p)
-  imap f (Branch' b p q) = Branch' (f b) (f p) (f q)
-  imap f (Match' p fs qs) = Match' (f p) fs (map f qs)
-  imap f (ChainPre' op p) = ChainPre' (f op) (f p)
-  imap f (ChainPost' p op) = ChainPost' (f p) (f op)
-  imap f (Debug' name p) = Debug' name (f p)
-
-convert :: Parser a -> Free Parser' Void '[] '[] a i
-convert (Pure x) = Op (Pure' x)
-convert (Satisfy f) = Op (Satisfy' f)
-convert (pf :<*>: px) = Op (convert pf :<*> convert px)
-convert (p :*>: q) = Op (convert p :*> convert q)
-convert (p :<*: q) = Op (convert p :<* convert q)
-convert (p :<|>: q) = Op (convert p :<|> convert q)
-convert Empty = Op Empty'
-convert (Try n p) = Op (Try' n (convert p))
-convert (LookAhead p) = Op (LookAhead' (convert p))
-convert (Rec p) = let p' = convert p in Op (Rec' p' p')
-convert (NotFollowedBy p) = Op (NotFollowedBy' (convert p))
-convert (Branch b p q) = Op (Branch' (convert b) (convert p) (convert q))
-convert (Match p fs qs) = Op (Match' (convert p) fs (map convert qs))
-convert (ChainPre op p) = Op (ChainPre' (convert op) (convert p))
-convert (ChainPost p op) = Op (ChainPost' (convert p) (convert op))
-convert (Debug name p) = Op (Debug' name (convert p))
+  imap _ (Pure x) = Pure x
+  imap _ (Satisfy p) = Satisfy p
+  imap f (p :<*>: q) = f p :<*>: f q
+  imap f (p :*>: q) = f p :*>: f q
+  imap f (p :<*: q) = f p :<*: f q
+  imap f (p :<|>: q) = f p :<|>: f q
+  imap _ Empty = Empty
+  imap f (Try n p) = Try n (f p)
+  imap f (LookAhead p) = LookAhead (f p)
+  imap f (Rec p q) = Rec p (f q)
+  imap f (NotFollowedBy p) = NotFollowedBy (f p)
+  imap f (Branch b p q) = Branch (f b) (f p) (f q)
+  imap f (Match p fs qs) = Match (f p) fs (map f qs)
+  imap f (ChainPre op p) = ChainPre (f op) (f p)
+  imap f (ChainPost p op) = ChainPost (f p) (f op)
+  imap f (Debug name p) = Debug name (f p)
 
 showAST' :: Free Parser' f '[] '[] a i -> String
 showAST' = getConst . fold (const (Const "")) (Const . alg)
   where
     alg :: Parser' (Const String) xs ks a i -> String
-    alg (Pure' x) = "(pure x)"
-    alg (Satisfy' _) = "(satisfy f)"
-    alg (Const pf :<*> Const px) = concat ["(", pf, " <*> ",  px, ")"]
-    alg (Const p :*> Const q) = concat ["(", p, " *> ", q, ")"]
-    alg (Const p :<* Const q) = concat ["(", p, " <* ", q, ")"]
-    alg (Const p :<|> Const q) = concat ["(", p, " <|> ", q, ")"]
-    alg Empty' = "empty"
-    alg (Try' Nothing (Const p)) = concat ["(try ? ", p, ")"]
-    alg (Try' (Just n) (Const p)) = concat ["(try ", show n, " ", p, ")"]
-    alg (LookAhead' (Const p)) = concat ["(lookAhead ", p, ")"]
-    alg (Rec' _ _) = "recursion point!"
-    alg (NotFollowedBy' (Const p)) = concat ["(notFollowedBy ", p, ")"]
-    alg (Branch' (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-    alg (Match' (Const p) fs qs) = concat ["(match ", p, " ", show (map getConst qs), ")"]
-    alg (ChainPre' (Const op) (Const p)) = concat ["(chainPre ", op, " ", p, ")"]
-    alg (ChainPost' (Const p) (Const op)) = concat ["(chainPost ", p, " ", op, ")"]
-    alg (Debug' _ (Const p)) = p
-
-showAST :: Parser a -> String
-showAST (Pure _) = "(pure x)"
-showAST (Satisfy _) = "(satisfy f)"
-showAST (pf :<*>: px) = concat ["(", showAST pf, " <*> ", showAST px, ")"]
-showAST (p :*>: q) = concat ["(", showAST p, " *> ", showAST q, ")"]
-showAST (p :<*: q) = concat ["(", showAST p, " <* ", showAST q, ")"]
-showAST (p :<|>: q) = concat ["(", showAST p, " <|> ", showAST q, ")"]
-showAST Empty = "empty"
-showAST (Try Nothing p) = concat ["(try ? ", showAST p, ")"]
-showAST (Try (Just n) p) = concat ["(try ", show n, " ", showAST p, ")"]
-showAST (LookAhead p) = concat ["(lookAhead ", showAST p, ")"]
-showAST (Rec _) = "recursion point!"
-showAST (ChainPre op p) = concat ["(chainPre ", showAST op, " ", showAST p, ")"]
-showAST (ChainPost op p) = concat ["(chainPost ", showAST op, " ", showAST p, ")"]
-showAST (NotFollowedBy p) = concat ["(notFollowedBy ", showAST p, ")"]
-showAST (Branch b p q) = concat ["(branch ", showAST b, " ", showAST p, " ", showAST q, ")"]
-showAST (Match p fs qs) = concat ["(match ", showAST p, " ", show (map showAST qs), ")"]
-showAST (Debug _ p) = showAST p
-
--- Smart Constructors
-{-instance Functor Parser where
-  fmap = liftA
-  x <$ p = p *> pure x
-instance Applicative Parser where
-  pure = Pure
-  (<*>) = (:<*>:)
-  (<*) = (:<*:)
-  (*>) = (:*>:)
-instance Monad Parser where
-  return = Pure
-  (>>=) = (:>>=:)
-  (>>) = (*>)
-instance Alternative Parser where
-  empty = Empty
-  (<|>) = (:<|>:)
-  --many = Many
-  some p = p <:> many p
-instance MonadPlus Parser-}
+    alg (Pure x) = "(pure x)"
+    alg (Satisfy _) = "(satisfy f)"
+    alg (Const pf :<*>: Const px) = concat ["(", pf, " <*> ",  px, ")"]
+    alg (Const p :*>: Const q) = concat ["(", p, " *> ", q, ")"]
+    alg (Const p :<*: Const q) = concat ["(", p, " <* ", q, ")"]
+    alg (Const p :<|>: Const q) = concat ["(", p, " <|> ", q, ")"]
+    alg Empty = "empty"
+    alg (Try Nothing (Const p)) = concat ["(try ? ", p, ")"]
+    alg (Try (Just n) (Const p)) = concat ["(try ", show n, " ", p, ")"]
+    alg (LookAhead (Const p)) = concat ["(lookAhead ", p, ")"]
+    alg (Rec _ _) = "recursion point!"
+    alg (NotFollowedBy (Const p)) = concat ["(notFollowedBy ", p, ")"]
+    alg (Branch (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
+    alg (Match (Const p) fs qs) = concat ["(match ", p, " ", show (map getConst qs), ")"]
+    alg (ChainPre (Const op) (Const p)) = concat ["(chainPre ", op, " ", p, ")"]
+    alg (ChainPost (Const p) (Const op)) = concat ["(chainPost ", p, " ", op, ")"]
+    alg (Debug _ (Const p)) = p
 
 fmap :: WQ (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
@@ -310,25 +239,25 @@ x <$ p = p *> pure x
 (<&>) = flip fmap
 
 pure :: WQ a -> Parser a
-pure = Pure
+pure = Op . Pure
 
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
-(<*>) = (:<*>:)
+p <*> q = Op (p :<*>: q)
 
 (<*) :: Parser a -> Parser b -> Parser a
-(<*) = (:<*:)
+p <* q = Op (p :<*: q)
 
 (*>) :: Parser a -> Parser b -> Parser b
-(*>) = (:*>:)
+p *> q = Op (p :*>: q)
 
 liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
 liftA2 f p q = f <$> p <*> q
 
 empty :: Parser a
-empty = Empty
+empty = Op Empty
 
 (<|>) :: Parser a -> Parser a -> Parser a
-(<|>) = (:<|>:)
+p <|> q = Op (p :<|>: q)
 
 many :: Parser a -> Parser [a]
 many p = pfoldr (lift' (:)) (WQ [] [||[]||]) p
@@ -346,20 +275,6 @@ skipMany = pfoldr (lift' const >*< lift' id) (lift' ())
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
 (<**>) = liftA2 (WQ (flip ($)) [|| (flip ($)) ||])
 
-{-class Functor f => Monoidal f where
-  unit :: f ()
-  (<~>) :: f a -> f b -> f (a, b)
-  (<~) :: f a -> f b -> f a
-  p <~ q = fst <$> (p <~> q)
-  (~>) :: f a -> f b -> f b
-  p ~> q = snd <$> (p <~> q)-}
-
-{-instance (Functor f, Applicative f) => Monoidal f where
-  unit = pure ()
-  (<~>) = liftA2 (,)
-  (<~) = (<*)
-  (~>) = (*>)-}
-
 unit :: Parser ()
 unit = pure (lift' ())
 
@@ -372,47 +287,37 @@ unit = pure (lift' ())
 (~>) :: Parser a -> Parser b -> Parser b
 (~>) = (*>)
 
---class (Monad p, Alternative p) => MonadParser p where
---  {-# MINIMAL (satisfy | item), notFollowedBy, lookAhead #-}
-satisfy :: WQ (Char -> Bool) -> Parser Char
---satisfy p = item >>= (\x -> if p x then return x else empty)
-item :: Parser Char
-item = satisfy (WQ (const True) [|| const True ||])
-
-  {-
-  These combinators should adhere to the following laws:
-    double negation: notFollowedBy . notFollowedBy         = lookAhead . void
-    idempotence:     lookAhead . lookAhead                 = lookAhead
-    right-identity:  notFollowedBy . lookAhead             = notFollowedBy
-    left-identity:   lookAhead . notFollowedBy             = notFollowedBy
-    transparency:    notFollowedBy p *>/<* notFollowedBy p = notFollowedBy p
-
-  As a consequence of these laws:
-    notFollowedBy eof = more
-    notFollowedBy more = eof
-  -}
-lookAhead :: Parser a -> Parser a
-notFollowedBy :: Parser a -> Parser ()
-
   -- Auxillary functions
-char :: Char -> Parser Char
 string :: String -> Parser String
 string = foldr (<:>) (pure (lift' [])) . map char
+
 token :: String -> Parser String
 token = try . string
+
 eof :: Parser ()
 eof = notFollowedBy item
+
 more :: Parser ()
 more = lookAhead (void item)
 
---instance MonadParser Parser where
-satisfy = Satisfy
-char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
-lookAhead = LookAhead
-notFollowedBy = NotFollowedBy
+-- Parsing Primitives
+satisfy :: WQ (Char -> Bool) -> Parser Char
+satisfy = Op . Satisfy
+
+lookAhead :: Parser a -> Parser a
+lookAhead = Op . LookAhead
+
+notFollowedBy :: Parser a -> Parser ()
+notFollowedBy = Op . NotFollowedBy
 
 try :: Parser a -> Parser a
-try = Try Nothing
+try = Op . Try Nothing
+
+char :: Char -> Parser Char
+char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
+
+item :: Parser Char
+item = satisfy (WQ (const True) [|| const True ||])
 
 optional :: Parser a -> Parser ()
 optional p = void p <|> unit
@@ -443,13 +348,13 @@ _match x (Left y)
   | otherwise = Right (Left y)
 
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b
-match vs p f = Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map f vs)
+match vs p f = Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map f vs))
 
 (||=) :: forall a b. (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
 p ||= f = match [minBound..maxBound] p f
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
-branch = Branch
+branch c p q = Op (Branch c p q)
 
 when :: Parser Bool -> Parser () -> Parser ()
 when p q = p <?|> (q, unit)
@@ -476,196 +381,154 @@ pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
 pfoldl f k p = chainPost (pure k) (lift' flip >*< f <$> p)
 
 chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre = ChainPre
+chainPre op p = Op (ChainPre op p)
 
 chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost = ChainPost
+chainPost p op = Op (ChainPost p op)
 
 debug :: String -> Parser a -> Parser a
-debug = Debug
+debug name p = Op (Debug name p)
 
-data StableParserName = forall a. StableParserName (StableName# (Parser a))
-data GenParser = forall a. GenParser (Parser a)
-instance Eq StableParserName where (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)
-instance Hashable StableParserName where
+data StableParserName xs ks i = forall a. StableParserName (StableName# (Free Parser' Void xs ks a i))
+data GenParser xs ks i = forall a. GenParser (Free Parser' Void xs ks a i)
+instance Eq (StableParserName xs ks i) where (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)
+instance Hashable (StableParserName xs ks i) where
   hash (StableParserName n) = hashStableName (StableName n)
   hashWithSalt salt (StableParserName n) = hashWithSalt salt (StableName n)
 
-preprocess :: Parser a -> Parser a
-preprocess !p = trace "preprocessing" $ unsafePerformIO (runReaderT (preprocess' p) (HashMap.empty))
-  where
-    preprocess' :: Parser a -> ReaderT (HashMap StableParserName GenParser) IO (Parser a)
-    -- Force evaluation of p to ensure that the stableName is correct first time
-    preprocess' !p =
-      do !seen <- ask
-         (StableName _name) <- Reader.lift (makeStableName p)
-         let !name = StableParserName _name
-         case HashMap.lookup name seen of
-           Just (GenParser q) -> return $! (Rec (coerce q))
-           Nothing -> mdo q <- local (HashMap.insert name (GenParser q)) (preprocess'' p)
-                          return $! q
-    preprocess'' :: Parser a -> ReaderT (HashMap StableParserName GenParser) IO (Parser a)
-    preprocess'' !(pf :<*>: px)     = liftM optimise (liftM2 (:<*>:)  (preprocess' pf) (preprocess' px))
-    preprocess'' !(p :*>: q)        = liftM optimise (liftM2 (:*>:)   (preprocess' p)  (preprocess' q))
-    preprocess'' !(p :<*: q)        = liftM optimise (liftM2 (:<*:)   (preprocess' p)  (preprocess' q))
-    preprocess'' !(p :<|>: q)       = liftM optimise (liftM2 (:<|>:)  (preprocess' p)  (preprocess' q))
-    preprocess'' !Empty             = return Empty
-    preprocess'' !(Try n p)         = liftM optimise (liftM (Try n) (preprocess' p))
-    preprocess'' !(LookAhead p)     = liftM optimise (liftM LookAhead (preprocess' p))
-    preprocess'' !(NotFollowedBy p) = liftM optimise (liftM NotFollowedBy (preprocess' p))
-    preprocess'' !(Branch b p q)    = liftM optimise (liftM3 Branch (preprocess' b) (preprocess' p) (preprocess' q))
-    preprocess'' !(Match p fs qs)   = liftM optimise (liftM3 Match (preprocess' p) (return fs) (traverse preprocess' qs))
-    preprocess'' !(ChainPre op p)   = liftM2 ChainPre (preprocess' op) (preprocess' p)
-    preprocess'' !(ChainPost p op)  = liftM2 ChainPost (preprocess' p) (preprocess' op)
-    preprocess'' !(Debug name p)    = liftM (Debug name) (preprocess' p)
-    preprocess'' !p                 = return p
-
-data StableParserName' xs ks i = forall a. StableParserName' (StableName# (Free Parser' Void xs ks a i))
-data GenParser' xs ks i = forall a. GenParser' (Free Parser' Void xs ks a i)
-instance Eq (StableParserName' xs ks i) where (StableParserName' n) == (StableParserName' m) = eqStableName (StableName n) (StableName m)
-instance Hashable (StableParserName' xs ks i) where
-  hash (StableParserName' n) = hashStableName (StableName n)
-  hashWithSalt salt (StableParserName' n) = hashWithSalt salt (StableName n)
-
-newtype Carrier xs ks a i = Carrier {unCarrier :: ReaderT (HashMap (StableParserName' xs ks i) (GenParser' xs ks i)) IO (Free Parser' Void xs ks a i)}
-preprocess' :: Free Parser' Void '[] '[] a i -> Free Parser' Void '[] '[] a i
-preprocess' !p = unsafePerformIO (runReaderT (unCarrier (fold' (Carrier . return . Var) alg p)) (HashMap.empty))
+newtype Carrier xs ks a i = Carrier {unCarrier :: ReaderT (HashMap (StableParserName xs ks i) (GenParser xs ks i)) IO (Free Parser' Void xs ks a i)}
+preprocess :: Free Parser' Void '[] '[] a i -> Free Parser' Void '[] '[] a i
+preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' (Carrier . return . Var) alg p)) (HashMap.empty))
   where
     alg :: Free Parser' Void xs ks a i -> Parser' Carrier xs ks a i -> Carrier xs ks a i
     -- Force evaluation of p to ensure that the stableName is correct first time
     alg !p q = Carrier $ do
       !seen <- ask
       (StableName _name) <- Reader.lift (makeStableName p)
-      let !name = StableParserName' _name
+      let !name = StableParserName _name
       case HashMap.lookup name seen of
-        Just (GenParser' q) -> return $! (Op (Rec' (coerce q) (coerce q)))
-        Nothing -> mdo q' <- local (HashMap.insert name (GenParser' q')) (unCarrier $ subalg q)
+        Just (GenParser q) -> return $! (Op (Rec (coerce q) (coerce q)))
+        Nothing -> mdo q' <- local (HashMap.insert name (GenParser q')) (unCarrier $ subalg q)
                        return $! q'
     subalg :: Parser' Carrier xs ks a i -> Carrier xs ks a i
-    subalg !(pf :<*> px)     = Carrier (liftM optimise' (liftM2 (:<*>) (unCarrier pf) (unCarrier px)))
-    subalg !(p :*> q)        = Carrier (liftM optimise' (liftM2 (:*>)  (unCarrier p)  (unCarrier q)))
-    subalg !(p :<* q)        = Carrier (liftM optimise' (liftM2 (:<*)  (unCarrier p)  (unCarrier q)))
-    subalg !(p :<|> q)       = Carrier (liftM optimise' (liftM2 (:<|>) (unCarrier p)  (unCarrier q)))
-    subalg !Empty'             = Carrier (return (Op Empty'))
-    subalg !(Try' n p)         = Carrier (liftM optimise' (liftM (Try' n) (unCarrier p)))
-    subalg !(LookAhead' p)     = Carrier (liftM optimise' (liftM LookAhead' (unCarrier p)))
-    subalg !(NotFollowedBy' p) = Carrier (liftM optimise' (liftM NotFollowedBy' (unCarrier p)))
-    subalg !(Branch' b p q)    = Carrier (liftM optimise' (liftM3 Branch' (unCarrier b) (unCarrier p) (unCarrier q)))
-    subalg !(Match' p fs qs)   = Carrier (liftM optimise' (liftM3 Match' (unCarrier p) (return fs) (traverse unCarrier qs)))
-    subalg !(ChainPre' op p)   = Carrier (liftM2 (\op p -> Op (ChainPre' op p)) (unCarrier op) (unCarrier p))
-    subalg !(ChainPost' p op)  = Carrier (liftM2 (\p op -> Op (ChainPost' p op)) (unCarrier p) (unCarrier op))
-    subalg !(Debug' name p)    = Carrier (liftM (Op . Debug' name) (unCarrier p))
-    subalg !(Pure' x)          = Carrier (return (Op (Pure' x)))
-    subalg !(Satisfy' f)       = Carrier (return (Op (Satisfy' f)))
+    subalg !(pf :<*>: px)     = Carrier (liftM optimise (liftM2 (:<*>:) (unCarrier pf) (unCarrier px)))
+    subalg !(p :*>: q)        = Carrier (liftM optimise (liftM2 (:*>:)  (unCarrier p)  (unCarrier q)))
+    subalg !(p :<*: q)        = Carrier (liftM optimise (liftM2 (:<*:)  (unCarrier p)  (unCarrier q)))
+    subalg !(p :<|>: q)       = Carrier (liftM optimise (liftM2 (:<|>:) (unCarrier p)  (unCarrier q)))
+    subalg !Empty             = Carrier (return (Op Empty))
+    subalg !(Try n p)         = Carrier (liftM optimise (liftM (Try n) (unCarrier p)))
+    subalg !(LookAhead p)     = Carrier (liftM optimise (liftM LookAhead (unCarrier p)))
+    subalg !(NotFollowedBy p) = Carrier (liftM optimise (liftM NotFollowedBy (unCarrier p)))
+    subalg !(Branch b p q)    = Carrier (liftM optimise (liftM3 Branch (unCarrier b) (unCarrier p) (unCarrier q)))
+    subalg !(Match p fs qs)   = Carrier (liftM optimise (liftM3 Match (unCarrier p) (return fs) (traverse unCarrier qs)))
+    subalg !(ChainPre op p)   = Carrier (liftM2 (\op p -> Op (ChainPre op p)) (unCarrier op) (unCarrier p))
+    subalg !(ChainPost p op)  = Carrier (liftM2 (\p op -> Op (ChainPost p op)) (unCarrier p) (unCarrier op))
+    subalg !(Debug name p)    = Carrier (liftM (Op . Debug name) (unCarrier p))
+    subalg !(Pure x)          = Carrier (return (Op (Pure x)))
+    subalg !(Satisfy f)       = Carrier (return (Op (Satisfy f)))
 
 -- pronounced quapp
 (>*<) :: WQ (a -> b) -> WQ a -> WQ b
 WQ f qf >*< WQ x qx = WQ (f x) [||$$qf $$qx||]
 infixl 9 >*<
 
-optimise :: Parser a -> Parser a
+optimise :: Parser' (Free Parser' f) xs ks a i -> Free Parser' f xs ks a i
 -- DESTRUCTIVE OPTIMISATION
 -- Right Absorption Law: empty <*> u = empty
-optimise (Empty :<*>: _)           = empty
+optimise (Op Empty :<*>: _)                           = Op Empty
 -- Failure Weakening Law: u <*> empty = u *> empty
-optimise (u :<*>: Empty)           = optimise (u *> empty)
+optimise (u :<*>: Op Empty)                           = Op (u :*>: Op Empty)
 -- Right Absorption Law: empty *> u = empty
-optimise (Empty :*>: _)            = empty
+optimise (Op Empty :*>: _)                            = Op Empty
 -- Right Absorption Law: empty <* u = empty
-optimise (Empty :<*: _)            = empty
+optimise (Op Empty :<*: _)                            = Op Empty
 -- Failure Weakening Law: u <* empty = u *> empty
-optimise (u :<*: Empty)            = u *> empty
--- Right Absorption Law: empty >>= f = empty
---optimise (Empty :>>=: f)           = Empty
+optimise (u :<*: Op Empty)                            = Op (u :*>: Op Empty)
 -- APPLICATIVE OPTIMISATION
 -- Homomorphism Law: pure f <*> pure x = pure (f x)
-optimise (Pure f :<*>: Pure x) = pure (f >*< x)
+optimise (Op (Pure f) :<*>: Op (Pure x))              = Op (Pure (f >*< x))
 -- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law
-optimise (Pure f :<*>: (Pure g :<*>: p)) = optimise (lift' (.) >*< f >*< g <$> p)
+-- Functor Composition Law: f <$> (g <$> p) = (f . g) <$> p
+optimise (Op (Pure f) :<*>: Op (Op (Pure g) :<*>: p)) = optimise (Op (Pure (lift' (.) >*< f >*< g)) :<*>: p)
 -- Composition Law: u <*> (v <*> w) = pure (.) <*> u <*> v <*> w
-optimise (u :<*>: (v :<*>: w))     = optimise (optimise (optimise (pure (lift' (.)) <*> u) <*> v) <*> w)
+optimise (u :<*>: Op (v :<*>: w))                     = optimise (optimise (optimise (Op (Pure (lift' (.))) :<*>: u) :<*>: v) :<*>: w)
 -- Reassociation Law 1: (u *> v) <*> w = u *> (v <*> w)
-optimise ((u :*>: v) :<*>: w)      = optimise (u *> (optimise (v <*> w)))
+optimise (Op (u :*>: v) :<*>: w)                      = optimise (u :*>: (optimise (v :<*>: w)))
 -- Interchange Law: u <*> pure x = pure ($ x) <*> u
-optimise (u :<*>: Pure x)          = optimise (lift' flip >*< lift' ($) >*< x <$> u)
+optimise (u :<*>: Op (Pure x))                        = optimise (Op (Pure (lift' flip >*< lift' ($) >*< x)) :<*>: u)
 -- Reassociation Law 2: u <*> (v <* w) = (u <*> v) <* w
-optimise (u :<*>: (v :<*: w))      = optimise (optimise (u <*> v) <* w)
+optimise (u :<*>: Op (v :<*: w))                      = optimise (optimise (u :<*>: v) :<*: w)
 -- Reassociation Law 3: u <*> (v *> pure x) = (u <*> pure x) <* v
-optimise (u :<*>: (v :*>: Pure x)) = optimise (optimise (u <*> pure x) <* v)
+optimise (u :<*>: Op (v :*>: Op (Pure x)))            = optimise (optimise (u :<*>: Op (Pure x)) :<*: v)
 -- ALTERNATIVE OPTIMISATION
 -- Left Catch Law: pure x <|> u = pure x
-optimise (Pure x :<|>: _)          = pure x
+optimise (p@(Op (Pure x)) :<|>: _)                    = p
 -- Left Neutral Law: empty <|> u = u
-optimise (Empty :<|>: u)           = u
+optimise (Op Empty :<|>: u)                           = u
 -- Right Neutral Law: u <|> empty = u
-optimise (u :<|>: Empty)           = u
+optimise (u :<|>: Op Empty)                           = u
 -- Associativity Law: (u <|> v) <|> w = u <|> (v <|> w)
-optimise ((u :<|>: v) :<|>: w)     = u <|> optimise (v <|> w)
--- MONADIC OPTIMISATION
--- Left Identity Law: pure x >>= f = f x
---optimise (Pure x :>>=: f)          = f x
--- Reassociation Law 4: (u *> v) >>= f = u *> (v >>= f)
---optimise ((u :*>: v) :>>=: f)      = optimise (u *> optimise (v >>= f))
+optimise (Op (u :<|>: v) :<|>: w)                     = Op (u :<|>: optimise (v :<|>: w))
 -- SEQUENCING OPTIMISATION
 -- Identity law: pure x *> u = u
-optimise (Pure _ :*>: u)           = u
+optimise (Op (Pure _) :*>: u)                         = u
 -- Identity law: (u *> pure x) *> v = u *> v
-optimise ((u :*>: Pure _) :*>: v)  = u *> v
+optimise (Op (u :*>: Op (Pure _)) :*>: v)             = Op (u :*>: v)
 -- Associativity Law: u *> (v *> w) = (u *> v) *> w
-optimise (u :*>: (v :*>: w))       = optimise (optimise (u *> v) *> w)
+optimise (u :*>: Op (v :*>: w))                       = optimise (optimise (u :*>: v) :*>: w)
 -- Identity law: u <* pure x = u
-optimise (u :<*: Pure _) = u
+optimise (u :<*: Op (Pure _))                         = u
 -- Identity law: u <* (v *> pure x) = u <* v
-optimise (u :<*: (v :*>: Pure _))  = optimise (u <* v)
+optimise (u :<*: Op (v :*>: Op (Pure _)))             = optimise (u :<*: v)
 -- Commutativity Law: pure x <* u = u *> pure x
-optimise (Pure x :<*: u)           = optimise (u *> pure x)
+optimise (Op (Pure x) :<*: u)                         = optimise (u :*>: Op (Pure x))
 -- Associativity Law (u <* v) <* w = u <* (v <* w)
-optimise ((u :<*: v) :<*: w)       = optimise (u <* optimise (v <* w))
+optimise (Op (u :<*: v) :<*: w)                       = optimise (u :<*: optimise (v :<*: w))
 -- Pure lookahead: lookAhead (pure x) = pure x
-optimise (LookAhead (Pure x))      = pure x
+optimise (LookAhead p@(Op (Pure x)))                  = p
 -- Dead lookahead: lookAhead empty = empty
-optimise (LookAhead Empty)         = empty
+optimise (LookAhead p@(Op Empty))                     = p
 -- Pure negative-lookahead: notFollowedBy (pure x) = empty
-optimise (NotFollowedBy (Pure _))  = empty
+optimise (NotFollowedBy (Op (Pure _)))                = Op Empty
 -- Dead negative-lookahead: notFollowedBy empty = unit
-optimise (NotFollowedBy Empty)     = unit
+optimise (NotFollowedBy (Op Empty))                   = Op (Pure (lift' ()))
 -- Double Negation Law: notFollowedBy . notFollowedBy = lookAhead . try . void
-optimise (NotFollowedBy (NotFollowedBy p)) = optimise (lookAhead (void (try p)))
+optimise (NotFollowedBy (Op (NotFollowedBy p)))       = optimise (LookAhead (Op (Op (Try (constantInput p) p) :*>: Op (Pure (lift' ())))))
 -- Zero Consumption Law: notFollowedBy (try p) = notFollowedBy p
-optimise (NotFollowedBy (Try _ p)) = optimise (notFollowedBy p)
+optimise (NotFollowedBy (Op (Try _ p)))               = optimise (NotFollowedBy p)
 -- Idempotence Law: lookAhead . lookAhead = lookAhead
-optimise (LookAhead (LookAhead p)) = lookAhead p
+optimise (LookAhead (Op (LookAhead p)))               = Op (LookAhead p)
 -- Right Identity Law: notFollowedBy . lookAhead = notFollowedBy
-optimise (NotFollowedBy (LookAhead p)) = optimise (notFollowedBy p)
+optimise (NotFollowedBy (Op (LookAhead p)))           = optimise (NotFollowedBy p)
 -- Left Identity Law: lookAhead . notFollowedBy = notFollowedBy
-optimise (LookAhead (NotFollowedBy p)) = notFollowedBy p
+optimise (LookAhead (Op (NotFollowedBy p)))           = Op (NotFollowedBy p)
 -- Transparency Law: notFollowedBy (try p <|> q) = notFollowedBy p *> notFollowedBy q
-optimise (NotFollowedBy (Try _ p :<|>: q)) = optimise (optimise (notFollowedBy p) *> optimise (notFollowedBy q))
+optimise (NotFollowedBy (Op (Op (Try _ p) :<|>: q)))  = optimise (optimise (NotFollowedBy p) :*>: optimise (NotFollowedBy q))
 -- Distributivity Law: lookAhead p <|> lookAhead q = lookAhead (p <|> q)
-optimise (LookAhead p :<|>: LookAhead q) = optimise (lookAhead (optimise (p <|> q)))
+optimise (Op (LookAhead p) :<|>: Op (LookAhead q))    = optimise (LookAhead (optimise (p :<|>: q)))
 -- Absorption Law: p <*> lookAhead (q *> pure x) = (p <*> pure x) <* lookAhead q
-optimise (p :<*>: LookAhead (q :*>: Pure x)) = optimise (optimise (p <*> pure x) <* optimise (lookAhead q))
+optimise (p :<*>: Op (LookAhead (Op (q :*>: Op (Pure x))))) = optimise (optimise (p :<*>: Op (Pure x)) :<*: optimise (LookAhead q))
 -- Absorption Law: p <*> notFollowedBy q = (p <*> unit) <* notFollowedBy q
-optimise (p :<*>: NotFollowedBy q) = optimise (optimise (p <*> unit) <* notFollowedBy q)
+optimise (p :<*>: Op (NotFollowedBy q))               = optimise (optimise (p :<*>: Op (Pure (lift' ()))) :<*: Op (NotFollowedBy q))
 -- Idempotence Law: notFollowedBy (p *> pure x) = notFollowedBy p
-optimise (NotFollowedBy (p :*>: Pure _)) = optimise (notFollowedBy p)
+optimise (NotFollowedBy (Op (p :*>: Op (Pure _))))    = optimise (NotFollowedBy p)
 -- Idempotence Law: notFollowedBy (f <$> p) = notFollowedBy p
-optimise (NotFollowedBy (Pure _ :<*>: p)) = optimise (notFollowedBy p)
-optimise (Try _ (Pure x))          = pure x
-optimise (Try _ Empty)             = empty
-optimise (Try Nothing p)           = Try (constantInput p) p
+optimise (NotFollowedBy (Op (Op (Pure _) :<*>: p)))   = optimise (NotFollowedBy p)
+optimise (Try _ (Op (Pure x)))                        = Op (Pure x)
+optimise (Try _ (Op Empty))                           = Op Empty
+optimise (Try Nothing p)                              = Op (Try (constantInput p) p)
 -- pure Left law: branch (pure (Left x)) p q = p <*> pure x
-optimise (Branch (Pure (WQ (Left x) ql)) p _) = optimise (p <*> pure (WQ x qx)) where qx = [||case $$ql of Left x -> x||]
+optimise (Branch (Op (Pure (WQ (Left x) ql))) p _)    = optimise (p :<*>: Op (Pure (WQ x qx))) where qx = [||case $$ql of Left x -> x||]
 -- pure Right law: branch (pure (Right x)) p q = q <*> pure x
-optimise (Branch (Pure (WQ (Right x) ql)) _ q) = optimise (q <*> pure (WQ x qx)) where qx = [||case $$ql of Right x -> x||]
+optimise (Branch (Op (Pure (WQ (Right x) ql))) _ q)   = optimise (q :<*>: Op (Pure (WQ x qx))) where qx = [||case $$ql of Right x -> x||]
 -- Generalised Identity law: branch b (pure f) (pure g) = either f g <$> b
-optimise (Branch b (Pure f) (Pure g)) = optimise (lift' either >*< f >*< g <$> b)
+optimise (Branch b (Op (Pure f)) (Op (Pure g)))       = optimise (Op (Pure (lift' either >*< f >*< g)) :<*>: b)
 -- Interchange law: branch (x *> y) p q = x *> branch y p q
-optimise (Branch (x :*>: y) p q)   = optimise (x *> optimise (branch y p q))
+optimise (Branch (Op (x :*>: y)) p q)                 = optimise (x :*>: optimise (Branch y p q))
 -- Negated Branch law: branch b p empty = branch (swapEither <$> b) empty p
-optimise (Branch b p Empty) = branch (WQ (either Right Left) [||either Right Left||] <$> b) empty p
+optimise (Branch b p (Op Empty))                      = Op (Branch (Op (Op (Pure (WQ (either Right Left) [||either Right Left||])) :<*>: b)) (Op Empty) p)
 -- Branch Fusion law: branch (branch b empty (pure f)) empty k = branch (g <$> b) empty k where g is a monad transforming (>>= f)
-optimise (Branch (Branch b Empty (Pure (WQ f qf))) Empty k) = optimise (branch (optimise (WQ g qg <$> b)) empty k)
+optimise (Branch (Op (Branch b (Op Empty) (Op (Pure (WQ f qf))))) (Op Empty) k) = optimise (Branch (optimise (Op (Pure (WQ g qg)) :<*>: b)) (Op Empty) k)
   where
     g (Left _) = Left ()
     g (Right x) = case f x of
@@ -676,90 +539,47 @@ optimise (Branch (Branch b Empty (Pure (WQ f qf))) Empty k) = optimise (branch (
                                Left _ -> Left ()
                                Right y -> Right y||]
 -- Distributivity Law: f <$> branch b p q = branch b ((f .) <$> p) ((f .) <$> q)
-optimise (Pure f :<*>: Branch b p q)   = optimise (branch b (optimise (lift' (.) >*< f <$> p)) (optimise (lift' (.) >*< f <$> q)))
+optimise (Op (Pure f) :<*>: Op (Branch b p q))   = optimise (Branch b (optimise (Op (Pure (lift' (.) >*< f)) :<*>: p)) (optimise (Op (Pure (lift' (.) >*< f)) :<*>: q)))
 -- pure Match law: match vs (pure x) f = if elem x vs then f x else empty
-optimise (Match (Pure (WQ x _)) fs qs) = foldr (\(f, q) k -> if _val f x then q else k) empty (zip fs qs)
+optimise (Match (Op (Pure (WQ x _))) fs qs) = foldr (\(f, q) k -> if _val f x then q else k) (Op Empty) (zip fs qs)
 -- Generalised Identity Match law: match vs p (pure . f) = f <$> (p >?> flip elem vs)
 optimise (Match p fs qs)
-  | all (\case {Pure _ -> True; _ -> False}) qs = optimise (WQ apply qapply <$> (p >?> WQ validate qvalidate))
-    where apply x    = foldr (\(f, Pure y) k -> if _val f x then _val y else k) (error "whoopsie") (zip fs qs)
-          qapply     = foldr (\(f, Pure y) k -> [||\x -> if $$(_code f) x then $$(_code y) else $$k x||]) ([||const (error "whoopsie")||]) (zip fs qs)
+  | all (\case {Op (Pure _) -> True; _ -> False}) qs = optimise (Op (Pure (WQ apply qapply)) :<*>: (p >?> (WQ validate qvalidate)))
+    where apply x    = foldr (\(f, Op (Pure y)) k -> if _val f x then _val y else k) (error "whoopsie") (zip fs qs)
+          qapply     = foldr (\(f, Op (Pure y)) k -> [||\x -> if $$(_code f) x then $$(_code y) else $$k x||]) ([||const (error "whoopsie")||]) (zip fs qs)
           validate x = foldr (\f b -> _val f x || b) False fs
           qvalidate  = foldr (\f k -> [||\x -> $$(_code f) x || $$k x||]) [||const False||] fs
+          (>?>) :: Free Parser' f xs ks a i -> WQ (a -> Bool) -> Free Parser' f xs ks a i
+          p >?> (WQ f qf) = Op (Branch (Op (Op (Pure (WQ g qg)) :<*>: p)) (Op Empty) (Op (Pure (lift' id))))
+            where
+              g x = if f x then Right x else Left ()
+              qg = [||\x -> if $$qf x then Right x else Left ()||]
 -- Distributivity Law: f <$> match vs p g = match vs p ((f <$>) . g)
-optimise (Pure f :<*>: Match p fs qs)  = Match p fs (map (optimise . (f <$>)) qs)
-optimise p                             = p
+optimise (Op (Pure f) :<*>: (Op (Match p fs qs))) = Op (Match p fs (map (optimise . (Op (Pure f) :<*>:)) qs))
+optimise p                                        = Op p
 
 -- NOTE: Distributivity Law : branch (pure x) (p *> q) (r *> s) = branch (pure x) p r *> branch (pure x) q s
 
---optimise'' :: Free Parser' Void a -> Free Parser' Void a
---optimise'' (Op x) = optimise' x
-
-optimise' :: Parser' (Free Parser' f) xs ks a i -> Free Parser' f xs ks a i
-optimise' (Op Empty' :<*> _) = Op Empty'
-optimise' (u :<*> Op Empty') = Op (u :*> Op Empty')
-optimise' (Op Empty' :*> _)  = Op Empty'
-optimise' (Op Empty' :<* _)  = Op Empty'
-optimise' (u :<* Op Empty')  = Op (u :*> Op Empty')
-optimise' (Op (Pure' (WQ f qf)) :<*> Op (Pure' (WQ x qx))) = Op (Pure' (WQ (f x) [|| $$qf $$qx ||]))
-optimise' (Op (Pure' (WQ f qf)) :<*> Op (Op (Pure' (WQ g qg)) :<*> p)) = optimise' (Op (Pure' (WQ (f . g) [|| $$qf . $$qg ||])) :<*> p)
-optimise' (u :<*> Op (v :<*> w))          = optimise' (optimise' (optimise' (Op (Pure' (WQ (.) [||(.)||])) :<*> u) :<*> v) :<*> w)
-optimise' (Op (u :*> v) :<*> w)           = optimise' (u :*> (optimise' (v :<*> w)))
-optimise' (u :<*> Op (Pure' (WQ x qx)))     = optimise' (Op (Pure' (WQ ($ x) [|| \f -> f $$qx ||])) :<*> u)
-optimise' (u :<*> Op (v :<* w))           = optimise' (optimise' (u :<*> v) :<* w)
-optimise' (u :<*> Op (v :*> Op (Pure' x))) = optimise' (optimise' (u :<*> Op (Pure' x)) :<* v)
-optimise' (Op (Pure' x) :<|> _)             = Op (Pure' x)
-optimise' (Op Empty' :<|> u)                = u
-optimise' (u :<|> Op Empty')                = u
-optimise' (Op (u :<|> v) :<|> w)          = Op (u :<|> optimise' (v :<|> w))
-optimise' (Op (Pure' _) :*> u)              = u
-optimise' (Op (u :*> Op (Pure' _)) :*> v)  = Op (u :*> v)
-optimise' (u :*> Op (v :*> w))            = optimise' (optimise' (u :*> v) :*> w)
-optimise' (u :<* Op (Pure' _))              = u
-optimise' (u :<* Op (v :*> Op (Pure' _)))  = optimise' (u :<* v)
-optimise' (Op (Pure' x) :<* u)              = optimise' (u :*> Op (Pure' x))
-optimise' (Op (u :<* v) :<* w)            = optimise' (u :<* optimise' (v :<* w))
-optimise' (Try' _ (Op (Pure' x)))            = Op (Pure' x)
-optimise' (Try' _ (Op Empty'))               = Op Empty'
-optimise' (Try' Nothing p)                  = Op (Try' (constantInput' p) p)
-optimise' p                                = Op p
-
-constantInput :: Parser a -> Maybe Int
-constantInput (Pure _) = Just 0
-constantInput (Satisfy _) = Just 1
-constantInput (p :<*>: q) = constantInput p <+> constantInput q
-constantInput (p :*>: q) = constantInput p <+> constantInput q
-constantInput (p :<*: q) = constantInput p <+> constantInput q
-constantInput (Try n _ :<|>: q) = n <==> constantInput q
-constantInput Empty = Just 0
-constantInput (Try n _) = n
-constantInput (LookAhead p) = constantInput p
-constantInput (NotFollowedBy p) = constantInput p
-constantInput (Branch b p q) = constantInput b <+> (constantInput p <==> constantInput q)
-constantInput (Match p _ qs) = constantInput p <+> (foldr1 (<==>) (map constantInput qs))
-constantInput (Debug _ p) = constantInput p
-constantInput _ = Nothing
-
-constantInput' :: Free Parser' f xs ks a i -> Maybe Int
-constantInput' = getConst . parafold (const (Const Nothing)) (alg1 |> (Const . alg2 . imap (snd . getProd)))
+constantInput :: Free Parser' f xs ks a i -> Maybe Int
+constantInput = getConst . parafold (const (Const Nothing)) (alg1 |> (Const . alg2 . imap (snd . getProd)))
   where
     alg1 :: Parser' (Prod (Free Parser' f) (Const (Maybe Int))) xs ks a i -> Maybe (Const (Maybe Int) xs ks a i)
-    alg1 (Prod (Op (Try' _ _), Const n) :<|> Prod (_, Const q)) = Just (Const (n <==> q))
+    alg1 (Prod (Op (Try _ _), Const n) :<|>: Prod (_, Const q)) = Just (Const (n <==> q))
     alg1 _ = Nothing
     alg2 :: Parser' (Const (Maybe Int)) xs ks a i -> Maybe Int
-    alg2 (Pure' _)                               = Just 0
-    alg2 (Satisfy' _)                            = Just 1
-    alg2 (Const p :<*> Const q)                  = p <+> q
-    alg2 (Const p :*> Const q)                   = p <+> q
-    alg2 (Const p :<* Const q)                   = p <+> q
-    alg2 Empty'                                  = Just 0
-    alg2 (Try' n _)                              = n
-    alg2 (LookAhead' (Const p))                  = p
-    alg2 (NotFollowedBy' (Const p))              = p
-    alg2 (Branch' (Const b) (Const p) (Const q)) = b <+> (p <==> q)
-    alg2 (Match' (Const p) _ qs)                 = p <+> (foldr1 (<==>) (map getConst qs))
-    alg2 (Debug' _ (Const p))                    = p
-    alg2 _                                       = Nothing
+    alg2 (Pure _)                               = Just 0
+    alg2 (Satisfy _)                            = Just 1
+    alg2 (Const p :<*>: Const q)                = p <+> q
+    alg2 (Const p :*>: Const q)                 = p <+> q
+    alg2 (Const p :<*: Const q)                 = p <+> q
+    alg2 Empty                                  = Just 0
+    alg2 (Try n _)                              = n
+    alg2 (LookAhead (Const p))                  = p
+    alg2 (NotFollowedBy (Const p))              = p
+    alg2 (Branch (Const b) (Const p) (Const q)) = b <+> (p <==> q)
+    alg2 (Match (Const p) _ qs)                 = p <+> (foldr1 (<==>) (map getConst qs))
+    alg2 (Debug _ (Const p))                    = p
+    alg2 _                                      = Nothing
 
 (<+>) :: (Num a, Monad m) => m a -> m a -> m a
 (<+>) = liftM2 (+)
@@ -828,84 +648,20 @@ instance Show (M xs ks a) where
 type IMVar = Int
 data State = forall a. State a (TExpQ a) (ΣVar a)
 type ΣVars = IORef [State]
-
-compile :: Parser a -> (M '[] '[] a, [State])
-compile !p = trace (show m) (m, vss)
-  where (m, vss) = unsafePerformIO (do σs <- newIORef []
-                                       m <- runReaderT (compile' (trace (showAST p) p) Halt) (HashMap.empty, 0, σs)
-                                       vss <- readIORef σs
-                                       return $! (m, vss))
-        compile' :: Parser a -> M (a ': xs) ks b -> ReaderT (HashMap StableParserName IMVar, IMVar, ΣVars) IO (M xs ks b)
-        compile' !(Pure x) !m          = do return $! (Push x m)
-        compile' !(Satisfy p) !m       = do return $! (Sat p m)
-        compile' !(pf :<*>: px) !m     = do !pxc <- compile' px (Lift2 (lift' ($)) m); compile' pf pxc
-        compile' !(p :*>: q) !m        = do !qc <- compile' q m; compile' p (Pop qc)
-        compile' !(p :<*: q) !m        = do !qc <- compile' q (Pop m); compile' p qc
-        compile' !Empty !m             = do return $! Empt
-        compile' !(Try n p :<|>: q) !m = do liftM2 (SoftFork n) (compile' p (Commit (isJust n) m)) (compile' q m)
-        compile' !(p :<|>: q) !m       = do liftM2 HardFork (compile' p (Commit False m)) (compile' q m)
-        compile' !(Try n p) !m         = do liftM (Attempt n) (compile' p (Commit (isJust n) m))
-        compile' !(LookAhead p) !m     = do liftM Look (compile' p (Restore m))
-        compile' !(NotFollowedBy p) !m = do liftM2 NegLook (compile' p (Restore Empt)) (return (Push (lift' ()) m))
-        compile' !(Branch b p q) !m    = do !pc <- compile' p (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
-                                            !qc <- compile' q (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
-                                            compile' b (Case pc qc)
-        compile' !(Match p fs qs) !m   = do !qcs <- traverse (flip compile' m) qs
-                                            compile' p (Choices fs qcs)
-        compile' !(Rec !p) !m          =
-          do (StableName _name) <- Reader.lift (makeStableName p)
-             (seen, v, _) <- ask
-             let !name = StableParserName _name
-             case HashMap.lookup name seen of
-               Just v' -> do return $! MuCall (MVar v') m
-               Nothing -> do n <- local (HashMap.insert name v >< (+1)) (compile' p Ret)
-                             return $! Call n (MVar v) m
-        compile' !(ChainPre op p) !m   =
-          do (_, v, rσs) <- ask
-             σs <- Reader.lift (readIORef rσs)
-             let σ = case σs of
-                       [] -> ΣVar 0
-                       (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-             Reader.lift (writeIORef rσs (State id [|| id ||] σ:σs))
-             opc <- local (id >< (+1)) (compile' op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
-             pc <- local (id >< (+1)) (compile' p (Lift2 (lift' ($)) m))
-             return $! Push (lift' id) (ChainInit (lift' id) σ (Push (lift' flip >*< lift' (.)) opc) (MVar v) pc)
-        compile' !(ChainPost (Pure x) op) !m =
-          do (_, v, rσs) <- ask
-             σs <- Reader.lift (readIORef rσs)
-             let σ = case σs of
-                       [] -> ΣVar 0
-                       (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-             Reader.lift (writeIORef rσs (State (_val x) (_code x) σ:σs))
-             opc <- local (id >< (+1)) (compile' op (ChainIter σ (MVar v)))
-             return $! Push x (ChainInit x σ opc (MVar v) m)
-        compile' !(ChainPost p op) !m =
-          do (_, v, rσs) <- ask
-             σs <- Reader.lift (readIORef rσs)
-             let σ = case σs of
-                       [] -> ΣVar 0
-                       (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-             Reader.lift (writeIORef rσs (State Nothing [|| Nothing ||] σ:σs))
-             opc <- local (id >< (+1)) (compile' op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
-             let m' = ChainInit (WQ Nothing [||Nothing||]) σ (Push (lift' (<$!>)) opc) (MVar v) (Lift2 (lift' ($)) m)
-             pc <- local (id >< (+1)) (compile' p (Lift2 (lift' ($)) m'))
-             return $! Push (lift' fromJust) (Push (lift' Just) pc)
-        compile' !(Debug name p) !m = liftM (LogEnter name) (compile' p (LogExit name m))
-
 newtype CodeGen b xs ks a i = CodeGen {runCodeGen :: forall xs' ks'. M (a ': xs') ks' b
-                                                  -> ReaderT (HashMap (StableParserName' xs ks i) IMVar, IMVar, ΣVars) IO (M xs' ks' b)}
-compile' :: Free Parser' Void '[] '[] a i -> (M '[] '[] a, [State])
-compile' p = unsafePerformIO (do σs <- newIORef []
-                                 m <- runReaderT (runCodeGen (parafold undefined (alg1 |> (alg2 . imap (snd . getProd))) p) Halt) (HashMap.empty, 0, σs)
-                                 vss <- readIORef σs
-                                 return $! (m, vss))
+                                                  -> ReaderT (HashMap (StableParserName xs ks i) IMVar, IMVar, ΣVars) IO (M xs' ks' b)}
+compile :: Free Parser' Void '[] '[] a i -> (M '[] '[] a, [State])
+compile p = unsafePerformIO (do σs <- newIORef []
+                                m <- runReaderT (runCodeGen (parafold undefined (alg1 |> (alg2 . imap (snd . getProd))) p) Halt) (HashMap.empty, 0, σs)
+                                vss <- readIORef σs
+                                return $! (m, vss))
   where
     alg1 :: Parser' (Prod (Free Parser' Void) (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
-    alg1 !((Prod (Op (Try' n p), _)) :<|> (Prod (_, q))) = Just $ CodeGen $ \(!m) ->
+    alg1 !((Prod (Op (Try n p), _)) :<|>: (Prod (_, q))) = Just $ CodeGen $ \(!m) ->
       do pc <- runCodeGen (parafold undefined (alg1 |> (alg2 . imap (snd . getProd))) p) (Commit False m)
          qc <- runCodeGen q m
          return $! HardFork pc qc
-    alg1 !(ChainPost' (Prod (Op (Pure' x), _)) (Prod (_, op))) = Just $ CodeGen $ \(!m) ->
+    alg1 !(ChainPost (Prod (Op (Pure x), _)) (Prod (_, op))) = Just $ CodeGen $ \(!m) ->
       do (_, v, rσs) <- ask
          σs <- Reader.lift (readIORef rσs)
          let σ = case σs of
@@ -916,30 +672,30 @@ compile' p = unsafePerformIO (do σs <- newIORef []
          return $! Push x (ChainInit x σ opc (MVar v) m)
     alg1 _ = Nothing
     alg2 :: Parser' (CodeGen b) xs ks a i -> CodeGen b xs ks a i
-    alg2 !(Pure' x)          = CodeGen $ \(!m) -> do return $! (Push x m)
-    alg2 !(Satisfy' p)       = CodeGen $ \(!m) -> do return $! (Sat p m)
-    alg2 !(pf :<*> px)     = CodeGen $ \(!m) -> do !pxc <- runCodeGen px (Lift2 (lift' ($)) m); runCodeGen pf pxc
-    alg2 !(p :*> q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q m; runCodeGen p (Pop qc)
-    alg2 !(p :<* q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q (Pop m); runCodeGen p qc
-    alg2 !Empty'             = CodeGen $ \(!m) -> do return $! Empt
-    alg2 !(p :<|> q)       = CodeGen $ \(!m) -> do liftM2 HardFork (runCodeGen p (Commit False m)) (runCodeGen q m)
-    alg2 !(Try' n p)         = CodeGen $ \(!m) -> do liftM (Attempt n) (runCodeGen p (Commit (isJust n) m))
-    alg2 !(LookAhead' p)     = CodeGen $ \(!m) -> do liftM Look (runCodeGen p (Restore m))
-    alg2 !(NotFollowedBy' p) = CodeGen $ \(!m) -> do liftM2 NegLook (runCodeGen p (Restore Empt)) (return (Push (lift' ()) m))
-    alg2 !(Branch' b p q)    = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
-                                                     !qc <- runCodeGen q (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
-                                                     runCodeGen b (Case pc qc)
-    alg2 !(Match' p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
-                                                     runCodeGen p (Choices fs qcs)
-    alg2 !(Rec' !p !q)       = CodeGen $ \(!m) ->
+    alg2 !(Pure x)          = CodeGen $ \(!m) -> do return $! (Push x m)
+    alg2 !(Satisfy p)       = CodeGen $ \(!m) -> do return $! (Sat p m)
+    alg2 !(pf :<*>: px)     = CodeGen $ \(!m) -> do !pxc <- runCodeGen px (Lift2 (lift' ($)) m); runCodeGen pf pxc
+    alg2 !(p :*>: q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q m; runCodeGen p (Pop qc)
+    alg2 !(p :<*: q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q (Pop m); runCodeGen p qc
+    alg2 !Empty             = CodeGen $ \(!m) -> do return $! Empt
+    alg2 !(p :<|>: q)       = CodeGen $ \(!m) -> do liftM2 HardFork (runCodeGen p (Commit False m)) (runCodeGen q m)
+    alg2 !(Try n p)         = CodeGen $ \(!m) -> do liftM (Attempt n) (runCodeGen p (Commit (isJust n) m))
+    alg2 !(LookAhead p)     = CodeGen $ \(!m) -> do liftM Look (runCodeGen p (Restore m))
+    alg2 !(NotFollowedBy p) = CodeGen $ \(!m) -> do liftM2 NegLook (runCodeGen p (Restore Empt)) (return (Push (lift' ()) m))
+    alg2 !(Branch b p q)    = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
+                                                    !qc <- runCodeGen q (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
+                                                    runCodeGen b (Case pc qc)
+    alg2 !(Match p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
+                                                    runCodeGen p (Choices fs qcs)
+    alg2 !(Rec !p !q)       = CodeGen $ \(!m) ->
       do (StableName _name) <- Reader.lift (makeStableName p)
          (seen, v, _) <- ask
-         let !name = StableParserName' _name
+         let !name = StableParserName _name
          case HashMap.lookup name seen of
            Just v' -> do return $! MuCall (MVar v') m
            Nothing -> do n <- local (HashMap.insert name v >< (+1)) (runCodeGen q Ret)
                          return $! Call n (MVar v) m
-    alg2 !(ChainPre' op p) = CodeGen $ \(!m) ->
+    alg2 !(ChainPre op p) = CodeGen $ \(!m) ->
       do (_, v, rσs) <- ask
          σs <- Reader.lift (readIORef rσs)
          let σ = case σs of
@@ -949,7 +705,7 @@ compile' p = unsafePerformIO (do σs <- newIORef []
          opc <- local (id >< (+1)) (runCodeGen op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
          pc <- local (id >< (+1)) (runCodeGen p (Lift2 (lift' ($)) m))
          return $! Push (lift' id) (ChainInit (lift' id) σ (Push (lift' flip >*< lift' (.)) opc) (MVar v) pc)
-    alg2 !(ChainPost' p op) = CodeGen $ \(!m) ->
+    alg2 !(ChainPost p op) = CodeGen $ \(!m) ->
       do (_, v, rσs) <- ask
          σs <- Reader.lift (readIORef rσs)
          let σ = case σs of
@@ -960,7 +716,7 @@ compile' p = unsafePerformIO (do σs <- newIORef []
          let m' = ChainInit (WQ Nothing [||Nothing||]) σ (Push (lift' (<$!>)) opc) (MVar v) (Lift2 (lift' ($)) m)
          pc <- local (id >< (+1)) (runCodeGen p (Lift2 (lift' ($)) m'))
          return $! Push (lift' fromJust) (Push (lift' Just) pc)
-    alg2 !(Debug' name p) = CodeGen $ \(!m) -> liftM (LogEnter name) (runCodeGen p (LogExit name m))
+    alg2 !(Debug name p) = CodeGen $ \(!m) -> liftM (LogEnter name) (runCodeGen p (LogExit name m))
 
 data SList a = !a ::: !(SList a) | SNil
 data HList xs where
@@ -1397,11 +1153,7 @@ eval' (LogEnter name k) γ     = trace "LOGENTER" $ evalLogEnter name k γ
 eval' (LogExit name k) γ      = trace "LOGEXIT" $ evalLogExit name k γ
 
 runParser :: Parser a -> TExpQ (String -> Maybe a)
-runParser p = --runST (compile (preprocess p) >>= eval input)
-  [||\input -> runST $$(eval [||input||] (compile (preprocess p)))||]
-
-runParser' :: Free Parser' Void '[] '[] a i -> TExpQ (String -> Maybe a)
-runParser' p = [||\input -> runST $$(eval [||input||] (compile' (preprocess' p)))||]
+runParser p = [||\input -> runST $$(eval [||input||] (compile (preprocess p)))||]
 
 showM :: Parser a -> String
 showM p = show (fst (compile (preprocess p)))

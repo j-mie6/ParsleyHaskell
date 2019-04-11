@@ -19,7 +19,7 @@ import Language.Haskell.TH.Syntax hiding (Match, match)
 import LiftPlugin
 
 manyTestParsley :: String -> Maybe ()
-manyTestParsley = {-}$$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}$$(Parsley.runParser (Parsley.while (Parsley.char 'a' Parsley.*> Parsley.pure (lift' True))))
+manyTestParsley = {-}$$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}$$(Parsley.runParser (Parsley.skipMany (Parsley.char 'a' Parsley.*> Parsley.pure (lift' True))))
 
 manyTestYodaBad :: Yoda.Parser Int
 manyTestYodaBad = Yoda.chainl1 (Parsley.toDigit Yoda.<$> Yoda.satisfy (Parsley.isDigit)) ((+) Yoda.<$ Yoda.char '+')

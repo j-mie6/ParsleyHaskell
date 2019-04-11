@@ -817,9 +817,9 @@ suspend m ctx ks =
 resume :: Γ s xs (xs ': ks) a -> QST s (Maybe a)
 resume (Γ input xs ks o hs cidx cs σs d) =
   [|| let ks' = bug ($$ks) :: K s (xs ': ks) a
-          (I# o#) = $$o
-          (I# cidx#) = $$cidx
-          (I# d#) = $$d
+          I# o# = $$o
+          I# cidx# = $$cidx
+          I# d# = $$d
       in
         case ks' of
           (KCons k ks) -> k $$input $$(bug xs) ks o# $$hs cidx# $$cs $$σs d#
@@ -912,7 +912,7 @@ data GenMVar a = forall xs ks. GenMVar (MVar xs ks a)
 instance Ord (GenMVar a) where compare (GenMVar (MVar u)) (GenMVar (MVar v)) = compare u v
 instance Eq (GenMVar a) where (GenMVar (MVar u)) == (GenMVar (MVar v)) = u == v
 
-data GenEval s a = forall xs ks. GenEval (TExpQ (Input -> X xs -> K s ks a -> O -> H s a -> CIdx -> C s -> Σ s -> D -> ST s (Maybe a)))
+data GenEval s a = forall xs ks. GenEval (TExpQ (Input -> X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> Σ s -> D# -> ST s (Maybe a)))
 type FixMap s a = Map (GenMVar a) (GenEval s a)
 data Ctx s a = Ctx {μ :: FixMap s a, σm :: DMap ΣVar (QSTRef s), constCount :: Int, debugLevel :: Int}
 
@@ -975,17 +975,23 @@ evalCall :: M xs ((b ': xs) ': ks) a -> MVar xs ((b ': xs) ': ks) a -> M (b ': x
          -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalCall m v k γ@(Γ input !xs ks o hs cidx cs σs d) =
   do ctx <- ask
-     return [|| fix (\r input xs ks o hs cidx cs σs d ->
+     return [|| let I# o# = $$o
+                    I# cidx# = $$cidx
+                    I# d# = $$d + 1
+                in fix (\r input xs ks o hs cidx cs σs d ->
        do save σs
           $$(let μ' = Map.insert (GenMVar v) (GenEval [||r||]) (μ ctx)
-             in runReader (eval' m (Γ [||input||] [||bug xs||] [||bug ks||] [||o||] [||hs||] [||cidx||] [||cs||] [||σs||] [||d||])) (ctx {μ = μ'})
-           )) $$input $$xs $$(suspend k ctx ks) $$o $$hs $$cidx $$cs $$σs ($$d + 1) ||]
+             in runReader (eval' m (Γ [||input||] [||bug xs||] [||bug ks||] [||I# o||] [||hs||] [||I# cidx||] [||cs||] [||σs||] [||I# d||])) (ctx {μ = μ'})
+           )) $$input $$xs $$(suspend k ctx ks) o# $$hs cidx# $$cs $$σs d# ||]
 
 evalMuCall :: MVar xs ((b ': xs) ': ks) a -> M (b ': xs) ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalMuCall v k γ@(Γ input !xs ks o hs cidx cs σs d) =
   do ctx <- ask
      case (μ ctx) Map.! (GenMVar v) of
-       GenEval m -> return [|| $$(coerce m) $$input $$xs $$(suspend k ctx ks) $$o $$hs $$cidx $$cs $$σs ($$d + 1)||]
+       GenEval m -> return [|| let I# o# = $$o
+                                   I# cidx# = $$cidx
+                                   I# d# = $$d + 1
+                               in $$(coerce m) $$input $$xs $$(suspend k ctx ks) o# $$hs cidx# $$cs $$σs d#||]
 
 evalPush :: WQ x -> M (x ': xs) ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalPush x k γ = eval' k (γ {xs = [|| pushX $$(_code x) $$(xs γ) ||]})
@@ -1110,7 +1116,10 @@ evalChainIter u v γ@(Γ input !xs ks o hs cidx cs σs d) =
          do let !(g, xs') = popX $$xs
             modifyΣ $$σ g
             pokeC $$o $$cidx $$cs
-            $$(coerce k) $$input xs' $$ks $$o $$hs $$cidx $$cs $$σs $$d
+            let I# o# = $$o
+            let I# cidx# = $$cidx
+            let I# d# = $$d
+            $$(coerce k) $$input xs' $$ks o# $$hs cidx# $$cs $$σs d#
          ||]
 
 evalChainInit :: WQ x -> ΣVar x -> M xs ks a -> MVar xs ks a -> M (x ': xs) ks a
@@ -1133,10 +1142,11 @@ evalChainInit deflt u l v k γ@(Γ input !xs ks o _ _ _ σs d) =
      return (setupHandlerΓ γ handler (\γ' -> [||
        -- NOTE: Only the offset and the cs array can change between interations of a chainPre
        do writeΣ $$σ (fst $$xs')
+          let I# o# = $$o
           fix (\r o cs ->
             $$(let μ' = Map.insert (GenMVar v) (GenEval [|| \_ _ _ o _ _ cs _ _ -> r o cs ||]) (μ ctx)
-               in runReader (eval' l (Γ input [||snd $$xs'||] ks [||o||] (hs γ') (cidx γ') [||cs||] σs d)) (ctx {μ = μ'})))
-            $$o $$(cs γ')||]))
+               in runReader (eval' l (Γ input [||snd $$xs'||] ks [||I# o||] (hs γ') (cidx γ') [||cs||] σs d)) (ctx {μ = μ'})))
+            o# $$(cs γ')||]))
 
 eval' :: M xs ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 eval' Halt γ                  = trace "HALT" $ evalHalt γ

@@ -769,6 +769,9 @@ data Γ s xs ks a = Γ { input :: QInput
                      , σs    :: QΣ s
                      , d     :: QD }
 
+bug :: a -> b
+bug = coerce
+
 double :: STUArray s Int Int -> ST s (STUArray s Int Int)
 double !arr =
   do !sz <- getNumElements arr
@@ -813,9 +816,13 @@ suspend m ctx ks =
     $$(runReader (eval' m (Γ [|| input ||] [|| xs ||] [||ks||] [||I# o||] [||hs||] [||I# cidx||] [||cs||] [||σs||] [||I# d||])) ctx)) $$ks ||]
 resume :: Γ s xs (xs ': ks) a -> QST s (Maybe a)
 resume (Γ input xs ks o hs cidx cs σs d) =
-  [|| let ks' = bug ($$ks) :: forall s xs ks a. K s (xs ': ks) a in
+  [|| let ks' = bug ($$ks) :: K s (xs ': ks) a
+          (I# o#) = $$o
+          (I# cidx#) = $$cidx
+          (I# d#) = $$d
+      in
         case ks' of
-          (KCons k ks) -> (bug k) $$input $$(bug xs) (bug ks) $$o $$hs $$cidx $$cs $$σs $$d
+          (KCons k ks) -> k $$input $$(bug xs) ks o# $$hs cidx# $$cs $$σs d#
   ||]
 
 makeH :: ST s (H s a)
@@ -964,9 +971,6 @@ evalRet γ = return [|| do restore $$(σs γ); $$(resume γ) ||]
 fix :: (a -> a) -> a
 fix f = let x = f x in x
 
-bug :: a -> b
-bug = coerce
-
 evalCall :: M xs ((b ': xs) ': ks) a -> MVar xs ((b ': xs) ': ks) a -> M (b ': xs) ks a
          -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalCall m v k γ@(Γ input !xs ks o hs cidx cs σs d) =
@@ -974,7 +978,7 @@ evalCall m v k γ@(Γ input !xs ks o hs cidx cs σs d) =
      return [|| fix (\r input xs ks o hs cidx cs σs d ->
        do save σs
           $$(let μ' = Map.insert (GenMVar v) (GenEval [||r||]) (μ ctx)
-             in runReader (eval' m (Γ [||input||] [|| bug xs ||] [|| bug ks ||] [||o||] [||hs||] [||cidx||] [||cs||] [||σs||] [||d||])) (ctx {μ = μ'})
+             in runReader (eval' m (Γ [||input||] [||bug xs||] [||bug ks||] [||o||] [||hs||] [||cidx||] [||cs||] [||σs||] [||d||])) (ctx {μ = μ'})
            )) $$input $$xs $$(suspend k ctx ks) $$o $$hs $$cidx $$cs $$σs ($$d + 1) ||]
 
 evalMuCall :: MVar xs ((b ': xs) ': ks) a -> M (b ': xs) ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
@@ -984,18 +988,18 @@ evalMuCall v k γ@(Γ input !xs ks o hs cidx cs σs d) =
        GenEval m -> return [|| $$(coerce m) $$input $$xs $$(suspend k ctx ks) $$o $$hs $$cidx $$cs $$σs ($$d + 1)||]
 
 evalPush :: WQ x -> M (x ': xs) ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-evalPush x k γ = eval' k (γ {xs = [|| pushX $$(_code x) $$(bug (xs γ)) ||]})
+evalPush x k γ = eval' k (γ {xs = [|| pushX $$(_code x) $$(xs γ) ||]})
 
 evalPop :: M xs ks a -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-evalPop k γ = eval' k (γ {xs = [|| popX_ $$(bug (xs γ)) ||]})
+evalPop k γ = eval' k (γ {xs = [|| popX_ $$(xs γ) ||]})
 
 evalLift2 :: WQ (x -> y -> z) -> M (z ': xs) ks a -> Γ s (y ': x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-evalLift2 f k γ = eval' k (γ {xs = [|| let !(y, xs') = popX $$(bug (xs γ)); !(x, xs'') = popX xs' in pushX ($$(_code f) x y) xs'' ||]})
+evalLift2 f k γ = eval' k (γ {xs = [|| let !(y, xs') = popX $$(xs γ); !(x, xs'') = popX xs' in pushX ($$(_code f) x y) xs'' ||]})
 
 evalSat :: WQ (Char -> Bool) -> M (Char ': xs) ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalSat p k γ =
   do ctx <- ask
-     return (nextSafe (skipBounds ctx) (input γ) (o γ) (_code p) (\o c -> runReader (eval' k (γ {xs = [|| pushX $$c $$(bug (xs γ)) ||], o = o})) ctx) (raiseΓ γ))
+     return (nextSafe (skipBounds ctx) (input γ) (o γ) (_code p) (\o c -> runReader (eval' k (γ {xs = [|| pushX $$c $$(xs γ) ||], o = o})) ctx) (raiseΓ γ))
 
 evalEmpt :: Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 evalEmpt γ = return (raiseΓ γ)
@@ -1078,14 +1082,14 @@ evalCase :: M (x ': xs) ks a -> M (y ': xs) ks a -> Γ s (Either x y ': xs) ks a
 evalCase m k γ =
   do ctx <- ask
      return [||
-         let !(e, xs') = popX $$(bug (xs γ))
+         let !(e, xs') = popX $$(xs γ)
          in case e of
            Right y  -> $$(runReader (eval' k (γ {xs = [||pushX y xs'||]})) ctx)
            Left x -> $$(runReader (eval' m (γ {xs = [||pushX x xs'||]})) ctx)
        ||]
 
 evalChoices :: forall x xs ks a s. [WQ (x -> Bool)] -> [M xs ks a] -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-evalChoices fs ks γ = do ctx <- ask; return [|| let (x, xs') = popX $$(bug (xs γ)) in $$(runReader (go [||x||] fs ks (γ {xs = [||xs'||]})) ctx) ||]
+evalChoices fs ks γ = do ctx <- ask; return [|| let (x, xs') = popX $$(xs γ) in $$(runReader (go [||x||] fs ks (γ {xs = [||xs'||]})) ctx) ||]
   where
     go :: TExpQ x -> [WQ (x -> Bool)] -> [M xs ks a] -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
     go _ [] [] γ = return (raiseΓ γ)
@@ -1103,7 +1107,7 @@ evalChainIter u v γ@(Γ input !xs ks o hs cidx cs σs d) =
      let !(QSTRef σ) = (σm ctx) DMap.! u
      case (μ ctx) Map.! (GenMVar v) of
        GenEval k -> return [||
-         do let !(g, xs') = popX $$(bug xs)
+         do let !(g, xs') = popX $$xs
             modifyΣ $$σ g
             pokeC $$o $$cidx $$cs
             $$(coerce k) $$input xs' $$ks $$o $$hs $$cidx $$cs $$σs $$d
@@ -1114,7 +1118,7 @@ evalChainInit :: WQ x -> ΣVar x -> M xs ks a -> MVar xs ks a -> M (x ': xs) ks 
 evalChainInit deflt u l v k γ@(Γ input !xs ks o _ _ _ σs d) =
   do ctx <- ask
      let !(QSTRef σ) = (σm ctx) DMap.! u
-     let xs' = [|| popX $$(bug xs) ||]
+     let xs' = [|| popX $$xs ||]
      let handler = [||\o hs cidx cs d' ->
           do rollback $$σs ((I# d') - $$d)
              (c, cidx') <- popC (I# cidx) cs
@@ -1131,7 +1135,7 @@ evalChainInit deflt u l v k γ@(Γ input !xs ks o _ _ _ σs d) =
        do writeΣ $$σ (fst $$xs')
           fix (\r o cs ->
             $$(let μ' = Map.insert (GenMVar v) (GenEval [|| \_ _ _ o _ _ cs _ _ -> r o cs ||]) (μ ctx)
-               in runReader (eval' l (Γ input [||snd $$xs'||] (bug ks) [||o||] (hs γ') (cidx γ') [||cs||] σs d)) (ctx {μ = μ'})))
+               in runReader (eval' l (Γ input [||snd $$xs'||] ks [||o||] (hs γ') (cidx γ') [||cs||] σs d)) (ctx {μ = μ'})))
             $$o $$(cs γ')||]))
 
 eval' :: M xs ks a -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))

@@ -1,14 +1,15 @@
 packages:.
+	 ../lift-plugin/lift-plugin
 --profiling:true
 optimization:2
 allow-newer:yoda:all
 profiling-detail:all-functions
 
-source-repository-package
-    type: git
-    location: https://github.com/mpickering/lift-plugin/
-    subdir: lift-plugin
-    tag: 16e4389aa87a67a4b6fee35e627604fd47b4056c
+--source-repository-package
+--    type: git
+--    location: https://github.com/mpickering/lift-plugin/
+--    subdir: lift-plugin
+--    tag: 16e4389aa87a67a4b6fee35e627604fd47b4056c
 
 source-repository-package
     type: git

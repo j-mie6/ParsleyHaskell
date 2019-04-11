@@ -15,6 +15,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE LambdaCase, MultiWayIf #-}
 module Parsley {-( Parser--, CompiledParser
+import MonadUtils
                , runParser--, mkParser, runCompiledParser
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
@@ -129,7 +130,6 @@ class IFunctor m => IMonad (m :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -
 --ithen :: IMonad m => m a i -> m b i -> m b i
 --ithen m n = m `ibind` (const n)
 
---data Free f i a = Var (a i) | Op (f (Free f i a) a)
 data Free (f :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) (a :: [*] -> [[*]] -> * -> * -> *) (i :: [*]) (j :: [[*]]) (k :: *) (l :: *) where
   Var :: a i j k l -> Free f a i j k l
   Op :: f (Free f a) i j k l -> Free f a i j k l
@@ -140,23 +140,47 @@ unOp (Op op) = op
 fold :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
                    -> (forall i' j' k' l'. f b i' j' k' l' -> b i' j' k' l') -> Free f a i j k l -> b i j k l
 fold gen alg (Var x) = gen x
-fold gen alg (Op x) = alg (imap (fold gen alg) x)
-
-(/\) :: (a -> b) -> (a -> c) -> a -> (b, c)
-(f /\ g) x = (f x, g x)
-
-newtype Prod f g i j k l = Prod {getProd :: (f i j k l, g i j k l)}
-parafold :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
-                       -> (forall i' j' k' l'. f (Prod (Free f a) b) i' j' k' l' -> b i' j' k' l')
-                       -> Free f a i j k l -> b i j k l
-parafold gen alg (Var x) = gen x
-parafold gen alg (Op x) = alg (imap (Prod . (id /\ (parafold gen alg))) x)
+fold gen alg (Op x)  = alg (imap (fold gen alg) x)
 
 fold' :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
                     -> (forall i' j' k' l'. Free f a i' j' k' l' -> f b i' j' k' l' -> b i' j' k' l')
                     -> Free f a i j k l -> b i j k l
-fold' gen alg (Var x) = gen x
+fold' gen alg (Var x)   = gen x
 fold' gen alg op@(Op x) = alg op (imap (fold' gen alg) x)
+
+(/\) :: (a -> b) -> (a -> c) -> a -> (b, c)
+(f /\ g) x = (f x, g x)
+
+data History f a i j k l = Genesis (a i j k l) | Era (a i j k l) (f (History f a) i j k l)
+present :: History f a i j k l -> a i j k l
+present (Genesis x) = x
+present (Era x _)   = x
+
+histofold :: forall f a b i j k l. IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+                                              -> (forall i' j' k' l'. f (History f b) i' j' k' l' -> b i' j' k' l')
+                                              -> Free f a i j k l -> b i j k l
+histofold gen alg tree = present (go tree)
+  where
+    go :: forall i' j' k' l'. Free f a i' j' k' l' -> History f b i' j' k' l'
+    go (Var x) = Genesis (gen x)
+    go (Op x)  = uncurry Era ((alg /\ id) (imap go x))
+
+
+{-newtype Prod f g i j k l = Prod {getProd :: (f i j k l, g i j k l)}
+parafold :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+                       -> (forall i' j' k' l'. f (Prod (Free f a) b) i' j' k' l' -> b i' j' k' l')
+                       -> Free f a i j k l -> b i j k l
+parafold gen alg (Var x) = gen x
+parafold gen alg (Op x)  = alg (imap (Prod . (id /\ (parafold gen alg))) x)
+
+parahistofold :: forall f a b i j k l. IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+                                                  -> (forall i' j' k' l'. f (Prod (Free f a) (History f b)) i' j' k' l' -> b i' j' k' l')
+                                                  -> Free f a i j k l -> b i j k l
+parahistofold gen alg tree = present (go tree)
+  where
+    go :: forall i' j' k' l'. Free f a i' j' k' l' -> History f b i' j' k' l'
+    go (Var x) = Genesis (gen x)
+    go (Op x)  = uncurry Era ((alg /\ imap (snd . getProd)) (imap (Prod . (id /\ go)) x))-}
 
 extract :: IFunctor f => (forall i' j' k' l'. f a i' j' k' l' -> a i' j' k' l') -> Free f a i j k l -> a i j k l
 extract = fold id
@@ -178,6 +202,8 @@ instance {-# OVERLAPS #-} Chain a (Maybe a) where
 
 data Unit i j k l = Unit
 data Void i j k l
+absurd :: Void i j k l -> b
+absurd = undefined
 data Const a i j k l = Const {getConst :: a}
 
 instance IFunctor Parser' where
@@ -398,7 +424,7 @@ instance Hashable (StableParserName xs ks i) where
 
 newtype Carrier xs ks a i = Carrier {unCarrier :: ReaderT (HashMap (StableParserName xs ks i) (GenParser xs ks i)) IO (Free Parser' Void xs ks a i)}
 preprocess :: Free Parser' Void '[] '[] a i -> Free Parser' Void '[] '[] a i
-preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' (Carrier . return . Var) alg p)) (HashMap.empty))
+preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' absurd alg p)) (HashMap.empty))
   where
     alg :: Free Parser' Void xs ks a i -> Parser' Carrier xs ks a i -> Carrier xs ks a i
     -- Force evaluation of p to ensure that the stableName is correct first time
@@ -561,10 +587,10 @@ optimise p                                        = Op p
 -- NOTE: Distributivity Law : branch (pure x) (p *> q) (r *> s) = branch (pure x) p r *> branch (pure x) q s
 
 constantInput :: Free Parser' f xs ks a i -> Maybe Int
-constantInput = getConst . parafold (const (Const Nothing)) (alg1 |> (Const . alg2 . imap (snd . getProd)))
+constantInput = getConst . histofold (const (Const Nothing)) (alg1 |> (Const . alg2 . imap present))
   where
-    alg1 :: Parser' (Prod (Free Parser' f) (Const (Maybe Int))) xs ks a i -> Maybe (Const (Maybe Int) xs ks a i)
-    alg1 (Prod (Op (Try _ _), Const n) :<|>: Prod (_, Const q)) = Just (Const (n <==> q))
+    alg1 :: Parser' (History Parser' (Const (Maybe Int))) xs ks a i -> Maybe (Const (Maybe Int) xs ks a i)
+    alg1 (Era (Const n) (Try _ _) :<|>: Era (Const q) _) = Just (Const (n <==> q))
     alg1 _ = Nothing
     alg2 :: Parser' (Const (Maybe Int)) xs ks a i -> Maybe Int
     alg2 (Pure _)                               = Just 0
@@ -650,18 +676,19 @@ data State = forall a. State a (TExpQ a) (ΣVar a)
 type ΣVars = IORef [State]
 newtype CodeGen b xs ks a i = CodeGen {runCodeGen :: forall xs' ks'. M (a ': xs') ks' b
                                                   -> ReaderT (HashMap (StableParserName xs ks i) IMVar, IMVar, ΣVars) IO (M xs' ks' b)}
+
 compile :: Free Parser' Void '[] '[] a i -> (M '[] '[] a, [State])
 compile p = unsafePerformIO (do σs <- newIORef []
-                                m <- runReaderT (runCodeGen (parafold undefined (alg1 |> (alg2 . imap (snd . getProd))) p) Halt) (HashMap.empty, 0, σs)
+                                m <- runReaderT (runCodeGen (histofold absurd (alg1 |> (alg2 . imap present)) p) Halt) (HashMap.empty, 0, σs)
                                 vss <- readIORef σs
-                                return $! (m, vss))
+                                return $! (trace (show m) m, vss))
   where
-    alg1 :: Parser' (Prod (Free Parser' Void) (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
-    alg1 !((Prod (Op (Try n p), _)) :<|>: (Prod (_, q))) = Just $ CodeGen $ \(!m) ->
-      do pc <- runCodeGen (parafold undefined (alg1 |> (alg2 . imap (snd . getProd))) p) (Commit False m)
+    alg1 :: Parser' (History Parser' (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
+    alg1 !(Era _ (Try n (Era p _)) :<|>: Era q _) = Just $ CodeGen $ \(!m) ->
+      do pc <- runCodeGen p (Commit False m)
          qc <- runCodeGen q m
-         return $! HardFork pc qc
-    alg1 !(ChainPost (Prod (Op (Pure x), _)) (Prod (_, op))) = Just $ CodeGen $ \(!m) ->
+         return $! SoftFork n pc qc
+    alg1 !(ChainPost (Era _ (Pure x)) (Era op _)) = Just $ CodeGen $ \(!m) ->
       do (_, v, rσs) <- ask
          σs <- Reader.lift (readIORef rσs)
          let σ = case σs of

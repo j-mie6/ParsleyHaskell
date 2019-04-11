@@ -205,8 +205,8 @@ instance IFunctor Parser' where
   imap f (ChainPost p op) = ChainPost (f p) (f op)
   imap f (Debug name p) = Debug name (f p)
 
-showAST' :: Free Parser' f '[] '[] a i -> String
-showAST' = getConst . fold (const (Const "")) (Const . alg)
+showAST :: Free Parser' f '[] '[] a i -> String
+showAST = getConst . fold (const (Const "")) (Const . alg)
   where
     alg :: Parser' (Const String) xs ks a i -> String
     alg (Pure x) = "(pure x)"
@@ -658,16 +658,19 @@ newtype CodeGen b xs ks a i = CodeGen {runCodeGen :: forall xs' ks'. M (a ': xs'
 
 compile :: Free Parser' Void '[] '[] a i -> (M '[] '[] a, [State])
 compile p = unsafePerformIO (do σs <- newIORef []
-                                m <- runReaderT (runCodeGen (histofold absurd (alg1 |> (alg2 . imap present)) p) Halt) (HashMap.empty, 0, σs)
+                                m <- runReaderT (runCodeGen (histofold absurd (peephole |> (direct . imap present)) (trace (showAST p) p)) Halt) (HashMap.empty, 0, σs)
                                 vss <- readIORef σs
                                 return $! (trace (show m) m, vss))
   where
-    alg1 :: Parser' (History Parser' (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
-    alg1 !(Era _ (Try n (Era p _)) :<|>: Era q _) = Just $ CodeGen $ \(!m) ->
+    peephole :: Parser' (History Parser' (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
+    peephole !(Era _ (Era _ (Pure f) :<*>: Era p _) :<*>: Era q _) = Just $ CodeGen $ \(!m) ->
+      do qc <- runCodeGen q (Lift2 f m)
+         runCodeGen p qc
+    peephole !(Era _ (Try n (Era p _)) :<|>: Era q _) = Just $ CodeGen $ \(!m) ->
       do pc <- runCodeGen p (Commit False m)
          qc <- runCodeGen q m
          return $! SoftFork n pc qc
-    alg1 !(ChainPost (Era _ (Pure x)) (Era op _)) = Just $ CodeGen $ \(!m) ->
+    peephole !(ChainPost (Era _ (Pure x)) (Era op _)) = Just $ CodeGen $ \(!m) ->
       do (_, v, rσs) <- ask
          σs <- Reader.lift (readIORef rσs)
          let σ = case σs of
@@ -676,24 +679,24 @@ compile p = unsafePerformIO (do σs <- newIORef []
          Reader.lift (writeIORef rσs (State (_val x) (_code x) σ:σs))
          opc <- local (id >< (+1)) (runCodeGen op (ChainIter σ (MVar v)))
          return $! Push x (ChainInit x σ opc (MVar v) m)
-    alg1 _ = Nothing
-    alg2 :: Parser' (CodeGen b) xs ks a i -> CodeGen b xs ks a i
-    alg2 !(Pure x)          = CodeGen $ \(!m) -> do return $! (Push x m)
-    alg2 !(Satisfy p)       = CodeGen $ \(!m) -> do return $! (Sat p m)
-    alg2 !(pf :<*>: px)     = CodeGen $ \(!m) -> do !pxc <- runCodeGen px (Lift2 (lift' ($)) m); runCodeGen pf pxc
-    alg2 !(p :*>: q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q m; runCodeGen p (Pop qc)
-    alg2 !(p :<*: q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q (Pop m); runCodeGen p qc
-    alg2 !Empty             = CodeGen $ \(!m) -> do return $! Empt
-    alg2 !(p :<|>: q)       = CodeGen $ \(!m) -> do liftM2 HardFork (runCodeGen p (Commit False m)) (runCodeGen q m)
-    alg2 !(Try n p)         = CodeGen $ \(!m) -> do liftM (Attempt n) (runCodeGen p (Commit (isJust n) m))
-    alg2 !(LookAhead p)     = CodeGen $ \(!m) -> do liftM Look (runCodeGen p (Restore m))
-    alg2 !(NotFollowedBy p) = CodeGen $ \(!m) -> do liftM2 NegLook (runCodeGen p (Restore Empt)) (return (Push (lift' ()) m))
-    alg2 !(Branch b p q)    = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
-                                                    !qc <- runCodeGen q (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
-                                                    runCodeGen b (Case pc qc)
-    alg2 !(Match p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
-                                                    runCodeGen p (Choices fs qcs)
-    alg2 !(Rec !p !q)       = CodeGen $ \(!m) ->
+    peephole _ = Nothing
+    direct :: Parser' (CodeGen b) xs ks a i -> CodeGen b xs ks a i
+    direct !(Pure x)          = CodeGen $ \(!m) -> do return $! (Push x m)
+    direct !(Satisfy p)       = CodeGen $ \(!m) -> do return $! (Sat p m)
+    direct !(pf :<*>: px)     = CodeGen $ \(!m) -> do !pxc <- runCodeGen px (Lift2 (lift' ($)) m); runCodeGen pf pxc
+    direct !(p :*>: q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q m; runCodeGen p (Pop qc)
+    direct !(p :<*: q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q (Pop m); runCodeGen p qc
+    direct !Empty             = CodeGen $ \(!m) -> do return $! Empt
+    direct !(p :<|>: q)       = CodeGen $ \(!m) -> do liftM2 HardFork (runCodeGen p (Commit False m)) (runCodeGen q m)
+    direct !(Try n p)         = CodeGen $ \(!m) -> do liftM (Attempt n) (runCodeGen p (Commit (isJust n) m))
+    direct !(LookAhead p)     = CodeGen $ \(!m) -> do liftM Look (runCodeGen p (Restore m))
+    direct !(NotFollowedBy p) = CodeGen $ \(!m) -> do liftM2 NegLook (runCodeGen p (Restore Empt)) (return (Push (lift' ()) m))
+    direct !(Branch b p q)    = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
+                                                      !qc <- runCodeGen q (Lift2 (WQ (flip ($)) [||flip ($)||]) m)
+                                                      runCodeGen b (Case pc qc)
+    direct !(Match p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
+                                                      runCodeGen p (Choices fs qcs)
+    direct !(Rec !p !q)       = CodeGen $ \(!m) ->
       do (StableName _name) <- Reader.lift (makeStableName p)
          (seen, v, _) <- ask
          let !name = StableParserName _name
@@ -701,7 +704,7 @@ compile p = unsafePerformIO (do σs <- newIORef []
            Just v' -> do return $! MuCall (MVar v') m
            Nothing -> do n <- local (HashMap.insert name v >< (+1)) (runCodeGen q Ret)
                          return $! Call n (MVar v) m
-    alg2 !(ChainPre op p) = CodeGen $ \(!m) ->
+    direct !(ChainPre op p) = CodeGen $ \(!m) ->
       do (_, v, rσs) <- ask
          σs <- Reader.lift (readIORef rσs)
          let σ = case σs of
@@ -711,7 +714,7 @@ compile p = unsafePerformIO (do σs <- newIORef []
          opc <- local (id >< (+1)) (runCodeGen op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
          pc <- local (id >< (+1)) (runCodeGen p (Lift2 (lift' ($)) m))
          return $! Push (lift' id) (ChainInit (lift' id) σ (Push (lift' flip >*< lift' (.)) opc) (MVar v) pc)
-    alg2 !(ChainPost p op) = CodeGen $ \(!m) ->
+    direct !(ChainPost p op) = CodeGen $ \(!m) ->
       do (_, v, rσs) <- ask
          σs <- Reader.lift (readIORef rσs)
          let σ = case σs of
@@ -722,7 +725,7 @@ compile p = unsafePerformIO (do σs <- newIORef []
          let m' = ChainInit (WQ Nothing [||Nothing||]) σ (Push (lift' (<$!>)) opc) (MVar v) (Lift2 (lift' ($)) m)
          pc <- local (id >< (+1)) (runCodeGen p (Lift2 (lift' ($)) m'))
          return $! Push (lift' fromJust) (Push (lift' Just) pc)
-    alg2 !(Debug name p) = CodeGen $ \(!m) -> liftM (LogEnter name) (runCodeGen p (LogExit name m))
+    direct !(Debug name p) = CodeGen $ \(!m) -> liftM (LogEnter name) (runCodeGen p (LogExit name m))
 
 data SList a = !a ::: !(SList a) | SNil
 data HList xs where

@@ -620,6 +620,9 @@ data M xs ks a where
   LogEnter  :: String -> !(M xs ks a) -> M xs ks a
   LogExit   :: String -> !(M xs ks a) -> M xs ks a
 
+fmapInstr :: WQ (x -> y) -> M (y ': xs) ks a -> M (x ': xs) ks a
+fmapInstr !f !m = Push f (Lift2 (lift' flip >*< lift' ($)) m)
+
 instance Show (M xs ks a) where
   show Halt = "Halt"
   show Ret = "Ret"
@@ -663,6 +666,7 @@ compile p = unsafePerformIO (do σs <- newIORef []
                                 return $! (trace (show m) m, vss))
   where
     peephole :: Parser' (History Parser' (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
+    peephole !(Era _ (Pure f) :<*>: Era p _) = Just $ CodeGen $ \(!m) -> runCodeGen p (fmapInstr f m)
     peephole !(Era _ (Era _ (Pure f) :<*>: Era p _) :<*>: Era q _) = Just $ CodeGen $ \(!m) ->
       do qc <- runCodeGen q (Lift2 f m)
          runCodeGen p qc
@@ -711,9 +715,9 @@ compile p = unsafePerformIO (do σs <- newIORef []
                    [] -> ΣVar 0
                    (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
          Reader.lift (writeIORef rσs (State id [|| id ||] σ:σs))
-         opc <- local (id >< (+1)) (runCodeGen op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
+         opc <- local (id >< (+1)) (runCodeGen op (fmapInstr (lift' flip >*< lift' (.)) (ChainIter σ (MVar v))))
          pc <- local (id >< (+1)) (runCodeGen p (Lift2 (lift' ($)) m))
-         return $! Push (lift' id) (ChainInit (lift' id) σ (Push (lift' flip >*< lift' (.)) opc) (MVar v) pc)
+         return $! Push (lift' id) (ChainInit (lift' id) σ opc (MVar v) pc)
     direct !(ChainPost p op) = CodeGen $ \(!m) ->
       do (_, v, rσs) <- ask
          σs <- Reader.lift (readIORef rσs)
@@ -721,10 +725,9 @@ compile p = unsafePerformIO (do σs <- newIORef []
                    [] -> ΣVar 0
                    (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
          Reader.lift (writeIORef rσs (State Nothing [|| Nothing ||] σ:σs))
-         opc <- local (id >< (+1)) (runCodeGen op (Lift2 (lift' ($)) (ChainIter σ (MVar v))))
-         let m' = ChainInit (WQ Nothing [||Nothing||]) σ (Push (lift' (<$!>)) opc) (MVar v) (Lift2 (lift' ($)) m)
-         pc <- local (id >< (+1)) (runCodeGen p (Lift2 (lift' ($)) m'))
-         return $! Push (lift' fromJust) (Push (lift' Just) pc)
+         opc <- local (id >< (+1)) (runCodeGen op (fmapInstr (lift' (<$!>)) (ChainIter σ (MVar v))))
+         let m' = ChainInit (WQ Nothing [||Nothing||]) σ opc (MVar v) (fmapInstr (lift' fromJust) m)
+         local (id >< (+1)) (runCodeGen p (fmapInstr (lift' Just) m'))
     direct !(Debug name p) = CodeGen $ \(!m) -> liftM (LogEnter name) (runCodeGen p (LogExit name m))
 
 data SList a = !a ::: !(SList a) | SNil

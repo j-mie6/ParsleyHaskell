@@ -14,8 +14,8 @@
 {-# LANGUAGE DeriveFunctor, DeriveLift #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE LambdaCase, MultiWayIf #-}
+{-# LANGUAGE EmptyCase #-}
 module Parsley {-( Parser--, CompiledParser
-import MonadUtils
                , runParser--, mkParser, runCompiledParser
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
@@ -37,12 +37,9 @@ import MonadUtils
                )-} where
 
 import Prelude hiding          (fmap, pure, (<*), (*>), (<*>), (<$>), (<$))
---import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA, (<**>), many, some)
 import qualified Data.Functor as Functor
 import qualified Control.Applicative as Applicative
---import Control.Applicative     (Const(Const), getConst)
 import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, liftM3, join, (<$!>), forM)
---import Data.Functor            ((<$>), (<$), ($>), (<&>), void)
 import GHC.ST                  (ST(..), runST)
 import Control.Monad.ST.Unsafe (unsafeIOToST)
 import Control.Monad.Reader    (ReaderT, ask, runReaderT, Reader, runReader, local)
@@ -61,7 +58,6 @@ import Data.Dependent.Map      (DMap)
 import Data.GADT.Compare       (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 import qualified Data.Dependent.Map as DMap
 import Data.Array.Unboxed      (UArray, listArray)
---import Data.Array.ST           (STArray)
 import Data.Array.Base         (STUArray(..), unsafeAt, newArray_, unsafeRead, unsafeWrite, MArray, getNumElements, numElements, ixmap, elems)
 import GHC.Prim                (Int#, Char#, StableName#, newByteArray#)
 import GHC.Exts                (Int(..), Char(..), (-#), (+#), (*#))
@@ -100,7 +96,7 @@ showi = show
 instance Pure WQ where lift' x = WQ x [||x||]
 
 -- AST
-type Parser a = Free Parser' Void '[] '[] a ()
+newtype Parser a = Parser {unParser :: Free Parser' Void '[] '[] a ()}
 data WQ a = WQ { _val :: a, _code :: TExpQ a }
 data Parser' (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: *) (i :: *) where
   Pure          :: WQ a -> Parser' k xs ks a i
@@ -122,13 +118,6 @@ data Parser' (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: 
 
 class IFunctor (f :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) where
   imap :: (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l') -> f a i j k l -> f b i j k l
-
-class IFunctor m => IMonad (m :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) where
-  ipure :: a i j k l -> m a i j k l
-  ibind :: m a i j k l -> (forall i' j' k' l'. a i' j' k' l' -> m b i' j' k' l') -> m b i j k l
-
---ithen :: IMonad m => m a i -> m b i -> m b i
---ithen m n = m `ibind` (const n)
 
 data Free (f :: ([*] -> [[*]] -> * -> * -> *) -> [*] -> [[*]] -> * -> * -> *) (a :: [*] -> [[*]] -> * -> * -> *) (i :: [*]) (j :: [[*]]) (k :: *) (l :: *) where
   Var :: a i j k l -> Free f a i j k l
@@ -165,7 +154,6 @@ histofold gen alg tree = present (go tree)
     go (Var x) = Genesis (gen x)
     go (Op x)  = uncurry Era ((alg /\ id) (imap go x))
 
-
 {-newtype Prod f g i j k l = Prod {getProd :: (f i j k l, g i j k l)}
 parafold :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
                        -> (forall i' j' k' l'. f (Prod (Free f a) b) i' j' k' l' -> b i' j' k' l')
@@ -189,21 +177,14 @@ instance IFunctor f => IFunctor (Free f) where
   imap f (Var x) = Var (f x)
   imap f (Op x) = Op (imap (imap f) x)
 
-instance IFunctor f => IMonad (Free f) where
-  ipure = Var
-  ibind m f = fold f Op m
-
-class Chain r k where
-  (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
-instance {-# OVERLAPPABLE #-} Chain a a where
-  (|>) = liftM2 (flip fromMaybe)
-instance {-# OVERLAPS #-} Chain a (Maybe a) where
-  (|>) = liftM2 (Applicative.<|>)
+class                         Chain r k         where (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
+instance {-# OVERLAPPABLE #-} Chain a a         where (|>) = liftM2 (flip fromMaybe)
+instance {-# OVERLAPS #-}     Chain a (Maybe a) where (|>) = liftM2 (Applicative.<|>)
 
 data Unit i j k l = Unit
 data Void i j k l
 absurd :: Void i j k l -> b
-absurd = undefined
+absurd = \case
 data Const a i j k l = Const {getConst :: a}
 
 instance IFunctor Parser' where
@@ -265,25 +246,25 @@ x <$ p = p *> pure x
 (<&>) = flip fmap
 
 pure :: WQ a -> Parser a
-pure = Op . Pure
+pure = Parser . Op . Pure
 
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
-p <*> q = Op (p :<*>: q)
+Parser p <*> Parser q = Parser (Op (p :<*>: q))
 
 (<*) :: Parser a -> Parser b -> Parser a
-p <* q = Op (p :<*: q)
+Parser p <* Parser q = Parser (Op (p :<*: q))
 
 (*>) :: Parser a -> Parser b -> Parser b
-p *> q = Op (p :*>: q)
+Parser p *> Parser q = Parser (Op (p :*>: q))
 
 liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
 liftA2 f p q = f <$> p <*> q
 
 empty :: Parser a
-empty = Op Empty
+empty = Parser (Op Empty)
 
 (<|>) :: Parser a -> Parser a -> Parser a
-p <|> q = Op (p :<|>: q)
+Parser p <|> Parser q = Parser (Op (p :<|>: q))
 
 many :: Parser a -> Parser [a]
 many p = pfoldr (lift' (:)) (WQ [] [||[]||]) p
@@ -328,16 +309,16 @@ more = lookAhead (void item)
 
 -- Parsing Primitives
 satisfy :: WQ (Char -> Bool) -> Parser Char
-satisfy = Op . Satisfy
+satisfy = Parser . Op . Satisfy
 
 lookAhead :: Parser a -> Parser a
-lookAhead = Op . LookAhead
+lookAhead = Parser . Op . LookAhead . unParser
 
 notFollowedBy :: Parser a -> Parser ()
-notFollowedBy = Op . NotFollowedBy
+notFollowedBy = Parser . Op . NotFollowedBy . unParser
 
 try :: Parser a -> Parser a
-try = Op . Try Nothing
+try = Parser . Op . Try Nothing . unParser
 
 char :: Char -> Parser Char
 char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
@@ -374,13 +355,13 @@ _match x (Left y)
   | otherwise = Right (Left y)
 
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b
-match vs p f = Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map f vs))
+match vs (Parser p) f = Parser (Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs)))
 
 (||=) :: forall a b. (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
 p ||= f = match [minBound..maxBound] p f
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
-branch c p q = Op (Branch c p q)
+branch (Parser c) (Parser p) (Parser q) = Parser (Op (Branch c p q))
 
 when :: Parser Bool -> Parser () -> Parser ()
 when p q = p <?|> (q, unit)
@@ -407,13 +388,13 @@ pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
 pfoldl f k p = chainPost (pure k) (lift' flip >*< f <$> p)
 
 chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre op p = Op (ChainPre op p)
+chainPre (Parser op) (Parser p) = Parser (Op (ChainPre op p))
 
 chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost p op = Op (ChainPost p op)
+chainPost (Parser p) (Parser op) = Parser (Op (ChainPost p op))
 
 debug :: String -> Parser a -> Parser a
-debug name p = Op (Debug name p)
+debug name (Parser p) = Parser (Op (Debug name p))
 
 data StableParserName xs ks i = forall a. StableParserName (StableName# (Free Parser' Void xs ks a i))
 data GenParser xs ks i = forall a. GenParser (Free Parser' Void xs ks a i)
@@ -583,8 +564,6 @@ optimise (Match p fs qs)
 -- Distributivity Law: f <$> match vs p g = match vs p ((f <$>) . g)
 optimise (Op (Pure f) :<*>: (Op (Match p fs qs))) = Op (Match p fs (map (optimise . (Op (Pure f) :<*>:)) qs))
 optimise p                                        = Op p
-
--- NOTE: Distributivity Law : branch (pure x) (p *> q) (r *> s) = branch (pure x) p r *> branch (pure x) q s
 
 constantInput :: Free Parser' f xs ks a i -> Maybe Int
 constantInput = getConst . histofold (const (Const Nothing)) (alg1 |> (Const . alg2 . imap present))
@@ -1180,10 +1159,10 @@ eval' (LogEnter name k) γ     = trace "LOGENTER" $ evalLogEnter name k γ
 eval' (LogExit name k) γ      = trace "LOGEXIT" $ evalLogExit name k γ
 
 runParser :: Parser a -> TExpQ (String -> Maybe a)
-runParser p = [||\input -> runST $$(eval [||input||] (compile (preprocess p)))||]
+runParser (Parser p) = [||\input -> runST $$(eval [||input||] (compile (preprocess p)))||]
 
 showM :: Parser a -> String
-showM p = show (fst (compile (preprocess p)))
+showM (Parser p) = show (fst (compile (preprocess p)))
 
 preludeString :: String -> Char -> Γ s xs ks a -> Ctx s a -> String -> TExpQ String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]

@@ -18,8 +18,9 @@ import Control.DeepSeq (NFData(rnf))
 import Language.Haskell.TH.Syntax hiding (Match, match)
 import LiftPlugin
 
-manyTestParsley :: String -> Maybe ()
-manyTestParsley = {-}$$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}$$(Parsley.runParser (Parsley.void (Parsley.some (Parsley.item))))
+manyTestParsley :: String -> Maybe Int
+manyTestParsley = $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}
+                  -- $$(Parsley.runParser (Parsley.while ((Parsley.WQ Parsley.greaterThan5 [||Parsley.greaterThan5||]) Parsley.<$> Parsley.digit)))
 
 manyTestYodaBad :: Yoda.Parser Int
 manyTestYodaBad = Yoda.chainl1 (Parsley.toDigit Yoda.<$> Yoda.satisfy (Parsley.isDigit)) ((+) Yoda.<$ Yoda.char '+')

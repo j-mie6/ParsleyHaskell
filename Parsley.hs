@@ -466,6 +466,10 @@ optimise (u :<*>: Op (v :<*>: w))                     = optimise (optimise (opti
 optimise (Op (u :*>: v) :<*>: w)                      = optimise (u :*>: (optimise (v :<*>: w)))
 -- Interchange Law: u <*> pure x = pure ($ x) <*> u
 optimise (u :<*>: Op (Pure x))                        = optimise (Op (Pure (lift' flip >*< lift' ($) >*< x)) :<*>: u)
+-- Right Absorption Law: (f <$> p) *> q = p *> q
+optimise (Op (Op (Pure f) :<*>: p) :*>: q)            = p :*>: q
+-- Left Absorption Law: p <* (f <$> q) = p <* q
+optimise (p :<*: (Op (Pure f) :<*>: q))               = p :<*: q
 -- Reassociation Law 2: u <*> (v <* w) = (u <*> v) <* w
 optimise (u :<*>: Op (v :<*: w))                      = optimise (optimise (u :<*>: v) :<*: w)
 -- Reassociation Law 3: u <*> (v *> pure x) = (u <*> pure x) <* v
@@ -516,8 +520,10 @@ optimise (LookAhead (Op (NotFollowedBy p)))           = Op (NotFollowedBy p)
 optimise (NotFollowedBy (Op (Op (Try _ p) :<|>: q)))  = optimise (optimise (NotFollowedBy p) :*>: optimise (NotFollowedBy q))
 -- Distributivity Law: lookAhead p <|> lookAhead q = lookAhead (p <|> q)
 optimise (Op (LookAhead p) :<|>: Op (LookAhead q))    = optimise (LookAhead (optimise (p :<|>: q)))
--- Absorption Law: p <*> lookAhead (q *> pure x) = (p <*> pure x) <* lookAhead q
-optimise (p :<*>: Op (LookAhead (Op (q :*>: Op (Pure x))))) = optimise (optimise (p :<*>: Op (Pure x)) :<*: optimise (LookAhead q))
+-- Interchange Law: lookAhead (p *> pure x) = lookAhead p *> pure x
+optimise (LookAhead (Op (p :*>: Op (Pure x))))        = optimise (optimise (LookAhead p) :*>: Op (Pure x)))
+-- Interchange law: lookAhead (f <$> p) = f <$> lookAhead p
+optimise (LookAhead (Op (Op (Pure f) :<*>: p)))       = optimise (Op (Pure f) :<*>: optimise (LookAhead p))
 -- Absorption Law: p <*> notFollowedBy q = (p <*> unit) <* notFollowedBy q
 optimise (p :<*>: Op (NotFollowedBy q))               = optimise (optimise (p :<*>: Op (Pure (lift' ()))) :<*: Op (NotFollowedBy q))
 -- Idempotence Law: notFollowedBy (p *> pure x) = notFollowedBy p
@@ -596,6 +602,54 @@ constantInput = getConst . histofold (const (Const Nothing)) (alg1 |> (Const . a
   | x == y    = Just x
   | otherwise = Nothing
 _ <==> _ = Nothing
+
+data Consumption = Some | None | Never
+data Prop xs ks a i = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool}
+terminationAnalysis :: Free Parser' Void '[] '[] a i -> Free Parser' Void '[] '[] a i
+terminationAnalysis p = if not (looping (fold absurd alg p)) then p else error "Parser will loop indefinitely; either it is left-recursive or iterates over pure computations"
+  where
+    looping (Prop Never Never _)   = True
+    looping _                      = False
+    neverSucceeds (Prop Never _ _) = True
+    neverSucceeds _                = False
+
+    Never &&& _     = Never
+    _     &&& Never = Never
+    Some  &&& _     = Some
+    None  &&& p     = p
+
+    p ==> _ | neverSucceeds p            = p
+    _ ==> Prop Never Never True          = Prop Never Never True
+    Prop None _ _ ==> Prop Never Never _ = Prop Never Never False
+    Prop s1 f1 b1 ==> Prop s1 f1 b2      = Prop (s1 &&& s2) (f1 &&& f2) (b1 && b2)
+
+    alg :: Parser' Prop ks xs a i -> Prop ks xs a i
+    alg (Satisfy _) = Prop Some None True
+    alg (Pure _)    = Prop None Never True
+    alg Empty       = Prop Never None True
+    alg (Try _ p)
+      | looping p = p
+      | otherwise = Prop (success p) None (indisputable p)
+    alg (LookAhead p)
+      | looping p = p
+      | otherwise = Prop None (fails p) (indisputable p)
+    alg (NotFollowedBy p)
+      | looping p = p
+      | otherwise = Prop None None True
+    alg (p :<*>: q) = p ==> q
+    alg (p :*>: q)  = p ==> q
+    alg (p :<*: q)  = p ==> q
+    -- NOTE: This one is special, need to consider how input is consumed on failure for p
+    alg (t1 :<|>: t2) = undefined
+    -- NOTE: Selectives are undecidable in general
+    alg (Branch b p q)    = undefined
+    alg (Match p _ qs)   = undefined
+    alg (ChainPre (Prop None _ _) _)  = Prop Never Never True
+    alg (ChainPre op p) = undefined
+    alg (ChainPost _ (Prop None _ _)) = Prop Never Never True
+    alg (ChainPost p op) = undefined
+    alg (Rec _)                           = Prop Never Never WeakLoop False
+    alg (Debug _ p)        = p
 
 newtype ΣVar a = ΣVar Int deriving Show
 newtype MVar xs ks a = MVar Int deriving Show
@@ -1211,7 +1265,7 @@ execChainInit deflt u l v k γ@(Γ input !xs ks o _ _ _ σs d) =
             o# $$(cs γ')||]))
 
 runParser :: Parser a -> TExpQ (String -> Maybe a)
-runParser (Parser p) = [||\input -> runST $$(exec [||input||] (compile (preprocess p)))||]
+runParser (Parser p) = [||\input -> runST $$(exec [||input||] (compile (terminationAnalysis (preprocess p))))||]
 
 showM :: Parser a -> String
 showM (Parser p) = show (fst (compile (preprocess p)))

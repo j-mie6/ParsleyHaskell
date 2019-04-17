@@ -5,6 +5,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -36,39 +37,40 @@ module Parsley {-( Parser--, CompiledParser
                , eval, runST, compile, preprocess
                )-} where
 
-import Prelude hiding          (fmap, pure, (<*), (*>), (<*>), (<$>), (<$))
+import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$))
 import qualified Data.Functor as Functor
 import qualified Control.Applicative as Applicative
-import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, liftM3, join, (<$!>), forM)
-import GHC.ST                  (ST(..), runST)
-import Control.Monad.ST.Unsafe (unsafeIOToST)
-import Control.Monad.Reader    (ReaderT, ask, runReaderT, Reader, runReader, local)
+import Control.Monad              (MonadPlus, mzero, mplus, liftM, liftM2, liftM3, join, (<$!>), forM)
+import GHC.ST                     (ST(..), runST)
+import Control.Monad.ST.Unsafe    (unsafeIOToST)
+import Control.Monad.Reader       (ReaderT, ask, runReaderT, Reader, runReader, local)
+import Control.Monad.State.Strict (State, get, put, runState, MonadState)
 import qualified Control.Monad.Reader as Reader
-import Data.STRef              (STRef, writeSTRef, readSTRef, modifySTRef', newSTRef)
-import System.IO.Unsafe        (unsafePerformIO)
-import Data.IORef              (IORef, writeIORef, readIORef, newIORef)
-import Data.Array              (Array, array)
-import GHC.StableName          (StableName(..), makeStableName, hashStableName, eqStableName)
-import Data.Hashable           (Hashable, hashWithSalt, hash)
-import Data.HashMap.Lazy       (HashMap)
+import Data.STRef                 (STRef, writeSTRef, readSTRef, modifySTRef', newSTRef)
+import System.IO.Unsafe           (unsafePerformIO)
+import Data.IORef                 (IORef, writeIORef, readIORef, newIORef)
+import Data.Array                 (Array, array)
+import GHC.StableName             (StableName(..), makeStableName, hashStableName, eqStableName)
+import Data.Hashable              (Hashable, hashWithSalt, hash)
+import Data.HashMap.Lazy          (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
-import Data.Map.Strict         (Map)
+import Data.Map.Strict            (Map)
 import qualified Data.Map.Strict as Map
-import Data.Dependent.Map      (DMap)
-import Data.GADT.Compare       (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
+import Data.Dependent.Map         (DMap)
+import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 import qualified Data.Dependent.Map as DMap
-import Data.Array.Unboxed      (UArray, listArray)
-import Data.Array.Base         (STUArray(..), unsafeAt, newArray_, unsafeRead, unsafeWrite, MArray, getNumElements, numElements, ixmap, elems)
-import GHC.Prim                (Int#, Char#, StableName#, newByteArray#)
-import GHC.Exts                (Int(..), Char(..), (-#), (+#), (*#))
-import Unsafe.Coerce           (unsafeCoerce)
-import Safe.Coerce             (coerce)
-import Data.Maybe              (isJust, fromMaybe, fromJust)
-import Data.List               (foldl')
+import Data.Array.Unboxed         (UArray, listArray)
+import Data.Array.Base            (STUArray(..), unsafeAt, newArray_, unsafeRead, unsafeWrite, MArray, getNumElements, numElements, ixmap, elems)
+import GHC.Prim                   (Int#, Char#, StableName#, newByteArray#)
+import GHC.Exts                   (Int(..), Char(..), (-#), (+#), (*#))
+import Unsafe.Coerce              (unsafeCoerce)
+import Safe.Coerce                (coerce)
+import Data.Maybe                 (isJust, fromMaybe, fromJust)
+import Data.List                  (foldl')
 import Language.Haskell.TH hiding (Match, match)
 import Language.Haskell.TH.Syntax hiding (Match, match)
 import Debug.Trace
-import System.Console.Pretty (color, Color(Green, White, Red, Blue))
+import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
 import LiftPlugin
 
 isDigit :: Char -> Bool
@@ -101,6 +103,7 @@ instance Pure WQ where lift' x = WQ x [||x||]
 -- AST
 newtype Parser a = Parser {unParser :: Free Parser' Void '[] '[] a ()}
 data WQ a = WQ { _val :: a, _code :: TExpQ a }
+type IMVar = Int
 data Parser' (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: *) (i :: *) where
   Pure          :: WQ a -> Parser' k xs ks a i
   Satisfy       :: WQ (Char -> Bool) -> Parser' k xs ks Char i
@@ -111,7 +114,7 @@ data Parser' (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: 
   Empty         :: Parser' k xs ks a i
   Try           :: Maybe Int -> k xs ks a i -> Parser' k xs ks a i
   LookAhead     :: k xs ks a i -> Parser' k xs ks a i
-  Rec           :: Free Parser' Void xs ks a i -> k xs ks a i -> Parser' k xs ks a i
+  Rec           :: IMVar -> k xs ks a i -> Parser' k xs ks a i
   NotFollowedBy :: k xs ks a i -> Parser' k xs ks () i
   Branch        :: k xs ks (Either a b) i -> k xs ks (a -> c) i -> k xs ks (b -> c) i -> Parser' k xs ks c i
   Match         :: k xs ks a i -> [WQ (a -> Bool)] -> [k xs ks b i] -> Parser' k xs ks b i
@@ -148,26 +151,26 @@ present :: History f a i j k l -> a i j k l
 present (Genesis x) = x
 present (Era x _)   = x
 
-histofold :: forall f a b i j k l. IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+histo :: forall f a b i j k l. IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
                                               -> (forall i' j' k' l'. f (History f b) i' j' k' l' -> b i' j' k' l')
                                               -> Free f a i j k l -> b i j k l
-histofold gen alg tree = present (go tree)
+histo gen alg tree = present (go tree)
   where
     go :: forall i' j' k' l'. Free f a i' j' k' l' -> History f b i' j' k' l'
     go (Var x) = Genesis (gen x)
     go (Op x)  = uncurry Era ((alg /\ id) (imap go x))
 
 {-newtype Prod f g i j k l = Prod {getProd :: (f i j k l, g i j k l)}
-parafold :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+para :: IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
                        -> (forall i' j' k' l'. f (Prod (Free f a) b) i' j' k' l' -> b i' j' k' l')
                        -> Free f a i j k l -> b i j k l
-parafold gen alg (Var x) = gen x
-parafold gen alg (Op x)  = alg (imap (Prod . (id /\ (parafold gen alg))) x)
+para gen alg (Var x) = gen x
+para gen alg (Op x)  = alg (imap (Prod . (id /\ (para gen alg))) x)
 
-parahistofold :: forall f a b i j k l. IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
+parahisto :: forall f a b i j k l. IFunctor f => (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l')
                                                   -> (forall i' j' k' l'. f (Prod (Free f a) (History f b)) i' j' k' l' -> b i' j' k' l')
                                                   -> Free f a i j k l -> b i j k l
-parahistofold gen alg tree = present (go tree)
+parahisto gen alg tree = present (go tree)
   where
     go :: forall i' j' k' l'. Free f a i' j' k' l' -> History f b i' j' k' l'
     go (Var x) = Genesis (gen x)
@@ -208,27 +211,27 @@ instance IFunctor Parser' where
   imap f (ChainPost p op) = ChainPost (f p) (f op)
   imap f (Debug name p) = Debug name (f p)
 
-showAST :: Free Parser' f '[] '[] a i -> String
-showAST = getConst . fold (const (Const "")) (Const . alg)
-  where
-    alg :: Parser' (Const String) xs ks a i -> String
-    alg (Pure x) = "(pure x)"
-    alg (Satisfy _) = "(satisfy f)"
-    alg (Const pf :<*>: Const px) = concat ["(", pf, " <*> ",  px, ")"]
-    alg (Const p :*>: Const q) = concat ["(", p, " *> ", q, ")"]
-    alg (Const p :<*: Const q) = concat ["(", p, " <* ", q, ")"]
-    alg (Const p :<|>: Const q) = concat ["(", p, " <|> ", q, ")"]
-    alg Empty = "empty"
-    alg (Try Nothing (Const p)) = concat ["(try ? ", p, ")"]
-    alg (Try (Just n) (Const p)) = concat ["(try ", show n, " ", p, ")"]
-    alg (LookAhead (Const p)) = concat ["(lookAhead ", p, ")"]
-    alg (Rec _ _) = "recursion point!"
-    alg (NotFollowedBy (Const p)) = concat ["(notFollowedBy ", p, ")"]
-    alg (Branch (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-    alg (Match (Const p) fs qs) = concat ["(match ", p, " ", show (map getConst qs), ")"]
-    alg (ChainPre (Const op) (Const p)) = concat ["(chainPre ", op, " ", p, ")"]
-    alg (ChainPost (Const p) (Const op)) = concat ["(chainPost ", p, " ", op, ")"]
-    alg (Debug _ (Const p)) = p
+instance Show (Free Parser' f '[] '[] a i) where
+  show = getConst . fold (const (Const "")) (Const . alg)
+    where
+      alg :: forall xs ks a i. Parser' (Const String) xs ks a i -> String
+      alg (Pure x) = "(pure x)"
+      alg (Satisfy _) = "(satisfy f)"
+      alg (Const pf :<*>: Const px) = concat ["(", pf, " <*> ",  px, ")"]
+      alg (Const p :*>: Const q) = concat ["(", p, " *> ", q, ")"]
+      alg (Const p :<*: Const q) = concat ["(", p, " <* ", q, ")"]
+      alg (Const p :<|>: Const q) = concat ["(", p, " <|> ", q, ")"]
+      alg Empty = "empty"
+      alg (Try Nothing (Const p)) = concat ["(try ? ", p, ")"]
+      alg (Try (Just n) (Const p)) = concat ["(try ", show n, " ", p, ")"]
+      alg (LookAhead (Const p)) = concat ["(lookAhead ", p, ")"]
+      alg (Rec _ _) = "recursion point!"
+      alg (NotFollowedBy (Const p)) = concat ["(notFollowedBy ", p, ")"]
+      alg (Branch (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
+      alg (Match (Const p) fs qs) = concat ["(match ", p, " ", show (map getConst qs), ")"]
+      alg (ChainPre (Const op) (Const p)) = concat ["(chainPre ", op, " ", p, ")"]
+      alg (ChainPost (Const p) (Const op)) = concat ["(chainPost ", p, " ", op, ")"]
+      alg (Debug _ (Const p)) = p
 
 fmap :: WQ (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
@@ -406,19 +409,19 @@ instance Hashable (StableParserName xs ks i) where
   hash (StableParserName n) = hashStableName (StableName n)
   hashWithSalt salt (StableParserName n) = hashWithSalt salt (StableName n)
 
-newtype Carrier xs ks a i = Carrier {unCarrier :: ReaderT (HashMap (StableParserName xs ks i) (GenParser xs ks i)) IO (Free Parser' Void xs ks a i)}
+newtype Carrier xs ks a i = Carrier {unCarrier :: ReaderT (HashMap (StableParserName xs ks i) (IMVar, GenParser xs ks i), IMVar) IO (Free Parser' Void xs ks a i)}
 preprocess :: Free Parser' Void '[] '[] a i -> Free Parser' Void '[] '[] a i
-preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' absurd alg p)) (HashMap.empty))
+preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' absurd alg p)) (HashMap.empty, 0))
   where
     alg :: Free Parser' Void xs ks a i -> Parser' Carrier xs ks a i -> Carrier xs ks a i
     -- Force evaluation of p to ensure that the stableName is correct first time
     alg !p q = Carrier $ do
-      !seen <- ask
+      !(seen, v) <- ask
       (StableName _name) <- Reader.lift (makeStableName p)
       let !name = StableParserName _name
       case HashMap.lookup name seen of
-        Just (GenParser q) -> return $! (Op (Rec (coerce q) (coerce q)))
-        Nothing -> mdo q' <- local (HashMap.insert name (GenParser q')) (unCarrier $ subalg q)
+        Just (v', GenParser q) -> return $! (Op (Rec v' (coerce q)))
+        Nothing -> mdo q' <- local (HashMap.insert name (v, GenParser q') >< (+1)) (unCarrier $ subalg q)
                        return $! q'
     subalg :: Parser' Carrier xs ks a i -> Carrier xs ks a i
     subalg !(pf :<*>: px)     = Carrier (liftM optimise (liftM2 (:<*>:) (unCarrier pf) (unCarrier px)))
@@ -436,6 +439,9 @@ preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' absurd alg p)) (Ha
     subalg !(Debug name p)    = Carrier (liftM (Op . Debug name) (unCarrier p))
     subalg !(Pure x)          = Carrier (return (Op (Pure x)))
     subalg !(Satisfy f)       = Carrier (return (Op (Satisfy f)))
+
+    (><) :: (a -> c) -> (b -> d) -> (a, b) -> (c, d)
+    (f >< g) (x, y) = (f x, g y)
 
 -- pronounced quapp
 (>*<) :: WQ (a -> b) -> WQ a -> WQ b
@@ -467,9 +473,9 @@ optimise (Op (u :*>: v) :<*>: w)                      = optimise (u :*>: (optimi
 -- Interchange Law: u <*> pure x = pure ($ x) <*> u
 optimise (u :<*>: Op (Pure x))                        = optimise (Op (Pure (lift' flip >*< lift' ($) >*< x)) :<*>: u)
 -- Right Absorption Law: (f <$> p) *> q = p *> q
-optimise (Op (Op (Pure f) :<*>: p) :*>: q)            = p :*>: q
+optimise (Op (Op (Pure f) :<*>: p) :*>: q)            = Op (p :*>: q)
 -- Left Absorption Law: p <* (f <$> q) = p <* q
-optimise (p :<*: (Op (Pure f) :<*>: q))               = p :<*: q
+optimise (p :<*: (Op (Op (Pure f) :<*>: q)))          = Op (p :<*: q)
 -- Reassociation Law 2: u <*> (v <* w) = (u <*> v) <* w
 optimise (u :<*>: Op (v :<*: w))                      = optimise (optimise (u :<*>: v) :<*: w)
 -- Reassociation Law 3: u <*> (v *> pure x) = (u <*> pure x) <* v
@@ -521,7 +527,7 @@ optimise (NotFollowedBy (Op (Op (Try _ p) :<|>: q)))  = optimise (optimise (NotF
 -- Distributivity Law: lookAhead p <|> lookAhead q = lookAhead (p <|> q)
 optimise (Op (LookAhead p) :<|>: Op (LookAhead q))    = optimise (LookAhead (optimise (p :<|>: q)))
 -- Interchange Law: lookAhead (p *> pure x) = lookAhead p *> pure x
-optimise (LookAhead (Op (p :*>: Op (Pure x))))        = optimise (optimise (LookAhead p) :*>: Op (Pure x)))
+optimise (LookAhead (Op (p :*>: Op (Pure x))))        = optimise (optimise (LookAhead p) :*>: Op (Pure x))
 -- Interchange law: lookAhead (f <$> p) = f <$> lookAhead p
 optimise (LookAhead (Op (Op (Pure f) :<*>: p)))       = optimise (Op (Pure f) :<*>: optimise (LookAhead p))
 -- Absorption Law: p <*> notFollowedBy q = (p <*> unit) <* notFollowedBy q
@@ -575,7 +581,7 @@ optimise (Op (Pure f) :<*>: (Op (Match p fs qs))) = Op (Match p fs (map (optimis
 optimise p                                        = Op p
 
 constantInput :: Free Parser' f xs ks a i -> Maybe Int
-constantInput = getConst . histofold (const (Const Nothing)) (alg1 |> (Const . alg2 . imap present))
+constantInput = getConst . histo (const (Const Nothing)) (alg1 |> (Const . alg2 . imap present))
   where
     alg1 :: Parser' (History Parser' (Const (Maybe Int))) xs ks a i -> Maybe (Const (Maybe Int) xs ks a i)
     alg1 (Era (Const n) (Try _ _) :<|>: Era (Const q) _) = Just (Const (n <==> q))
@@ -604,52 +610,97 @@ constantInput = getConst . histofold (const (Const Nothing)) (alg1 |> (Const . a
 _ <==> _ = Nothing
 
 data Consumption = Some | None | Never
-data Prop xs ks a i = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool}
+data Prop xs ks a i = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool} | Unknown
 terminationAnalysis :: Free Parser' Void '[] '[] a i -> Free Parser' Void '[] '[] a i
-terminationAnalysis p = if not (looping (fold absurd alg p)) then p else error "Parser will loop indefinitely; either it is left-recursive or iterates over pure computations"
+terminationAnalysis p = if not (looping (fold absurd alg p)) then p
+                        else error "Parser will loop indefinitely: either it is left-recursive or iterates over pure computations"
   where
-    looping (Prop Never Never _)   = True
-    looping _                      = False
-    neverSucceeds (Prop Never _ _) = True
-    neverSucceeds _                = False
+    looping (Prop Never Never _)          = True
+    looping _                             = False
+    strongLooping (Prop Never Never True) = True
+    strongLooping _                       = False
+    neverSucceeds (Prop Never _ _)        = True
+    neverSucceeds _                       = False
+    neverFails (Prop _ Never _)           = True
+    neverFails _                          = False
 
-    Never &&& _     = Never
-    _     &&& Never = Never
-    Some  &&& _     = Some
-    None  &&& p     = p
+    Never ||| _     = Never
+    _     ||| Never = Never
+    Some  ||| _     = Some
+    None  ||| p     = p
 
-    p ==> _ | neverSucceeds p            = p
+    Some  &&& _    = Some
+    _     &&& Some = Some
+    None  &&& _    = None
+    Never &&& p    = p
+
+    Never ^^^ _     = Never
+    _     ^^^ Never = Never
+    None  ^^^ _     = None
+    Some  ^^^ p     = p
+
+    (==>) :: Prop xs ks a i -> Prop xs ks a' i' -> Prop xs ks a'' i''
+    p ==> _ | neverSucceeds p            = cast p
     _ ==> Prop Never Never True          = Prop Never Never True
     Prop None _ _ ==> Prop Never Never _ = Prop Never Never False
-    Prop s1 f1 b1 ==> Prop s1 f1 b2      = Prop (s1 &&& s2) (f1 &&& f2) (b1 && b2)
+    Prop s1 f1 b1 ==> Prop s2 f2 b2      = Prop (s1 ||| s2) (f1 &&& (s1 ||| f2)) (b1 && b2)
 
+    branching :: Prop xs ks a i -> [Prop xs ks a' i'] -> Prop xs ks a'' i''
+    branching b ps
+      | neverSucceeds b = cast b
+      | any strongLooping ps = Prop Never Never True
+    branching (Prop None f _) ps
+      | any looping ps = Prop Never Never False
+      | otherwise      = Prop (foldr1 (|||) (map success ps)) (f &&& (foldr1 (^^^) (map fails ps))) False
+    branching (Prop Some f _) ps = Prop (foldr (|||) Some (map success ps)) f False
+
+    cast :: Prop xs ks a i -> Prop xs ks a' i'
+    cast (Prop s f i) = Prop s f i
+
+    -- TODO We want to augment this with information about the recursion scope
     alg :: Parser' Prop ks xs a i -> Prop ks xs a i
-    alg (Satisfy _) = Prop Some None True
-    alg (Pure _)    = Prop None Never True
-    alg Empty       = Prop Never None True
+    alg (Satisfy _)                          = Prop Some None True
+    alg (Pure _)                             = Prop None Never True
+    alg Empty                                = Prop Never None True
     alg (Try _ p)
-      | looping p = p
-      | otherwise = Prop (success p) None (indisputable p)
+      | looping p                            = p
+      | otherwise                            = Prop (success p) None (indisputable p)
     alg (LookAhead p)
-      | looping p = p
-      | otherwise = Prop None (fails p) (indisputable p)
+      | looping p                            = p
+      | otherwise                            = Prop None (fails p) (indisputable p)
     alg (NotFollowedBy p)
-      | looping p = p
-      | otherwise = Prop None None True
-    alg (p :<*>: q) = p ==> q
-    alg (p :*>: q)  = p ==> q
-    alg (p :<*: q)  = p ==> q
-    -- NOTE: This one is special, need to consider how input is consumed on failure for p
-    alg (t1 :<|>: t2) = undefined
-    -- NOTE: Selectives are undecidable in general
-    alg (Branch b p q)    = undefined
-    alg (Match p _ qs)   = undefined
-    alg (ChainPre (Prop None _ _) _)  = Prop Never Never True
-    alg (ChainPre op p) = undefined
-    alg (ChainPost _ (Prop None _ _)) = Prop Never Never True
-    alg (ChainPost p op) = undefined
-    alg (Rec _)                           = Prop Never Never WeakLoop False
-    alg (Debug _ p)        = p
+      | looping p                            = cast p
+      | otherwise                            = Prop None None True
+    alg (p :<*>: q)                          = p ==> q
+    alg (p :*>: q)                           = p ==> q
+    alg (p :<*: q)                           = p ==> q
+    -- If we fail without consuming input then q governs behaviour
+    alg (Prop _ None _ :<|>: q)              = q
+    alg (p :<|>: q)
+      -- If p never fails then q is irrelevant
+      | neverFails p                         = p
+      -- If p never succeeds then q governs
+      | neverSucceeds p                      = q
+    alg (Prop s1 Some i1 :<|>: Prop s2 f i2) = Prop (s1 &&& s2) (Some ||| f) (i1 && i2)
+    alg (Branch b p q)                       = branching b [cast p, cast q]
+    alg (Match p _ qs)                       = branching p qs
+    -- Never failing implies you must either loop or not consume input
+    alg (ChainPre (Prop _ Never _) _)        = Prop Never Never True
+    alg (ChainPre op p)
+      -- Reaching p can take a route that consumes no input, if op failed
+      | looping p                            = p
+      | otherwise                            = p -- TODO Verify!
+    alg (ChainPost _ (Prop None _ _))        = Prop Never Never True
+    alg (ChainPost (Prop Some f _)
+                   (Prop _ Never _))         = Prop Some f False
+    -- TODO Verify
+    alg (ChainPost p op)                     = Prop (success p) (fails p &&& fails op) False
+    -- TODO This is actually a little problematic... recursion is scoped...
+    -- Perhaps we need to go inside one layer? That's a recursive algebra though
+    -- Talk to nick...
+    alg (Rec _ _)                            = Prop Never Never False
+    alg (Debug _ p)                          = p
+    alg _                                    = Unknown
 
 newtype ΣVar a = ΣVar Int deriving Show
 newtype MVar xs ks a = MVar Int deriving Show
@@ -733,21 +784,16 @@ instance Show (Free M f xs ks a i) where
     alg (LogEnter _ k) = getConst k
     alg (LogExit _ k) = getConst k
 
-(><) :: (a -> c) -> (b -> d) -> (a, b, x) -> (c, d, x)
-(f >< g) (x, y, z) = (f x, g y, z)
-
-type IMVar = Int
-data State = forall a. State a (TExpQ a) (ΣVar a)
-type ΣVars = IORef [State]
+data ΣState = forall a. State a (TExpQ a) (ΣVar a)
+type ΣVars = [ΣState]
 newtype CodeGen b xs ks a i = CodeGen {runCodeGen :: forall xs' ks'. Free M Void (a ': xs') ks' b i
-                                                  -> ReaderT (HashMap (StableParserName xs ks i) IMVar, IMVar, ΣVars) IO (Free M Void xs' ks' b i)}
+                                                  -> ReaderT (Map IMVar IMVar, IMVar) (State ΣVars) (Free M Void xs' ks' b i)}
 
-compile :: Free Parser' Void '[] '[] a i -> (Free M Void '[] '[] a i, [State])
-compile p = unsafePerformIO (do σs <- newIORef []
-                                m <- runReaderT (runCodeGen (histofold absurd (peephole |> (direct . imap present)) (trace (showAST p) p)) (Op Halt)) (HashMap.empty, 0, σs)
-                                vss <- readIORef σs
-                                return $! (trace (show m) m, vss))
+compile :: Free Parser' Void '[] '[] a i -> (Free M Void '[] '[] a i, ΣVars)
+compile p = let (m, vs) = runState (runReaderT (runCodeGen (histo absurd alg (traceShow p p)) (Op Halt)) (Map.empty, 0)) []
+            in traceShow m (m, vs)
   where
+    alg = peephole |> (direct . imap present)
     peephole :: Parser' (History Parser' (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
     peephole !(Era _ (Pure f) :<*>: Era p _) = Just $ CodeGen $ \(!m) -> runCodeGen p (fmapInstr f m)
     peephole !(Era _ (Era _ (Pure f) :<*>: Era p _) :<*>: Era q _) = Just $ CodeGen $ \(!m) ->
@@ -758,12 +804,8 @@ compile p = unsafePerformIO (do σs <- newIORef []
          qc <- runCodeGen q m
          return $! Op (SoftFork n pc qc)
     peephole !(ChainPost (Era _ (Pure x)) (Era op _)) = Just $ CodeGen $ \(!m) ->
-      do (_, v, rσs) <- ask
-         σs <- Reader.lift (readIORef rσs)
-         let σ = case σs of
-                   [] -> ΣVar 0
-                   (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-         Reader.lift (writeIORef rσs (State (_val x) (_code x) σ:σs))
+      do (_, v) <- ask
+         σ <- freshΣ (_val x) (_code x)
          opc <- local (id >< (+1)) (runCodeGen op (Op (ChainIter σ (MVar v))))
          return $! Op (Push x (Op (ChainInit x σ opc (MVar v) m)))
     peephole _ = Nothing
@@ -783,35 +825,38 @@ compile p = unsafePerformIO (do σs <- newIORef []
                                                       runCodeGen b (Op (Case pc qc))
     direct !(Match p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
                                                       runCodeGen p (Op (Choices fs qcs))
-    direct !(Rec !p !q)       = CodeGen $ \(!m) ->
-      do (StableName _name) <- Reader.lift (makeStableName p)
-         (seen, v, _) <- ask
-         let !name = StableParserName _name
-         case HashMap.lookup name seen of
-           Just v' -> do return $! Op (MuCall (MVar v') m)
-           Nothing -> do n <- local (HashMap.insert name v >< (+1)) (runCodeGen q (Op Ret))
-                         return $! Op (Call n (MVar v) m)
+    -- NOTE: It is necessary to rename the MVars produced by preprocess
+    direct !(Rec !old !q)     = CodeGen $ \(!m) ->
+      do (seen, v) <- ask
+         case Map.lookup old seen of
+           Just new -> do return $! Op (MuCall (MVar new) m)
+           Nothing  -> do n <- local (Map.insert old v >< (const (v+1))) (runCodeGen q (Op Ret))
+                          return $! Op (Call n (MVar v) m)
     direct !(ChainPre op p) = CodeGen $ \(!m) ->
-      do (_, v, rσs) <- ask
-         σs <- Reader.lift (readIORef rσs)
-         let σ = case σs of
-                   [] -> ΣVar 0
-                   (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-         Reader.lift (writeIORef rσs (State id [|| id ||] σ:σs))
+      do (_, v) <- ask
+         σ <- freshΣ id [||id||]
          opc <- local (id >< (+1)) (runCodeGen op (fmapInstr (lift' flip >*< lift' (.)) (Op (ChainIter σ (MVar v)))))
          pc <- local (id >< (+1)) (runCodeGen p (Op (Lift2 (lift' ($)) m)))
          return $! Op (Push (lift' id) (Op (ChainInit (lift' id) σ opc (MVar v) pc)))
     direct !(ChainPost p op) = CodeGen $ \(!m) ->
-      do (_, v, rσs) <- ask
-         σs <- Reader.lift (readIORef rσs)
-         let σ = case σs of
-                   [] -> ΣVar 0
-                   (State _ _ (ΣVar x)):_ -> ΣVar (x+1)
-         Reader.lift (writeIORef rσs (State Nothing [|| Nothing ||] σ:σs))
+      do (_, v) <- ask
+         σ <- freshΣ Nothing [||Nothing||]
          opc <- local (id >< (+1)) (runCodeGen op (fmapInstr (lift' (<$!>)) (Op (ChainIter σ (MVar v)))))
          let m' = Op (ChainInit (WQ Nothing [||Nothing||]) σ opc (MVar v) (fmapInstr (lift' fromJust) m))
          local (id >< (+1)) (runCodeGen p (fmapInstr (lift' Just) m'))
     direct !(Debug name p) = CodeGen $ \(!m) -> liftM (Op . LogEnter name) (runCodeGen p (Op (LogExit name m)))
+
+    (><) :: (a -> c) -> (b -> d) -> (a, b) -> (c, d)
+    (f >< g) (x, y) = (f x, g y)
+
+    freshΣ :: MonadState ΣVars m => a -> TExpQ a -> m (ΣVar a)
+    freshΣ x qx = do σs <- get
+                     let σ = nextΣ σs
+                     put (State x qx σ:σs)
+                     return $! σ
+      where
+        nextΣ []                     = ΣVar 0
+        nextΣ (State _ _ (ΣVar x):_) = ΣVar (x+1)
 
 data SList a = !a ::: !(SList a) | SNil
 data HList xs where
@@ -960,10 +1005,10 @@ instance GCompare ΣVar where
     EQ -> coerce GEQ
     GT -> coerce GGT
 
-makeΣ :: [State] -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
+makeΣ :: ΣVars -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
 makeΣ ps = makeΣ' ps (DMap.empty) [|| return () ||] [|| return () ||] [|| const (return ()) ||]
   where
-    makeΣ' :: [State] -> DMap ΣVar (QSTRef s) -> QST s () -> QST s () -> TExpQ (D -> ST s ()) -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
+    makeΣ' :: ΣVars -> DMap ΣVar (QSTRef s) -> QST s () -> QST s () -> TExpQ (D -> ST s ()) -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
     makeΣ' [] m save restore rollback k = [|| let !σs = Σ $$save $$restore (\n -> if n == 0 then return () else $$rollback n) in $$(k m [|| σs ||]) ||]
     makeΣ' (State x qx (ΣVar v):ps) m save restore rollback k = [||
       do σ <- newSTRef ($$qx:::SNil)
@@ -1022,7 +1067,7 @@ newtype Exec s xs ks a i = Exec (Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe 
 run :: Exec s xs ks a i -> Γ s xs ks a -> (Ctx s a) -> QST s (Maybe a)
 run (Exec m) γ ctx = runReader (m γ) ctx
 
-exec :: TExpQ String -> (Free M Void '[] '[] a i, [State]) -> QST s (Maybe a)
+exec :: TExpQ String -> (Free M Void '[] '[] a i, ΣVars) -> QST s (Maybe a)
 exec input (!m, vss) = [||
   do xs <- makeX
      ks <- makeK

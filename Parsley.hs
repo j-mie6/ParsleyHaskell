@@ -784,7 +784,7 @@ instance Show (Free M f xs ks a i) where
     alg (LogEnter _ k) = getConst k
     alg (LogExit _ k) = getConst k
 
-data ΣState = forall a. State a (TExpQ a) (ΣVar a)
+data ΣState = forall a. State !a !(TExpQ a) !(ΣVar a)
 type ΣVars = [ΣState]
 newtype CodeGen b xs ks a i = CodeGen {runCodeGen :: forall xs' ks'. Free M Void (a ': xs') ks' b i
                                                   -> ReaderT (Map IMVar IMVar, IMVar) (State ΣVars) (Free M Void xs' ks' b i)}

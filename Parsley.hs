@@ -354,12 +354,6 @@ p >?> (WQ f qf) = select (WQ g qg <$> p) empty
     g x = if f x then Right x else Left ()
     qg = [||\x -> if $$qf x then Right x else Left ()||]
 
-_match :: Eq a => a -> Either a b -> Either () (Either a b)
-_match _ (Right y) = Right (Right y)
-_match x (Left y)
-  | x == y = Left ()
-  | otherwise = Right (Left y)
-
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b
 match vs (Parser p) f = Parser (Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs)))
 

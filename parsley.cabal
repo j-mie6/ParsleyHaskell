@@ -51,7 +51,7 @@ executable benchmarks
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=DumpCore -fplugin=LiftPlugin -ddump-simpl -ddump-splices -ddump-to-file -dumpdir=. -fforce-recomp
+  ghc-options:         -rtsopts -fplugin=DumpCore -fplugin=LiftPlugin -ddump-simpl -ddump-simpl-stats -ddump-splices -ddump-to-file -dumpdir=. -fforce-recomp
 
 library
   -- Modules exported by the library.

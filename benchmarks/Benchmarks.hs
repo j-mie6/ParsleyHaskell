@@ -20,7 +20,9 @@ import LiftPlugin
 
 manyTestParsley :: String -> Maybe ()
 manyTestParsley = -- $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}
-                  $$(Parsley.runParser (Parsley.while ((Parsley.WQ Parsley.greaterThan5 [||Parsley.greaterThan5||]) Parsley.<$> Parsley.digit)))
+                  -- $$(Parsley.runParser (Parsley.while ((Parsley.WQ (== 'a') [||(== 'a')||]) Parsley.<$> Parsley.item
+                  --                        Parsley.<* Parsley.while ((Parsley.WQ (== 'b') [||(== 'b')||]) Parsley.<$> Parsley.item))))
+                  $$(Parsley.runParser (Parsley.void Parsley.pred))
 
 manyTestYodaBad :: Yoda.Parser Int
 manyTestYodaBad = Yoda.chainl1 (Parsley.toDigit Yoda.<$> Yoda.satisfy (Parsley.isDigit)) ((+) Yoda.<$ Yoda.char '+')
@@ -53,9 +55,9 @@ crossMany = env (return $ take 1001 ('0':cycle "+1")) $ \input -> bgroup "many" 
 
 main :: IO ()
 --main = rnf (Parsley.runParser longChoice "b") `seq` return ()
-main = --rnf (Parsley.runParser (manyTestParsley) (replicate 1000000 'a')) `seq` return (){-
+{-main = --rnf (Parsley.runParser (manyTestParsley) (replicate 1000000 'a')) `seq` return (){-
   defaultMain [
     combinatorGroup,
     crossMany
-  ]--}
---main = print (manyTestParsley ("1+2+3+4+5"))
+  ]--}-}
+main = print (manyTestParsley ("abbbbbccc"))

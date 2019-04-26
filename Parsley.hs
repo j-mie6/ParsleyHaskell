@@ -44,7 +44,7 @@ import Control.Monad              (MonadPlus, mzero, mplus, liftM, liftM2, liftM
 import GHC.ST                     (ST(..), runST)
 import Control.Monad.ST.Unsafe    (unsafeIOToST)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, Reader, runReader, local)
-import Control.Monad.State.Strict (State, get, put, runState, MonadState)
+import Control.Monad.State.Strict (State, get, put, runState, evalState, MonadState)
 import qualified Control.Monad.Reader as Reader
 import Data.STRef                 (STRef, writeSTRef, readSTRef, modifySTRef', newSTRef)
 import System.IO.Unsafe           (unsafePerformIO)
@@ -56,6 +56,8 @@ import Data.HashMap.Lazy          (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import Data.Map.Strict            (Map)
 import qualified Data.Map.Strict as Map
+import Data.Set                   (Set)
+import qualified Data.Set as Set
 import Data.Dependent.Map         (DMap)
 import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 import qualified Data.Dependent.Map as DMap
@@ -97,6 +99,16 @@ selectTest = Parsley.pure (lift' (Left 10))
 
 showi :: Int -> String
 showi = show
+
+data Pred' = And Pred' Pred' | Not Pred' | T | F deriving Lift
+pred :: Parser Pred'
+pred = chainr1 term (lift' And <$ token "&&")
+  where
+    term :: Parser Pred'
+    term = chainPre (lift' Not <$ token "!") atom
+    atom :: Parser Pred'
+    atom = (lift' T <$ token "t")
+       <|> (lift' F <$ token "f")
 
 instance Pure WQ where lift' x = WQ x [||x||]
 
@@ -531,6 +543,10 @@ optimise (NotFollowedBy (Op (p :*>: Op (Pure _))))    = optimise (NotFollowedBy 
 -- Idempotence Law: notFollowedBy (f <$> p) = notFollowedBy p
 optimise (NotFollowedBy (Op (Op (Pure _) :<*>: p)))   = optimise (NotFollowedBy p)
 optimise (Try _ (Op (Pure x)))                        = Op (Pure x)
+-- Interchange Law: try (p *> pure x) = try p *> pure x
+optimise (Try n (Op (p :*>: Op (Pure x))))            = optimise (optimise (Try n p) :*>: Op (Pure x))
+-- Interchange law: try (f <$> p) = f <$> try p
+optimise (Try n (Op (Op (Pure f) :<*>: p)))           = optimise (Op (Pure f) :<*>: optimise (Try n p))
 optimise (Try _ (Op Empty))                           = Op Empty
 optimise (Try Nothing p)                              = Op (Try (constantInput p) p)
 -- pure Left law: branch (pure (Left x)) p q = p <*> pure x
@@ -604,9 +620,11 @@ constantInput = getConst . histo (const (Const Nothing)) (alg1 |> (Const . alg2 
 _ <==> _ = Nothing
 
 data Consumption = Some | None | Never
-data Prop xs ks a i = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool} | Unknown
+data Prop = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool} | Unknown
+--data InferredTerm = Loops | Safe | Undecidable
+newtype Termination xs ks a i = Termination {runTerm :: ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop}
 terminationAnalysis :: Free Parser' Void '[] '[] a i -> Free Parser' Void '[] '[] a i
-terminationAnalysis p = if not (looping (fold absurd alg p)) then p
+terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold absurd (Termination . alg) p)) Set.empty) Map.empty)) then p
                         else error "Parser will loop indefinitely: either it is left-recursive or iterates over pure computations"
   where
     looping (Prop Never Never _)          = True
@@ -633,68 +651,77 @@ terminationAnalysis p = if not (looping (fold absurd alg p)) then p
     None  ^^^ _     = None
     Some  ^^^ p     = p
 
-    (==>) :: Prop xs ks a i -> Prop xs ks a' i' -> Prop xs ks a'' i''
-    p ==> _ | neverSucceeds p            = cast p
+    (==>) :: Prop -> Prop -> Prop
+    p ==> _ | neverSucceeds p            = p
     _ ==> Prop Never Never True          = Prop Never Never True
     Prop None _ _ ==> Prop Never Never _ = Prop Never Never False
     Prop s1 f1 b1 ==> Prop s2 f2 b2      = Prop (s1 ||| s2) (f1 &&& (s1 ||| f2)) (b1 && b2)
 
-    branching :: Prop xs ks a i -> [Prop xs ks a' i'] -> Prop xs ks a'' i''
+    branching :: Prop -> [Prop] -> Prop
     branching b ps
-      | neverSucceeds b = cast b
+      | neverSucceeds b = b
       | any strongLooping ps = Prop Never Never True
     branching (Prop None f _) ps
       | any looping ps = Prop Never Never False
       | otherwise      = Prop (foldr1 (|||) (map success ps)) (f &&& (foldr1 (^^^) (map fails ps))) False
     branching (Prop Some f _) ps = Prop (foldr (|||) Some (map success ps)) f False
 
-    cast :: Prop xs ks a i -> Prop xs ks a' i'
-    cast (Prop s f i) = Prop s f i
-
-    -- TODO We want to augment this with information about the recursion scope
-    alg :: Parser' Prop ks xs a i -> Prop ks xs a i
-    alg (Satisfy _)                          = Prop Some None True
-    alg (Pure _)                             = Prop None Never True
-    alg Empty                                = Prop Never None True
-    alg (Try _ p)
-      | looping p                            = p
-      | otherwise                            = Prop (success p) None (indisputable p)
-    alg (LookAhead p)
-      | looping p                            = p
-      | otherwise                            = Prop None (fails p) (indisputable p)
-    alg (NotFollowedBy p)
-      | looping p                            = cast p
-      | otherwise                            = Prop None None True
-    alg (p :<*>: q)                          = p ==> q
-    alg (p :*>: q)                           = p ==> q
-    alg (p :<*: q)                           = p ==> q
-    -- If we fail without consuming input then q governs behaviour
-    alg (Prop _ None _ :<|>: q)              = q
-    alg (p :<|>: q)
-      -- If p never fails then q is irrelevant
-      | neverFails p                         = p
-      -- If p never succeeds then q governs
-      | neverSucceeds p                      = q
-    alg (Prop s1 Some i1 :<|>: Prop s2 f i2) = Prop (s1 &&& s2) (Some ||| f) (i1 && i2)
-    alg (Branch b p q)                       = branching b [cast p, cast q]
-    alg (Match p _ qs)                       = branching p qs
-    -- Never failing implies you must either loop or not consume input
-    alg (ChainPre (Prop _ Never _) _)        = Prop Never Never True
-    alg (ChainPre op p)
-      -- Reaching p can take a route that consumes no input, if op failed
-      | looping p                            = p
-      | otherwise                            = p -- TODO Verify!
-    alg (ChainPost _ (Prop None _ _))        = Prop Never Never True
-    alg (ChainPost (Prop Some f _)
-                   (Prop _ Never _))         = Prop Some f False
-    -- TODO Verify
-    alg (ChainPost p op)                     = Prop (success p) (fails p &&& fails op) False
-    -- TODO This is actually a little problematic... recursion is scoped...
-    -- Perhaps we need to go inside one layer? That's a recursive algebra though
-    -- Talk to nick...
-    alg (Rec _ _)                            = Prop Never Never False
-    alg (Debug _ p)                          = p
-    alg _                                    = Unknown
+    alg :: Parser' Termination ks xs a i -> ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop
+    alg (Satisfy _)                          = return $! Prop Some None True
+    alg (Pure _)                             = return $! Prop None Never True
+    alg Empty                                = return $! Prop Never None True
+    alg (Try _ p)                            =
+      do x <- runTerm p
+         return $! if looping x then x
+                   else Prop (success x) None (indisputable x)
+    alg (LookAhead p)                        =
+      do x <- runTerm p
+         return $! if looping x then x
+                   else Prop None (fails x) (indisputable x)
+    alg (NotFollowedBy p)                    =
+      do x <- runTerm p
+         return $! if looping x then x
+                   else Prop None None True
+    alg (p :<*>: q)                          = liftM2 (==>) (runTerm p) (runTerm q)
+    alg (p :*>: q)                           = liftM2 (==>) (runTerm p) (runTerm q)
+    alg (p :<*: q)                           = liftM2 (==>) (runTerm p) (runTerm q)
+    alg (p :<|>: q)                          =
+      do x <- runTerm p; case x of
+           -- If we fail without consuming input then q governs behaviour
+           Prop _ None _       -> runTerm q
+           -- If p never fails then q is irrelevant
+           x | neverFails x    -> return $! x
+           -- If p never succeeds then q governs
+           x | neverSucceeds x -> runTerm q
+           Prop s1 Some i1     -> do ~(Prop s2 f i2) <- runTerm q; return $! Prop (s1 &&& s2) (Some ||| f) (i1 && i2)
+    alg (Branch b p q)                       = liftM2 branching (runTerm b) (sequence [runTerm p, runTerm q])
+    alg (Match p _ qs)                       = liftM2 branching (runTerm p) (traverse runTerm qs)
+    alg (ChainPre op p)                      =
+      do x <- runTerm op; case x of
+           -- Never failing implies you must either loop or not consume input
+           Prop _ Never _ -> return $! Prop Never Never True
+           -- Reaching p can take a route that consumes no input, if op failed
+           _ -> do y <- runTerm p
+                   return $! if looping y then y
+                             else y -- TODO Verify!
+    alg (ChainPost p op)                     =
+      do y <- runTerm op; case y of
+           Prop None _ _ -> return $! Prop Never Never True
+           y -> do x <- runTerm p; case (x, y) of
+                     (Prop Some f _, Prop _ Never _) -> return $! Prop Some f False
+                     (x, y)                          -> return $! Prop (success x) (fails x &&& fails y) False -- TODO Verify
+    alg (Rec v p)                            =
+      do props <- get
+         seen <- ask
+         case Map.lookup v props of
+           Just prop -> return $! prop
+           Nothing | Set.member v seen -> return $! Prop Never Never False
+           Nothing -> do prop <- local (Set.insert v) (runTerm p)
+                         let prop' = if looping prop then Prop Never Never True else prop
+                         put (Map.insert v prop' props)
+                         return $! prop'
+    alg (Debug _ p)                          = runTerm p
+    --alg _                                    = return $! Unknown
 
 newtype ΣVar a = ΣVar Int deriving Show
 newtype MVar xs ks a = MVar Int deriving Show

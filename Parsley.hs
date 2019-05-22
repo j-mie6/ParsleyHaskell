@@ -61,9 +61,9 @@ import qualified Data.Set as Set
 import Data.Dependent.Map         (DMap)
 import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 import qualified Data.Dependent.Map as DMap
-import Data.Array.Unboxed         (UArray, listArray)
-import Data.Array.Base            (STUArray(..), unsafeAt, newArray_, unsafeRead, unsafeWrite, MArray, getNumElements, numElements, ixmap, elems)
-import GHC.Prim                   (Int#, Char#, StableName#, newByteArray#)
+import Data.Array.Unboxed         (listArray)
+import Data.Array.Base            (STUArray(..), UArray(..), unsafeAt, newArray_, unsafeRead, unsafeWrite, MArray, getNumElements, numElements, ixmap, elems)
+import GHC.Prim                   (Int#, Char#, StableName#, newByteArray#, indexWideCharArray#)
 import GHC.Exts                   (Int(..), Char(..), (-#), (+#), (*#))
 import Unsafe.Coerce              (unsafeCoerce)
 import Safe.Coerce                (coerce)
@@ -415,7 +415,7 @@ instance Hashable (StableParserName xs ks i) where
   hash (StableParserName n) = hashStableName (StableName n)
   hashWithSalt salt (StableParserName n) = hashWithSalt salt (StableName n)
 
-newtype Carrier xs ks a i = Carrier {unCarrier :: ReaderT (HashMap (StableParserName xs ks i) (IMVar, GenParser xs ks i), IMVar) IO (Free Parser' Void xs ks a i)}
+newtype Carrier xs ks a i = Carrier {unCarrier :: ReaderT (HashMap (StableParserName xs ks i) (IMVar, GenParser xs ks i, IORef Bool), IMVar) IO (Free Parser' Void xs ks a i)}
 preprocess :: Free Parser' Void '[] '[] a i -> Free Parser' Void '[] '[] a i
 preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' absurd alg p)) (HashMap.empty, 0))
   where
@@ -426,9 +426,13 @@ preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' absurd alg p)) (Ha
       (StableName _name) <- Reader.lift (makeStableName p)
       let !name = StableParserName _name
       case HashMap.lookup name seen of
-        Just (v', GenParser q) -> return $! (Op (Rec v' (coerce q)))
-        Nothing -> mdo q' <- local (HashMap.insert name (v, GenParser q') >< (+1)) (unCarrier $ subalg q)
-                       return $! q'
+        Just (v', GenParser q, used) -> do Reader.lift (writeIORef used True)
+                                           return $! (Op (Rec v' (coerce q)))
+        Nothing -> mdo usedVar <- Reader.lift (newIORef False)
+                       q' <- local (HashMap.insert name (v, GenParser q', usedVar) >< (+1)) (unCarrier $ subalg q)
+                       used <- Reader.lift (readIORef usedVar)
+                       if used then return $! (Op (Rec v q'))
+                       else         return $! q'
     subalg :: Parser' Carrier xs ks a i -> Carrier xs ks a i
     subalg !(pf :<*>: px)     = Carrier (liftM optimise (liftM2 (:<*>:) (unCarrier pf) (unCarrier px)))
     subalg !(p :*>: q)        = Carrier (liftM optimise (liftM2 (:*>:)  (unCarrier p)  (unCarrier q)))
@@ -446,7 +450,7 @@ preprocess !p = unsafePerformIO (runReaderT (unCarrier (fold' absurd alg p)) (Ha
     subalg !(Pure x)          = Carrier (return (Op (Pure x)))
     subalg !(Satisfy f)       = Carrier (return (Op (Satisfy f)))
 
-    (><) :: (a -> c) -> (b -> d) -> (a, b) -> (c, d)
+    (><) :: (a -> x) -> (b -> y) -> (a, b) -> (x, y)
     (f >< g) (x, y) = (f x, g y)
 
 -- pronounced quapp
@@ -542,13 +546,12 @@ optimise (p :<*>: Op (NotFollowedBy q))               = optimise (optimise (p :<
 optimise (NotFollowedBy (Op (p :*>: Op (Pure _))))    = optimise (NotFollowedBy p)
 -- Idempotence Law: notFollowedBy (f <$> p) = notFollowedBy p
 optimise (NotFollowedBy (Op (Op (Pure _) :<*>: p)))   = optimise (NotFollowedBy p)
-optimise (Try _ (Op (Pure x)))                        = Op (Pure x)
 -- Interchange Law: try (p *> pure x) = try p *> pure x
 optimise (Try n (Op (p :*>: Op (Pure x))))            = optimise (optimise (Try n p) :*>: Op (Pure x))
 -- Interchange law: try (f <$> p) = f <$> try p
 optimise (Try n (Op (Op (Pure f) :<*>: p)))           = optimise (Op (Pure f) :<*>: optimise (Try n p))
-optimise (Try _ (Op Empty))                           = Op Empty
 optimise (Try Nothing p)                              = case constantInput p of
+                                                          Just 0 -> p
                                                           Just 1 -> p
                                                           ci -> Op (Try ci p)
 -- pure Left law: branch (pure (Left x)) p q = p <*> pure x
@@ -725,9 +728,9 @@ terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold ab
     alg (Debug _ p)                          = runTerm p
     --alg _                                    = return $! Unknown
 
-newtype ΣVar a = ΣVar Int deriving Show
-newtype MVar xs ks a = MVar Int deriving Show
-newtype ΦVar x a = ΦVar Int deriving Show
+newtype ΣVar a = ΣVar Int
+newtype MVar xs ks a = MVar Int
+newtype ΦVar a = ΦVar Int
 data M k xs ks a i where
   Halt      :: M k '[a] ks a i
   Ret       :: M k (b ': xs) ((b ': xs) ': ks) a i
@@ -739,9 +742,9 @@ data M k xs ks a i where
   MuCall    :: MVar xs ((b ': xs) ': ks) a -> !(k (b ': xs) ks a i) -> M k xs ks a i
   Empt      :: M k xs ks a i
   Commit    :: !Bool -> !(k xs ks a i) -> M k xs ks a i
-  HardFork  :: !(k xs ks a i) -> !(k xs ks a i) -> !(Maybe (ΦVar x a, k (x ': xs) ks a i)) -> M k xs ks a i
-  SoftFork  :: !(Maybe Int) -> !(k xs ks a i) -> !(k xs ks a i) -> !(Maybe (ΦVar x a, k (x ': xs) ks a i)) -> M k xs ks a i
-  Join      :: !(ΦVar x a) -> M k (x ': xs) ks a i
+  HardFork  :: !(k xs ks a i) -> !(k xs ks a i) -> !(Maybe (ΦVar x, k (x ': xs) ks a i)) -> M k xs ks a i
+  SoftFork  :: !(Maybe Int) -> !(k xs ks a i) -> !(k xs ks a i) -> !(Maybe (ΦVar x, k (x ': xs) ks a i)) -> M k xs ks a i
+  Join      :: !(ΦVar x) -> M k (x ': xs) ks a i
   Attempt   :: !(Maybe Int) -> !(k xs ks a i) -> M k xs ks a i
   Look      :: !(k xs ks a i) -> M k xs ks a i
   NegLook   :: !(k xs ks a i) -> !(k xs ks a i) -> M k xs ks a i
@@ -788,8 +791,8 @@ instance Show (Free M f xs ks a i) where
     alg :: forall i j k l. M (Const String) i j k l -> String
     alg Halt = "Halt"
     alg Ret = "Ret"
-    alg (Call m v k) = "{Call (" ++ show v ++ ") " ++ getConst m ++ " " ++ getConst k ++ "}"
-    alg (MuCall v k) = "(μCall (" ++ show v ++ ") " ++ getConst k ++ ")"
+    alg (Call m (MVar v) k) = "{Call μ" ++ show v ++ " " ++ getConst m ++ " " ++ getConst k ++ "}"
+    alg (MuCall (MVar v) k) = "(μCall μ" ++ show v ++ " " ++ getConst k ++ ")"
     alg (Push _ k) = "(Push x " ++ getConst k ++ ")"
     alg (Pop k) = "(Pop " ++ getConst k ++ ")"
     alg (Lift2 _ k) = "(Lift2 f " ++ getConst k ++ ")"
@@ -811,8 +814,8 @@ instance Show (Free M f xs ks a i) where
     alg (Restore k) = "(Restore " ++ getConst k ++ ")"
     alg (Case m k) = "(Case " ++ getConst m ++ " " ++ getConst k ++ ")"
     alg (Choices _ ks) = "(Choices " ++ show (map getConst ks) ++ ")"
-    alg (ChainIter σ v) = "(ChainIter (" ++ show σ ++ ") (" ++ show v ++ "))"
-    alg (ChainInit _ σ m v k) = "{ChainInit (" ++ show σ ++ ") (" ++ show v ++ ") " ++ getConst m ++ " " ++ getConst k ++ "}"
+    alg (ChainIter (ΣVar σ) (MVar v)) = "(ChainIter σ" ++ show σ ++ " μ" ++ show v ++ ")"
+    alg (ChainInit _ (ΣVar σ) m (MVar v) k) = "{ChainInit σ" ++ show σ ++ " μ" ++ show v ++ " " ++ getConst m ++ " " ++ getConst k ++ "}"
     alg (LogEnter _ k) = getConst k
     alg (LogExit _ k) = getConst k
 
@@ -917,14 +920,12 @@ data HList xs where
   HCons :: a -> !(HList as) -> HList (a ': as)
 data K s ks a where
   KNil :: K s '[] a
-  KCons :: !(Input -> X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> Σ s -> D# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
+  KCons :: !(X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
 
 instance Show (K s ks a) where
   show KNil = "KNil"
   show (KCons _ ks) = "(KCons " ++ show ks ++ ")"
 
-type Input = UArray Int Char
-type QInput = TExpQ Input
 newtype H s a = H (SList (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)))
 type QH s a = TExpQ (H s a)
 type X = HList
@@ -938,22 +939,18 @@ type QC s = TExpQ (C s)
 type O = Int
 type O# = Int#
 type QO = TExpQ O
-data Σ s = Σ { save :: ST s (), restore :: ST s (), rollback :: D -> ST s () }
 type D = Int
 type D# = Int#
 type QD = TExpQ D
-type QΣ s = TExpQ (Σ s)
 type QST s a = TExpQ (ST s a)
 newtype QSTRef s a = QSTRef (TExpQ (STRef s (SList a)))
 
-data Γ s xs ks a = Γ { input :: QInput
-                     , xs    :: QX xs
+data Γ s xs ks a = Γ { xs    :: QX xs
                      , ks    :: QK s ks a
                      , o     :: QO
                      , hs    :: QH s a
                      , cidx  :: QCIdx
                      , cs    :: QC s
-                     , σs    :: QΣ s
                      , d     :: QD }
 
 bug :: a -> b
@@ -999,17 +996,17 @@ makeK :: ST s (K s '[] a)
 makeK = return $! KNil
 suspend :: Exec s xs ks a i -> Ctx s a -> QK s ks a -> QK s (xs ': ks) a
 suspend m ctx ks =
-  [|| KCons (\input xs ks o hs cidx cs σs d ->
-    $$(run m (Γ [||input||] [||xs||] [||ks||] [||I# o||] [||hs||] [||I# cidx||] [||cs||] [||σs||] [||I# d||]) ctx)) $$ks ||]
+  [|| KCons (\xs ks o hs cidx cs d ->
+    $$(run m (Γ[||xs||] [||ks||] [||I# o||] [||hs||] [||I# cidx||] [||cs||] [||I# d||]) ctx)) $$ks ||]
 resume :: Γ s xs (xs ': ks) a -> QST s (Maybe a)
-resume (Γ input xs ks o hs cidx cs σs d) =
+resume (Γ xs ks o hs cidx cs d) =
   [|| let ks' = bug ($$ks) :: K s (xs ': ks) a
           I# o# = $$o
           I# cidx# = $$cidx
           I# d# = $$d
       in
         case ks' of
-          (KCons k ks) -> k $$input $$(bug xs) ks o# $$hs cidx# $$cs $$σs d#
+          (KCons k ks) -> k $$(bug xs) ks o# $$hs cidx# $$cs d#
   ||]
 
 makeH :: ST s (H s a)
@@ -1039,11 +1036,12 @@ popC_ !i = i - 1
 pokeC :: O -> CIdx -> C s -> ST s ()
 pokeC !c !i !cs = unsafeWrite cs i c
 
-nextSafe :: Bool -> QInput -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
-nextSafe True input o p good bad = [|| let !c = unsafeAt $$input $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else $$bad ||]
+-- TODO Convert Input into a pair of getChar and inputSize, stored statically in the context
+nextSafe :: Bool -> Input -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
+nextSafe True input o p good bad = [|| let !c = $$(charAt input) $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else $$bad ||]
 nextSafe False input o p good bad = [||
     let bad' = $$bad in
-      if  numElements $$input > $$o then let !c = unsafeAt $$input $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else bad'
+      if  $$(size input) > $$o then let !c = $$(charAt input) $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else bad'
       else bad'
   ||]
 
@@ -1058,11 +1056,26 @@ instance GCompare ΣVar where
     EQ -> coerce GEQ
     GT -> coerce GGT
 
-makeΣ :: ΣVars -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
+instance GEq ΦVar where
+  geq (ΦVar u) (ΦVar v)
+    | u == v    = Just (coerce Refl)
+    | otherwise = Nothing
+
+instance GCompare ΦVar where
+  gcompare (ΦVar u) (ΦVar v) = case compare u v of
+    LT -> coerce GLT
+    EQ -> coerce GEQ
+    GT -> coerce GGT
+
+makeΣ :: ΣVars -> (DMap ΣVar (QSTRef s) -> Σ s -> QST s r) -> QST s r
 makeΣ ps = makeΣ' ps (DMap.empty) [|| return () ||] [|| return () ||] [|| const (return ()) ||]
   where
-    makeΣ' :: ΣVars -> DMap ΣVar (QSTRef s) -> QST s () -> QST s () -> TExpQ (D -> ST s ()) -> (DMap ΣVar (QSTRef s) -> QΣ s -> QST s r) -> QST s r
-    makeΣ' [] m save restore rollback k = [|| let !σs = Σ $$save $$restore (\n -> if n == 0 then return () else $$rollback n) in $$(k m [|| σs ||]) ||]
+    makeΣ' :: ΣVars -> DMap ΣVar (QSTRef s) -> QST s () -> QST s () -> TExpQ (D -> ST s ()) -> (DMap ΣVar (QSTRef s) -> Σ s -> QST s r) -> QST s r
+    makeΣ' [] m save restore rollback k =
+      [|| let save' = $$save
+              restore' = $$restore
+              rollback' n = if n == 0 then return () else $$rollback n
+          in $$(let !σs = Σ [||save'||] [||restore'||] [||rollback'||] in k m σs) ||]
     makeΣ' (State x qx (ΣVar v):ps) m save restore rollback k = [||
       do σ <- newSTRef ($$qx:::SNil)
          $$(let save' = [|| do modifySTRef' σ ($$qx:::); $$save ||]
@@ -1095,11 +1108,17 @@ sdrop :: Int -> SList a -> SList a
 sdrop 0 xs = xs
 sdrop n (_ ::: xs) = sdrop (n-1) xs
 
-data GenExec s a = forall xs ks. GenExec (TExpQ (Input -> X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> Σ s -> D# -> ST s (Maybe a)))
-data GenJoin s a = forall x. GenJoin (TExpQ (x -> O# -> ST s (Maybe a)))
-type FixMap s a = Map IMVar (GenExec s a)
-type JoinMap s a = Map IΦVar (GenJoin s a)
-data Ctx s a = Ctx {μs :: FixMap s a, φs :: JoinMap s a, σm :: DMap ΣVar (QSTRef s), constCount :: Int, debugLevel :: Int}
+data GenExec s a = forall xs ks. GenExec (TExpQ (X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)))
+newtype GenJoin s a x = GenJoin (TExpQ (x -> O# -> ST s (Maybe a)))
+data Input = Input {charAt :: TExpQ (Int -> Char), size :: TExpQ Int, substr :: TExpQ (Int -> Int -> UArray Int Char)}
+data Σ s = Σ { save :: QST s (), restore :: QST s (), rollback :: TExpQ (D -> ST s ()) }
+data Ctx s a = Ctx {μs         :: Map IMVar (GenExec s a),
+                    φs         :: DMap ΦVar (GenJoin s a),
+                    σm         :: DMap ΣVar (QSTRef s),
+                    σs         :: {-# UNPACK #-} !(Σ s),
+                    input      :: {-# UNPACK #-} !Input,
+                    constCount :: Int,
+                    debugLevel :: Int}
 
 addConstCount :: Int -> Ctx s a -> Ctx s a
 addConstCount x ctx = ctx {constCount = constCount ctx + x}
@@ -1124,11 +1143,15 @@ exec input (!m, vss) = [||
      ks <- makeK
      hs <- makeH
      !(cidx, cs) <- makeC
-     let input' = $$(toArray input) :: Input
-     $$(makeΣ vss (\σm σs -> run (fold absurd alg m) (Γ [||input'||] [||xs||] [||ks||] [||0||] [||hs||] [||cidx||] [||cs||] σs [||0||]) (Ctx Map.empty Map.empty σm 0 0)))
+     let !(UArray _ _ !size input#) = $$(toArray input)
+     let charAt (I# i#) = C# (indexWideCharArray# input# i#)
+     let substr i j = ixmap (i, j) id (UArray 0 (size - 1) size input#) :: UArray Int Char
+     $$(makeΣ vss (\σm σs ->
+       run (fold absurd alg m) (Γ [||xs||] [||ks||] [||0||] [||hs||] [||cidx||] [||cs||] [||0||])
+                               (Ctx Map.empty DMap.empty σm 0 0 σs (Input [||charAt||] [||size||] [||substr||]))))
   ||]
   where
-    toArray :: TExpQ String -> QInput
+    toArray :: TExpQ String -> TExpQ (UArray Int Char)
     toArray input = [|| listArray (0, length $$input-1) $$input ||]
 
     alg :: M (Exec s) xs ks a i -> Exec s xs ks a i
@@ -1181,32 +1204,32 @@ execHalt :: Γ s (a ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execHalt γ = return $! [|| case $$(xs γ) of HCons x _ -> return (Just x) ||]
 
 execRet :: Γ s (b ': xs) ((b ': xs) ': ks) a -> Reader (Ctx s a) (QST s (Maybe a))
-execRet γ = return $! [|| do restore $$(σs γ); $$(resume γ) ||]
+execRet γ = do ctx <- ask; return $! [|| do $$(restore (σs ctx)); $$(resume γ) ||]
 
 fix :: (a -> a) -> a
 fix f = let x = f x in x
 
 execCall :: Exec s xs ((b ': xs) ': ks) a i -> MVar xs ((b ': xs) ': ks) a -> Exec s (b ': xs) ks a i
          -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execCall m (MVar μ) k γ@(Γ input !xs ks o hs cidx cs σs d) =
+execCall m (MVar μ) k γ@(Γ !xs ks o hs cidx cs d) =
   do ctx <- ask
      return $! [|| let !(I# o#) = $$o
                        !(I# cidx#) = $$cidx
                        !(I# d#) = $$d + 1
-                   in fix (\r input xs ks o# hs cidx# cs σs d# ->
-       do save σs
+                   in fix (\r xs ks o# hs cidx# cs d# ->
+       do $$(save (σs ctx))
           $$(let μs' = Map.insert μ (GenExec [||r||]) (μs ctx)
-             in run m (Γ [||input||] [||bug xs||] [||bug ks||] [||I# o#||] [||hs||] [||I# cidx#||] [||cs||] [||σs||] [||I# d#||]) (ctx {μs = μs'})
-           )) $$input $$xs $$(suspend k ctx ks) o# $$hs cidx# $$cs $$σs d# ||]
+             in run m (Γ [||bug xs||] [||bug ks||] [||I# o#||] [||hs||] [||I# cidx#||] [||cs||] [||I# d#||]) (ctx {μs = μs'})
+           )) (bug $$xs) $$(suspend k ctx ks) o# $$hs cidx# $$cs d# ||]
 
 execMuCall :: MVar xs ((b ': xs) ': ks) a -> Exec s (b ': xs) ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execMuCall (MVar μ) k γ@(Γ input !xs ks o hs cidx cs σs d) =
+execMuCall (MVar μ) k γ@(Γ !xs ks o hs cidx cs d) =
   do ctx <- ask
      case (μs ctx) Map.! μ of
        GenExec m -> return $! [|| let !(I# o#) = $$o
                                       !(I# cidx#) = $$cidx
                                       !(I# d#) = $$d + 1
-                                  in $$(coerce m) $$input $$xs $$(suspend k ctx ks) o# $$hs cidx# $$cs $$σs d#||]
+                                  in $$(coerce m) $$xs $$(suspend k ctx ks) o# $$hs cidx# $$cs d#||]
 
 execPush :: WQ x -> Exec s (x ': xs) ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execPush x (Exec k) γ = k (γ {xs = [|| pushX $$(_code x) $$(xs γ) ||]})
@@ -1220,7 +1243,7 @@ execLift2 f (Exec k) γ = k (γ {xs = [|| let !(y, xs') = popX $$(xs γ); !(x, x
 execSat :: WQ (Char -> Bool) -> Exec s (Char ': xs) ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execSat p k γ =
   do ctx <- ask
-     return $! (nextSafe (skipBounds ctx) (input γ) (o γ) (_code p) (\o c -> run k (γ {xs = [|| pushX $$c $$(xs γ) ||], o = o}) ctx) (raiseΓ γ))
+     return $! (nextSafe (skipBounds ctx) (input ctx) (o γ) (_code p) (\o c -> run k (γ {xs = [|| pushX $$c $$(xs γ) ||], o = o}) ctx) (raiseΓ γ))
 
 execEmpt :: Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execEmpt γ = return (raiseΓ γ)
@@ -1229,15 +1252,15 @@ execCommit :: Bool -> Exec s xs ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST 
 execCommit exit (Exec k) γ = local (\ctx -> if exit then addConstCount (-1) ctx else ctx)
                             (k (γ {hs = [|| popH_ $$(hs γ) ||], cidx = [|| popC_ $$(cidx γ) ||]}))
 
-execHardFork :: Exec s xs ks a i -> Exec s xs ks a i -> Maybe (ΦVar x a, Exec s (x ': xs) ks a i) -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execHardFork p q (Just (ΦVar φ, k)) γ =
+execHardFork :: Exec s xs ks a i -> Exec s xs ks a i -> Maybe (ΦVar x, Exec s (x ': xs) ks a i) -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
+execHardFork p q (Just (φ, k)) γ =
   do ctx <- ask
      return $! [||
        let join x (o# :: O#) = $$(run k (γ {xs = [||HCons x $$(xs γ)||], o = [||I# o#||]}) ctx)
-       in $$(let ctx' = ctx {φs = Map.insert φ (GenJoin [||join||]) (φs ctx)}
+       in $$(let ctx' = ctx {φs = DMap.insert φ (GenJoin [||join||]) (φs ctx)}
                  handler = [||\o# hs cidx# cs d'# ->
                    do (c, cidx') <- popC (I# cidx#) cs
-                      if c == (I# o#) then do rollback $$(σs γ) ((I# d'#) - $$(d γ))
+                      if c == (I# o#) then do $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
                                               $$(run q (γ {o = [||I# o#||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx')
                       else raise hs cidx' cs (I# o#) (I# d'#)
                    ||]
@@ -1247,21 +1270,21 @@ execHardFork p q Nothing γ =
   do ctx <- ask
      let handler = [||\o# hs cidx# cs d'# ->
            do (c, cidx') <- popC (I# cidx#) cs
-              if c == (I# o#) then do rollback $$(σs γ) ((I# d'#) - $$(d γ))
+              if c == (I# o#) then do $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
                                       $$(run q (γ {o = [||I# o#||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
               else raise hs cidx' cs (I# o#) (I# d'#)
            ||]
      return $! (setupHandlerΓ γ handler (\γ' -> run p γ' ctx))
 
-execSoftFork :: Maybe Int -> Exec s xs ks a i -> Exec s xs ks a i -> Maybe (ΦVar x a, Exec s (x ': xs) ks a i) -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execSoftFork constantInput p q (Just (ΦVar φ, k)) γ =
+execSoftFork :: Maybe Int -> Exec s xs ks a i -> Exec s xs ks a i -> Maybe (ΦVar x, Exec s (x ': xs) ks a i) -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
+execSoftFork constantInput p q (Just (φ, k)) γ =
   do ctx <- ask
      return $! [||
        let join x (o# :: O#) = $$(run k (γ {xs = [||HCons x $$(xs γ)||], o = [||I# o#||]}) ctx)
-       in $$(let ctx' = ctx {φs = Map.insert φ (GenJoin [||join||]) (φs ctx)}
+       in $$(let ctx' = ctx {φs = DMap.insert φ (GenJoin [||join||]) (φs ctx)}
                  handler = [||\_ hs cidx# cs d'# ->
                    do !(o, cidx') <- popC (I# cidx#) cs
-                      rollback $$(σs γ) ((I# d'#) - $$(d γ))
+                      $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
                       $$(run q (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx')
                    ||]
              in setupHandlerΓ γ handler (\γ' ->
@@ -1269,7 +1292,7 @@ execSoftFork constantInput p q (Just (ΦVar φ, k)) γ =
                  Nothing -> run p γ' ctx
                  Just _ | skipBounds ctx -> run p γ' (addConstCount 1 ctx)
                  Just n -> [||
-                     if numElements $$(input γ) > (n + $$(o γ) - 1) then $$(run p γ' (addConstCount 1 ctx'))
+                     if $$(size (input ctx)) > (n + $$(o γ) - 1) then $$(run p γ' (addConstCount 1 ctx'))
                      else $$(raiseΓ γ')
                    ||]))
        ||]
@@ -1277,7 +1300,7 @@ execSoftFork constantInput p q Nothing γ =
   do ctx <- ask
      let handler = [||\_ hs cidx# cs d'# ->
            do !(o, cidx') <- popC (I# cidx#) cs
-              rollback $$(σs γ) ((I# d'#) - $$(d γ))
+              $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
               $$(run q (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
            ||]
      return $! (setupHandlerΓ γ handler (\γ' ->
@@ -1285,13 +1308,13 @@ execSoftFork constantInput p q Nothing γ =
          Nothing -> run p γ' ctx
          Just _ | skipBounds ctx -> run p γ' (addConstCount 1 ctx)
          Just n -> [||
-             if numElements $$(input γ) > (n + $$(o γ) - 1) then $$(run p γ' (addConstCount 1 ctx))
+             if $$(size (input ctx)) > (n + $$(o γ) - 1) then $$(run p γ' (addConstCount 1 ctx))
              else $$(raiseΓ γ')
            ||]
        ))
 
-execJoin :: ΦVar x a -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execJoin (ΦVar φ) γ = liftM (\(GenJoin k) -> [|| let !(I# o#) = $$(o γ) in $$(coerce k) (peekX $$(xs γ)) o# ||]) (liftM ((Map.! φ) . φs) ask)
+execJoin :: ΦVar x -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
+execJoin φ γ = liftM (\(GenJoin k) -> [|| let !(I# o#) = $$(o γ) in $$k (peekX $$(xs γ)) o# ||]) (liftM ((DMap.! φ) . φs) ask)
 
 execAttempt :: Maybe Int -> Exec s xs ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execAttempt constantInput k γ =
@@ -1305,7 +1328,7 @@ execAttempt constantInput k γ =
          Nothing -> run k γ' ctx
          Just _ | skipBounds ctx -> run k γ' (addConstCount 1 ctx)
          Just n -> [||
-             if numElements $$(input γ) > (n + $$(o γ) - 1) then $$(run k γ' (addConstCount 1 ctx))
+             if $$(size (input ctx)) > (n + $$(o γ) - 1) then $$(run k γ' (addConstCount 1 ctx))
              else $$(raiseΓ γ')
            ||]
        ))
@@ -1321,7 +1344,7 @@ execNegLook m k γ =
   do ctx <- ask
      let handler = [||\_ hs cidx# cs d'# ->
            do (o, cidx') <- popC (I# cidx#) cs
-              rollback $$(σs γ) ((I# d'#) - $$(d γ))
+              $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
               $$(run k (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
            ||]
      return $! (setupHandlerΓ γ handler (\γ' -> run m γ' ctx))
@@ -1356,7 +1379,7 @@ execChoices fs ks γ = do ctx <- ask; return [|| let (x, xs') = popX $$(xs γ) i
 
 
 execChainIter :: ΣVar x -> MVar xs ks a -> Γ s ((x -> x) ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execChainIter u (MVar μ) γ@(Γ input !xs ks o hs cidx cs σs d) =
+execChainIter u (MVar μ) γ@(Γ !xs ks o hs cidx cs d) =
   do ctx <- ask
      let !(QSTRef σ) = (σm ctx) DMap.! u
      case (μs ctx) Map.! μ of
@@ -1367,17 +1390,17 @@ execChainIter u (MVar μ) γ@(Γ input !xs ks o hs cidx cs σs d) =
             let I# o# = $$o
             let I# cidx# = $$cidx
             let I# d# = $$d
-            $$(coerce k) $$input xs' $$ks o# $$hs cidx# $$cs $$σs d#
+            $$(coerce k) xs' $$ks o# $$hs cidx# $$cs d#
          ||]
 
 execChainInit :: WQ x -> ΣVar x -> Exec s xs ks a i -> MVar xs ks a -> Exec s (x ': xs) ks a i
                   -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execChainInit deflt u l (MVar μ) k γ@(Γ input !xs ks o _ _ _ σs d) =
+execChainInit deflt u l (MVar μ) k γ@(Γ !xs ks o _ _ _ d) =
   do ctx <- ask
      let !(QSTRef σ) = (σm ctx) DMap.! u
      let xs' = [|| popX $$xs ||]
      let handler = [||\o# hs cidx# cs d'# ->
-          do rollback $$σs ((I# d'#) - $$d)
+          do $$(rollback (σs ctx)) ((I# d'#) - $$d)
              (c, cidx') <- popC (I# cidx#) cs
              if c == (I# o#) then do y <- pokeΣ $$σ $$(_code deflt)
                                      $$(run k (γ {xs = [|| pushX y (snd $$xs') ||],
@@ -1392,8 +1415,8 @@ execChainInit deflt u l (MVar μ) k γ@(Γ input !xs ks o _ _ _ σs d) =
        do writeΣ $$σ (fst $$xs')
           let I# o# = $$o
           fix (\r o# cs ->
-            $$(let μs' = Map.insert μ (GenExec [|| \_ _ _ o# _ _ cs _ _ -> r o# cs ||]) (μs ctx)
-               in run l (Γ input [||snd $$xs'||] ks [||I# o#||] (hs γ') (cidx γ') [||cs||] σs d) (ctx {μs = μs'})))
+            $$(let μs' = Map.insert μ (GenExec [|| \_ _ o# _ _ cs _ -> r o# cs ||]) (μs ctx)
+               in run l (Γ [||snd $$xs'||] ks [||I# o#||] (hs γ') (cidx γ') [||cs||] d) (ctx {μs = μs'})))
             o# $$(cs γ')||]))
 
 runParser :: Parser a -> TExpQ (String -> Maybe a)
@@ -1408,13 +1431,13 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     offset       = o γ
     indent       = replicate (debugLevel ctx * 2) ' '
     start        = [|| max ($$offset - 5) 0 ||]
-    end          = [|| min ($$offset + 6) (numElements $$(input γ)) ||]
-    sub          = [|| ixmap ($$start, $$end - 1) id $$(input γ) ||]
+    end          = [|| min ($$offset + 6) $$(size (input ctx)) ||]
+    sub          = [|| $$(substr (input ctx)) $$start ($$end - 1) ||]
     inputTrace   = [|| let replace '\n' = color Green "↙"
                            replace ' '  = color White "·"
                            replace c    = return c
                        in concatMap replace (elems $$sub) ||]
-    eof          = [|| if $$end == numElements $$(input γ) then $$inputTrace ++ color Red "•" else $$inputTrace ||]
+    eof          = [|| if $$end == $$(size (input ctx)) then $$inputTrace ++ color Red "•" else $$inputTrace ||]
     prelude      = [|| concat [indent, dir : name, dir : " (", show $$offset, "): "] ||]
     caretSpace   = [|| replicate (length $$prelude + $$offset - $$start) ' ' ||]
 

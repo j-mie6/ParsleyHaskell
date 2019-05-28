@@ -1148,7 +1148,7 @@ exec input (!m, vss) = [||
      let substr i j = ixmap (i, j) id (UArray 0 (size - 1) size input#) :: UArray Int Char
      $$(makeΣ vss (\σm σs ->
        run (fold absurd alg m) (Γ [||xs||] [||ks||] [||0||] [||hs||] [||cidx||] [||cs||] [||0||])
-                               (Ctx Map.empty DMap.empty σm 0 0 σs (Input [||charAt||] [||size||] [||substr||]))))
+                               (Ctx Map.empty DMap.empty σm σs (Input [||charAt||] [||size||] [||substr||]) 0 0)))
   ||]
   where
     toArray :: TExpQ String -> TExpQ (UArray Int Char)

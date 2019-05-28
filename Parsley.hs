@@ -1143,7 +1143,7 @@ exec input (!m, vss) = [||
      ks <- makeK
      hs <- makeH
      !(cidx, cs) <- makeC
-     let !(UArray _ _ !size input#) = $$(toArray input)
+     let !(UArray _ _ size input#) = $$(toArray input)
      let charAt (I# i#) = C# (indexWideCharArray# input# i#)
      let substr i j = ixmap (i, j) id (UArray 0 (size - 1) size input#) :: UArray Int Char
      $$(makeΣ vss (\σm σs ->

@@ -24,7 +24,7 @@ module Parsley ( Parser, runParser
                , traverse, sequence, string, token
                , (<?|>), (>?>), when, while, fromMaybeP
                -- Extras (TODO REMOVE TO TEST MODULE)
-               , pred, isDigit, toDigit, digit, greaterThan5, plus, selectTest
+               , pred, isDigit, toDigit, digit, greaterThan5, plus, selectTest, Pred'
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -61,7 +61,7 @@ selectTest = pure (lift' (Left 10))
 showi :: Int -> String
 showi = show
 
-data Pred' = And Pred' Pred' | Not Pred' | T | F deriving Lift
+data Pred' = And Pred' Pred' | Not Pred' | T | F deriving (Lift, Show)
 pred :: Parser Pred'
 pred = chainr1 term (lift' And <$ token "&&")
   where

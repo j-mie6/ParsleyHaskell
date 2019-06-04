@@ -215,20 +215,7 @@ execCommit exit (Exec k) γ = local (\ctx -> if exit then addConstCount (-1) ctx
                             (k (γ {hs = [|| popH_ $$(hs γ) ||], cidx = [|| popC_ $$(cidx γ) ||]}))
 
 execHardFork :: Exec s xs ks a i -> Exec s xs ks a i -> Maybe (ΦVar x, Exec s (x ': xs) ks a i) -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execHardFork p q (Just (φ, k)) γ =
-  do ctx <- ask
-     return $! [||
-       let join x (o# :: O#) = $$(run k (γ {xs = [||pushX x $$(xs γ)||], o = [||I# o#||]}) ctx)
-       in $$(let ctx' = ctx {φs = DMap.insert φ (GenJoin [||join||]) (φs ctx)}
-                 handler = [||\o# hs cidx# cs d'# ->
-                   do (c, cidx') <- popC (I# cidx#) cs
-                      if c == (I# o#) then do $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
-                                              $$(run q (γ {o = [||I# o#||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx')
-                      else raise hs cidx' cs (I# o#) (I# d'#)
-                   ||]
-             in setupHandlerΓ γ handler (\γ' -> run p γ' ctx'))
-       ||]
-execHardFork p q Nothing γ =
+execHardFork p q decl γ = setupJoinPoint decl γ $
   do ctx <- ask
      let handler = [||\o# hs cidx# cs d'# ->
            do (c, cidx') <- popC (I# cidx#) cs
@@ -239,41 +226,14 @@ execHardFork p q Nothing γ =
      return $! (setupHandlerΓ γ handler (\γ' -> run p γ' ctx))
 
 execSoftFork :: Maybe Int -> Exec s xs ks a i -> Exec s xs ks a i -> Maybe (ΦVar x, Exec s (x ': xs) ks a i) -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execSoftFork constantInput p q (Just (φ, k)) γ =
-  do ctx <- ask
-     return $! [||
-       let join x (o# :: O#) = $$(run k (γ {xs = [||pushX x $$(xs γ)||], o = [||I# o#||]}) ctx)
-       in $$(let ctx' = ctx {φs = DMap.insert φ (GenJoin [||join||]) (φs ctx)}
-                 handler = [||\_ hs cidx# cs d'# ->
-                   do !(o, cidx') <- popC (I# cidx#) cs
-                      $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
-                      $$(run q (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx')
-                   ||]
-             in setupHandlerΓ γ handler (\γ' ->
-               case constantInput of
-                 Nothing -> run p γ' ctx
-                 Just _ | skipBounds ctx -> run p γ' (addConstCount 1 ctx)
-                 Just n -> [||
-                     if $$(size (input ctx)) > (n + $$(o γ) - 1) then $$(run p γ' (addConstCount 1 ctx'))
-                     else $$(raiseΓ γ')
-                   ||]))
-       ||]
-execSoftFork constantInput p q Nothing γ =
+execSoftFork constantInput p q decl γ = setupJoinPoint decl γ $
   do ctx <- ask
      let handler = [||\_ hs cidx# cs d'# ->
            do !(o, cidx') <- popC (I# cidx#) cs
               $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
               $$(run q (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
            ||]
-     return $! (setupHandlerΓ γ handler (\γ' ->
-       case constantInput of
-         Nothing -> run p γ' ctx
-         Just _ | skipBounds ctx -> run p γ' (addConstCount 1 ctx)
-         Just n -> [||
-             if $$(size (input ctx)) > (n + $$(o γ) - 1) then $$(run p γ' (addConstCount 1 ctx))
-             else $$(raiseΓ γ')
-           ||]
-       ))
+     return $! (setupHandlerΓ γ handler (\γ' -> inputSizeCheck constantInput p γ' ctx))
 
 execJoin :: ΦVar x -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execJoin φ γ = fmap (\(GenJoin k) -> [|| let !(I# o#) = $$(o γ) in $$k (peekX $$(xs γ)) o# ||]) (fmap ((DMap.! φ) . φs) ask)
@@ -285,15 +245,7 @@ execAttempt constantInput k γ =
            do !(o, cidx') <- popC (I# cidx#) cs
               raise hs cidx' cs o (I# d'#)
            ||]
-     return $! (setupHandlerΓ γ handler (\γ' ->
-       case constantInput of
-         Nothing -> run k γ' ctx
-         Just _ | skipBounds ctx -> run k γ' (addConstCount 1 ctx)
-         Just n -> [||
-             if $$(size (input ctx)) > (n + $$(o γ) - 1) then $$(run k γ' (addConstCount 1 ctx))
-             else $$(raiseΓ γ')
-           ||]
-       ))
+     return $! (setupHandlerΓ γ handler (\γ' -> inputSizeCheck constantInput k γ' ctx))
 
 execLook :: Exec s xs ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execLook k γ =
@@ -412,6 +364,24 @@ execLogExit name k γ =
 setupHandlerΓ :: Γ s xs ks a -> TExpQ (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)) ->
                                 (Γ s xs ks a -> QST s (Maybe a)) -> QST s (Maybe a)
 setupHandlerΓ γ !h !k = setupHandler (hs γ) (cidx γ) (cs γ) (o γ) h (\hs cidx cs -> k (γ {hs = hs, cidx = cidx, cs = cs}))
+
+setupJoinPoint :: Maybe (ΦVar x, Exec s (x ': xs) ks a i) -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a)) -> Reader (Ctx s a) (QST s (Maybe a))
+setupJoinPoint Nothing γ mx = mx
+setupJoinPoint (Just (φ, k)) γ mx =
+  do ctx <- ask
+     return $! [||
+       let join x (o# :: O#) = $$(run k (γ {xs = [||pushX x $$(xs γ)||], o = [||I# o#||]}) ctx)
+       in $$(runReader mx (ctx {φs = DMap.insert φ (GenJoin [||join||]) (φs ctx)}))
+       ||]
+
+inputSizeCheck :: Maybe Int -> Exec s xs ks a i -> Γ s xs ks a -> Ctx s a -> QST s (Maybe a)
+inputSizeCheck Nothing p γ ctx = run p γ ctx
+inputSizeCheck (Just n) p γ ctx
+  | skipBounds ctx = run p γ (addConstCount 1 ctx)
+  | otherwise      = [||
+      if $$(size (input ctx)) > (n + $$(o γ) - 1) then $$(run p γ (addConstCount 1 ctx))
+      else $$(raiseΓ γ)
+    ||]
 
 raiseΓ :: Γ s xs ks a -> QST s (Maybe a)
 raiseΓ γ = [|| raise $$(hs γ) $$(cidx γ) $$(cs γ) $$(o γ) $$(d γ) ||]

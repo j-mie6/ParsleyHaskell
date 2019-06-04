@@ -49,51 +49,52 @@ _ <==> _ = Nothing
 
 data Consumption = Some | None | Never
 data Prop = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool} | Unknown
+
+looping (Prop Never Never _)          = True
+looping _                             = False
+strongLooping (Prop Never Never True) = True
+strongLooping _                       = False
+neverSucceeds (Prop Never _ _)        = True
+neverSucceeds _                       = False
+neverFails (Prop _ Never _)           = True
+neverFails _                          = False
+
+Never ||| _     = Never
+_     ||| Never = Never
+Some  ||| _     = Some
+None  ||| p     = p
+
+Some  &&& _    = Some
+_     &&& Some = Some
+None  &&& _    = None
+Never &&& p    = p
+
+Never ^^^ _     = Never
+_     ^^^ Never = Never
+None  ^^^ _     = None
+Some  ^^^ p     = p
+
+(==>) :: Prop -> Prop -> Prop
+p ==> _ | neverSucceeds p            = p
+_ ==> Prop Never Never True          = Prop Never Never True
+Prop None _ _ ==> Prop Never Never _ = Prop Never Never False
+Prop s1 f1 b1 ==> Prop s2 f2 b2      = Prop (s1 ||| s2) (f1 &&& (s1 ||| f2)) (b1 && b2)
+
+branching :: Prop -> [Prop] -> Prop
+branching b ps
+  | neverSucceeds b = b
+  | any strongLooping ps = Prop Never Never True
+branching (Prop None f _) ps
+  | any looping ps = Prop Never Never False
+  | otherwise      = Prop (foldr1 (|||) (map success ps)) (f &&& (foldr1 (^^^) (map fails ps))) False
+branching (Prop Some f _) ps = Prop (foldr (|||) Some (map success ps)) f False
+
 --data InferredTerm = Loops | Safe | Undecidable
 newtype Termination xs ks a i = Termination {runTerm :: ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop}
 terminationAnalysis :: Free ParserF Void '[] '[] a i -> Free ParserF Void '[] '[] a i
 terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold absurd (Termination . alg) p)) Set.empty) Map.empty)) then p
                         else error "Parser will loop indefinitely: either it is left-recursive or iterates over pure computations"
   where
-    looping (Prop Never Never _)          = True
-    looping _                             = False
-    strongLooping (Prop Never Never True) = True
-    strongLooping _                       = False
-    neverSucceeds (Prop Never _ _)        = True
-    neverSucceeds _                       = False
-    neverFails (Prop _ Never _)           = True
-    neverFails _                          = False
-
-    Never ||| _     = Never
-    _     ||| Never = Never
-    Some  ||| _     = Some
-    None  ||| p     = p
-
-    Some  &&& _    = Some
-    _     &&& Some = Some
-    None  &&& _    = None
-    Never &&& p    = p
-
-    Never ^^^ _     = Never
-    _     ^^^ Never = Never
-    None  ^^^ _     = None
-    Some  ^^^ p     = p
-
-    (==>) :: Prop -> Prop -> Prop
-    p ==> _ | neverSucceeds p            = p
-    _ ==> Prop Never Never True          = Prop Never Never True
-    Prop None _ _ ==> Prop Never Never _ = Prop Never Never False
-    Prop s1 f1 b1 ==> Prop s2 f2 b2      = Prop (s1 ||| s2) (f1 &&& (s1 ||| f2)) (b1 && b2)
-
-    branching :: Prop -> [Prop] -> Prop
-    branching b ps
-      | neverSucceeds b = b
-      | any strongLooping ps = Prop Never Never True
-    branching (Prop None f _) ps
-      | any looping ps = Prop Never Never False
-      | otherwise      = Prop (foldr1 (|||) (map success ps)) (f &&& (foldr1 (^^^) (map fails ps))) False
-    branching (Prop Some f _) ps = Prop (foldr (|||) Some (map success ps)) f False
-
     alg :: ParserF Termination ks xs a i -> ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop
     alg (Satisfy _)                          = return $! Prop Some None True
     alg (Pure _)                             = return $! Prop None Never True

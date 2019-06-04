@@ -136,11 +136,12 @@ optimise (Match p fs qs)
           qapply     = foldr (\(f, Op (Pure y)) k -> [||\x -> if $$(_code f) x then $$(_code y) else $$k x||]) ([||const (error "whoopsie")||]) (zip fs qs)
           validate x = foldr (\f b -> _val f x || b) False fs
           qvalidate  = foldr (\f k -> [||\x -> $$(_code f) x || $$k x||]) [||const False||] fs
-          (>?>) :: Free ParserF f xs ks a i -> WQ (a -> Bool) -> Free ParserF f xs ks a i
-          p >?> (WQ f qf) = Op (Branch (Op (Op (Pure (WQ g qg)) :<*>: p)) (Op Empty) (Op (Pure (lift' id))))
-            where
-              g x = if f x then Right x else Left ()
-              qg = [||\x -> if $$qf x then Right x else Left ()||]
 -- Distributivity Law: f <$> match vs p g = match vs p ((f <$>) . g)
 optimise (Op (Pure f) :<*>: (Op (Match p fs qs))) = Op (Match p fs (map (optimise . (Op (Pure f) :<*>:)) qs))
 optimise p                                        = Op p
+
+(>?>) :: Free ParserF f xs ks a i -> WQ (a -> Bool) -> Free ParserF f xs ks a i
+p >?> (WQ f qf) = Op (Branch (Op (Op (Pure (WQ g qg)) :<*>: p)) (Op Empty) (Op (Pure (lift' id))))
+  where
+    g x = if f x then Right x else Left ()
+    qg = [||\x -> if $$qf x then Right x else Left ()||]

@@ -2,31 +2,35 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DeriveLift #-}
-module Parsley {-( Parser
-               , runParser
+module Parsley ( Parser, runParser
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
                -- Applicative
                , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
                -- Alternative
-               , empty, (<|>), some, many, optional, choice
+               , empty, (<|>), optional, choice
                -- Monoidal
                , unit, (<~>), (<~), (~>)
-               -- Monadic
-               , return, (>>=), (>>), mzero, mplus, join
+               -- Selective
+               , branch, select, match, (||=)
                -- Primitives
                , satisfy, item
                , lookAhead, notFollowedBy, try
+               -- Iteratives
+               , chainl1, chainr1, chainPre, chainPost
+               , pfoldr, pfoldl, some, many, skipMany
                -- Composites
                , char, eof, more
-               --, traverse, sequence, string--, manyUnrolled
-               , eval, runST, compile, preprocess
-               )-} where
+               , traverse, sequence, string, token
+               , (<?|>), (>?>), when, while, fromMaybeP
+               -- Extras (TODO REMOVE TO TEST MODULE)
+               , pred, isDigit, toDigit, digit, greaterThan5, plus, selectTest
+               ) where
 
-import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$))
-import Compiler                   (Parser(..), pipeline, Parser'(..))
+import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
+import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost)
+import Compiler                   (compile)
 import Machine                    (exec)
-import Indexed                    (Free(Op))
 import Utils                      (lift', (>*<), WQ(..), TExpQ)
 import Data.Function              (fix)
 import Control.Monad.ST           (runST)
@@ -52,7 +56,7 @@ plus :: Parser (Int -> Int -> Int)
 plus = char '+' $> lift' (+)
 
 selectTest :: Parser (Either Int String)
-selectTest = Parsley.pure (lift' (Left 10))
+selectTest = pure (lift' (Left 10))
 
 showi :: Int -> String
 showi = show
@@ -85,26 +89,8 @@ x <$ p = p *> pure x
 (<&>) :: Parser a -> WQ (a -> b) -> Parser b
 (<&>) = flip fmap
 
-pure :: WQ a -> Parser a
-pure = Parser . Op . Pure
-
-(<*>) :: Parser (a -> b) -> Parser a -> Parser b
-Parser p <*> Parser q = Parser (Op (p :<*>: q))
-
-(<*) :: Parser a -> Parser b -> Parser a
-Parser p <* Parser q = Parser (Op (p :<*: q))
-
-(*>) :: Parser a -> Parser b -> Parser b
-Parser p *> Parser q = Parser (Op (p :*>: q))
-
 liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
 liftA2 f p q = f <$> p <*> q
-
-empty :: Parser a
-empty = Parser (Op Empty)
-
-(<|>) :: Parser a -> Parser a -> Parser a
-Parser p <|> Parser q = Parser (Op (p :<|>: q))
 
 many :: Parser a -> Parser [a]
 many p = pfoldr (lift' (:)) (WQ [] [||[]||]) p
@@ -148,18 +134,6 @@ more :: Parser ()
 more = lookAhead (void item)
 
 -- Parsing Primitives
-satisfy :: WQ (Char -> Bool) -> Parser Char
-satisfy = Parser . Op . Satisfy
-
-lookAhead :: Parser a -> Parser a
-lookAhead = Parser . Op . LookAhead . unParser
-
-notFollowedBy :: Parser a -> Parser ()
-notFollowedBy = Parser . Op . NotFollowedBy . unParser
-
-try :: Parser a -> Parser a
-try = Parser . Op . Try Nothing . unParser
-
 char :: Char -> Parser Char
 char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
 
@@ -188,14 +162,8 @@ p >?> (WQ f qf) = select (WQ g qg <$> p) empty
     g x = if f x then Right x else Left ()
     qg = [||\x -> if $$qf x then Right x else Left ()||]
 
-match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b
-match vs (Parser p) f = Parser (Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs)))
-
 (||=) :: forall a b. (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
 p ||= f = match [minBound..maxBound] p f
-
-branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
-branch (Parser c) (Parser p) (Parser q) = Parser (Op (Branch c p q))
 
 when :: Parser Bool -> Parser () -> Parser ()
 when p q = p <?|> (q, unit)
@@ -221,17 +189,8 @@ pfoldr f k p = chainPre (f <$> p) (pure k)
 pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
 pfoldl f k p = chainPost (pure k) (lift' flip >*< f <$> p)
 
-chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre (Parser op) (Parser p) = Parser (Op (ChainPre op p))
-
-chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost (Parser p) (Parser op) = Parser (Op (ChainPost p op))
-
-debug :: String -> Parser a -> Parser a
-debug name (Parser p) = Parser (Op (Debug name p))
-
 runParser :: Parser a -> TExpQ (String -> Maybe a)
-runParser p = [||\input -> runST $$(exec [||input||] (pipeline p))||]
+runParser p = [||\input -> runST $$(exec [||input||] (compile p))||]
 
 showM :: Parser a -> String
-showM p = show (fst (pipeline p))
+showM p = show (fst (compile p))

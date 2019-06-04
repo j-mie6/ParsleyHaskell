@@ -51,16 +51,16 @@ executable benchmarks
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=DumpCore -fplugin=LiftPlugin -ddump-simpl -ddump-simpl-stats -ddump-splices -ddump-to-file -dumpdir=.
+  ghc-options:         -rtsopts -fplugin=LiftPlugin -ddump-simpl -ddump-simpl-stats -ddump-splices -ddump-to-file -dumpdir=.
   
--- -fforce-recomp
+-- -fplugin=DumpCore 
 
 library
   -- Modules exported by the library.
   exposed-modules:     Parsley
 
   -- Modules included in this library but not exported.
-  other-modules:       Compiler, Indexed, Machine, Utils
+  other-modules:       Compiler, Indexed, Machine, MachineOps, Utils, Optimiser, Analyser, ParserAST, CodeGenerator
 
   -- LANGUAGE extensions used by modules in this package.
   other-extensions:    InstanceSigs, GADTs, DataKinds, TypeOperators, RecursiveDo, RankNTypes, BangPatterns, FlexibleInstances, UndecidableInstances
@@ -74,5 +74,5 @@ library
   -- Base language which the package is written in.
   default-language:    Haskell2010
   --ghc-options:         -g -fplugin=DumpCore -ddump-simpl -ddump-stg -ddump-to-file -dumpdir=. -fforce-recomp
-  ghc-options:         -fplugin=DumpCore -fplugin=LiftPlugin -ddump-simpl -ddump-to-file -dumpdir=. 
-  -- -fforce-recomp
+  ghc-options:         -fplugin=LiftPlugin -ddump-simpl -ddump-to-file -dumpdir=. 
+-- -fplugin=DumpCore 

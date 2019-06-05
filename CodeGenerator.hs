@@ -6,10 +6,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
-module CodeGenerator(codeGen) where
+module CodeGenerator (codeGen) where
 
 import ParserAST                  (ParserF(..))
-import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar(..), MVar(..), ΦVar(..), fmapInstr)
+import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar(..), MVar(..), ΦVar(..), ΦDecl, fmapInstr)
 import Indexed                    (IFunctor, Free(Op), History(Era), Void, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
@@ -17,9 +17,9 @@ import Control.Monad              ((<$!>))
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local, MonadReader)
 import Control.Monad.State.Strict (State, get, put, runState, MonadState)
 import Data.Map.Strict            (Map)
-import qualified Data.Map.Strict as Map
 import Data.Maybe                 (isJust, fromJust)
 import Debug.Trace                (traceShow)
+import qualified Data.Map.Strict as Map
 
 type IΦVar = Int
 newtype CodeGen b xs ks a i = CodeGen {runCodeGen :: forall xs' ks'. Free M Void (a ': xs') ks' b i
@@ -38,20 +38,20 @@ peephole !(Era _ (Era _ (Pure f) :<*>: Era p _) :<*>: Era q _) = Just $ CodeGen 
      runCodeGen p qc
 peephole !(Era _ (Try n (Era p _)) :<|>: Era q _) = Just $ CodeGen $ \(!m) ->
   do (decl, φ) <- makeΦ m
-     pc <- local (trimap id id (+1)) (runCodeGen p (Op (Commit (isJust n) φ)))
-     qc <- local (trimap id id (+1)) (runCodeGen q φ)
+     pc <- freshΦ (runCodeGen p (Op (Commit (isJust n) φ)))
+     qc <- freshΦ (runCodeGen q φ)
      return $! Op (SoftFork n pc qc decl)
 peephole !(Era _ (Era _ (Try n (Era p _)) :*>: Era _ (Pure x)) :<|>: Era q _) = Just $ CodeGen $ \(!m) ->
   do (decl, φ) <- makeΦ m
-     pc <- local (trimap id id (+1)) (runCodeGen p (Op (Commit (isJust n) (Op (Pop (Op (Push x φ)))))))
-     qc <- local (trimap id id (+1)) (runCodeGen q φ)
+     pc <- freshΦ (runCodeGen p (Op (Commit (isJust n) (Op (Pop (Op (Push x φ)))))))
+     qc <- freshΦ (runCodeGen q φ)
      return $! Op (SoftFork n pc qc decl)
 -- TODO: One more for fmap try
 peephole !(ChainPost (Era _ (Pure x)) (Era op _)) = Just $ CodeGen $ \(!m) ->
-  do (_, v, _) <- ask
+  do μ <- askM
      σ <- freshΣ (_val x) (_code x)
-     opc <- local (trimap id (+1) id) (runCodeGen op (Op (ChainIter σ (MVar v))))
-     return $! Op (Push x (Op (ChainInit x σ opc (MVar v) m)))
+     opc <- freshM (runCodeGen op (Op (ChainIter σ μ)))
+     return $! Op (Push x (Op (ChainInit x σ opc μ m)))
 peephole _ = Nothing
 
 direct :: ParserF (CodeGen b) xs ks a i -> CodeGen b xs ks a i
@@ -63,8 +63,8 @@ direct !(p :<*: q)        = CodeGen $ \(!m) -> do !qc <- runCodeGen q (Op (Pop m
 direct !Empty             = CodeGen $ \(!m) -> do return $! Op Empt
 direct !(p :<|>: q)       = CodeGen $ \(!m) ->
   do (decl, φ) <- makeΦ m
-     pc <- local (trimap id id (+1)) (runCodeGen p (Op (Commit False φ)))
-     qc <- local (trimap id id (+1)) (runCodeGen q φ)
+     pc <- freshΦ (runCodeGen p (Op (Commit False φ)))
+     qc <- freshΦ (runCodeGen q φ)
      return $! Op (HardFork pc qc decl)
 direct !(Try n p)         = CodeGen $ \(!m) -> do fmap (Op . Attempt n) (runCodeGen p (Op (Commit (isJust n) m)))
 direct !(LookAhead p)     = CodeGen $ \(!m) -> do fmap (Op . Look) (runCodeGen p (Op (Restore m)))
@@ -74,29 +74,55 @@ direct !(Branch b p q)    = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Op (Lift2
                                                   runCodeGen b (Op (Case pc qc))
 direct !(Match p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
                                                   runCodeGen p (Op (Choices fs qcs))
--- NOTE: It is necessary to rename the MVars produced by preprocess
-direct !(Rec !old !q)     = CodeGen $ \(!m) ->
-  do (seen, v, _) <- ask
-     case Map.lookup old seen of
-       Just new -> do return $! Op (MuCall (MVar new) m)
-       Nothing  -> do n <- local (trimap (Map.insert old v) (const (v+1)) id) (runCodeGen q (Op Ret))
-                      return $! Op (Call n (MVar v) m)
+direct !(Rec !v !q)     = CodeGen $ \(!m) ->
+  do seen <- lookupM v; case seen of
+       Just μ -> do return $! Op (MuCall μ m)
+       Nothing  -> do μ <- askM
+                      n <- renameM v μ (runCodeGen q (Op Ret))
+                      return $! Op (Call n μ m)
 direct !(ChainPre op p) = CodeGen $ \(!m) ->
-  do (_, v, _) <- ask
+  do μ <- askM
      σ <- freshΣ id [||id||]
-     opc <- local (trimap id (+1) id) (runCodeGen op (fmapInstr (lift' flip >*< lift' (.)) (Op (ChainIter σ (MVar v)))))
-     pc <- local (trimap id (+1) id) (runCodeGen p (Op (Lift2 (lift' ($)) m)))
-     return $! Op (Push (lift' id) (Op (ChainInit (lift' id) σ opc (MVar v) pc)))
+     opc <- freshM (runCodeGen op (fmapInstr (lift' flip >*< lift' (.)) (Op (ChainIter σ μ))))
+     pc <- freshM (runCodeGen p (Op (Lift2 (lift' ($)) m)))
+     return $! Op (Push (lift' id) (Op (ChainInit (lift' id) σ opc μ pc)))
 direct !(ChainPost p op) = CodeGen $ \(!m) ->
-  do (_, v, _) <- ask
+  do μ <- askM
      σ <- freshΣ Nothing [||Nothing||]
-     opc <- local (trimap id (+1) id) (runCodeGen op (fmapInstr (lift' (<$!>)) (Op (ChainIter σ (MVar v)))))
-     let m' = Op (ChainInit (WQ Nothing [||Nothing||]) σ opc (MVar v) (fmapInstr (lift' fromJust) m))
-     local (trimap id (+1) id) (runCodeGen p (fmapInstr (lift' Just) m'))
+     opc <- freshM (runCodeGen op (fmapInstr (lift' (<$!>)) (Op (ChainIter σ μ))))
+     let m' = Op (ChainInit (WQ Nothing [||Nothing||]) σ opc μ (fmapInstr (lift' fromJust) m))
+     freshM (runCodeGen p (fmapInstr (lift' Just) m'))
 direct !(Debug name p) = CodeGen $ \(!m) -> fmap (Op . LogEnter name) (runCodeGen p (Op (LogExit name m)))
 
 trimap :: (a -> x) -> (b -> y) -> (c -> z) -> (a, b, c) -> (x, y, z)
 trimap f g h (x, y, z) = (f x, g y, h z)
+
+askM :: MonadReader (r1, IMVar, r3) m => m (MVar xs ks a)
+askM = do (_, μ, _) <- ask; return $! (MVar μ)
+
+askΦ :: MonadReader (r1, r2, IΦVar) m => m (ΦVar a)
+askΦ = do (_, _, φ) <- ask; return $! (ΦVar φ)
+
+lookupM :: MonadReader (Map IMVar IMVar, r2, r3) m => IMVar -> m (Maybe (MVar xs ks a))
+lookupM v = do (m, _, _) <- ask; return $! fmap MVar (Map.lookup v m)
+
+freshM :: MonadReader (r1, IMVar, r3) m => m a -> m a
+freshM = local (trimap id (+1) id)
+
+freshΦ :: MonadReader (r1, r2, IΦVar) m => m a -> m a
+freshΦ = local (trimap id id (+1))
+
+renameM :: MonadReader (Map IMVar IMVar, IMVar, r3) m => IMVar -> MVar xs ks x -> m a -> m a
+renameM old (MVar new) = local (trimap (Map.insert old new) (const (new+1)) id)
+
+makeΦ :: MonadReader (r1, r2, IΦVar) m => Free M Void (x ': xs) ks a i -> m (Maybe (ΦDecl (Free M Void) x xs ks a i), Free M Void (x ': xs) ks a i)
+-- This is double-φ optimisation: If a φ-node points directly to another φ-node, then it can be elided
+makeΦ m@(Op (Join _)) = return $! (Nothing, m)
+makeΦ m =
+  do φ <- askΦ
+     let !decl = Just (φ, m)
+     let !join = Op (Join φ)
+     return $! (decl, join)
 
 freshΣ :: MonadState ΣVars m => a -> TExpQ a -> m (ΣVar a)
 freshΣ x qx = 
@@ -107,15 +133,3 @@ freshΣ x qx =
   where
     nextΣ []                      = ΣVar 0
     nextΣ (ΣState _ _ (ΣVar x):_) = ΣVar (x+1)
-
-type Join a xs ks b i = Free M Void (a ': xs) ks b i
-type ΦDecl a xs ks b i = (ΦVar a, Join a xs ks b i)
-makeΦ :: MonadReader (Map IMVar IMVar, IMVar, IΦVar) m => Free M Void (a ': xs) ks b i -> m (Maybe (ΦDecl a xs ks b i), Join a xs ks b i)
--- This is double-φ optimisation: If a φ-node points directly to another φ-node, then it can be elided
-makeΦ m@(Op (Join _)) = return $! (Nothing, m)
-makeΦ m =
-  do (_, _, i) <- ask
-     let !φ = ΦVar i
-     let !decl = Just (φ, m)
-     let !join = Op (Join φ)
-     return $! (decl, join)

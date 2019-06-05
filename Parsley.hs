@@ -1,6 +1,4 @@
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DeriveLift #-}
 module Parsley ( Parser, runParser
                -- Functor
@@ -23,8 +21,8 @@ module Parsley ( Parser, runParser
                , char, eof, more
                , traverse, sequence, string, token
                , (<?|>), (>?>), when, while, fromMaybeP
-               -- Extras (TODO REMOVE TO TEST MODULE)
-               , pred, isDigit, toDigit, digit, greaterThan5, plus, selectTest, Pred'
+               -- Template Haskell Utils
+               , lift', (>*<), WQ(..), Lift
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -35,41 +33,6 @@ import Utils                      (lift', (>*<), WQ(..), TExpQ)
 import Data.Function              (fix)
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
-
-isDigit :: Char -> Bool
-isDigit c
-  |    c == '0' || c == '1' || c == '2' || c == '3'
-    || c == '4' || c == '5' || c == '6' || c == '7'
-    || c == '8' || c == '9' = True
-  | otherwise = False
-
-toDigit :: Char -> Int
-toDigit c = fromEnum c - fromEnum '0'
-
-digit :: Parser Int
-digit = lift' toDigit <$> satisfy (lift' isDigit)
-
-greaterThan5 :: Int -> Bool
-greaterThan5 = (> 5)
-
-plus :: Parser (Int -> Int -> Int)
-plus = char '+' $> lift' (+)
-
-selectTest :: Parser (Either Int String)
-selectTest = pure (lift' (Left 10))
-
-showi :: Int -> String
-showi = show
-
-data Pred' = And Pred' Pred' | Not Pred' | T | F deriving (Lift, Show)
-pred :: Parser Pred'
-pred = chainr1 term (lift' And <$ token "&&")
-  where
-    term :: Parser Pred'
-    term = chainPre (lift' Not <$ token "!") atom
-    atom :: Parser Pred'
-    atom = (lift' T <$ token "t")
-       <|> (lift' F <$ token "f")
 
 fmap :: WQ (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
@@ -162,7 +125,7 @@ p >?> (WQ f qf) = select (WQ g qg <$> p) empty
     g x = if f x then Right x else Left ()
     qg = [||\x -> if $$qf x then Right x else Left ()||]
 
-(||=) :: forall a b. (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
+(||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
 p ||= f = match [minBound..maxBound] p f
 
 when :: Parser Bool -> Parser () -> Parser ()

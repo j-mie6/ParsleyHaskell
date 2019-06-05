@@ -9,12 +9,12 @@
 {-# LANGUAGE PolyKinds #-}
 module MachineOps where
 
-import Utils                      (TExpQ)
-import GHC.ST                     (ST(..))
-import Data.STRef                 (STRef, writeSTRef, readSTRef, newSTRef)
-import Data.Array.Base            (STUArray(..), UArray(..), newArray_, unsafeRead, unsafeWrite, MArray, getNumElements)
-import GHC.Prim                   (Int#, Char#, newByteArray#, indexWideCharArray#)
-import GHC.Exts                   (Int(..), Char(..), (-#), (+#), (*#))
+import Utils           (TExpQ)
+import GHC.ST          (ST(..))
+import Data.STRef      (STRef, writeSTRef, readSTRef, newSTRef)
+import Data.Array.Base (STUArray(..), UArray(..), newArray_, unsafeRead, unsafeWrite, MArray, getNumElements)
+import GHC.Prim        (Int#, Char#, newByteArray#, indexWideCharArray#)
+import GHC.Exts        (Int(..), Char(..), (-#), (+#), (*#))
 
 data SList a = !a ::: !(SList a) | SNil
 data HList xs where

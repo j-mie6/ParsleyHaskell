@@ -11,21 +11,24 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
+import Criterion.Main  (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
+import Control.DeepSeq (NFData(rnf))
+import ParsleyParsers
+--import YodaParsers
+--import ParsecParsers
+--import MegaparsecParsers
+--import AttoparsecParsers
 import qualified Parsley
 import qualified Text.Yoda as Yoda
-import Criterion.Main (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
-import Control.DeepSeq (NFData(rnf))
-import Language.Haskell.TH.Syntax hiding (Match, match)
-import LiftPlugin
 
 manyTestParsley :: String -> Maybe ()
 manyTestParsley = -- $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}
                   -- $$(Parsley.runParser (Parsley.while ((Parsley.WQ (== 'a') [||(== 'a')||]) Parsley.<$> Parsley.item
                   --                        Parsley.<* Parsley.while ((Parsley.WQ (== 'b') [||(== 'b')||]) Parsley.<$> Parsley.item))))
-                  $$(Parsley.runParser (Parsley.void Parsley.pred))
+                  $$(Parsley.runParser (Parsley.void ParsleyParsers.pred))
 
 manyTestYodaBad :: Yoda.Parser Int
-manyTestYodaBad = Yoda.chainl1 (Parsley.toDigit Yoda.<$> Yoda.satisfy (Parsley.isDigit)) ((+) Yoda.<$ Yoda.char '+')
+manyTestYodaBad = Yoda.chainl1 (toDigit Yoda.<$> Yoda.satisfy (isDigit)) ((+) Yoda.<$ Yoda.char '+')
 
 manyTestYodaOk :: Yoda.Parser [Char]
 manyTestYodaOk = Yoda.cull (Yoda.many (Yoda.char 'a'))

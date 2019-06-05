@@ -10,7 +10,7 @@ module ParserAST where
 
 import Indexed                    (IFunctor, Free(Op), Void, Const(..), imap, fold)
 import Machine                    (IMVar)
-import Utils                      (TExpQ, lift', (>*<), WQ(..))
+import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 
 -- Parser wrapper type
@@ -83,40 +83,40 @@ data ParserF (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: 
 
 -- Instances
 instance IFunctor ParserF where
-  imap _ (Pure x) = Pure x
-  imap _ (Satisfy p) = Satisfy p
-  imap f (p :<*>: q) = f p :<*>: f q
-  imap f (p :*>: q) = f p :*>: f q
-  imap f (p :<*: q) = f p :<*: f q
-  imap f (p :<|>: q) = f p :<|>: f q
-  imap _ Empty = Empty
-  imap f (Try n p) = Try n (f p)
-  imap f (LookAhead p) = LookAhead (f p)
-  imap f (Rec p q) = Rec p (f q)
+  imap _ (Pure x)          = Pure x
+  imap _ (Satisfy p)       = Satisfy p
+  imap f (p :<*>: q)       = f p :<*>: f q
+  imap f (p :*>: q)        = f p :*>: f q
+  imap f (p :<*: q)        = f p :<*: f q
+  imap f (p :<|>: q)       = f p :<|>: f q
+  imap _ Empty             = Empty
+  imap f (Try n p)         = Try n (f p)
+  imap f (LookAhead p)     = LookAhead (f p)
+  imap f (Rec p q)         = Rec p (f q)
   imap f (NotFollowedBy p) = NotFollowedBy (f p)
-  imap f (Branch b p q) = Branch (f b) (f p) (f q)
-  imap f (Match p fs qs) = Match (f p) fs (map f qs)
-  imap f (ChainPre op p) = ChainPre (f op) (f p)
-  imap f (ChainPost p op) = ChainPost (f p) (f op)
-  imap f (Debug name p) = Debug name (f p)
+  imap f (Branch b p q)    = Branch (f b) (f p) (f q)
+  imap f (Match p fs qs)   = Match (f p) fs (map f qs)
+  imap f (ChainPre op p)   = ChainPre (f op) (f p)
+  imap f (ChainPost p op)  = ChainPost (f p) (f op)
+  imap f (Debug name p)    = Debug name (f p)
 
 instance Show (Free ParserF f '[] '[] a i) where
   show = getConst . fold (const (Const "")) (Const . alg)
     where
-      alg (Pure x) = "(pure x)"
-      alg (Satisfy _) = "(satisfy f)"
-      alg (Const pf :<*>: Const px) = concat ["(", pf, " <*> ",  px, ")"]
-      alg (Const p :*>: Const q) = concat ["(", p, " *> ", q, ")"]
-      alg (Const p :<*: Const q) = concat ["(", p, " <* ", q, ")"]
-      alg (Const p :<|>: Const q) = concat ["(", p, " <|> ", q, ")"]
-      alg Empty = "empty"
-      alg (Try Nothing (Const p)) = concat ["(try ? ", p, ")"]
-      alg (Try (Just n) (Const p)) = concat ["(try ", show n, " ", p, ")"]
-      alg (LookAhead (Const p)) = concat ["(lookAhead ", p, ")"]
-      alg (Rec _ _) = "recursion point!"
-      alg (NotFollowedBy (Const p)) = concat ["(notFollowedBy ", p, ")"]
+      alg (Pure x)                               = "(pure x)"
+      alg (Satisfy _)                            = "(satisfy f)"
+      alg (Const pf :<*>: Const px)              = concat ["(", pf, " <*> ",  px, ")"]
+      alg (Const p :*>: Const q)                 = concat ["(", p, " *> ", q, ")"]
+      alg (Const p :<*: Const q)                 = concat ["(", p, " <* ", q, ")"]
+      alg (Const p :<|>: Const q)                = concat ["(", p, " <|> ", q, ")"]
+      alg Empty                                  = "empty"
+      alg (Try Nothing (Const p))                = concat ["(try ? ", p, ")"]
+      alg (Try (Just n) (Const p))               = concat ["(try ", show n, " ", p, ")"]
+      alg (LookAhead (Const p))                  = concat ["(lookAhead ", p, ")"]
+      alg (Rec _ _)                              = "recursion point!"
+      alg (NotFollowedBy (Const p))              = concat ["(notFollowedBy ", p, ")"]
       alg (Branch (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-      alg (Match (Const p) fs qs) = concat ["(match ", p, " ", show (map getConst qs), ")"]
-      alg (ChainPre (Const op) (Const p)) = concat ["(chainPre ", op, " ", p, ")"]
-      alg (ChainPost (Const p) (Const op)) = concat ["(chainPost ", p, " ", op, ")"]
-      alg (Debug _ (Const p)) = p
+      alg (Match (Const p) fs qs)                = concat ["(match ", p, " ", show (map getConst qs), ")"]
+      alg (ChainPre (Const op) (Const p))        = concat ["(chainPre ", op, " ", p, ")"]
+      alg (ChainPost (Const p) (Const op))       = concat ["(chainPost ", p, " ", op, ")"]
+      alg (Debug _ (Const p))                    = p

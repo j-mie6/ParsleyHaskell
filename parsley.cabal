@@ -48,6 +48,7 @@ cabal-version:       >=1.10
 
 executable benchmarks
   build-depends:       base >=4.10 && <5, parsley, criterion >=1.5 && <1.6, yoda, deepseq, dump-core, lift-plugin, template-haskell, pretty-terminal
+  other-modules:       ParsleyParsers
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010

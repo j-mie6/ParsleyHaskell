@@ -3,7 +3,7 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
-module Analyser(constantInput, terminationAnalysis) where
+module Analyser (constantInput, terminationAnalysis) where
 
 import ParserAST                  (ParserF(..))
 import Machine                    (IMVar)
@@ -12,9 +12,9 @@ import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
 import Control.Monad.State.Strict (State, get, put, evalState)
 import Data.Map.Strict            (Map)
-import qualified Data.Map.Strict as Map
 import Data.Set                   (Set)
-import qualified Data.Set as Set
+import qualified Data.Map.Strict as Map
+import qualified Data.Set        as Set
 
 -- Constant Input Consumption Analysis
 constantInput :: Free ParserF f xs ks a i -> Maybe Int

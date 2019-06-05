@@ -131,7 +131,7 @@ exec input (Machine !m, vss) = [||
      ks <- makeK
      hs <- makeH
      !(cidx, cs) <- makeC
-     let !(UArray _ _ size input#) = listArray (0, length $$input-1) $$input-- $$(toArray input)
+     let !(UArray _ _ size input#) = listArray (0, length $$input-1) $$input
      let charAt (I# i#) = C# (indexWideCharArray# input# i#)
      let substr i j = ixmap (i, j) id (UArray 0 (size - 1) size input#) :: UArray Int Char
      $$(makeΣ vss (\σm σs ->
@@ -139,8 +139,6 @@ exec input (Machine !m, vss) = [||
                                (Ctx Map.empty DMap.empty σm σs (Input [||charAt||] [||size||] [||substr||]) 0 0)))
   ||]
   where
-    --toArray :: TExpQ String -> TExpQ (UArray Int Char)
-    --toArray input = [|| listArray (0, length $$input-1) $$input ||]
     alg :: M (Exec s) xs ks a i -> Exec s xs ks a i
     alg Halt                  = Exec $ execHalt
     alg Ret                   = Exec $ execRet
@@ -174,19 +172,19 @@ execRet γ = do ctx <- ask; return $! [|| do $$(restore (σs ctx)); $$(resume γ
 
 execCall :: Exec s xs ((b ': xs) ': ks) a i -> MVar xs ((b ': xs) ': ks) a -> Exec s (b ': xs) ks a i
          -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execCall m (MVar μ) k γ@(Γ !xs ks o hs cidx cs d) =
+execCall m (MVar μ) k γ@(Γ xs ks o hs cidx cs d) =
   do ctx <- ask
      return $! [|| let !(I# o#) = $$o
                        !(I# cidx#) = $$cidx
                        !(I# d#) = $$d + 1
-                   in fix (\r xs ks o# hs cidx# cs d# ->
+                   in fix (\r (!xs) (!ks) o# (!hs) cidx# (!cs) d# ->
        do $$(save (σs ctx))
           $$(let μs' = Map.insert μ (GenExec [||r||]) (μs ctx)
              in run m (Γ [||bug xs||] [||bug ks||] [||I# o#||] [||hs||] [||I# cidx#||] [||cs||] [||I# d#||]) (ctx {μs = μs'})
            )) (bug $$xs) $$(suspend k ctx ks) o# $$hs cidx# $$cs d# ||]
 
 execMuCall :: MVar xs ((b ': xs) ': ks) a -> Exec s (b ': xs) ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execMuCall (MVar μ) k γ@(Γ !xs ks o hs cidx cs d) =
+execMuCall (MVar μ) k γ@(Γ xs ks o hs cidx cs d) =
   do ctx <- ask
      case (μs ctx) Map.! μ of
        GenExec m -> return $! [|| let !(I# o#) = $$o
@@ -294,7 +292,7 @@ execChoices fs ks γ = do ctx <- ask; return [|| let (# x, xs' #) = popX $$(xs �
 
 
 execChainIter :: ΣVar x -> MVar xs ks a -> Γ s ((x -> x) ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execChainIter u (MVar μ) γ@(Γ !xs ks o hs cidx cs d) =
+execChainIter u (MVar μ) γ@(Γ xs ks o hs cidx cs d) =
   do ctx <- ask
      let !(QSTRef σ) = (σm ctx) DMap.! u
      case (μs ctx) Map.! μ of
@@ -316,7 +314,7 @@ snd# (# _, y #) = y
 
 execChainInit :: WQ x -> ΣVar x -> Exec s xs ks a i -> MVar xs ks a -> Exec s (x ': xs) ks a i
                   -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execChainInit deflt u l (MVar μ) k γ@(Γ !xs ks o _ _ _ d) =
+execChainInit deflt u l (MVar μ) k γ@(Γ xs ks o _ _ _ d) =
   do ctx <- ask
      let !(QSTRef σ) = (σm ctx) DMap.! u
      let xs' = [|| popX $$xs ||]
@@ -335,8 +333,8 @@ execChainInit deflt u l (MVar μ) k γ@(Γ !xs ks o _ _ _ d) =
        -- NOTE: Only the offset and the cs array can change between interations of a chainPre
        do writeΣ $$σ (fst# $$xs')
           let I# o# = $$o
-          fix (\r o# cs ->
-            $$(let μs' = Map.insert μ (GenExec [|| \_ _ o# _ _ cs _ -> r o# cs ||]) (μs ctx)
+          fix (\r o# (!cs) ->
+            $$(let μs' = Map.insert μ (GenExec [|| \_ _ o# _ _ (!cs) _ -> r o# cs ||]) (μs ctx)
                in run l (Γ [||snd# $$xs'||] ks [||I# o#||] (hs γ') (cidx γ') [||cs||] d) (ctx {μs = μs'})))
             o# $$(cs γ')||]))
 
@@ -400,12 +398,11 @@ suspend m ctx ks =
 
 resume :: Γ s xs (xs ': ks) a -> QST s (Maybe a)
 resume (Γ xs ks o hs cidx cs d) =
-  -- TODO: Check if bug is still needed now we use popK
-  [|| let ks' = bug ($$ks) :: K s (xs ': ks) a
+  [|| let --ks' = bug ($$ks) :: K s (xs ': ks) a -- Looks like bug isn't needed!
           I# o# = $$o
           I# cidx# = $$cidx
           I# d# = $$d
-          !(# k, ks'' #) = popK ks'
+          !(# k, ks'' #) = popK $$ks
       in k $$(bug xs) ks'' o# $$hs cidx# $$cs d#
   ||]
 

@@ -10,7 +10,9 @@ module Parsley ( Parser, runParser
                -- Monoidal
                , unit, (<~>), (<~), (~>)
                -- Selective
-               , branch, select, match, (||=)
+               , branch, select, match
+               -- "Monadic"
+               , (||=), (>>)
                -- Primitives
                , satisfy, item
                , lookAhead, notFollowedBy, try
@@ -21,16 +23,19 @@ module Parsley ( Parser, runParser
                , char, eof, more
                , traverse, sequence, string, token
                , (<?|>), (>?>), when, while, fromMaybeP
+               -- Expressions
+               , Level(..), precedence
                -- Template Haskell Utils
                , lift', (>*<), WQ(..), Lift
                ) where
 
-import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
+import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>))
 import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost)
 import Compiler                   (compile)
 import Machine                    (exec)
 import Utils                      (lift', (>*<), WQ(..), TExpQ)
 import Data.Function              (fix)
+import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 
@@ -82,6 +87,9 @@ unit = pure (lift' ())
 
 (~>) :: Parser a -> Parser b -> Parser b
 (~>) = (*>)
+
+(>>) :: Parser a -> Parser b -> Parser b
+(>>) = (*>)
 
   -- Auxillary functions
 string :: String -> Parser String
@@ -152,5 +160,44 @@ pfoldr f k p = chainPre (f <$> p) (pure k)
 pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
 pfoldl f k p = chainPost (pure k) (lift' flip >*< f <$> p)
 
+data Level a = InfixL  [Parser (a -> a -> a)]
+             | InfixR  [Parser (a -> a -> a)]
+             | Prefix  [Parser (a -> a)]
+             | Postfix [Parser (a -> a)]
+
+-- TODO If subroutines are reintroduced to the language, then this needs subroutines to be efficient
+precedence :: [Level a] -> Parser a -> Parser a
+precedence levels atom = foldl' convert atom levels
+  where
+    convert x (InfixL ops)  = chainl1 x (choice ops)
+    convert x (InfixR ops)  = chainr1 x (choice ops)
+    convert x (Prefix ops)  = chainPre (choice ops) x
+    convert x (Postfix ops) = chainPost x (choice ops)
+
 runParser :: Parser a -> TExpQ (String -> Maybe a)
 runParser p = [||\input -> runST $$(exec [||input||] (compile p))||]
+
+-- Fixities
+-- Functor
+infixl 4 <$>
+infixl 4 <$
+infixl 4 $>
+infixl 4 <&>
+-- Applicative
+--infixl 4 <*>
+--infixl 4 <*
+--infixl 4 *>
+infixl 4 <**>
+infixl 4 <:>
+-- Monoidal
+infixl 4 <~>
+infixl 4 <~
+infixl 4 ~>
+-- Alternative
+--infixl 3 <|>
+-- Selective
+infixl 4 >?>
+infixl 4 <?|>
+-- "Monadic"
+infixl 1 ||=
+infixl 1 >>

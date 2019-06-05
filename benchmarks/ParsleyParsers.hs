@@ -4,16 +4,7 @@ module ParsleyParsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
-
-isDigit :: Char -> Bool
-isDigit c
-  |    c == '0' || c == '1' || c == '2' || c == '3'
-    || c == '4' || c == '5' || c == '6' || c == '7'
-    || c == '8' || c == '9' = True
-  | otherwise = False
-
-toDigit :: Char -> Int
-toDigit c = fromEnum c - fromEnum '0'
+import CommonFunctions
 
 digit :: Parser Int
 digit = lift' toDigit <$> satisfy (lift' isDigit)
@@ -32,10 +23,7 @@ showi = show
 
 data Pred = And Pred Pred | Not Pred | T | F deriving (Lift, Show)
 pred :: Parser Pred
-pred = chainr1 term (lift' And <$ token "&&")
-  where
-    term :: Parser Pred
-    term = chainPre (lift' Not <$ token "!") atom
-    atom :: Parser Pred
-    atom = (lift' T <$ token "t")
-       <|> (lift' F <$ token "f")
+pred = precedence [ Prefix [token "!" $> lift' Not]
+                  , InfixR [token "&&" $> lift' And]] 
+                  ( token "t" $> lift' T
+                <|> token "f" $> lift' F )

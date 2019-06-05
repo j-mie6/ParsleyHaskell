@@ -14,29 +14,23 @@ module Main where
 import Criterion.Main  (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq (NFData(rnf))
 import ParsleyParsers
---import YodaParsers
+import YodaParsers
 --import ParsecParsers
 --import MegaparsecParsers
 --import AttoparsecParsers
 import qualified Parsley
 import qualified Text.Yoda as Yoda
 
-manyTestParsley :: String -> Maybe ()
+manyTestParsley :: String -> Maybe Pred
 manyTestParsley = -- $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}
                   -- $$(Parsley.runParser (Parsley.while ((Parsley.WQ (== 'a') [||(== 'a')||]) Parsley.<$> Parsley.item
                   --                        Parsley.<* Parsley.while ((Parsley.WQ (== 'b') [||(== 'b')||]) Parsley.<$> Parsley.item))))
-                  $$(Parsley.runParser (Parsley.void ParsleyParsers.pred))
-
-manyTestYodaBad :: Yoda.Parser Int
-manyTestYodaBad = Yoda.chainl1 (toDigit Yoda.<$> Yoda.satisfy (isDigit)) ((+) Yoda.<$ Yoda.char '+')
-
-manyTestYodaOk :: Yoda.Parser [Char]
-manyTestYodaOk = Yoda.cull (Yoda.many (Yoda.char 'a'))
+                  $$(Parsley.runParser ({-Parsley.void -}ParsleyParsers.pred))
 
 {-longChoice :: Parsley.Parser Char
 longChoice = Parsley.choice (map Parsley.char (replicate 1000000 'a' ++ "b"))-}
 
-combinatorGroup :: Benchmark
+{-combinatorGroup :: Benchmark
 combinatorGroup =
   --let longChoice' = Parsley.mkParser longChoice in
   bgroup "combinators" [
@@ -54,7 +48,7 @@ crossMany = env (return $ take 1001 ('0':cycle "+1")) $ \input -> bgroup "many" 
     bench "manyParsley 1000" $ nf manyTestParsley input,
     bench "manyYodaBad 1000" $ nf (Yoda.parse manyTestYodaBad)        input,
     bench "manyYodaOk 1000"  $ nf (Yoda.parse manyTestYodaOk)         input
-  ]
+  ]-}
 
 main :: IO ()
 --main = rnf (Parsley.runParser longChoice "b") `seq` return ()
@@ -63,4 +57,4 @@ main :: IO ()
     combinatorGroup,
     crossMany
   ]--}-}
-main = print (manyTestParsley ("abbbbbccc"))
+main = print (manyTestParsley ("t&&f&&!t"))

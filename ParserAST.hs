@@ -62,6 +62,14 @@ chainPost (Parser p) (Parser op) = Parser (Op (ChainPost p op))
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (Op (Debug name p))
 
+-- Fixities
+-- Applicative
+infixl 4 <*>
+infixl 4 <*
+infixl 4 *>
+-- Alternative
+infixl 3 <|>
+
 -- Core datatype
 data ParserF (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: *) (i :: *) where
     Pure          :: WQ a -> ParserF k xs ks a i

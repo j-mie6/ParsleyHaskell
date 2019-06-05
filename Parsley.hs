@@ -154,6 +154,3 @@ pfoldl f k p = chainPost (pure k) (lift' flip >*< f <$> p)
 
 runParser :: Parser a -> TExpQ (String -> Maybe a)
 runParser p = [||\input -> runST $$(exec [||input||] (compile p))||]
-
-showM :: Parser a -> String
-showM p = show (fst (compile p))

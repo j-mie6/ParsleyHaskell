@@ -64,8 +64,8 @@ makeX = return $! HNil
 pushX :: a -> X xs -> X (a ': xs)
 pushX = HCons
 {-# INLINE popX #-}
-popX :: X (a ': xs) -> (a, X xs)
-popX (HCons x xs) = (x, xs)
+popX :: X (a ': xs) -> (# a, X xs #)
+popX (HCons x xs) = (# x, xs #)
 {-# INLINE popX_ #-}
 popX_ :: X (a ': xs) -> X xs
 popX_ (HCons x xs) = xs
@@ -85,8 +85,8 @@ makeK = return $! KNil
 pushK :: (X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)) -> K s ks a -> K s (xs ': ks) a
 pushK = KCons
 {-# INLINE popK #-}
-popK :: K s (xs ': ks) a -> ((X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)), K s ks a )
-popK (KCons k ks) = (k, ks)
+popK :: K s (xs ': ks) a -> (#(X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)), K s ks a #)
+popK (KCons k ks) = (# k, ks #)
 
 makeH :: ST s (H s a)
 makeH = return $! (H SNil)

@@ -5,6 +5,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -130,7 +131,7 @@ exec input (Machine !m, vss) = [||
      ks <- makeK
      hs <- makeH
      !(cidx, cs) <- makeC
-     let !(UArray _ _ size input#) = $$(toArray input)
+     let !(UArray _ _ size input#) = listArray (0, length $$input-1) $$input-- $$(toArray input)
      let charAt (I# i#) = C# (indexWideCharArray# input# i#)
      let substr i j = ixmap (i, j) id (UArray 0 (size - 1) size input#) :: UArray Int Char
      $$(makeΣ vss (\σm σs ->
@@ -138,9 +139,8 @@ exec input (Machine !m, vss) = [||
                                (Ctx Map.empty DMap.empty σm σs (Input [||charAt||] [||size||] [||substr||]) 0 0)))
   ||]
   where
-    toArray :: TExpQ String -> TExpQ (UArray Int Char)
-    toArray input = [|| listArray (0, length $$input-1) $$input ||]
-
+    --toArray :: TExpQ String -> TExpQ (UArray Int Char)
+    --toArray input = [|| listArray (0, length $$input-1) $$input ||]
     alg :: M (Exec s) xs ks a i -> Exec s xs ks a i
     alg Halt                  = Exec $ execHalt
     alg Ret                   = Exec $ execRet
@@ -201,7 +201,7 @@ execPop :: Exec s xs ks a i -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (M
 execPop (Exec k) γ = k (γ {xs = [|| popX_ $$(xs γ) ||]})
 
 execLift2 :: WQ (x -> y -> z) -> Exec s (z ': xs) ks a i -> Γ s (y ': x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execLift2 f (Exec k) γ = k (γ {xs = [|| let !(y, xs') = popX $$(xs γ); !(x, xs'') = popX xs' in pushX ($$(_code f) x y) xs'' ||]})
+execLift2 f (Exec k) γ = k (γ {xs = [|| let !(# y, xs' #) = popX $$(xs γ); !(# x, xs'' #) = popX xs' in pushX ($$(_code f) x y) xs'' ||]})
 
 execSat :: WQ (Char -> Bool) -> Exec s (Char ': xs) ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execSat p k γ =
@@ -276,14 +276,14 @@ execCase :: Exec s (x ': xs) ks a i -> Exec s (y ': xs) ks a i -> Γ s (Either x
 execCase p q γ =
   do ctx <- ask
      return $! [||
-         let !(e, xs') = popX $$(xs γ)
+         let !(# e, xs' #) = popX $$(xs γ)
          in case e of
            Left x -> $$(run p (γ {xs = [||pushX x xs'||]}) ctx)
            Right y  -> $$(run q (γ {xs = [||pushX y xs'||]}) ctx)
        ||]
 
 execChoices :: forall x xs ks a s i. [WQ (x -> Bool)] -> [Exec s xs ks a i] -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execChoices fs ks γ = do ctx <- ask; return [|| let (x, xs') = popX $$(xs γ) in $$(go [||x||] fs ks (γ {xs = [||xs'||]}) ctx) ||]
+execChoices fs ks γ = do ctx <- ask; return [|| let (# x, xs' #) = popX $$(xs γ) in $$(go [||x||] fs ks (γ {xs = [||xs'||]}) ctx) ||]
   where
     go :: TExpQ x -> [WQ (x -> Bool)] -> [Exec s xs ks a i] -> Γ s xs ks a -> Ctx s a -> QST s (Maybe a)
     go _ [] [] γ _ = raiseΓ γ
@@ -299,7 +299,7 @@ execChainIter u (MVar μ) γ@(Γ !xs ks o hs cidx cs d) =
      let !(QSTRef σ) = (σm ctx) DMap.! u
      case (μs ctx) Map.! μ of
        GenExec k -> return [||
-         do let !(g, xs') = popX $$xs
+         do let !(# g, xs' #) = popX $$xs
             modifyΣ $$σ g
             pokeC $$o $$cidx $$cs
             let I# o# = $$o
@@ -307,6 +307,12 @@ execChainIter u (MVar μ) γ@(Γ !xs ks o hs cidx cs d) =
             let I# d# = $$d
             $$(coerce k) xs' $$ks o# $$hs cidx# $$cs d#
          ||]
+
+fst# :: (# a, b #) -> a
+fst# (# x, _ #) = x
+
+snd# :: (# a, b #) -> b
+snd# (# _, y #) = y
 
 execChainInit :: WQ x -> ΣVar x -> Exec s xs ks a i -> MVar xs ks a -> Exec s (x ': xs) ks a i
                   -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
@@ -318,7 +324,7 @@ execChainInit deflt u l (MVar μ) k γ@(Γ !xs ks o _ _ _ d) =
           do $$(rollback (σs ctx)) ((I# d'#) - $$d)
              (c, cidx') <- popC (I# cidx#) cs
              if c == (I# o#) then do y <- pokeΣ $$σ $$(_code deflt)
-                                     $$(run k (γ {xs = [|| pushX y (snd $$xs') ||],
+                                     $$(run k (γ {xs = [|| pushX y (snd# $$xs') ||],
                                                   o = [||I# o#||],
                                                   hs = [||hs||],
                                                   cidx = [||cidx'||],
@@ -327,11 +333,11 @@ execChainInit deflt u l (MVar μ) k γ@(Γ !xs ks o _ _ _ d) =
           ||]
      return $! (setupHandlerΓ γ handler (\γ' -> [||
        -- NOTE: Only the offset and the cs array can change between interations of a chainPre
-       do writeΣ $$σ (fst $$xs')
+       do writeΣ $$σ (fst# $$xs')
           let I# o# = $$o
           fix (\r o# cs ->
             $$(let μs' = Map.insert μ (GenExec [|| \_ _ o# _ _ cs _ -> r o# cs ||]) (μs ctx)
-               in run l (Γ [||snd $$xs'||] ks [||I# o#||] (hs γ') (cidx γ') [||cs||] d) (ctx {μs = μs'})))
+               in run l (Γ [||snd# $$xs'||] ks [||I# o#||] (hs γ') (cidx γ') [||cs||] d) (ctx {μs = μs'})))
             o# $$(cs γ')||]))
 
 preludeString :: String -> Char -> Γ s xs ks a -> Ctx s a -> String -> TExpQ String
@@ -399,7 +405,7 @@ resume (Γ xs ks o hs cidx cs d) =
           I# o# = $$o
           I# cidx# = $$cidx
           I# d# = $$d
-          !(k, ks'') = popK ks'
+          !(# k, ks'' #) = popK ks'
       in k $$(bug xs) ks'' o# $$hs cidx# $$cs d#
   ||]
 

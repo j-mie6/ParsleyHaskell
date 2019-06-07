@@ -39,6 +39,24 @@ import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 
+{-
+PAPERS
+1) PLDI - Similar to the Garnishing paper, talk about deep embeddings of parsers, type-safe representation,
+          Free, type-safe compilation. Then go on to discuss the machine, its safety, its correspondance to
+          DFA with state? Acknowledgement of staging here, but not dicussed in detail. Talk about how
+          law based optimisations provide an additional boost. Mention a reliance on GHC to "do the right 
+          thing". Optimisations are not guaranteed to terminate at this stage?
+2) POPL - Foundational: differentiation of of grammars and how it corresponds to parsing. 
+          Furthermore, show the correspondance with the abstract machines (left
+          corresponds to handler stack pop, or backtracking)
+3) PLDI - MicroCompiler architecture, a.k.a how to stop relying on GHC (1): relations to multi-stage programming
+4) ICFP - Staging considerations for the machine (1): how is it actually orchestrated?
+5) ?    - Abstract Interpretation (loop finding, termination analysis, constant input analysis, more more more)
+6) IFL  - Error reporting in the parsers, lazy adaptation of the error stacks in P4S
+7) ?    - Error correcting parsers using foundation layed in (2)
+-}
+
+
 fmap :: WQ (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
 

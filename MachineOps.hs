@@ -24,24 +24,26 @@ data K s ks a where
   KNil :: K s '[] a
   KCons :: !(X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
 
-newtype H s a = H (SList (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)))
-type QH s a = TExpQ (H s a)
+newtype H s a = H (SList (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Handled s a)))
 type X = HList
-type QX xs = TExpQ (X xs)
-type QK s ks a = TExpQ (K s ks a)
 type CIdx = Int
 type CIdx# = Int#
-type QCIdx = TExpQ CIdx
 type C s = STUArray s Int Int
-type QC s = TExpQ (C s)
 type O = Int
 type O# = Int#
-type QO = TExpQ O
 type D = Int
 type D# = Int#
+data Input = Input {charAt :: TExpQ (Int -> Char), size :: TExpQ Int, substr :: TExpQ (Int -> Int -> UArray Int Char)}
+data Σ s = Σ { save :: QST s (), restore :: QST s (), rollback :: TExpQ (D -> ST s ()) }
+
+type QH s a = TExpQ (H s a)
+type QX xs = TExpQ (X xs)
+type QK s ks a = TExpQ (K s ks a)
+type QCIdx = TExpQ CIdx
+type QC s = TExpQ (C s)
+type QO = TExpQ O
 type QD = TExpQ D
 type QST s a = TExpQ (ST s a)
-data Input = Input {charAt :: TExpQ (Int -> Char), size :: TExpQ Int, substr :: TExpQ (Int -> Int -> UArray Int Char)}
 
 double :: STUArray s Int Int -> ST s (STUArray s Int Int)
 double !arr =
@@ -90,7 +92,7 @@ popK (KCons k ks) = (# k, ks #)
 
 makeH :: ST s (H s a)
 makeH = return $! (H SNil)
-pushH :: (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)) -> H s a -> H s a
+pushH :: (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Handled s a)) -> H s a -> H s a
 pushH !h !(H hs) = H (h:::hs)
 {-# INLINE popH_ #-}
 popH_ :: H s a -> H s a
@@ -134,8 +136,12 @@ pokeΣ σ y =
      writeSTRef σ (y:::xs)
      return $! x
 
+newtype Handled s a = Handled {runHandler :: ST s (Maybe a)}
+handled :: ST s (Maybe a) -> ST s (Handled s a)
+handled = return . Handled
+
 {-# INLINE setupHandler #-}
-setupHandler :: QH s a -> QCIdx -> QC s -> QO -> TExpQ (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)) ->
+setupHandler :: QH s a -> QCIdx -> QC s -> QO -> TExpQ (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Handled s a)) ->
                                                  (QH s a -> QCIdx -> QC s -> QST s (Maybe a)) -> QST s (Maybe a)
 setupHandler !hs !cidx !cs !o !h !k = [||
   do !(cidx', cs') <- pushC $$o $$cidx $$cs
@@ -143,9 +149,16 @@ setupHandler !hs !cidx !cs !o !h !k = [||
   ||]
 
 {-# INLINE raise #-}
-raise :: H s a -> CIdx -> C s -> O -> D -> ST s (Maybe a)
-raise (H SNil) !_ !_ !_ !_                           = return Nothing
-raise (H (h:::hs')) !(I# cidx) !cs !(I# o) !(I# d)   = h o (H hs') cidx cs d
+raise :: H s a -> CIdx -> C s -> O -> D -> ST s (Handled s a)
+raise (H SNil) !_ !_ !_ !_                            = handled (return Nothing)
+raise (H (h:::hs')) !(I# cidx#) !cs !(I# o#) !(I# d#) = h o# (H hs') cidx# cs d#
+
+{-# INLINE recover #-}
+recover :: Σ s -> QD -> QST s (Maybe a) -> QST s (Handled s a)
+recover σs d k = [||
+  do $$(rollback σs) $$d
+     handled $$k
+  ||]
 
 nextSafe :: Bool -> Input -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True input o p good bad = [|| let !c = $$(charAt input) $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else $$bad ||]

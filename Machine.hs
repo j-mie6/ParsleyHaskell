@@ -74,7 +74,6 @@ data Γ s xs ks a = Γ { xs    :: QX xs
 
 data GenExec s a = forall xs ks. GenExec (TExpQ (X xs -> K s ks a -> O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)))
 newtype GenJoin s a x = GenJoin (TExpQ (x -> O# -> ST s (Maybe a)))
-data Σ s = Σ { save :: QST s (), restore :: QST s (), rollback :: TExpQ (D -> ST s ()) }
 type IMVar = Int
 newtype QSTRef s a = QSTRef (TExpQ (STRef s (SList a)))
 data Ctx s a = Ctx { μs         :: Map IMVar (GenExec s a)
@@ -218,8 +217,7 @@ execHardFork p q decl γ = setupJoinPoint decl γ $
   do ctx <- ask
      let handler = [||\o# hs cidx# cs d'# ->
            do (c, cidx') <- popC (I# cidx#) cs
-              if c == (I# o#) then do $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
-                                      $$(run q (γ {o = [||I# o#||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
+              if c == (I# o#) then $$(recoverΓ [||I# d'#||] q (γ {o = [||I# o#||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
               else raise hs cidx' cs (I# o#) (I# d'#)
            ||]
      return $! (setupHandlerΓ γ handler (\γ' -> run p γ' ctx))
@@ -229,8 +227,7 @@ execSoftFork constantInput p q decl γ = setupJoinPoint decl γ $
   do ctx <- ask
      let handler = [||\_ hs cidx# cs d'# ->
            do !(o, cidx') <- popC (I# cidx#) cs
-              $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
-              $$(run q (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
+              $$(recoverΓ [||I# d'#||] q (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
            ||]
      return $! (setupHandlerΓ γ handler (\γ' -> inputSizeCheck constantInput p γ' ctx))
 
@@ -257,8 +254,7 @@ execNegLook m k γ =
   do ctx <- ask
      let handler = [||\_ hs cidx# cs d'# ->
            do (o, cidx') <- popC (I# cidx#) cs
-              $$(rollback (σs ctx)) ((I# d'#) - $$(d γ))
-              $$(run k (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
+              $$(recoverΓ [||I# d'#||] k (γ {o = [||o||], hs = [||hs||], cidx = [||cidx'||], cs = [||cs||]}) ctx)
            ||]
      return $! (setupHandlerΓ γ handler (\γ' -> run m γ' ctx))
 
@@ -313,21 +309,23 @@ snd# :: (# a, b #) -> b
 snd# (# _, y #) = y
 
 execChainInit :: WQ x -> ΣVar x -> Exec s xs ks a i -> MVar xs ks a -> Exec s (x ': xs) ks a i
-                  -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
+              -> Γ s (x ': xs) ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execChainInit deflt u l (MVar μ) k γ@(Γ xs ks o _ _ _ d) =
   do ctx <- ask
      let !(QSTRef σ) = (σm ctx) DMap.! u
      let xs' = [|| popX $$xs ||]
      let handler = [||\o# hs cidx# cs d'# ->
-          do $$(rollback (σs ctx)) ((I# d'#) - $$d)
-             (c, cidx') <- popC (I# cidx#) cs
-             if c == (I# o#) then do y <- pokeΣ $$σ $$(_code deflt)
-                                     $$(run k (γ {xs = [|| pushX y (snd# $$xs') ||],
-                                                  o = [||I# o#||],
-                                                  hs = [||hs||],
-                                                  cidx = [||cidx'||],
-                                                  cs = [||cs||]}) ctx)
-             else do writeΣ $$σ $$(_code deflt); raise hs cidx' cs (I# o#) $$d
+          do (c, cidx') <- popC (I# cidx#) cs
+             $$(recover (σs ctx) [||(I# d'#) - $$d||] [||
+               if c == (I# o#) then
+                 do y <- pokeΣ $$σ $$(_code deflt)
+                    $$(run k (γ {xs = [|| pushX y (snd# $$xs') ||],
+                                 o = [||I# o#||],
+                                 hs = [||hs||],
+                                 cidx = [||cidx'||],
+                                 cs = [||cs||]}) ctx)
+                else do writeΣ $$σ $$(_code deflt); raise hs cidx' cs (I# o#) $$d >>= runHandler
+              ||])
           ||]
      return $! (setupHandlerΓ γ handler (\γ' -> [||
        -- NOTE: Only the offset and the cs array can change between interations of a chainPre
@@ -366,7 +364,7 @@ execLogExit name k γ =
      return $! [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(run k γ (debugDown ctx)) ||]
 
 {-# INLINE setupHandlerΓ #-}
-setupHandlerΓ :: Γ s xs ks a -> TExpQ (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Maybe a)) ->
+setupHandlerΓ :: Γ s xs ks a -> TExpQ (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Handled s a)) ->
                                 (Γ s xs ks a -> QST s (Maybe a)) -> QST s (Maybe a)
 setupHandlerΓ γ !h !k = setupHandler (hs γ) (cidx γ) (cs γ) (o γ) h (\hs cidx cs -> k (γ {hs = hs, cidx = cidx, cs = cs}))
 
@@ -389,7 +387,10 @@ inputSizeCheck (Just n) p γ ctx
     ||]
 
 raiseΓ :: Γ s xs ks a -> QST s (Maybe a)
-raiseΓ γ = [|| raise $$(hs γ) $$(cidx γ) $$(cs γ) $$(o γ) $$(d γ) ||]
+raiseΓ γ = [|| raise $$(hs γ) $$(cidx γ) $$(cs γ) $$(o γ) $$(d γ) >>= runHandler ||]
+
+recoverΓ :: QD -> Exec s xs ks a i -> Γ s xs ks a -> Ctx s a -> QST s (Handled s a)
+recoverΓ d' k γ ctx = recover (σs ctx) [||$$d' - $$(d γ)||] (run k γ ctx)
 
 suspend :: Exec s xs ks a i -> Ctx s a -> QK s ks a -> QK s (xs ': ks) a
 suspend m ctx ks =

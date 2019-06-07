@@ -135,9 +135,9 @@ pokeΣ σ y =
      return $! x
 
 newtype Handled s a = Handled {runHandler :: ST s (Maybe a)}
-{-# INLINE handled #-}
-handled :: ST s (Maybe a) -> ST s (Handled s a)
-handled = return . Handled
+{-# INLINE handledBy #-}
+handledBy :: ST s (Maybe a) -> ST s (Handled s a)
+handledBy = return . Handled
 
 setupHandler :: QH s a -> QCIdx -> QC s -> QO -> TExpQ (O# -> H s a -> CIdx# -> C s -> D# -> ST s (Handled s a)) ->
                                                  (QH s a -> QCIdx -> QC s -> QST s (Maybe a)) -> QST s (Maybe a)
@@ -148,13 +148,13 @@ setupHandler !hs !cidx !cs !o !h !k = [||
 
 {-# INLINE raise #-}
 raise :: H s a -> CIdx -> C s -> O -> D -> ST s (Handled s a)
-raise (H SNil) !_ !_ !_ !_                            = handled (return Nothing)
+raise (H SNil) !_ !_ !_ !_                            = handledBy (return Nothing)
 raise (H (h:::hs')) !(I# cidx#) !cs !(I# o#) !(I# d#) = h o# (H hs') cidx# cs d#
 
 recover :: Σ s -> QD -> QST s (Maybe a) -> QST s (Handled s a)
 recover σs d k = [||
   do $$(rollback σs) $$d
-     handled $$k
+     handledBy $$k
   ||]
 
 nextSafe :: Bool -> Input -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)

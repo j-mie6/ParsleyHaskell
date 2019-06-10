@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
+{-# LANGUAGE StandaloneDeriving #-}
 module ParsleyParsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -21,9 +22,26 @@ selectTest = pure (lift' (Left 10))
 showi :: Int -> String
 showi = show
 
-data Pred = And Pred Pred | Not Pred | T | F deriving (Lift, Show)
+deriving instance Lift Pred
+
 pred :: Parser Pred
 pred = precedence [ Prefix [token "!" $> lift' Not]
                   , InfixR [token "&&" $> lift' And]] 
                   ( token "t" $> lift' T
                 <|> token "f" $> lift' F )
+
+-- Brainfuck benchmark
+deriving instance Lift BrainFuckOp
+
+brainfuck :: Parser [BrainFuckOp]
+brainfuck = whitespace *>
+  many ( (lexeme (char '>' $> lift' RightPointer))
+     <|> (lexeme (char '<' $> lift' LeftPointer))
+     <|> (lexeme (char '+' $> lift' Increment))
+     <|> (lexeme (char '-' $> lift' Decrement))
+     -- <|> (lexeme (char '.' $> lift' Output))
+     -- <|> (lexeme (char ',' $> lift' Input))
+     <|> (between (lexeme (char '[')) (lexeme (char ']')) (lift' Loop <$> brainfuck)))
+  where
+    whitespace = skipMany (noneOf "<>+-[]")
+    lexeme p = p <* whitespace

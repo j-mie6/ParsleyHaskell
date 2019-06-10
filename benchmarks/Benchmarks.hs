@@ -1,31 +1,39 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE MagicHash, UnboxedTuples #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Main where
 import Criterion.Main  (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq (NFData(rnf))
-import ParsleyParsers
-import YodaParsers
---import ParsecParsers
---import MegaparsecParsers
---import AttoparsecParsers
+import GHC.Generics    (Generic)
+import qualified ParsleyParsers
+import qualified YodaParsers
+import qualified ParsecParsers
+import qualified MegaparsecParsers
+import qualified AttoparsecParsers
+import qualified NativeParsers
 import qualified Parsley
 import qualified Text.Yoda as Yoda
+import qualified Text.Parsec as Parsec
+import CommonFunctions
+
+deriving instance Generic Pred
+deriving instance NFData Pred
+deriving instance Generic BrainFuckOp
+deriving instance NFData BrainFuckOp
+
+parsecParse :: ParsecParsers.Parser a -> String -> Maybe a
+parsecParse p input = either (const Nothing) Just (Parsec.parse p "" input)
 
 manyTestParsley :: String -> Maybe Pred
 manyTestParsley = -- $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}
                   -- $$(Parsley.runParser (Parsley.while ((Parsley.WQ (== 'a') [||(== 'a')||]) Parsley.<$> Parsley.item
                   --                        Parsley.<* Parsley.while ((Parsley.WQ (== 'b') [||(== 'b')||]) Parsley.<$> Parsley.item))))
                   $$(Parsley.runParser ({-Parsley.void -}ParsleyParsers.pred))
+
+brainfuckParsley :: String -> Maybe [BrainFuckOp]
+brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
 {-longChoice :: Parsley.Parser Char
 longChoice = Parsley.choice (map Parsley.char (replicate 1000000 'a' ++ "b"))-}
@@ -57,4 +65,4 @@ main :: IO ()
     combinatorGroup,
     crossMany
   ]--}-}
-main = print (manyTestParsley ("t&&f&&!t"))
+main = print (brainfuckParsley ("[.+<]-af"))

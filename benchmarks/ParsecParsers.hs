@@ -1,13 +1,8 @@
-module YodaParsers where
-
-import Text.Yoda
+module ParsecParsers where
 import CommonFunctions
+import Text.Parsec
 
-manyTestBad :: Parser Int
-manyTestBad = chainl1 (toDigit <$> satisfy (isDigit)) ((+) <$ char '+')
-
-manyTestOk :: Parser [Char]
-manyTestOk = cull (many (char 'a'))
+type Parser a = Parsec String () a
 
 ($>) :: Parser a -> b -> Parser b
 ($>) = flip (<$)

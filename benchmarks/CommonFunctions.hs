@@ -9,3 +9,6 @@ isDigit c
 
 toDigit :: Char -> Int
 toDigit c = fromEnum c - fromEnum '0'
+
+data Pred = And Pred Pred | Not Pred | T | F deriving Show
+data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show

@@ -6,7 +6,7 @@ module Parsley ( Parser, runParser
                -- Applicative
                , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
                -- Alternative
-               , empty, (<|>), optional, choice
+               , empty, (<|>), optional, choice, oneOf, noneOf, maybeP
                -- Monoidal
                , unit, (<~>), (<~), (~>)
                -- Selective
@@ -17,20 +17,25 @@ module Parsley ( Parser, runParser
                , satisfy, item
                , lookAhead, notFollowedBy, try
                -- Iteratives
-               , chainl1, chainr1, chainPre, chainPost
-               , pfoldr, pfoldl, some, many, skipMany
+               , chainl1, chainr1, chainPre, chainPost, chainl, chainr
+               , pfoldr, pfoldl
+               , many, manyN, some
+               , skipMany, skipManyN, skipSome
+               , sepBy, sepBy1, endBy, endBy1, manyTill, someTill
                -- Composites
                , char, eof, more
-               , traverse, sequence, string, token
+               , traverse, sequence, string, token, repeat
+               , between
                , (<?|>), (>?>), when, while, fromMaybeP
+               , debug
                -- Expressions
                , Level(..), precedence
                -- Template Haskell Utils
                , lift', (>*<), WQ(..), Lift
                ) where
 
-import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>))
-import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost)
+import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat)
+import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
 import Compiler                   (compile)
 import Machine                    (exec)
 import Utils                      (lift', (>*<), WQ(..), TExpQ)
@@ -81,11 +86,38 @@ liftA2 f p q = f <$> p <*> q
 many :: Parser a -> Parser [a]
 many p = pfoldr (lift' (:)) (WQ [] [||[]||]) p
 
+manyN :: Int -> Parser a -> Parser [a]
+manyN n p = foldr (const (p <:>)) (many p) [1..n]
+
 some :: Parser a -> Parser [a]
-some p = p <:> many p
+some = manyN 1
 
 skipMany :: Parser a -> Parser ()
 skipMany = pfoldr (lift' const >*< lift' id) (lift' ())
+
+skipManyN :: Int -> Parser a -> Parser ()
+skipManyN n p = foldr (const (p *>)) (skipMany p) [1..n]
+
+skipSome :: Parser a -> Parser ()
+skipSome = skipManyN 1
+
+sepBy :: Parser a -> Parser b -> Parser [a]
+sepBy p sep = sepBy1 p sep <|> pure (WQ [] [||[]||])
+
+sepBy1 :: Parser a -> Parser b -> Parser [a]
+sepBy1 p sep = p <:> many (sep *> p)
+
+endBy :: Parser a -> Parser b -> Parser [a]
+endBy p sep = many (p <* sep)
+
+endBy1 :: Parser a -> Parser b -> Parser [a]
+endBy1 p sep = some (p <* sep)
+
+manyTill :: Parser a -> Parser b -> Parser [a]
+manyTill p end = let go = end $> WQ [] [||[]||] <|> p <:> go in go
+
+someTill :: Parser a -> Parser b -> Parser [a]
+someTill p end = notFollowedBy end *> (p <:> manyTill p end)
 
 -- Additional Combinators
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
@@ -110,8 +142,20 @@ unit = pure (lift' ())
 (>>) = (*>)
 
   -- Auxillary functions
+sequence :: [Parser a] -> Parser [a]
+sequence = foldr (<:>) (pure (WQ [] [||[]||]))
+
+traverse :: (a -> Parser b) -> [a] -> Parser [b]
+traverse f = sequence . map f
+
 string :: String -> Parser String
-string = foldr (<:>) (pure (lift' [])) . map char
+string = traverse char
+
+oneOf :: [Char] -> Parser Char
+oneOf = choice . map char--satisfy (WQ (flip elem cs) [||flip elem cs||])
+
+noneOf :: [Char] -> Parser Char
+noneOf cs = satisfy (WQ (not . flip elem cs) [||not . flip elem cs||])
 
 token :: String -> Parser String
 token = try . string
@@ -122,6 +166,12 @@ eof = notFollowedBy item
 more :: Parser ()
 more = lookAhead (void item)
 
+repeat :: Int -> Parser a -> Parser [a]
+repeat n p = traverse (const p) [1..n]
+
+between :: Parser o -> Parser c -> Parser a -> Parser a
+between open close p = open *> p <* close
+
 -- Parsing Primitives
 char :: Char -> Parser Char
 char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
@@ -129,6 +179,7 @@ char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
 item :: Parser Char
 item = satisfy (WQ (const True) [|| const True ||])
 
+-- Composite Combinators
 optional :: Parser a -> Parser ()
 optional p = void p <|> unit
 
@@ -166,11 +217,20 @@ select p q = branch p q (pure (lift' id))
 fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
 fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
 
+maybeP :: Parser a -> Parser (Maybe a)
+maybeP p = lift' Just <$> p <|> pure (WQ Nothing [||Nothing||])
+
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 p op = chainPost p (lift' flip <$> op <*> p)
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainr1 p op = let go = p <**> ((lift' flip <$> op <*> go) <|> pure (lift' id)) in go
+
+chainr :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
+chainr p op x = chainr1 p op <|> pure x
+
+chainl :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
+chainl p op x = chainl1 p op <|> pure x
 
 pfoldr :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
 pfoldr f k p = chainPre (f <$> p) (pure k)

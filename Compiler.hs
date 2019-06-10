@@ -70,7 +70,7 @@ postprocess !(Satisfy f)       = Carrier (return        (Op (Satisfy f)))
 (f >< g) (x, y) = (f x, g y)
 
 showM :: Parser a -> String
-showM = show . fst .compile
+showM = show . fst . compile
 
 instance Eq (StableParserName xs ks i) where 
   (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)

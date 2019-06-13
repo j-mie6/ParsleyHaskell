@@ -6,10 +6,11 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables, TypeApplications #-}
 module CodeGenerator (codeGen) where
 
 import ParserAST                  (ParserF(..))
-import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar(..), MVar(..), ΦVar(..), ΦDecl, fmapInstr)
+import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar(..), MVar(..), ΦVar(..), ΦDecl, fmapInstr, abstract)
 import Indexed                    (IFunctor, Free(Op), History(Era), Void, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
@@ -79,7 +80,7 @@ direct !(Rec !v !q)     = CodeGen $ \(!m) ->
        Just μ -> do return $! Op (MuCall μ m)
        Nothing  -> do μ <- askM
                       n <- renameM v μ (runCodeGen q (Op Ret))
-                      return $! Op (Call n μ m)
+                      return $! Op (Call (abstract n) μ m)
 direct !(ChainPre op p) = CodeGen $ \(!m) ->
   do μ <- askM
      σ <- freshΣ id [||id||]
@@ -97,13 +98,13 @@ direct !(Debug name p) = CodeGen $ \(!m) -> fmap (Op . LogEnter name) (runCodeGe
 trimap :: (a -> x) -> (b -> y) -> (c -> z) -> (a, b, c) -> (x, y, z)
 trimap f g h (x, y, z) = (f x, g y, h z)
 
-askM :: MonadReader (r1, IMVar, r3) m => m (MVar xs ks a)
+askM :: MonadReader (r1, IMVar, r3) m => m (MVar a)
 askM = do (_, μ, _) <- ask; return $! (MVar μ)
 
 askΦ :: MonadReader (r1, r2, IΦVar) m => m (ΦVar a)
 askΦ = do (_, _, φ) <- ask; return $! (ΦVar φ)
 
-lookupM :: MonadReader (Map IMVar IMVar, r2, r3) m => IMVar -> m (Maybe (MVar xs ks a))
+lookupM :: MonadReader (Map IMVar IMVar, r2, r3) m => IMVar -> m (Maybe (MVar a))
 lookupM v = do (m, _, _) <- ask; return $! fmap MVar (Map.lookup v m)
 
 freshM :: MonadReader (r1, IMVar, r3) m => m a -> m a
@@ -112,7 +113,7 @@ freshM = local (trimap id (+1) id)
 freshΦ :: MonadReader (r1, r2, IΦVar) m => m a -> m a
 freshΦ = local (trimap id id (+1))
 
-renameM :: MonadReader (Map IMVar IMVar, IMVar, r3) m => IMVar -> MVar xs ks x -> m a -> m a
+renameM :: MonadReader (Map IMVar IMVar, IMVar, r3) m => IMVar -> MVar x -> m a -> m a
 renameM old (MVar new) = local (trimap (Map.insert old new) (const (new+1)) id)
 
 makeΦ :: MonadReader (r1, r2, IΦVar) m => Free M Void (x ': xs) ks a i -> m (Maybe (ΦDecl (Free M Void) x xs ks a i), Free M Void (x ': xs) ks a i)

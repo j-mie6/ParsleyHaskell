@@ -3,6 +3,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DataKinds, TypeOperators #-}
 module Main where
 import Criterion.Main  (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq (NFData(rnf))
@@ -32,8 +33,8 @@ manyTestParsley = -- $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley
                   --                        Parsley.<* Parsley.while ((Parsley.WQ (== 'b') [||(== 'b')||]) Parsley.<$> Parsley.item))))
                   $$(Parsley.runParser ({-Parsley.void -}ParsleyParsers.pred))
 
-brainfuckParsley :: String -> Maybe [BrainFuckOp]
-brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
+--brainfuckParsley :: String -> Maybe [BrainFuckOp]
+--brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
 {-longChoice :: Parsley.Parser Char
 longChoice = Parsley.choice (map Parsley.char (replicate 1000000 'a' ++ "b"))-}
@@ -65,4 +66,4 @@ main :: IO ()
     combinatorGroup,
     crossMany
   ]--}-}
-main = print (brainfuckParsley ("[.+<]-af"))
+main = print (manyTestParsley ("!!!!t&&!f&&t"))

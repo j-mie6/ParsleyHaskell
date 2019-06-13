@@ -28,7 +28,7 @@ pred :: Parser Pred
 pred = precedence [ Prefix [token "!" $> lift' Not]
                   , InfixR [token "&&" $> lift' And]] 
                   ( token "t" $> lift' T
-                <|> token "f" $> lift' F )
+                <|> token "f" $> lift' F)
 
 -- Brainfuck benchmark
 deriving instance Lift BrainFuckOp

@@ -6,30 +6,29 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE ScopedTypeVariables, TypeApplications #-}
 module CodeGenerator (codeGen) where
 
 import ParserAST                  (ParserF(..))
-import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar(..), MVar(..), ΦVar(..), ΦDecl, fmapInstr, abstract)
+import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar, IΦVar, MVar(..), ΦVar(..), ΦDecl, fmapInstr, abstract)
 import Indexed                    (IFunctor, Free(Op), History(Era), Void, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
 import Control.Monad              ((<$!>))
-import Control.Monad.Reader       (ReaderT, ask, runReaderT, local, MonadReader)
+import Control.Monad.Reader       (ReaderT, ask, asks, runReaderT, local, MonadReader)
 import Control.Monad.State.Strict (State, get, put, runState, MonadState)
+import Fresh                      (VFreshT, runFreshT, evalFreshT, construct, MonadFresh(..))
 import Data.Map.Strict            (Map)
 import Data.Maybe                 (isJust, fromJust)
 import Debug.Trace                (traceShow)
 import qualified Data.Map.Strict as Map
 
-type IΦVar = Int
 newtype CodeGen b xs ks a i = CodeGen {runCodeGen :: forall xs' ks'. Free M Void (a ': xs') ks' b i
-                                                  -> ReaderT (Map IMVar IMVar, IMVar, IΦVar) (State ΣVars) (Free M Void xs' ks' b i)}
+                                                  -> VFreshT IΦVar (ReaderT (Map IMVar IMVar, IMVar) (State ΣVars)) (Free M Void xs' ks' b i)}
 
 codeGen :: Free ParserF Void '[] '[] a i -> (Free M Void '[] '[] a i, ΣVars)
 codeGen p = traceShow m (m, vs)
   where
-    (m, vs) = runState (runReaderT (runCodeGen (histo absurd alg (traceShow p p)) (Op Halt)) (Map.empty, 0, 0)) []
+    (m, vs) = runState (runReaderT (evalFreshT (runCodeGen (histo absurd alg (traceShow p p)) (Op Halt)) 0) (Map.empty, 0)) []
     alg = peephole |> (direct . imap present)
 
 peephole :: ParserF (History ParserF (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
@@ -95,28 +94,29 @@ direct !(ChainPost p op) = CodeGen $ \(!m) ->
      freshM (runCodeGen p (fmapInstr (lift' Just) m'))
 direct !(Debug name p) = CodeGen $ \(!m) -> fmap (Op . LogEnter name) (runCodeGen p (Op (LogExit name m)))
 
-trimap :: (a -> x) -> (b -> y) -> (c -> z) -> (a, b, c) -> (x, y, z)
-trimap f g h (x, y, z) = (f x, g y, h z)
+(><) :: (a -> x) -> (b -> y) -> (a, b) -> (x, y)
+(f >< g) (x, y) = (f x, g y)
 
-askM :: MonadReader (r1, IMVar, r3) m => m (MVar a)
-askM = do (_, μ, _) <- ask; return $! (MVar μ)
+-- Refactor with asks
+askM :: MonadReader (r1, IMVar) m => m (MVar a)
+askM = asks (MVar . snd)
 
-askΦ :: MonadReader (r1, r2, IΦVar) m => m (ΦVar a)
-askΦ = do (_, _, φ) <- ask; return $! (ΦVar φ)
+askΦ :: MonadFresh IΦVar m => m (ΦVar a)
+askΦ = construct ΦVar
 
-lookupM :: MonadReader (Map IMVar IMVar, r2, r3) m => IMVar -> m (Maybe (MVar a))
-lookupM v = do (m, _, _) <- ask; return $! fmap MVar (Map.lookup v m)
+lookupM :: MonadReader (Map IMVar IMVar, IMVar) m => IMVar -> m (Maybe (MVar a))
+lookupM v = asks (fmap MVar . Map.lookup v . fst)
 
-freshM :: MonadReader (r1, IMVar, r3) m => m a -> m a
-freshM = local (trimap id (+1) id)
+freshM :: MonadReader (r1, IMVar) m => m a -> m a
+freshM = local (id >< (+1))
 
-freshΦ :: MonadReader (r1, r2, IΦVar) m => m a -> m a
-freshΦ = local (trimap id id (+1))
+freshΦ :: MonadFresh IΦVar m => m a -> m a
+freshΦ = newScope
 
-renameM :: MonadReader (Map IMVar IMVar, IMVar, r3) m => IMVar -> MVar x -> m a -> m a
-renameM old (MVar new) = local (trimap (Map.insert old new) (const (new+1)) id)
+renameM :: MonadReader (Map IMVar IMVar, IMVar) m => IMVar -> MVar x -> m a -> m a
+renameM old (MVar new) = local ((Map.insert old new) >< (const (new+1)))
 
-makeΦ :: MonadReader (r1, r2, IΦVar) m => Free M Void (x ': xs) ks a i -> m (Maybe (ΦDecl (Free M Void) x xs ks a i), Free M Void (x ': xs) ks a i)
+makeΦ :: MonadFresh IΦVar m => Free M Void (x ': xs) ks a i -> m (Maybe (ΦDecl (Free M Void) x xs ks a i), Free M Void (x ': xs) ks a i)
 -- This is double-φ optimisation: If a φ-node points directly to another φ-node, then it can be elided
 makeΦ m@(Op (Join _)) = return $! (Nothing, m)
 makeΦ m =

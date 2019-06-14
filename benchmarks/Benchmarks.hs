@@ -33,6 +33,9 @@ manyTestParsley = -- $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley
                   --                        Parsley.<* Parsley.while ((Parsley.WQ (== 'b') [||(== 'b')||]) Parsley.<$> Parsley.item))))
                   $$(Parsley.runParser ({-Parsley.void -}ParsleyParsers.pred))
 
+phiTestP :: String -> Maybe Char
+phiTestP = $$(Parsley.runParser ParsleyParsers.phiTest)
+
 --brainfuckParsley :: String -> Maybe [BrainFuckOp]
 --brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
 

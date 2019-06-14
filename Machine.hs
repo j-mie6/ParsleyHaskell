@@ -15,6 +15,7 @@ import MachineOps            --()
 import Indexed               (IFunctor, Free(Op), Void, Const(..), imap, absurd, fold, getConst)
 import Utils                 (WQ(..), lift', (>*<), TExpQ)
 import Data.Function         (fix)
+import Data.Word             (Word64)
 import Control.Monad.ST      (ST)
 import Control.Monad.Reader  (ask, Reader, runReader, local)
 import Data.STRef            (STRef, modifySTRef', newSTRef)
@@ -30,9 +31,9 @@ import System.Console.Pretty (color, Color(Green, White, Red, Blue))
 import qualified Data.Dependent.Map as DMap
 
 newtype Machine a = Machine { getMachine :: Free M Void '[] '[] a () }
-newtype ΣVar a = ΣVar Int
-newtype MVar a = MVar Int
-newtype ΦVar a = ΦVar Int
+newtype ΣVar a = ΣVar Word64
+newtype MVar a = MVar IMVar
+newtype ΦVar a = ΦVar IΦVar
 type ΦDecl k x xs ks a i = (ΦVar x, k (x ': xs) ks a i)
 newtype AbstractedStack k x a i = AbstractedStack (forall xs ks. k xs ((x ': xs) ': ks) a i)
 abstract :: k xs ((x ': xs) ': ks) a i -> AbstractedStack k x a i
@@ -76,7 +77,8 @@ data Γ s xs ks a = Γ { xs    :: QX xs
 newtype AbsExec s a x = AbsExec { runConcrete :: forall xs ks. X xs -> K s ((x ': xs) ': ks) a -> O# -> H s a -> C -> D# -> ST s (Maybe a) }
 newtype QAbsExec s a x = QAbsExec (TExpQ (AbsExec s a x))
 newtype QJoin s a x = QJoin (TExpQ (x -> O# -> ST s (Maybe a)))
-type IMVar = Int
+type IMVar = Word64
+type IΦVar = Word64
 newtype QSTRef s a = QSTRef (TExpQ (STRef s (SList a)))
 data Ctx s a = Ctx { μs         :: DMap MVar (QAbsExec s a)
                    , φs         :: DMap ΦVar (QJoin s a)
@@ -101,7 +103,7 @@ debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 type ΣVars = [ΣState]
 data ΣState = forall a. ΣState !a !(TExpQ a) !(ΣVar a)
 makeΣ :: ΣVars -> (DMap ΣVar (QSTRef s) -> Σ s -> QST s r) -> QST s r
-makeΣ ps = makeΣ' ps (DMap.empty) [|| return () ||] [|| return () ||] [|| const (return ()) ||]
+makeΣ ps = makeΣ' ps (DMap.empty) [|| return () :: ST s () ||] [|| return () :: ST s () ||] [|| const (return () :: ST s ()) ||]
   where
     makeΣ' :: ΣVars -> DMap ΣVar (QSTRef s) -> QST s () -> QST s () -> TExpQ (D -> ST s ()) -> (DMap ΣVar (QSTRef s) -> Σ s -> QST s r) -> QST s r
     makeΣ' [] m save restore rollback k =

@@ -59,7 +59,7 @@ library
   exposed-modules:     Parsley
 
   -- Modules included in this library but not exported.
-  other-modules:       Compiler, Indexed, Machine, MachineOps, Utils, Optimiser, Analyser, ParserAST, CodeGenerator
+  other-modules:       Compiler, Indexed, Machine, MachineOps, Utils, Optimiser, Analyser, ParserAST, CodeGenerator, Fresh
 
   -- LANGUAGE extensions used by modules in this package.
   other-extensions:    InstanceSigs, GADTs, DataKinds, TypeOperators, RecursiveDo, RankNTypes, BangPatterns, FlexibleInstances, UndecidableInstances

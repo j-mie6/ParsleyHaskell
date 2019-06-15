@@ -9,6 +9,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Machine where
 
 import MachineOps            --()
@@ -31,7 +32,7 @@ import System.Console.Pretty (color, Color(Green, White, Red, Blue))
 import qualified Data.Dependent.Map as DMap
 
 newtype Machine a = Machine { getMachine :: Free M Void '[] '[] a () }
-newtype ΣVar a = ΣVar Word64
+newtype ΣVar a = ΣVar IΣVar
 newtype MVar a = MVar IMVar
 newtype ΦVar a = ΦVar IΦVar
 type ΦDecl k x xs ks a i = (ΦVar x, k (x ': xs) ks a i)
@@ -46,8 +47,8 @@ data M k xs ks a i where
   Pop       :: !(k xs ks a i) -> M k (x ': xs) ks a i
   Lift2     :: !(WQ (x -> y -> z)) -> !(k (z ': xs) ks a i) -> M k (y ': x ': xs) ks a i
   Sat       :: WQ (Char -> Bool) -> !(k (Char ': xs) ks a i) -> M k xs ks a i
-  Call      :: AbstractedStack k x a i -> MVar x -> !(k (x ': xs) ks a i) -> M k xs ks a i
-  MuCall    :: MVar x -> !(k (x ': xs) ks a i) -> M k xs ks a i
+  Call      :: Maybe (AbstractedStack k x a i) -> !(MVar x) -> !(k (x ': xs) ks a i) -> M k xs ks a i
+  Jump      :: Maybe (AbstractedStack k x a i) -> !(MVar x) -> M k xs ((x ': xs) ': ks) a i
   Empt      :: M k xs ks a i
   Commit    :: !Bool -> !(k xs ks a i) -> M k xs ks a i
   HardFork  :: !(k xs ks a i) -> !(k xs ks a i) -> !(Maybe (ΦDecl k x xs ks a i)) -> M k xs ks a i
@@ -77,8 +78,9 @@ data Γ s xs ks a = Γ { xs    :: QX xs
 newtype AbsExec s a x = AbsExec { runConcrete :: forall xs ks. X xs -> K s ((x ': xs) ': ks) a -> O# -> H s a -> C -> D# -> ST s (Maybe a) }
 newtype QAbsExec s a x = QAbsExec (TExpQ (AbsExec s a x))
 newtype QJoin s a x = QJoin (TExpQ (x -> O# -> ST s (Maybe a)))
-type IMVar = Word64
-type IΦVar = Word64
+newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum)
+newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum)
+newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum)
 newtype QSTRef s a = QSTRef (TExpQ (STRef s (SList a)))
 data Ctx s a = Ctx { μs         :: DMap MVar (QAbsExec s a)
                    , φs         :: DMap ΦVar (QJoin s a)
@@ -145,8 +147,8 @@ exec input (Machine !m, vss) = [||
     alg :: M (Exec s) xs ks a i -> Exec s xs ks a i
     alg Halt                  = Exec $ execHalt
     alg Ret                   = Exec $ execRet
-    alg (Call m v k)          = Exec $ execCall m v k
-    alg (MuCall v k)          = Exec $ execMuCall v k
+    alg (Call m μ k)          = Exec $ execCall m μ k
+    alg (Jump m μ)            = Exec $ execJump m μ
     alg (Push x k)            = Exec $ execPush x k
     alg (Pop k)               = Exec $ execPop k
     alg (Lift2 f k)           = Exec $ execLift2 f k
@@ -162,8 +164,8 @@ exec input (Machine !m, vss) = [||
     alg (Restore k)           = Exec $ execRestore k
     alg (Case p q)            = Exec $ execCase p q
     alg (Choices fs ks)       = Exec $ execChoices fs ks
-    alg (ChainIter σ v)       = Exec $ execChainIter σ v
-    alg (ChainInit x σ l v k) = Exec $ execChainInit x σ l v k
+    alg (ChainIter σ μ)       = Exec $ execChainIter σ μ
+    alg (ChainInit x σ l μ k) = Exec $ execChainInit x σ l μ k
     alg (LogEnter name k)     = Exec $ execLogEnter name k
     alg (LogExit name k)      = Exec $ execLogExit name k
 
@@ -173,26 +175,43 @@ execHalt γ = return $! [|| return $! Just $! peekX ($$(xs γ)) ||]
 execRet :: Γ s (x ': xs) ((x ': xs) ': ks) a -> Reader (Ctx s a) (QST s (Maybe a))
 execRet γ = do ctx <- ask; return $! [|| do $$(restore (σs ctx)); $$(resume γ) ||]
 
-execCall :: AbstractedStack (Exec s) x a i -> MVar x -> Exec s (x ': xs) ks a i
+execCall :: Maybe (AbstractedStack (Exec s) x a i) -> MVar x -> Exec s (x ': xs) ks a i
          -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execCall (AbstractedStack m) μ k γ@(Γ xs ks o hs cs d) =
+execCall (Just (AbstractedStack m)) μ k γ@(Γ xs ks o hs cs d) =
+  do (ctx :: Ctx s a) <- ask
+     return $! [|| do let !(I# o#) = $$o
+                      let !(I# d#) = $$d + 1
+                      $$(save (σs ctx))
+                      runConcrete (fix (\r -> 
+                        AbsExec (\(!xs) (!ks) o# (!hs) (!cs) d# ->
+                          $$(let μs' = DMap.insert μ (QAbsExec [||r||]) (μs ctx)
+                            in run m (Γ [||xs||] [||ks||] [||I# o#||] [||hs||] [||cs||] [||I# d#||]) (ctx {μs = μs'}))
+                          ))) $$xs $$(suspend k ctx ks) o# $$hs $$cs d# ||]
+execCall Nothing μ k γ@(Γ xs ks o hs cs d) =
+  do ctx <- ask
+     let (QAbsExec m) = (μs ctx) DMap.! μ
+     return $! [|| do let !(I# o#) = $$o
+                      let !(I# d#) = $$d + 1
+                      $$(save (σs ctx))
+                      runConcrete $$m $$xs $$(suspend k ctx ks) o# $$hs $$cs d# ||]
+
+execJump :: Maybe (AbstractedStack (Exec s) x a i) -> MVar x 
+         -> Γ s xs ((x ': xs) ': ks) a -> Reader (Ctx s a) (QST s (Maybe a))
+execJump (Just (AbstractedStack m)) μ γ@(Γ xs ks o hs cs d) =
   do (ctx :: Ctx s a) <- ask
      return $! [|| let !(I# o#) = $$o
-                       !(I# d#) = $$d + 1
+                       !(I# d#) = $$d
                    in runConcrete (fix (\r -> 
-                     AbsExec (\(!xs) (!ks) o# (!hs) (!cs) d# ->
-                       do $$(save (σs ctx))
+                        AbsExec (\(!xs) (!ks) o# (!hs) (!cs) d# ->
                           $$(let μs' = DMap.insert μ (QAbsExec [||r||]) (μs ctx)
-                             in run m (Γ [||xs||] [||ks||] [||I# o#||] [||hs||] [||cs||] [||I# d#||]) (ctx {μs = μs'}))
-                     ))) $$xs $$(suspend k ctx ks) o# $$hs $$cs d# ||]
-
-execMuCall :: MVar x -> Exec s (x ': xs) ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
-execMuCall μ k γ@(Γ xs ks o hs cs d) =
+                            in run m (Γ [||xs||] [||ks||] [||I# o#||] [||hs||] [||cs||] [||I# d#||]) (ctx {μs = μs'}))
+                          ))) $$xs $$ks o# $$hs $$cs d# ||]         
+execJump Nothing μ γ@(Γ xs ks o hs cs d) =
   do ctx <- ask
-     case (μs ctx) DMap.! μ of
-       QAbsExec m -> return $! [|| let !(I# o#) = $$o
-                                       !(I# d#) = $$d + 1
-                                   in runConcrete $$m $$xs $$(suspend k ctx ks) o# $$hs $$cs d#||]
+     let (QAbsExec m) = (μs ctx) DMap.! μ
+     return $! [|| let !(I# o#) = $$o
+                       !(I# d#) = $$d
+                   in runConcrete $$m $$xs $$ks o# $$hs $$cs d# ||]
 
 execPush :: WQ x -> Exec s (x ': xs) ks a i -> Γ s xs ks a -> Reader (Ctx s a) (QST s (Maybe a))
 execPush x (Exec k) γ = k (γ {xs = [|| pushX $$(_code x) $$(xs γ) ||]})
@@ -403,66 +422,74 @@ resume (Γ xs ks o hs cs d) =
   ||]
 
 instance IFunctor M where
-  imap f Halt                           = Halt
-  imap f Ret                            = Ret
-  imap f (Push x k)                     = Push x (f k)
-  imap f (Pop k)                        = Pop (f k)
-  imap f (Lift2 g k)                    = Lift2 g (f k)
-  imap f (Sat g k)                      = Sat g (f k)
-  imap f (Call (AbstractedStack m) v k) = Call (AbstractedStack (f m)) v (f k)
-  imap f (MuCall v k)                   = MuCall v (f k)
-  imap f Empt                           = Empt
-  imap f (Commit exit k)                = Commit exit (f k)
-  imap f (SoftFork n p q (Just (φ, k))) = SoftFork n (f p) (f q) (Just (φ, f k))
-  imap f (SoftFork n p q Nothing)       = SoftFork n (f p) (f q) Nothing
-  imap f (HardFork p q (Just (φ, k)))   = HardFork (f p) (f q) (Just (φ, f k))
-  imap f (HardFork p q Nothing)         = HardFork (f p) (f q) Nothing
-  imap f (Join φ)                       = Join φ
-  imap f (Attempt n k)                  = Attempt n (f k)
-  imap f (Look k)                       = Look (f k)
-  imap f (NegLook m k)                  = NegLook (f m) (f k)
-  imap f (Restore k)                    = Restore (f k)
-  imap f (Case p q)                     = Case (f p) (f q)
-  imap f (Choices fs ks)                = Choices fs (map f ks)
-  imap f (ChainIter σ v)                = ChainIter σ v
-  imap f (ChainInit x σ l v k)          = ChainInit x σ (f l) v (f k)
-  imap f (LogEnter name k)              = LogEnter name (f k)
-  imap f (LogExit name k)               = LogExit name (f k)
+  imap f Halt                                  = Halt
+  imap f Ret                                   = Ret
+  imap f (Push x k)                            = Push x (f k)
+  imap f (Pop k)                               = Pop (f k)
+  imap f (Lift2 g k)                           = Lift2 g (f k)
+  imap f (Sat g k)                             = Sat g (f k)
+  imap f (Call (Just (AbstractedStack m)) μ k) = Call (Just (AbstractedStack (f m))) μ (f k)
+  imap f (Call Nothing μ k)                    = Call Nothing μ (f k)
+  imap f (Jump (Just (AbstractedStack m)) μ)   = Jump (Just (AbstractedStack (f m))) μ
+  imap f (Jump Nothing μ)                      = Jump Nothing μ
+  imap f Empt                                  = Empt
+  imap f (Commit exit k)                       = Commit exit (f k)
+  imap f (SoftFork n p q (Just (φ, k)))        = SoftFork n (f p) (f q) (Just (φ, f k))
+  imap f (SoftFork n p q Nothing)              = SoftFork n (f p) (f q) Nothing
+  imap f (HardFork p q (Just (φ, k)))          = HardFork (f p) (f q) (Just (φ, f k))
+  imap f (HardFork p q Nothing)                = HardFork (f p) (f q) Nothing
+  imap f (Join φ)                              = Join φ
+  imap f (Attempt n k)                         = Attempt n (f k)
+  imap f (Look k)                              = Look (f k)
+  imap f (NegLook m k)                         = NegLook (f m) (f k)
+  imap f (Restore k)                           = Restore (f k)
+  imap f (Case p q)                            = Case (f p) (f q)
+  imap f (Choices fs ks)                       = Choices fs (map f ks)
+  imap f (ChainIter σ μ)                       = ChainIter σ μ
+  imap f (ChainInit x σ l μ k)                 = ChainInit x σ (f l) μ (f k)
+  imap f (LogEnter name k)                     = LogEnter name (f k)
+  imap f (LogExit name k)                      = LogExit name (f k)
 
 instance Show (Machine a) where show = show . getMachine
 instance Show (Free M f xs ks a i) where
   show = getConst . fold (const (Const "")) (Const . alg) where
     alg :: forall i j k l. M (Const String) i j k l -> String
-    alg Halt                                       = "Halt"
-    alg Ret                                        = "Ret"
-    alg (Call (AbstractedStack m) (MVar v) k)      = "{Call μ" ++ show v ++ " " ++ getConst m ++ " " ++ getConst k ++ "}"
-    alg (MuCall (MVar v) k)                        = "(μCall μ" ++ show v ++ " " ++ getConst k ++ ")"
-    alg (Push _ k)                                 = "(Push x " ++ getConst k ++ ")"
-    alg (Pop k)                                    = "(Pop " ++ getConst k ++ ")"
-    alg (Lift2 _ k)                                = "(Lift2 f " ++ getConst k ++ ")"
-    alg (Sat _ k)                                  = "(Sat f " ++ getConst k ++ ")"
-    alg Empt                                       = "Empt"
-    alg (Commit True k)                            = "(Commit end " ++ getConst k ++ ")"
-    alg (Commit False k)                           = "(Commit " ++ getConst k ++ ")"
-    alg (SoftFork Nothing p q Nothing)             = "(SoftFork " ++ getConst p ++ " " ++ getConst q ++ ")"
-    alg (SoftFork (Just n) p q Nothing)            = "(SoftFork " ++ show n ++ " " ++ getConst p ++ " " ++ getConst q ++ ")"
-    alg (SoftFork Nothing p q (Just (ΦVar φ, k)))  = "(SoftFork " ++ getConst p ++ " " ++ getConst q ++ " (φ" ++ show φ ++ " = " ++ getConst k ++ "))"
-    alg (SoftFork (Just n) p q (Just (ΦVar φ, k))) = "(SoftFork " ++ show n ++ " " ++ getConst p ++ " " ++ getConst q ++ " (φ" ++ show φ ++ " = " ++ getConst k ++ "))"
-    alg (HardFork p q Nothing)                     = "(HardFork " ++ getConst p ++ " " ++ getConst q ++ ")"
-    alg (HardFork p q (Just (ΦVar φ, k)))          = "(HardFork " ++ getConst p ++ " " ++ getConst q ++ " (φ" ++ show φ ++ " = " ++ getConst k ++ "))"
-    alg (Join (ΦVar φ))                            = "φ" ++ show φ
-    alg (Attempt Nothing k)                        = "(Try " ++ getConst k ++ ")"
-    alg (Attempt (Just n) k)                       = "(Try " ++ show n ++ " " ++ getConst k ++ ")"
-    alg (Look k)                                   = "(Look " ++ getConst k ++ ")"
-    alg (NegLook m k)                              = "(NegLook " ++ getConst m ++ " " ++ getConst k ++ ")"
-    alg (Restore k)                                = "(Restore " ++ getConst k ++ ")"
-    alg (Case m k)                                 = "(Case " ++ getConst m ++ " " ++ getConst k ++ ")"
-    alg (Choices _ ks)                             = "(Choices " ++ show (map getConst ks) ++ ")"
-    alg (ChainIter (ΣVar σ) (MVar v))              = "(ChainIter σ" ++ show σ ++ " μ" ++ show v ++ ")"
-    alg (ChainInit _ (ΣVar σ) m (MVar v) k)        = "{ChainInit σ" ++ show σ ++ " μ" ++ show v ++ " " ++ getConst m ++ " " ++ getConst k ++ "}"
-    alg (LogEnter _ k)                             = getConst k
-    alg (LogExit _ k)                              = getConst k
+    alg Halt                                  = "Halt"
+    alg Ret                                   = "Ret"
+    alg (Call (Just (AbstractedStack m)) μ k) = "{Call " ++ show μ ++ " " ++ getConst m ++ " " ++ getConst k ++ "}"
+    alg (Call Nothing μ k)                    = "(Call " ++ show μ ++ " " ++ getConst k ++ ")"
+    alg (Jump (Just (AbstractedStack m)) μ)   = "{Jump " ++ show μ ++ " " ++ getConst m ++ "}"
+    alg (Jump Nothing μ)                      = "(Jump " ++ show μ ++ ")"
+    alg (Push _ k)                            = "(Push x " ++ getConst k ++ ")"
+    alg (Pop k)                               = "(Pop " ++ getConst k ++ ")"
+    alg (Lift2 _ k)                           = "(Lift2 f " ++ getConst k ++ ")"
+    alg (Sat _ k)                             = "(Sat f " ++ getConst k ++ ")"
+    alg Empt                                  = "Empt"
+    alg (Commit True k)                       = "(Commit end " ++ getConst k ++ ")"
+    alg (Commit False k)                      = "(Commit " ++ getConst k ++ ")"
+    alg (SoftFork Nothing p q Nothing)        = "(SoftFork " ++ getConst p ++ " " ++ getConst q ++ ")"
+    alg (SoftFork (Just n) p q Nothing)       = "(SoftFork " ++ show n ++ " " ++ getConst p ++ " " ++ getConst q ++ ")"
+    alg (SoftFork Nothing p q (Just (φ, k)))  = "(SoftFork " ++ getConst p ++ " " ++ getConst q ++ " (" ++ show φ ++ " = " ++ getConst k ++ "))"
+    alg (SoftFork (Just n) p q (Just (φ, k))) = "(SoftFork " ++ show n ++ " " ++ getConst p ++ " " ++ getConst q ++ " (" ++ show φ ++ " = " ++ getConst k ++ "))"
+    alg (HardFork p q Nothing)                = "(HardFork " ++ getConst p ++ " " ++ getConst q ++ ")"
+    alg (HardFork p q (Just (φ, k)))          = "(HardFork " ++ getConst p ++ " " ++ getConst q ++ " (" ++ show φ ++ " = " ++ getConst k ++ "))"
+    alg (Join φ)                              = show φ
+    alg (Attempt Nothing k)                   = "(Try " ++ getConst k ++ ")"
+    alg (Attempt (Just n) k)                  = "(Try " ++ show n ++ " " ++ getConst k ++ ")"
+    alg (Look k)                              = "(Look " ++ getConst k ++ ")"
+    alg (NegLook m k)                         = "(NegLook " ++ getConst m ++ " " ++ getConst k ++ ")"
+    alg (Restore k)                           = "(Restore " ++ getConst k ++ ")"
+    alg (Case m k)                            = "(Case " ++ getConst m ++ " " ++ getConst k ++ ")"
+    alg (Choices _ ks)                        = "(Choices " ++ show (map getConst ks) ++ ")"
+    alg (ChainIter σ μ)                       = "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
+    alg (ChainInit _ σ m μ k)                 = "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ getConst m ++ " " ++ getConst k ++ "}"
+    alg (LogEnter _ k)                        = getConst k
+    alg (LogExit _ k)                         = getConst k
   
+instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
+instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ
+instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
+
 instance GEq ΣVar where
   geq (ΣVar u) (ΣVar v)
     | u == v    = Just (coerce Refl)

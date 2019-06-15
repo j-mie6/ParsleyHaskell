@@ -4,7 +4,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
 
-module Fresh ( VFreshT, HFreshT, runFreshT, evalFreshT, execFreshT, MonadFresh(..), construct ) where
+module Fresh ( VFreshT, HFreshT, runFreshT, evalFreshT, execFreshT, MonadFresh(..), construct, mapVFreshT ) where
 import Control.Applicative  (liftA2)
 import Control.Monad.Fix    (MonadFix(..))
 import Control.Monad.Trans  (MonadTrans(..), MonadIO(..))
@@ -18,6 +18,9 @@ class Monad m => MonadFresh x m | m -> x where
 
 construct :: MonadFresh x m => (x -> a) -> m a
 construct f = fmap f newVar
+
+mapVFreshT :: (m (a, x, x) -> n (b, x, x)) -> VFreshT x m a -> VFreshT x n b
+mapVFreshT f m = vFreshT (\cur max -> f (unVFreshT m cur max))
 
 class (Monad n, Monad m) => RunFreshT x n m | m -> x, m -> n where
   runFreshT :: m a -> x -> n (a, x)

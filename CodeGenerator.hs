@@ -9,26 +9,36 @@
 module CodeGenerator (codeGen) where
 
 import ParserAST                  (ParserF(..))
-import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar, IΦVar, MVar(..), ΦVar(..), ΦDecl, fmapInstr, abstract)
+import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΦDecl, fmapInstr, abstract, AbstractedStack)
 import Indexed                    (IFunctor, Free(Op), History(Era), Void, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
 import Control.Monad              ((<$!>))
 import Control.Monad.Reader       (ReaderT, ask, asks, runReaderT, local, MonadReader)
 import Control.Monad.State.Strict (State, get, put, runState, MonadState)
-import Fresh                      (VFreshT, runFreshT, evalFreshT, construct, MonadFresh(..))
-import Data.Map.Strict            (Map)
+import Fresh                      (VFreshT, HFreshT, runFreshT, evalFreshT, construct, MonadFresh(..), mapVFreshT)
+import Control.Monad.Trans        (lift)
+import Data.Set                   (Set)
 import Data.Maybe                 (isJust, fromJust)
 import Debug.Trace                (traceShow)
-import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
-newtype CodeGen b xs ks a i = CodeGen {runCodeGen :: forall xs' ks'. Free M Void (a ': xs') ks' b i
-                                                  -> VFreshT IΦVar (ReaderT (Map IMVar IMVar, IMVar) (State ΣVars)) (Free M Void xs' ks' b i)}
+type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFreshT IΣVar (ReaderT (Set IMVar) (State ΣVars)))) a
+runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> Set IMVar -> ΣVars -> (a, ΣVars)
+runCodeGenStack m μ0 φ0 σ0 seen0 vs0 = 
+  (flip runState vs0 . 
+   flip runReaderT seen0 . 
+   flip evalFreshT σ0 . 
+   flip evalFreshT μ0 . 
+   flip evalFreshT φ0) m
 
-codeGen :: Free ParserF Void '[] '[] a i -> (Free M Void '[] '[] a i, ΣVars)
-codeGen p = traceShow m (m, vs)
+newtype CodeGen b xs ks a i = 
+  CodeGen {runCodeGen :: forall xs' ks'. Free M Void (a ': xs') ks' b i -> CodeGenStack (Free M Void xs' ks' b i)}
+
+codeGen :: Free ParserF Void '[] '[] a i -> IMVar -> (Free M Void '[] '[] a i, ΣVars)
+codeGen p μ0 = traceShow m (m, vs)
   where
-    (m, vs) = runState (runReaderT (evalFreshT (runCodeGen (histo absurd alg (traceShow p p)) (Op Halt)) 0) (Map.empty, 0)) []
+    (m, vs) = runCodeGenStack (runCodeGen (histo absurd alg (traceShow p p)) (Op Halt)) μ0 0 0 Set.empty []
     alg = peephole |> (direct . imap present)
 
 peephole :: ParserF (History ParserF (CodeGen b)) xs ks a i -> Maybe (CodeGen b xs ks a i)
@@ -74,12 +84,11 @@ direct !(Branch b p q)    = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Op (Lift2
                                                   runCodeGen b (Op (Case pc qc))
 direct !(Match p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
                                                   runCodeGen p (Op (Choices fs qcs))
-direct !(Rec !v !q)     = CodeGen $ \(!m) ->
-  do seen <- lookupM v; case seen of
-       Just μ -> do return $! Op (MuCall μ m)
-       Nothing  -> do μ <- askM
-                      n <- renameM v μ (runCodeGen q (Op Ret))
-                      return $! Op (Call (abstract n) μ m)
+direct !(Rec !μ !q)     = CodeGen $ \(!m) ->
+  do ifSeenM μ
+       (do return $! tailCallOptimise Nothing (MVar μ) m)
+       (do n <- addM μ (runCodeGen q (Op Ret))
+           return $! tailCallOptimise (Just (abstract n)) (MVar μ) m)
 direct !(ChainPre op p) = CodeGen $ \(!m) ->
   do μ <- askM
      σ <- freshΣ id [||id||]
@@ -94,43 +103,53 @@ direct !(ChainPost p op) = CodeGen $ \(!m) ->
      freshM (runCodeGen p (fmapInstr (lift' Just) m'))
 direct !(Debug name p) = CodeGen $ \(!m) -> fmap (Op . LogEnter name) (runCodeGen p (Op (LogExit name m)))
 
+tailCallOptimise :: Maybe (AbstractedStack (Free M Void) x a i) -> MVar x -> Free M Void (x ': xs) ks a i -> Free M Void xs ks a i
+tailCallOptimise body μ (Op Ret) = Op (Jump body μ)
+tailCallOptimise body μ k        = Op (Call body μ k)
+
 (><) :: (a -> x) -> (b -> y) -> (a, b) -> (x, y)
 (f >< g) (x, y) = (f x, g y)
 
 -- Refactor with asks
-askM :: MonadReader (r1, IMVar) m => m (MVar a)
-askM = asks (MVar . snd)
+askM :: CodeGenStack (MVar a)
+askM = lift (construct MVar)
 
-askΦ :: MonadFresh IΦVar m => m (ΦVar a)
+askΦ :: CodeGenStack (ΦVar a)
 askΦ = construct ΦVar
 
-lookupM :: MonadReader (Map IMVar IMVar, IMVar) m => IMVar -> m (Maybe (MVar a))
-lookupM v = asks (fmap MVar . Map.lookup v . fst)
+freshM :: CodeGenStack a -> CodeGenStack a
+freshM = mapVFreshT newScope
 
-freshM :: MonadReader (r1, IMVar) m => m a -> m a
-freshM = local (id >< (+1))
-
-freshΦ :: MonadFresh IΦVar m => m a -> m a
+freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
-renameM :: MonadReader (Map IMVar IMVar, IMVar) m => IMVar -> MVar x -> m a -> m a
-renameM old (MVar new) = local ((Map.insert old new) >< (const (new+1)))
+ifSeenM :: MonadReader (Set IMVar) m => IMVar -> m a -> m a -> m a
+ifSeenM v seen unseen = 
+  do isSeen <- asks (Set.member v)
+     if isSeen then do seen 
+     else do unseen
 
-makeΦ :: MonadFresh IΦVar m => Free M Void (x ': xs) ks a i -> m (Maybe (ΦDecl (Free M Void) x xs ks a i), Free M Void (x ': xs) ks a i)
--- This is double-φ optimisation: If a φ-node points directly to another φ-node, then it can be elided
-makeΦ m@(Op (Join _)) = return $! (Nothing, m)
+addM :: MonadReader (Set IMVar) m => IMVar -> m a -> m a
+addM μ = local (Set.insert μ)
+
+makeΦ :: Free M Void (x ': xs) ks a i -> CodeGenStack (Maybe (ΦDecl (Free M Void) x xs ks a i), Free M Void (x ': xs) ks a i)
+makeΦ m | elidable m = return $! (Nothing, m)
+  where 
+    -- This is double-φ optimisation:   If a φ-node points directly to another φ-node, then it can be elided
+    elidable (Op (Join _)) = True
+    -- This is terminal-φ optimisation: If a φ-node points directly to a terminal operation, then it can be elided
+    elidable (Op Ret)      = True
+    elidable (Op Halt)     = True
+    elidable _             = False
 makeΦ m =
   do φ <- askΦ
      let !decl = Just (φ, m)
      let !join = Op (Join φ)
      return $! (decl, join)
 
-freshΣ :: MonadState ΣVars m => a -> TExpQ a -> m (ΣVar a)
+freshΣ :: a -> TExpQ a -> CodeGenStack (ΣVar a)
 freshΣ x qx = 
   do σs <- get
-     let σ = nextΣ σs
+     σ <- lift (lift (construct ΣVar))
      put (ΣState x qx σ:σs)
      return $! σ
-  where
-    nextΣ []                      = ΣVar 0
-    nextΣ (ΣState _ _ (ΣVar x):_) = ΣVar (x+1)

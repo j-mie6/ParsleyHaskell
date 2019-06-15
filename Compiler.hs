@@ -14,7 +14,7 @@ import Machine              (Machine(..), ΣVars, IMVar(..))
 import Indexed              (Free(Op), Void, fold', absurd)
 import Control.Applicative  (liftA2, liftA3)
 import Control.Monad.Reader (ReaderT, ask, runReaderT, local)
-import Fresh                (VFreshT, newVar, newScope, runFreshT, evalFreshT)
+import Fresh                (VFreshT, newVar, newScope, runFreshT)
 import Control.Monad.Trans  (liftIO)
 import System.IO.Unsafe     (unsafePerformIO)
 import Data.IORef           (IORef, writeIORef, readIORef, newIORef)
@@ -27,14 +27,19 @@ import Debug.Trace          (traceShow)
 import qualified Data.HashMap.Lazy as HashMap
 
 compile :: Parser a -> (Machine a, ΣVars)
-compile (Parser p) = let (m, σs) = codeGen (terminationAnalysis (preprocess p)) in (Machine m, σs)
+compile (Parser p) = 
+  let (p', numV) = preprocess p
+      (m, σs) = codeGen (terminationAnalysis p') numV in (Machine m, σs)
 
 data StableParserName xs ks i = forall a. StableParserName (StableName# (Free ParserF Void xs ks a i))
 data GenParser xs ks i = forall a. GenParser (Free ParserF Void xs ks a i)
 
-newtype Carrier xs ks a i = Carrier {unCarrier :: VFreshT IMVar (ReaderT (HashMap (StableParserName xs ks i) (IMVar, GenParser xs ks i, IORef Bool)) IO) (Free ParserF Void xs ks a i)}
-preprocess :: Free ParserF Void '[] '[] a i -> Free ParserF Void '[] '[] a i
-preprocess !p = unsafePerformIO (runReaderT (evalFreshT (unCarrier (fold' absurd findRecursion p)) 0) HashMap.empty)
+newtype Carrier xs ks a i = 
+  Carrier {unCarrier :: VFreshT IMVar 
+                        (ReaderT (HashMap (StableParserName xs ks i) (IMVar, GenParser xs ks i, IORef Bool)) IO)
+                        (Free ParserF Void xs ks a i)}
+preprocess :: Free ParserF Void '[] '[] a i -> (Free ParserF Void '[] '[] a i, IMVar)
+preprocess !p = unsafePerformIO (runReaderT (runFreshT (unCarrier (fold' absurd findRecursion p)) 0) HashMap.empty)
 
 findRecursion :: Free ParserF Void xs ks a i -> ParserF Carrier xs ks a i -> Carrier xs ks a i
 -- Force evaluation of p to ensure that the stableName is correct first time

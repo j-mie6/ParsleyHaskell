@@ -107,6 +107,8 @@ tailCallOptimise :: Maybe (AbstractedStack (Free M Void) x a i) -> MVar x -> Fre
 tailCallOptimise body μ (Op Ret) = Op (Jump body μ)
 tailCallOptimise body μ k        = Op (Call body μ k)
 
+--deadCommitOptimisation :: Free M Void (x ': xs) ks a i -> 
+
 (><) :: (a -> x) -> (b -> y) -> (a, b) -> (x, y)
 (f >< g) (x, y) = (f x, g y)
 

@@ -186,14 +186,14 @@ execCall (Just (AbstractedStack m)) μ k γ@(Γ xs ks o hs cs d) =
                         AbsExec (\(!xs) (!ks) o# (!hs) (!cs) d# ->
                           $$(let μs' = DMap.insert μ (QAbsExec [||r||]) (μs ctx)
                             in run m (Γ [||xs||] [||ks||] [||I# o#||] [||hs||] [||cs||] [||I# d#||]) (ctx {μs = μs'}))
-                          ))) $$xs $$(suspend k ctx ks) o# $$hs $$cs d# ||]
+                          ))) $$xs $$(suspend k γ ctx {-ks-}) o# $$hs $$cs d# ||]
 execCall Nothing μ k γ@(Γ xs ks o hs cs d) =
   do ctx <- ask
      let (QAbsExec m) = (μs ctx) DMap.! μ
      return $! [|| do let !(I# o#) = $$o
                       let !(I# d#) = $$d + 1
                       $$(save (σs ctx))
-                      runConcrete $$m $$xs $$(suspend k ctx ks) o# $$hs $$cs d# ||]
+                      runConcrete $$m $$xs $$(suspend k γ ctx {-ks-}) o# $$hs $$cs d# ||]
 
 execJump :: Maybe (AbstractedStack (Exec s) x a i) -> MVar x 
          -> Γ s xs ((x ': xs) ': ks) a -> Reader (Ctx s a) (QST s (Maybe a))
@@ -408,17 +408,18 @@ raiseΓ γ = [|| raise $$(hs γ) $$(cs γ) $$(o γ) $$(d γ) >>= runHandler ||]
 recoverΓ :: QD -> Exec s xs ks a i -> Γ s xs ks a -> Ctx s a -> QST s (Handled s a)
 recoverΓ d' k γ ctx = recover (σs ctx) [||$$d' - $$(d γ)||] (run k γ ctx)
 
-suspend :: Exec s xs ks a i -> Ctx s a -> QK s ks a -> QK s (xs ': ks) a
-suspend m ctx ks =
-  [|| pushK (\xs ks o hs cs d ->
-    $$(run m (Γ[||xs||] [||ks||] [||I# o||] [||hs||] [||cs||] [||I# d||]) ctx)) $$ks ||]
+suspend :: Exec s (x ': xs) ks a i -> Γ s xs ks a -> Ctx s a {--> QK s ks a-} -> QK s ((x ': xs) ': ks) a
+suspend m γ ctx =
+  {-[|| pushK (\xs ks o# hs cs d# ->
+    $$(run m (Γ [||xs||] [||ks||] [||I# o#||] [||hs||] [||cs||] [||I# d#||]) ctx)) $$ks ||]-}
+  [|| pushK (\xs o# -> $$(run m (γ {xs = [||xs||], o = [||I# o#||]}) ctx)) $$(ks γ) ||]
 
 resume :: Γ s (x ': xs) ((x ': xs) ': ks) a -> QST s (Maybe a)
-resume (Γ xs ks o hs cs d) =
-  [|| let I# o# = $$o
-          I# d# = $$d
-          !(# k, ks'' #) = popK $$ks
-      in k $$xs ks'' o# $$hs $$cs d#
+resume γ =
+  [|| let I# o# = $$(o γ)
+          --I# d# = $$d - 1
+          -- !(# k, ks'' #) = popK $$(ks γ)
+      in peekK $$(ks γ) $$(xs γ) {-ks''-} o# {-$$hs $$cs d#-}
   ||]
 
 instance IFunctor M where

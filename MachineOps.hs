@@ -21,7 +21,18 @@ data HList xs where
   HCons :: !a -> !(HList as) -> HList (a ': as)
 data K s ks a where
   KNil :: K s '[] a
-  KCons :: !(X xs -> K s ks a -> O# -> H s a -> C -> D# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
+  {- A key property of the pure semantics of the machine states that
+     at the end of the execution of a machine, all the stacks shall
+     be empty. This also holds true of any recursive machines, for
+     obvious reasons. In the concrete machine, however, it is not
+     entirely necessary for this invariant to be obeyed: indeed the
+     stacks that would have otherwise been passed to the continuation
+     in the pure semantics were available to the caller in the
+     concrete machine. As such, continuations are only required to
+     demand the values of X and o, with all other values closed over
+     during suspension. -}
+  --KCons :: !(X xs -> K s ks a -> O# -> H s a -> C -> D# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
+  KCons :: !(X xs -> O# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
 
 newtype H s a = H (SList (O# -> H s a -> C -> D# -> ST s (Handled s a)))
 type X = HList
@@ -65,13 +76,16 @@ peekX !(HCons x xs) = x
 makeK :: ST s (K s '[] a)
 makeK = return $! KNil
 {-# INLINE pushK #-}
-pushK :: (X xs -> K s ks a -> O# -> H s a -> C -> D# -> ST s (Maybe a)) -> K s ks a -> K s (xs ': ks) a
+pushK :: (X xs -> O# -> ST s (Maybe a)) -> K s ks a -> K s (xs ': ks) a
 pushK = KCons
 {-# INLINE popK #-}
-popK :: K s (xs ': ks) a -> (#(X xs -> K s ks a -> O# -> H s a -> C -> D# -> ST s (Maybe a)), K s ks a #)
+popK :: K s (xs ': ks) a -> (# (X xs -> O# -> ST s (Maybe a)), K s ks a #)
 popK !(KCons k ks) = (# k, ks #)
-noreturn :: X xs -> K s ks a -> O# -> H s a -> C -> D# -> ST s (Maybe a)
-noreturn xs ks o hs c d = error "Machine is only permitted return-by-failure"
+{-# INLINE peekK #-}
+peekK :: K s (xs ': ks) a -> (X xs -> O# -> ST s (Maybe a))
+peekK !(KCons k ks) = k
+noreturn :: X xs -> O# -> ST s (Maybe a)
+noreturn xs o# = error "Machine is only permitted return-by-failure"
 
 makeH :: ST s (H s a)
 makeH = return $! (H SNil)

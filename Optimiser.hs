@@ -102,7 +102,11 @@ optimise (Try n (Op (p :*>: Op (Pure x))))              = optimise (optimise (Tr
 optimise (Try n (Op (Op (Pure f) :<*>: p)))             = optimise (Op (Pure f) :<*>: optimise (Try n p))
 optimise (Try Nothing p)                                = case constantInput p of
                                                             Just 0 -> p
-                                                            Just 1 -> p
+                                                            -- This is a desirable thing to have, but we don't want to miss out
+                                                            -- on possible constant input optimisations. It might be better to
+                                                            -- perform global input size optimisation checks, potentially as a
+                                                            -- separate instruction even?
+                                                            --Just 1 -> p
                                                             ci -> Op (Try ci p)
 -- pure Left law: branch (pure (Left x)) p q            = p <*> pure x
 optimise (Branch (Op (Pure (WQ (Left x) ql))) p _)      = optimise (p :<*>: Op (Pure (WQ x qx))) where qx = [||case $$ql of Left x -> x||]

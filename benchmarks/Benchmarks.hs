@@ -19,6 +19,10 @@ import qualified Text.Yoda as Yoda
 import qualified Text.Parsec as Parsec
 import CommonFunctions
 
+import Text.Megaparsec
+import Text.Megaparsec.Char
+import Data.Text (Text, pack)
+
 deriving instance Generic Pred
 deriving instance NFData Pred
 deriving instance Generic BrainFuckOp
@@ -33,8 +37,11 @@ manyTestParsley = -- $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley
                   --                        Parsley.<* Parsley.while ((Parsley.WQ (== 'b') [||(== 'b')||]) Parsley.<$> Parsley.item))))
                   $$(Parsley.runParser ({-Parsley.void -}ParsleyParsers.pred))
 
-phiTestP :: String -> Maybe Char
-phiTestP = $$(Parsley.runParser ParsleyParsers.phiTest)
+tailTestP :: String -> Maybe Char
+tailTestP = $$(Parsley.runParser ParsleyParsers.phiTest)
+
+tailTestP' :: String -> Maybe Char
+tailTestP' = parseMaybe (skipMany (char 'a') *> char 'b' :: Parsec () String Char)
 
 --brainfuckParsley :: String -> Maybe [BrainFuckOp]
 --brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
@@ -62,11 +69,22 @@ crossMany = env (return $ take 1001 ('0':cycle "+1")) $ \input -> bgroup "many" 
     bench "manyYodaOk 1000"  $ nf (Yoda.parse manyTestYodaOk)         input
   ]-}
 
+tailTest :: Benchmark
+tailTest = bgroup "tail-rec" [
+    bench "tail-rec 0"      $ nf tailTestP' (replicate 0 'a' ++ "b"),--(take 0 ('0':cycle "+1")),
+    bench "tail-rec 1"      $ nf tailTestP' (replicate 1 'a' ++ "b"),--(take 1 ('0':cycle "+1")),
+    bench "tail-rec 10"     $ nf tailTestP' (replicate 10 'a' ++ "b"),--(take 11 ('0':cycle "+1")),
+    bench "tail-rec 100"    $ nf tailTestP' (replicate 100 'a' ++ "b"),--(take 101 ('0':cycle "+1")),
+    bench "tail-rec 1000"   $ nf tailTestP' (replicate 1000 'a' ++ "b"),--(take 1001 ('0':cycle "+1")),
+    bench "tail-rec 10,000" $ nf tailTestP' (replicate 10000 'a' ++ "b")--(take 10001 ('0':cycle "+1"))
+  ]
+
 main :: IO ()
 --main = rnf (Parsley.runParser longChoice "b") `seq` return ()
-{-main = --rnf (Parsley.runParser (manyTestParsley) (replicate 1000000 'a')) `seq` return (){-
+main = --rnf (Parsley.runParser (manyTestParsley) (replicate 1000000 'a')) `seq` return (){-
   defaultMain [
-    combinatorGroup,
-    crossMany
+    --combinatorGroup,
+    --crossMany
+    tailTest
   ]--}-}
-main = print (manyTestParsley ("!!!!t&&!f&&t"))
+--main = print (manyTestParsley ("!!!!t&&!f&&t"))

@@ -23,3 +23,9 @@ brainfuck input =
     (res, []) -> res
     _         -> error "] closes a loop, but no loop was opened"
         
+tailTest :: String -> Maybe Char
+tailTest [] = Nothing
+tailTest (c:cs) = case c of
+  'a' -> tailTest cs
+  'b' -> Just 'b'
+  _   -> Nothing

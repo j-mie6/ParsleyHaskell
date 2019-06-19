@@ -9,12 +9,12 @@
 module ParserAST where
 
 import Indexed                    (IFunctor, Free(Op), Void, Const(..), imap, fold)
-import Machine                    (IMVar)
+import Machine                    (IMVar, MVar(..))
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 
 -- Parser wrapper type
-newtype Parser a = Parser {unParser :: Free ParserF Void '[] '[] a ()}
+newtype Parser a = Parser {unParser :: Free ParserF Void a}
 
 -- Core smart constructors
 pure :: WQ a -> Parser a
@@ -71,23 +71,24 @@ infixl 4 *>
 infixl 3 <|>
 
 -- Core datatype
-data ParserF (k :: [*] -> [[*]] -> * -> * -> *) (xs :: [*]) (ks :: [[*]]) (a :: *) (i :: *) where
-    Pure          :: WQ a -> ParserF k xs ks a i
-    Satisfy       :: WQ (Char -> Bool) -> ParserF k xs ks Char i
-    (:<*>:)       :: k xs ks (a -> b) i -> k xs ks a i -> ParserF k xs ks b i
-    (:*>:)        :: k xs ks a i -> k xs ks b i -> ParserF k xs ks b i
-    (:<*:)        :: k xs ks a i -> k xs ks b i -> ParserF k xs ks a i
-    (:<|>:)       :: k xs ks a i -> k xs ks a i -> ParserF k xs ks a i
-    Empty         :: ParserF k xs ks a i
-    Try           :: Maybe Int -> k xs ks a i -> ParserF k xs ks a i
-    LookAhead     :: k xs ks a i -> ParserF k xs ks a i
-    Rec           :: IMVar -> k xs ks a i -> ParserF k xs ks a i
-    NotFollowedBy :: k xs ks a i -> ParserF k xs ks () i
-    Branch        :: k xs ks (Either a b) i -> k xs ks (a -> c) i -> k xs ks (b -> c) i -> ParserF k xs ks c i
-    Match         :: k xs ks a i -> [WQ (a -> Bool)] -> [k xs ks b i] -> ParserF k xs ks b i
-    ChainPre      :: k xs ks (a -> a) i -> k xs ks a i -> ParserF k xs ks a i
-    ChainPost     :: k xs ks a i -> k xs ks (a -> a) i -> ParserF k xs ks a i
-    Debug         :: String -> k xs ks a i -> ParserF k xs ks a i
+data ParserF (k :: * -> *) (a :: *) where
+    Pure          :: WQ a -> ParserF k a
+    Satisfy       :: WQ (Char -> Bool) -> ParserF k Char
+    (:<*>:)       :: k (a -> b) -> k a -> ParserF k b
+    (:*>:)        :: k a -> k b -> ParserF k b
+    (:<*:)        :: k a -> k b -> ParserF k a
+    (:<|>:)       :: k a -> k a -> ParserF k a
+    Empty         :: ParserF k a
+    Try           :: Maybe Int -> k a -> ParserF k a
+    LookAhead     :: k a -> ParserF k a
+    Let           :: MVar a -> k a -> ParserF k a
+    Rec           :: MVar a -> k a -> ParserF k a
+    NotFollowedBy :: k a -> ParserF k ()
+    Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF k c
+    Match         :: k a -> [WQ (a -> Bool)] -> [k b] -> ParserF k b
+    ChainPre      :: k (a -> a) -> k a -> ParserF k a
+    ChainPost     :: k a -> k (a -> a) -> ParserF k a
+    Debug         :: String -> k a -> ParserF k a
 
 -- Instances
 instance IFunctor ParserF where
@@ -100,7 +101,8 @@ instance IFunctor ParserF where
   imap _ Empty             = Empty
   imap f (Try n p)         = Try n (f p)
   imap f (LookAhead p)     = LookAhead (f p)
-  imap f (Rec p q)         = Rec p (f q)
+  imap f (Let v p)         = Let v (f p)
+  imap f (Rec v p)         = Rec v (f p)
   imap f (NotFollowedBy p) = NotFollowedBy (f p)
   imap f (Branch b p q)    = Branch (f b) (f p) (f q)
   imap f (Match p fs qs)   = Match (f p) fs (map f qs)
@@ -108,7 +110,7 @@ instance IFunctor ParserF where
   imap f (ChainPost p op)  = ChainPost (f p) (f op)
   imap f (Debug name p)    = Debug name (f p)
 
-instance Show (Free ParserF f '[] '[] a i) where
+instance Show (Free ParserF f a) where
   show = getConst . fold (const (Const "")) (Const . alg)
     where
       alg (Pure x)                               = "(pure x)"
@@ -121,7 +123,8 @@ instance Show (Free ParserF f '[] '[] a i) where
       alg (Try Nothing (Const p))                = concat ["(try ? ", p, ")"]
       alg (Try (Just n) (Const p))               = concat ["(try ", show n, " ", p, ")"]
       alg (LookAhead (Const p))                  = concat ["(lookAhead ", p, ")"]
-      alg (Rec _ _)                              = "recursion point!"
+      alg (Let v (Const p))                      = concat ["(let-bound ", show v, " ", p, ")"]
+      alg (Rec v _)                              = concat ["(rec ", show v, ")"]
       alg (NotFollowedBy (Const p))              = concat ["(notFollowedBy ", p, ")"]
       alg (Branch (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
       alg (Match (Const p) fs qs)                = concat ["(match ", p, " ", show (map getConst qs), ")"]

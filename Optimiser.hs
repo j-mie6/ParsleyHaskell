@@ -8,7 +8,7 @@ import Analyser  (constantInput)
 import Indexed   (Free(Op))
 import Utils     (lift', (>*<), WQ(..))
 
-optimise :: ParserF (Free ParserF f) xs ks a i -> Free ParserF f xs ks a i
+optimise :: ParserF (Free ParserF f) a -> Free ParserF f a
 -- DESTRUCTIVE OPTIMISATION
 -- Right Absorption Law: empty <*> u                    = empty
 optimise (Op Empty :<*>: _)                             = Op Empty
@@ -105,8 +105,8 @@ optimise (Try Nothing p)                                = case constantInput p o
                                                             -- This is a desirable thing to have, but we don't want to miss out
                                                             -- on possible constant input optimisations. It might be better to
                                                             -- perform global input size optimisation checks, potentially as a
-                                                            -- separate instruction even?
-                                                            --Just 1 -> p
+                                                            -- separate instruction even? Or use strings, then this is unnecessary
+                                                            Just 1 -> p
                                                             ci -> Op (Try ci p)
 -- pure Left law: branch (pure (Left x)) p q            = p <*> pure x
 optimise (Branch (Op (Pure (WQ (Left x) ql))) p _)      = optimise (p :<*>: Op (Pure (WQ x qx))) where qx = [||case $$ql of Left x -> x||]
@@ -142,9 +142,13 @@ optimise (Match p fs qs)
           qvalidate  = foldr (\f k -> [||\x -> $$(_code f) x || $$k x||]) [||const False||] fs
 -- Distributivity Law: f <$> match vs p g                = match vs p ((f <$>) . g)
 optimise (Op (Pure f) :<*>: (Op (Match p fs qs)))        = Op (Match p fs (map (optimise . (Op (Pure f) :<*>:)) qs))
+-- Trivial let-bindings
+optimise (Let _ p@(Op (Pure _)))                         = p
+optimise (Let _ p@(Op Empty))                            = p
+optimise (Let _ p@(Op (Satisfy _)))                      = p
 optimise p                                               = Op p
 
-(>?>) :: Free ParserF f xs ks a i -> WQ (a -> Bool) -> Free ParserF f xs ks a i
+(>?>) :: Free ParserF f a -> WQ (a -> Bool) -> Free ParserF f a
 p >?> (WQ f qf) = Op (Branch (Op (Op (Pure (WQ g qg)) :<*>: p)) (Op Empty) (Op (Pure (lift' id))))
   where
     g x = if f x then Right x else Left ()

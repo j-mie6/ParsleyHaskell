@@ -6,7 +6,7 @@ module Parsley ( Parser, runParser
                -- Applicative
                , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
                -- Alternative
-               , empty, (<|>), optional, choice, oneOf, noneOf, maybeP
+               , empty, (<|>), optional, option, choice, oneOf, noneOf, maybeP
                -- Monoidal
                , unit, (<~>), (<~), (~>)
                -- Selective
@@ -32,6 +32,8 @@ module Parsley ( Parser, runParser
                , Level(..), precedence
                -- Template Haskell Utils
                , lift', (>*<), WQ(..), Lift
+               -- Template Haskell Crap
+               , bool
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat)
@@ -184,6 +186,9 @@ item = satisfy (WQ (const True) [|| const True ||])
 -- Composite Combinators
 optional :: Parser a -> Parser ()
 optional p = void p <|> unit
+
+option :: WQ a -> Parser a -> Parser a
+option x p = p <|> pure x
 
 choice :: [Parser a] -> Parser a
 choice = foldr (<|>) empty

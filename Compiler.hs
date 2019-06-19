@@ -3,82 +3,189 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE MagicHash, ScopedTypeVariables #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE FlexibleInstances, MultiParamTypeClasses, UndecidableInstances, AllowAmbiguousTypes #-}
 module Compiler(compile) where
 
-import ParserAST            (ParserF(..), Parser(..))
-import Optimiser            (optimise)
-import Analyser             (terminationAnalysis)
-import CodeGenerator        (codeGen)
-import Machine              (Machine(..), ΣVars, IMVar(..))
-import Indexed              (Free(Op), Void, fold', absurd)
-import Control.Applicative  (liftA2, liftA3)
-import Control.Monad.Reader (ReaderT, ask, runReaderT, local)
-import Fresh                (VFreshT, newVar, newScope, runFreshT)
-import Control.Monad.Trans  (liftIO)
-import System.IO.Unsafe     (unsafePerformIO)
-import Data.IORef           (IORef, writeIORef, readIORef, newIORef)
-import GHC.StableName       (StableName(..), makeStableName, hashStableName, eqStableName)
-import Data.Hashable        (Hashable, hashWithSalt, hash)
-import Data.HashMap.Lazy    (HashMap)
-import GHC.Prim             (StableName#)
-import Safe.Coerce          (coerce)
-import Debug.Trace          (traceShow)
-import qualified Data.HashMap.Lazy as HashMap
+import ParserAST                  (ParserF(..), Parser(..))
+import Optimiser                  (optimise)
+import Analyser                   (terminationAnalysis)
+import CodeGenerator              (codeGen)
+import Machine                    (Machine(..), ΣVars, IMVar, MVar(..))
+import Indexed                    (Free(Op), Void, fold', absurd)
+import Control.Applicative        (liftA2, liftA3)
+import Control.Monad              (forM_)
+import Control.Monad.Reader       (ReaderT, runReaderT, local, asks, MonadReader)
+import Control.Monad.State.Strict (StateT, get, gets, put, runStateT, execStateT, modify', MonadState)
+import Data.Tuple.Extra           (first, second)
+import Fresh                      (HFreshT, newVar, newScope, runFreshT)
+import Control.Monad.Trans        (liftIO, MonadIO)
+import System.IO.Unsafe           (unsafePerformIO)
+import GHC.StableName             (StableName(..), makeStableName, hashStableName, eqStableName)
+import Data.Hashable              (Hashable, hashWithSalt, hash)
+import Data.HashMap.Strict        (HashMap)
+import Data.HashSet               (HashSet)
+import Data.Dependent.Map         (DMap)
+import GHC.Prim                   (StableName#)
+import Debug.Trace                (traceShow)
+import qualified Data.HashMap.Strict as HashMap (lookup, insert, empty, insertWith, foldrWithKey)
+import qualified Data.HashSet        as HashSet (member, insert, empty, singleton, union, size)
+import qualified Data.Dependent.Map  as DMap    ((!), empty, insert)
+import Data.GADT.Show (GShow(..))
+import Data.Dependent.Sum (ShowTag(..))
 
 compile :: Parser a -> (Machine a, ΣVars)
 compile (Parser p) = 
-  let (p', numV) = preprocess p
-      (m, σs) = codeGen (terminationAnalysis p') numV in (Machine m, σs)
+  let (p', maxV) = preprocess p
+      (m, σs) = codeGen ({-terminationAnalysis -}p') (maxV + 1) in (Machine m, σs)
 
-data StableParserName xs ks i = forall a. StableParserName (StableName# (Free ParserF Void xs ks a i))
-data GenParser xs ks i = forall a. GenParser (Free ParserF Void xs ks a i)
+preprocess :: Free ParserF Void a -> (Free ParserF Void a, IMVar)
+preprocess p =
+  let (lets, recs) = findLets p
+      (p', μs, maxV) = letInsertion lets recs p
+  in traceShow μs (p', maxV)
 
-newtype Carrier xs ks a i = 
-  Carrier {unCarrier :: VFreshT IMVar 
-                        (ReaderT (HashMap (StableParserName xs ks i) (IMVar, GenParser xs ks i, IORef Bool)) IO)
-                        (Free ParserF Void xs ks a i)}
-preprocess :: Free ParserF Void '[] '[] a i -> (Free ParserF Void '[] '[] a i, IMVar)
-preprocess !p = unsafePerformIO (runReaderT (runFreshT (unCarrier (fold' absurd findRecursion p)) 0) HashMap.empty)
+data StableParserName = forall a. StableParserName (StableName# (Free ParserF Void a))
+newtype LetFinder a =
+  LetFinder {
+    runLetFinder :: StateT ( HashMap StableParserName (HashSet StableParserName)
+                           , HashSet StableParserName)
+                    (ReaderT (Maybe StableParserName, HashSet StableParserName) IO)
+                    () 
+    }
 
-findRecursion :: Free ParserF Void xs ks a i -> ParserF Carrier xs ks a i -> Carrier xs ks a i
+findLets :: Free ParserF Void a -> (HashSet StableParserName, HashSet StableParserName)
+findLets p = first lets (unsafePerformIO (runReaderT (execStateT (runLetFinder (fold' absurd findLetsAlg p)) (HashMap.empty, HashSet.empty)) (Nothing, HashSet.empty)))
+  where
+    lets = HashMap.foldrWithKey (\k vs ls -> if HashSet.size vs > 1 then HashSet.insert k ls else ls) HashSet.empty
+
+findLetsAlg :: Free ParserF Void a -> ParserF LetFinder a -> LetFinder a
+findLetsAlg p q = LetFinder $ do 
+  name <- makeStableParserName p
+  pred <- askPred
+  maybe (return ()) (addPred name) pred
+  ifSeen name 
+    (do addRec name)
+    (do addName name (localPred (Just name) (case q of
+          pf :<*>: px     -> do runLetFinder pf; runLetFinder px
+          p :*>: q        -> do runLetFinder p;  runLetFinder q
+          p :<*: q        -> do runLetFinder p;  runLetFinder q
+          p :<|>: q       -> do runLetFinder p;  runLetFinder q
+          Try n p         -> do runLetFinder p
+          LookAhead p     -> do runLetFinder p
+          NotFollowedBy p -> do runLetFinder p
+          Branch b p q    -> do runLetFinder b;  runLetFinder p; runLetFinder q
+          Match p _ qs    -> do runLetFinder p;  forM_ qs runLetFinder
+          ChainPre op p   -> do runLetFinder op; runLetFinder p
+          ChainPost p op  -> do runLetFinder p;  runLetFinder op
+          Debug _ p       -> do runLetFinder p
+          _               -> do return ())))
+
+newtype LetInserter a =
+  LetInserter {
+      runLetInserter :: HFreshT IMVar 
+                        (StateT ( HashMap StableParserName IMVar
+                                , DMap MVar (Free ParserF Void)) IO) 
+                        (Free ParserF Void a)
+    }
+letInsertion :: HashSet StableParserName -> HashSet StableParserName -> Free ParserF Void a -> (Free ParserF Void a, DMap MVar (Free ParserF Void), IMVar)
+letInsertion lets recs p = (p', μs, μMax)
+  where
+    m = fold' absurd alg p
+    ((p', μMax), (_, μs)) = unsafePerformIO (runStateT (runFreshT (runLetInserter m) 0) (HashMap.empty, DMap.empty))
+    alg :: Free ParserF Void a -> ParserF LetInserter a -> LetInserter a
+    alg p q = LetInserter $ do
+      name <- makeStableParserName p
+      (vs, μs) <- get
+      if | HashSet.member name recs ->
+             case HashMap.lookup name vs of
+               Just v  -> let μ = MVar v in return $! Op (Rec μ (μs DMap.! μ))
+               Nothing -> mdo
+                 v <- newVar
+                 let μ = MVar v
+                 put (HashMap.insert name v vs, DMap.insert μ q' μs)
+                 q' <- runLetInserter (postprocess q)
+                 return $! Op (Rec μ q')
+         | HashSet.member name lets ->
+             case HashMap.lookup name vs of
+               Just v  -> let μ = MVar v in return $! optimise (Let μ (μs DMap.! μ))
+               Nothing -> do -- no mdo here, let bindings are not recursive!
+                 v <- newVar
+                 let μ = MVar v
+                 q' <- runLetInserter (postprocess q)
+                 put (HashMap.insert name v vs, DMap.insert μ q' μs)
+                 return $! optimise (Let μ q')
+         | otherwise -> do runLetInserter (postprocess q)
+
+postprocess :: ParserF LetInserter a -> LetInserter a
+postprocess (pf :<*>: px)     = LetInserter (fmap optimise (liftA2 (:<*>:) (runLetInserter pf) (runLetInserter px)))
+postprocess (p :*>: q)        = LetInserter (fmap optimise (liftA2 (:*>:)  (runLetInserter p)  (runLetInserter q)))
+postprocess (p :<*: q)        = LetInserter (fmap optimise (liftA2 (:<*:)  (runLetInserter p)  (runLetInserter q)))
+postprocess (p :<|>: q)       = LetInserter (fmap optimise (liftA2 (:<|>:) (runLetInserter p)  (runLetInserter q)))
+postprocess Empty             = LetInserter (return        (Op Empty))
+postprocess (Try n p)         = LetInserter (fmap optimise (fmap (Try n) (runLetInserter p)))
+postprocess (LookAhead p)     = LetInserter (fmap optimise (fmap LookAhead (runLetInserter p)))
+postprocess (NotFollowedBy p) = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
+postprocess (Branch b p q)    = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
+postprocess (Match p fs qs)   = LetInserter (fmap optimise (liftA3 Match (runLetInserter p) (return fs) (traverse runLetInserter qs)))
+postprocess (ChainPre op p)   = LetInserter (fmap Op       (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
+postprocess (ChainPost p op)  = LetInserter (fmap Op       (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
+postprocess (Debug name p)    = LetInserter (fmap Op       (fmap (Debug name) (runLetInserter p)))
+postprocess (Pure x)          = LetInserter (return        (Op (Pure x)))
+postprocess (Satisfy f)       = LetInserter (return        (Op (Satisfy f)))
+
+getPreds :: MonadState (s1, s2) m => m s1
+getPreds = gets fst
+
+getRecs :: MonadState (s1, s2) m => m s2
+getRecs = gets snd
+
+modifyPreds :: MonadState (s1, s2) m => (s1 -> s1) -> m ()
+modifyPreds = modify' . first
+
+modifyRecs :: MonadState (s1, s2) m => (s2 -> s2) -> m ()
+modifyRecs = modify' . second
+
+addPred :: (Eq k, Hashable k, Eq v, Hashable v, MonadState (HashMap k (HashSet v), s2) m) => k -> v -> m ()
+addPred k v = modifyPreds (HashMap.insertWith HashSet.union k (HashSet.singleton v))
+
+addRec :: (Eq a, Hashable a, MonadState (s1, HashSet a) m) => a -> m ()
+addRec = modifyRecs . HashSet.insert
+
+askPred :: MonadReader (r1, r2) m => m r1
+askPred = asks fst
+
+askSeen :: MonadReader (r1, r2) m => m r2
+askSeen = asks snd
+
+localPred :: MonadReader (r1, r2) m => r1 -> m a -> m a
+localPred x = local (first (const x))
+
+localSeen :: MonadReader (r1, r2) m => (r2 -> r2) -> m a -> m a
+localSeen f = local (second f)
+
+ifSeen :: (Eq a, Hashable a, MonadReader (r1, HashSet a) m) => a -> m b -> m b -> m b
+ifSeen x yes no = do !seen <- askSeen; if HashSet.member x seen then yes else no
+
+addName :: (Eq a, Hashable a, MonadReader (r1, HashSet a) m) => a -> m b -> m b
+addName x = localSeen (HashSet.insert x)
+
+makeStableParserName :: MonadIO m => Free ParserF Void a -> m StableParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
-findRecursion !p q = Carrier $ do
-  !seen <- ask
-  (StableName _name) <- liftIO (makeStableName p)
-  let !name = StableParserName _name
-  case HashMap.lookup name seen of
-    Just (v', GenParser q, used) -> do liftIO (writeIORef used True)
-                                       return $! (Op (Rec v' (coerce q)))
-    Nothing -> mdo usedVar <- liftIO (newIORef False)
-                   v <- newVar
-                   q' <- local (HashMap.insert name (v, GenParser q', usedVar)) (newScope (unCarrier $ postprocess q))
-                   used <- liftIO (readIORef usedVar)
-                   if used then return $! (Op (Rec v q'))
-                   else         return $! q'
-
-postprocess :: ParserF Carrier xs ks a i -> Carrier xs ks a i
-postprocess !(pf :<*>: px)     = Carrier (fmap optimise (liftA2 (:<*>:) (unCarrier pf) (unCarrier px)))
-postprocess !(p :*>: q)        = Carrier (fmap optimise (liftA2 (:*>:)  (unCarrier p)  (unCarrier q)))
-postprocess !(p :<*: q)        = Carrier (fmap optimise (liftA2 (:<*:)  (unCarrier p)  (unCarrier q)))
-postprocess !(p :<|>: q)       = Carrier (fmap optimise (liftA2 (:<|>:) (unCarrier p)  (unCarrier q)))
-postprocess !Empty             = Carrier (return        (Op Empty))
-postprocess !(Try n p)         = Carrier (fmap optimise (fmap (Try n) (unCarrier p)))
-postprocess !(LookAhead p)     = Carrier (fmap optimise (fmap LookAhead (unCarrier p)))
-postprocess !(NotFollowedBy p) = Carrier (fmap optimise (fmap NotFollowedBy (unCarrier p)))
-postprocess !(Branch b p q)    = Carrier (fmap optimise (liftA3 Branch (unCarrier b) (unCarrier p) (unCarrier q)))
-postprocess !(Match p fs qs)   = Carrier (fmap optimise (liftA3 Match (unCarrier p) (return fs) (traverse unCarrier qs)))
-postprocess !(ChainPre op p)   = Carrier (fmap Op       (liftA2 ChainPre (unCarrier op) (unCarrier p)))
-postprocess !(ChainPost p op)  = Carrier (fmap Op       (liftA2 ChainPost (unCarrier p) (unCarrier op)))
-postprocess !(Debug name p)    = Carrier (fmap Op       (fmap (Debug name) (unCarrier p)))
-postprocess !(Pure x)          = Carrier (return        (Op (Pure x)))
-postprocess !(Satisfy f)       = Carrier (return        (Op (Satisfy f)))
+makeStableParserName !p =
+  do !(StableName name) <- liftIO (makeStableName p)
+     return $! StableParserName name
 
 showM :: Parser a -> String
 showM = show . fst . compile
 
-instance Eq (StableParserName xs ks i) where 
+instance Eq StableParserName where 
   (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)
-instance Hashable (StableParserName xs ks i) where
+instance Hashable StableParserName where
   hash (StableParserName n) = hashStableName (StableName n)
   hashWithSalt salt (StableParserName n) = hashWithSalt salt (StableName n)
+
+instance GShow MVar where gshowsPrec = showsPrec
+instance Show (Free ParserF Void a) => ShowTag MVar (Free ParserF Void) where showTaggedPrec m = showsPrec

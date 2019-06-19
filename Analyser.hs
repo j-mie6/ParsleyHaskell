@@ -6,7 +6,7 @@
 module Analyser (constantInput, terminationAnalysis) where
 
 import ParserAST                  (ParserF(..))
-import Machine                    (IMVar)
+import Machine                    (IMVar, MVar(..))
 import Indexed                    (Free, History(Era), Void, Const(..), imap, fold, histo, present, (|>), absurd)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
@@ -17,13 +17,13 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
 -- Constant Input Consumption Analysis
-constantInput :: Free ParserF f xs ks a i -> Maybe Int
+constantInput :: Free ParserF f a -> Maybe Int
 constantInput = getConst . histo (const (Const Nothing)) (alg1 |> (Const . alg2 . imap present))
   where
-    alg1 :: ParserF (History ParserF (Const (Maybe Int))) xs ks a i -> Maybe (Const (Maybe Int) xs ks a i)
+    alg1 :: ParserF (History ParserF (Const (Maybe Int))) a -> Maybe (Const (Maybe Int) a)
     alg1 (Era (Const n) (Try _ _) :<|>: Era (Const q) _) = Just (Const (n <==> q))
     alg1 _ = Nothing
-    alg2 :: ParserF (Const (Maybe Int)) xs ks a i -> Maybe Int
+    alg2 :: ParserF (Const (Maybe Int)) a -> Maybe Int
     alg2 (Pure _)                               = Just 0
     alg2 (Satisfy _)                            = Just 1
     alg2 (Const p :<*>: Const q)                = p <+> q
@@ -36,6 +36,7 @@ constantInput = getConst . histo (const (Const Nothing)) (alg1 |> (Const . alg2 
     alg2 (Branch (Const b) (Const p) (Const q)) = b <+> (p <==> q)
     alg2 (Match (Const p) _ qs)                 = p <+> (foldr1 (<==>) (map getConst qs))
     alg2 (Debug _ (Const p))                    = p
+    alg2 (Let _ (Const p))                      = p
     alg2 _                                      = Nothing
 
 -- Termination Analysis (Generalised left-recursion checker)
@@ -90,12 +91,12 @@ branching (Prop None f _) ps
 branching (Prop Some f _) ps = Prop (foldr (|||) Some (map success ps)) f False
 
 --data InferredTerm = Loops | Safe | Undecidable
-newtype Termination xs ks a i = Termination {runTerm :: ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop}
-terminationAnalysis :: Free ParserF Void '[] '[] a i -> Free ParserF Void '[] '[] a i
+newtype Termination a = Termination {runTerm :: ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop}
+terminationAnalysis :: Free ParserF Void a -> Free ParserF Void a
 terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold absurd (Termination . alg) p)) Set.empty) Map.empty)) then p
                         else error "Parser will loop indefinitely: either it is left-recursive or iterates over pure computations"
   where
-    alg :: ParserF Termination ks xs a i -> ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop
+    alg :: ParserF Termination a -> ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop
     alg (Satisfy _)                          = return $! Prop Some None True
     alg (Pure _)                             = return $! Prop None Never True
     alg Empty                                = return $! Prop Never None True
@@ -139,7 +140,7 @@ terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold ab
            y -> do x <- runTerm p; case (x, y) of
                      (Prop Some f _, Prop _ Never _) -> return $! Prop Some f False
                      (x, y)                          -> return $! Prop (success x) (fails x &&& fails y) False -- TODO Verify
-    alg (Rec v p)                            =
+    alg (Rec (MVar v) p)                     =
       do props <- get
          seen <- ask
          case Map.lookup v props of

@@ -31,7 +31,6 @@ data K s ks a where
      concrete machine. As such, continuations are only required to
      demand the values of X and o, with all other values closed over
      during suspension. -}
-  --KCons :: !(X xs -> K s ks a -> O# -> H s a -> C -> D# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
   KCons :: !(X xs -> O# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
 
 newtype H s a = H (SList (O# -> H s a -> C -> D# -> ST s (Handled s a)))

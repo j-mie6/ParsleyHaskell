@@ -12,8 +12,8 @@ module Compiler(compile) where
 import ParserAST                  (ParserF(..), Parser(..))
 import Optimiser                  (optimise)
 import Analyser                   (terminationAnalysis)
-import CodeGenerator              (codeGen)
-import Machine                    (Machine(..), ΣVars, IMVar, MVar(..))
+import CodeGenerator              (codeGen, halt, ret)
+import Machine                    (Machine(..), ΣVars, IMVar, IΣVar, MVar(..), letBind, LetBinding)
 import Indexed                    (Free(Op), Void, fold', absurd)
 import Control.Applicative        (liftA2, liftA3)
 import Control.Monad              (forM_)
@@ -32,20 +32,27 @@ import GHC.Prim                   (StableName#)
 import Debug.Trace                (traceShow)
 import qualified Data.HashMap.Strict as HashMap (lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, singleton, union, size)
-import qualified Data.Dependent.Map  as DMap    ((!), empty, insert)
+import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey)
 import Data.GADT.Show (GShow(..))
 import Data.Dependent.Sum (ShowTag(..))
 
-compile :: Parser a -> (Machine a, ΣVars)
+compile :: Parser a -> (Machine a, DMap MVar (LetBinding a), ΣVars)
 compile (Parser p) = 
-  let (p', maxV) = preprocess p
-      (m, σs) = codeGen ({-terminationAnalysis -}p') (maxV + 1) in (Machine m, σs)
+  let (p', μs, maxV) = preprocess p
+      (m, σs, maxΣ) = codeGen ({-terminationAnalysis -}p') halt (maxV + 1) 0
+      (ms, σs') = compileLets μs σs (maxV + 1) maxΣ
+  in traceShow ms (Machine m, ms, σs)
 
-preprocess :: Free ParserF Void a -> (Free ParserF Void a, IMVar)
-preprocess p =
-  let (lets, recs) = findLets p
-      (p', μs, maxV) = letInsertion lets recs p
-  in traceShow μs (p', maxV)
+compileLets :: DMap MVar (Free ParserF Void) -> ΣVars -> IMVar -> IΣVar -> (DMap MVar (LetBinding a), ΣVars)
+compileLets μs σs maxV maxΣ = let (ms, σs', _) = DMap.foldrWithKey compileLet (DMap.empty, σs, maxΣ) μs in (ms, σs')
+  where
+    compileLet :: MVar x -> Free ParserF Void x -> (DMap MVar (LetBinding a), ΣVars, IΣVar) -> (DMap MVar (LetBinding a), ΣVars, IΣVar)
+    compileLet (MVar μ) p (ms, σs, maxΣ) =
+      let (m, σs', maxΣ') = codeGen p ret maxV (maxΣ + 1)
+      in (DMap.insert (MVar μ) (letBind m) ms, σs ++ σs', maxΣ')
+
+preprocess :: Free ParserF Void a -> (Free ParserF Void a, DMap MVar (Free ParserF Void), IMVar)
+preprocess p = let (lets, recs) = findLets p in letInsertion lets recs p
 
 data StableParserName = forall a. StableParserName (StableName# (Free ParserF Void a))
 newtype LetFinder a =
@@ -101,22 +108,22 @@ letInsertion lets recs p = (p', μs, μMax)
       (vs, μs) <- get
       if | HashSet.member name recs ->
              case HashMap.lookup name vs of
-               Just v  -> let μ = MVar v in return $! Op (Rec μ (μs DMap.! μ))
+               Just v  -> let μ = MVar v in return $! Op (Let True μ (μs DMap.! μ))
                Nothing -> mdo
                  v <- newVar
                  let μ = MVar v
                  put (HashMap.insert name v vs, DMap.insert μ q' μs)
                  q' <- runLetInserter (postprocess q)
-                 return $! Op (Rec μ q')
+                 return $! Op (Let True μ q')
          | HashSet.member name lets ->
              case HashMap.lookup name vs of
-               Just v  -> let μ = MVar v in return $! optimise (Let μ (μs DMap.! μ))
+               Just v  -> let μ = MVar v in return $! optimise (Let False μ (μs DMap.! μ))
                Nothing -> do -- no mdo here, let bindings are not recursive!
                  v <- newVar
                  let μ = MVar v
                  q' <- runLetInserter (postprocess q)
                  put (HashMap.insert name v vs, DMap.insert μ q' μs)
-                 return $! optimise (Let μ q')
+                 return $! optimise (Let False μ q')
          | otherwise -> do runLetInserter (postprocess q)
 
 postprocess :: ParserF LetInserter a -> LetInserter a
@@ -179,7 +186,7 @@ makeStableParserName !p =
      return $! StableParserName name
 
 showM :: Parser a -> String
-showM = show . fst . compile
+showM = show . (\(x, _, _) -> x) . compile
 
 instance Eq StableParserName where 
   (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)
@@ -189,3 +196,4 @@ instance Hashable StableParserName where
 
 instance GShow MVar where gshowsPrec = showsPrec
 instance Show (Free ParserF Void a) => ShowTag MVar (Free ParserF Void) where showTaggedPrec m = showsPrec
+instance Show (LetBinding a x) => ShowTag MVar (LetBinding a) where showTaggedPrec m = showsPrec

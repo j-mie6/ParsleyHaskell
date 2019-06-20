@@ -36,7 +36,7 @@ constantInput = getConst . histo (const (Const Nothing)) (alg1 |> (Const . alg2 
     alg2 (Branch (Const b) (Const p) (Const q)) = b <+> (p <==> q)
     alg2 (Match (Const p) _ qs)                 = p <+> (foldr1 (<==>) (map getConst qs))
     alg2 (Debug _ (Const p))                    = p
-    alg2 (Let _ (Const p))                      = p
+    alg2 (Let False _ (Const p))                = p
     alg2 _                                      = Nothing
 
 -- Termination Analysis (Generalised left-recursion checker)
@@ -140,7 +140,7 @@ terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold ab
            y -> do x <- runTerm p; case (x, y) of
                      (Prop Some f _, Prop _ Never _) -> return $! Prop Some f False
                      (x, y)                          -> return $! Prop (success x) (fails x &&& fails y) False -- TODO Verify
-    alg (Rec (MVar v) p)                     =
+    alg (Let True (MVar v) p)                =
       do props <- get
          seen <- ask
          case Map.lookup v props of

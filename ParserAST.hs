@@ -81,8 +81,7 @@ data ParserF (k :: * -> *) (a :: *) where
     Empty         :: ParserF k a
     Try           :: Maybe Int -> k a -> ParserF k a
     LookAhead     :: k a -> ParserF k a
-    Let           :: MVar a -> k a -> ParserF k a
-    Rec           :: MVar a -> k a -> ParserF k a
+    Let           :: Bool -> MVar a -> k a -> ParserF k a
     NotFollowedBy :: k a -> ParserF k ()
     Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF k c
     Match         :: k a -> [WQ (a -> Bool)] -> [k b] -> ParserF k b
@@ -101,8 +100,7 @@ instance IFunctor ParserF where
   imap _ Empty             = Empty
   imap f (Try n p)         = Try n (f p)
   imap f (LookAhead p)     = LookAhead (f p)
-  imap f (Let v p)         = Let v (f p)
-  imap f (Rec v p)         = Rec v (f p)
+  imap f (Let r v p)       = Let r v (f p)
   imap f (NotFollowedBy p) = NotFollowedBy (f p)
   imap f (Branch b p q)    = Branch (f b) (f p) (f q)
   imap f (Match p fs qs)   = Match (f p) fs (map f qs)
@@ -123,8 +121,8 @@ instance Show (Free ParserF f a) where
       alg (Try Nothing (Const p))                = concat ["(try ? ", p, ")"]
       alg (Try (Just n) (Const p))               = concat ["(try ", show n, " ", p, ")"]
       alg (LookAhead (Const p))                  = concat ["(lookAhead ", p, ")"]
-      alg (Let v (Const p))                      = concat ["(let-bound ", show v, " ", p, ")"]
-      alg (Rec v _)                              = concat ["(rec ", show v, ")"]
+      alg (Let False v _)                        = concat ["(let-bound ", show v, ")"]
+      alg (Let True v _)                         = concat ["(rec ", show v, ")"]
       alg (NotFollowedBy (Const p))              = concat ["(notFollowedBy ", p, ")"]
       alg (Branch (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
       alg (Match (Const p) fs qs)                = concat ["(match ", p, " ", show (map getConst qs), ")"]

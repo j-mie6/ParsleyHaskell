@@ -142,10 +142,12 @@ optimise (Match p fs qs)
           qvalidate  = foldr (\f k -> [||\x -> $$(_code f) x || $$k x||]) [||const False||] fs
 -- Distributivity Law: f <$> match vs p g                = match vs p ((f <$>) . g)
 optimise (Op (Pure f) :<*>: (Op (Match p fs qs)))        = Op (Match p fs (map (optimise . (Op (Pure f) :<*>:)) qs))
--- Trivial let-bindings
-optimise (Let _ p@(Op (Pure _)))                         = p
-optimise (Let _ p@(Op Empty))                            = p
-optimise (Let _ p@(Op (Satisfy _)))                      = p
+-- Trivial let-bindings - NOTE: These will get moved when Let nodes no longer have the "source" in them
+optimise (Let False _ p@(Op (Pure _)))                   = p
+optimise (Let False _ p@(Op Empty))                      = p
+optimise (Let False _ p@(Op (Satisfy _)))                = p
+-- Applicative-fusion across let boundary?
+--optimise (Let _ p@(Op ()))
 optimise p                                               = Op p
 
 (>?>) :: Free ParserF f a -> WQ (a -> Bool) -> Free ParserF f a

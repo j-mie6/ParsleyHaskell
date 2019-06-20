@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
-module CodeGenerator (codeGen) where
+module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..))
 import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΦDecl, fmapInstr, abstract, AbstractedStack)
@@ -24,21 +24,27 @@ import Debug.Trace                (traceShow)
 import qualified Data.Set as Set
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFreshT IΣVar (ReaderT (Set IMVar) (State ΣVars)))) a
-runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> Set IMVar -> ΣVars -> (a, ΣVars)
+runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> Set IMVar -> ΣVars -> ((a, IΣVar), ΣVars)
 runCodeGenStack m μ0 φ0 σ0 seen0 vs0 = 
   (flip runState vs0 . 
    flip runReaderT seen0 . 
-   flip evalFreshT σ0 . 
+   flip runFreshT σ0 . 
    flip evalFreshT μ0 . 
    flip evalFreshT φ0) m
 
 newtype CodeGen b a = 
   CodeGen {runCodeGen :: forall xs' ks'. Free3 M Void3 (a ': xs') ks' b -> CodeGenStack (Free3 M Void3 xs' ks' b)}
 
-codeGen :: Free ParserF Void a -> IMVar -> (Free3 M Void3 '[] '[] a, ΣVars)
-codeGen p μ0 = traceShow m (m, vs)
+halt :: Free3 M Void3 '[a] '[] a
+halt = Op3 Halt
+
+ret :: Free3 M Void3 (x ': xs) ((x ': xs) ': ks) a
+ret = Op3 Ret
+
+codeGen :: Free ParserF Void a -> Free3 M Void3 (a ': xs) ks b -> IMVar -> IΣVar -> (Free3 M Void3 xs ks b, ΣVars, IΣVar)
+codeGen p terminal μ0 σ0 = traceShow m (m, vs, maxΣ)
   where
-    (m, vs) = runCodeGenStack (runCodeGen (histo absurd alg (traceShow p p)) (Op3 Halt)) μ0 0 0 Set.empty []
+    ((m, maxΣ), vs) = runCodeGenStack (runCodeGen (histo absurd alg (traceShow p p)) terminal) μ0 0 σ0 Set.empty []
     alg = peephole |> (direct . imap present)
 
 peephole :: ParserF (History ParserF (CodeGen b)) a -> Maybe (CodeGen b a)
@@ -84,7 +90,7 @@ direct !(Branch b p q)    = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Op3 (Lift
                                                   runCodeGen b (Op3 (Case pc qc))
 direct !(Match p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
                                                   runCodeGen p (Op3 (Choices fs qcs))
-direct !(Rec !μ !q)     = CodeGen $ \(!m) ->
+direct !(Let True !μ !q)  = CodeGen $ \(!m) ->
   do ifSeenM μ
        (do return $! tailCallOptimise Nothing μ m)
        (do n <- addM μ (runCodeGen q (Op3 Ret))
@@ -102,9 +108,9 @@ direct !(ChainPost p op) = CodeGen $ \(!m) ->
      let m' = Op3 (ChainInit (WQ Nothing [||Nothing||]) σ opc μ (fmapInstr (lift' fromJust) m))
      freshM (runCodeGen p (fmapInstr (lift' Just) m'))
 direct !(Debug name p) = CodeGen $ \(!m) -> fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
-direct !(Let _ p) = CodeGen $ \(!m) -> runCodeGen p m
+direct !(Let False _ p) = CodeGen $ \(!m) -> runCodeGen p m
 
-tailCallOptimise :: Maybe (AbstractedStack (Free3 M Void3) x a) -> MVar x -> Free3 M Void3 (x ': xs) ks a -> Free3 M Void3 xs ks a
+tailCallOptimise :: Maybe (AbstractedStack (Free3 M Void3) a x) -> MVar x -> Free3 M Void3 (x ': xs) ks a -> Free3 M Void3 xs ks a
 tailCallOptimise body μ (Op3 Ret) = Op3 (Jump body μ)
 tailCallOptimise body μ k         = Op3 (Call body μ k)
 

@@ -71,12 +71,12 @@ crossMany = env (return $ take 1001 ('0':cycle "+1")) $ \input -> bgroup "many" 
 
 tailTest :: Benchmark
 tailTest = bgroup "tail-rec" [
-    bench "tail-rec 0"      $ nf tailTestP' (replicate 0 'a' ++ "b"),--(take 0 ('0':cycle "+1")),
-    bench "tail-rec 1"      $ nf tailTestP' (replicate 1 'a' ++ "b"),--(take 1 ('0':cycle "+1")),
-    bench "tail-rec 10"     $ nf tailTestP' (replicate 10 'a' ++ "b"),--(take 11 ('0':cycle "+1")),
-    bench "tail-rec 100"    $ nf tailTestP' (replicate 100 'a' ++ "b"),--(take 101 ('0':cycle "+1")),
-    bench "tail-rec 1000"   $ nf tailTestP' (replicate 1000 'a' ++ "b"),--(take 1001 ('0':cycle "+1")),
-    bench "tail-rec 10,000" $ nf tailTestP' (replicate 10000 'a' ++ "b")--(take 10001 ('0':cycle "+1"))
+    bench "tail-rec 0"      $ nf tailTestP (replicate 0 'a' ++ "b"),--(take 0 ('0':cycle "+1")),
+    bench "tail-rec 1"      $ nf tailTestP (replicate 1 'a' ++ "b"),--(take 1 ('0':cycle "+1")),
+    bench "tail-rec 10"     $ nf tailTestP (replicate 10 'a' ++ "b"),--(take 11 ('0':cycle "+1")),
+    bench "tail-rec 100"    $ nf tailTestP (replicate 100 'a' ++ "b"),--(take 101 ('0':cycle "+1")),
+    bench "tail-rec 1000"   $ nf tailTestP (replicate 1000 'a' ++ "b"),--(take 1001 ('0':cycle "+1")),
+    bench "tail-rec 10,000" $ nf tailTestP (replicate 10000 'a' ++ "b")--(take 10001 ('0':cycle "+1"))
   ]
 
 main :: IO ()

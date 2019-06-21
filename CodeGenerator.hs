@@ -9,13 +9,13 @@
 module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..))
-import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΦDecl, fmapInstr, abstract, AbstractedStack)
+import Machine                    (M(..), ΣVar(..), ΣState(..), ΣVars, IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΦDecl, fmapInstr)
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void, Void3, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
 import Control.Monad              ((<$!>))
 import Control.Monad.Reader       (ReaderT, ask, asks, runReaderT, local, MonadReader)
-import Control.Monad.State.Strict (State, get, put, runState, MonadState)
+import Control.Monad.State.Strict (State, get, modify', runState, MonadState)
 import Fresh                      (VFreshT, HFreshT, runFreshT, evalFreshT, construct, MonadFresh(..), mapVFreshT)
 import Control.Monad.Trans        (lift)
 import Data.Set                   (Set)
@@ -90,11 +90,7 @@ direct !(Branch b p q)    = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Op3 (Lift
                                                   runCodeGen b (Op3 (Case pc qc))
 direct !(Match p fs qs)   = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
                                                   runCodeGen p (Op3 (Choices fs qcs))
-direct !(Let True !μ !q)  = CodeGen $ \(!m) ->
-  do ifSeenM μ
-       (do return $! tailCallOptimise Nothing μ m)
-       (do n <- addM μ (runCodeGen q (Op3 Ret))
-           return $! tailCallOptimise (Just (abstract n)) μ m)
+direct !(Let _ !μ _)  = CodeGen $ \(!m) -> return $! tailCallOptimise μ m
 direct !(ChainPre op p) = CodeGen $ \(!m) ->
   do μ <- askM
      σ <- freshΣ id [||id||]
@@ -108,11 +104,10 @@ direct !(ChainPost p op) = CodeGen $ \(!m) ->
      let m' = Op3 (ChainInit (WQ Nothing [||Nothing||]) σ opc μ (fmapInstr (lift' fromJust) m))
      freshM (runCodeGen p (fmapInstr (lift' Just) m'))
 direct !(Debug name p) = CodeGen $ \(!m) -> fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
-direct !(Let False _ p) = CodeGen $ \(!m) -> runCodeGen p m
 
-tailCallOptimise :: Maybe (AbstractedStack (Free3 M Void3) a x) -> MVar x -> Free3 M Void3 (x ': xs) ks a -> Free3 M Void3 xs ks a
-tailCallOptimise body μ (Op3 Ret) = Op3 (Jump body μ)
-tailCallOptimise body μ k         = Op3 (Call body μ k)
+tailCallOptimise :: MVar x -> Free3 M Void3 (x ': xs) ks a -> Free3 M Void3 xs ks a
+tailCallOptimise μ (Op3 Ret) = Op3 (Jump μ)
+tailCallOptimise μ k         = Op3 (Call μ k)
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret or Halt
 -- However, I'm not yet sure about the interactions with try yet...
@@ -161,7 +156,6 @@ makeΦ m =
 
 freshΣ :: a -> TExpQ a -> CodeGenStack (ΣVar a)
 freshΣ x qx = 
-  do σs <- get
-     σ <- lift (lift (construct ΣVar))
-     put (ΣState x qx σ:σs)
+  do σ <- lift (lift (construct ΣVar))
+     modify' (ΣState x qx σ:)
      return $! σ

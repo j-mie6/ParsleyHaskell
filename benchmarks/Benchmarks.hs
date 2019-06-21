@@ -43,8 +43,8 @@ tailTestP = $$(Parsley.runParser ParsleyParsers.phiTest)
 tailTestP' :: String -> Maybe Char
 tailTestP' = parseMaybe (skipMany (char 'a') *> char 'b' :: Parsec () String Char)
 
---brainfuckParsley :: String -> Maybe [BrainFuckOp]
---brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
+brainfuckParsley :: String -> Maybe [BrainFuckOp]
+brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
 {-longChoice :: Parsley.Parser Char
 longChoice = Parsley.choice (map Parsley.char (replicate 1000000 'a' ++ "b"))-}

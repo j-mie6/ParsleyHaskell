@@ -5,6 +5,7 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleInstances #-}
 module MachineOps where
 
 import Utils           (TExpQ)
@@ -33,6 +34,7 @@ data K s ks a where
      during suspension. -}
   KCons :: !(X xs -> O# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
 
+newtype Handler s a = Handler (O# -> Handler s a -> C -> D# -> ST s (Handled s a))
 newtype H s a = H (SList (O# -> H s a -> C -> D# -> ST s (Handled s a)))
 type X = HList
 type C = IList
@@ -93,6 +95,8 @@ pushH !h !(H hs) = H (h:::hs)
 {-# INLINE popH_ #-}
 popH_ :: H s a -> H s a
 popH_ !(H (_:::hs)) = H hs
+fatal :: Handler s a 
+fatal = Handler (\_ _ _ _ -> handledBy (return Nothing))
 
 makeC :: ST s C
 makeC = return $! INil

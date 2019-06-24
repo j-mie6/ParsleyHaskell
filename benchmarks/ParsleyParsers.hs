@@ -38,14 +38,14 @@ phiTest = skipMany (char 'a' <* skipMany (char 'c')) *> char 'b'
 deriving instance Lift BrainFuckOp
 
 brainfuck :: Parser [BrainFuckOp]
-brainfuck = whitespace *>
-  many ( (lexeme (char '>' $> lift' RightPointer))
-     <|> (lexeme (char '<' $> lift' LeftPointer))
-     <|> (lexeme (char '+' $> lift' Increment))
-     <|> (lexeme (char '-' $> lift' Decrement))
-     -- <|> (lexeme (char '.' $> lift' Output))
-     -- <|> (lexeme (char ',' $> lift' Input))
-     <|> (between (lexeme (char '[')) (lexeme (char ']')) (lift' Loop <$> brainfuck)))
+brainfuck = whitespace *> bf
   where
     whitespace = skipMany (noneOf "<>+-[]")
     lexeme p = p <* whitespace
+    bf = many ( (lexeme (char '>' $> lift' RightPointer))
+      <|> (lexeme (char '<' $> lift' LeftPointer))
+      <|> (lexeme (char '+' $> lift' Increment))
+      <|> (lexeme (char '-' $> lift' Decrement))
+      <|> (lexeme (char '.' $> lift' Output))
+      <|> (lexeme (char ',' $> lift' Input))
+      <|> (between (lexeme (char '[')) (lexeme (char ']')) (lift' Loop <$> brainfuck)))

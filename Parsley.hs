@@ -6,7 +6,7 @@ module Parsley ( Parser, runParser
                -- Applicative
                , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
                -- Alternative
-               , empty, (<|>), optional, option, choice, oneOf, noneOf, maybeP
+               , empty, (<|>), (<+>), optional, option, choice, oneOf, noneOf, maybeP
                -- Monoidal
                , unit, (<~>), (<~), (~>)
                -- Selective
@@ -63,7 +63,6 @@ PAPERS
 7) ?    - Error correcting parsers using foundation layed in (2)
 -}
 
-
 fmap :: WQ (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
 
@@ -104,6 +103,9 @@ skipManyN n p = foldr (const (p *>)) (skipMany p) [1..n]
 
 skipSome :: Parser a -> Parser ()
 skipSome = skipManyN 1
+
+(<+>) :: Parser a -> Parser b -> Parser (Either a b)
+p <+> q = lift' Left <$> p <|> lift' Right <$> q
 
 sepBy :: Parser a -> Parser b -> Parser [a]
 sepBy p sep = sepBy1 p sep <|> pure (WQ [] [||[]||])
@@ -280,6 +282,7 @@ infixl 4 <~
 infixl 4 ~>
 -- Alternative
 --infixl 3 <|>
+infixl 3 <+>
 -- Selective
 infixl 4 >?>
 infixl 4 <?|>

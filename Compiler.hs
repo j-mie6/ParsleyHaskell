@@ -18,7 +18,7 @@ import Machine                    (Machine(..), ΣVars, IMVar, IΣVar, MVar(..),
 import Indexed                    (Free(Op), Void, fold', absurd)
 import Control.Applicative        (liftA2, liftA3)
 import Control.Monad              (forM_)
-import Control.Monad.Reader       (ReaderT, runReaderT, local, asks, MonadReader)
+import Control.Monad.Reader       (ReaderT, runReaderT, local, ask, asks, MonadReader)
 import Control.Monad.State.Strict (StateT, get, gets, put, runStateT, execStateT, modify', MonadState)
 import Data.List                  (foldl')
 import Fresh                      (HFreshT, newVar, newScope, runFreshT)
@@ -61,7 +61,7 @@ data LetFinderState = LetFinderState { preds  :: HashMap StableParserName Int
                                      , recs   :: HashSet StableParserName
                                      , before :: HashSet StableParserName
                                      , topo   :: [StableParserName] }
-data LetFinderCtx   = LetFinderCtx { seen :: HashSet StableParserName }
+type LetFinderCtx   = HashSet StableParserName
 newtype LetFinder a = LetFinder { runLetFinder :: StateT LetFinderState (ReaderT LetFinderCtx IO) () }
 
 reverseFilter :: (a -> Bool) -> [a] -> [a]
@@ -72,7 +72,7 @@ findLets p = (lets, recs, reverseFilter letBound topo)
   where
     letBound = flip HashSet.member (HashSet.union lets recs)
     state = LetFinderState HashMap.empty HashSet.empty HashSet.empty []
-    ctx = LetFinderCtx HashSet.empty
+    ctx = HashSet.empty
     LetFinderState preds recs _ topo = unsafePerformIO (runReaderT (execStateT (runLetFinder (fold' absurd findLetsAlg p)) state) ctx)
     lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
 
@@ -180,14 +180,8 @@ addPred k = modifyPreds (HashMap.insertWith (+) k 1)
 addRec :: MonadState LetFinderState m => StableParserName -> m ()
 addRec = modifyRecs . HashSet.insert
 
-askSeen :: MonadReader LetFinderCtx m => m (HashSet StableParserName)
-askSeen = asks seen
-
-localSeen :: MonadReader LetFinderCtx m => (HashSet StableParserName -> HashSet StableParserName) -> m a -> m a
-localSeen f = local (\ctx -> ctx {seen = f (seen ctx)})
-
 ifSeen :: MonadReader LetFinderCtx m => StableParserName -> m a -> m a -> m a
-ifSeen x yes no = do !seen <- askSeen; if HashSet.member x seen then yes else no
+ifSeen x yes no = do !seen <- ask; if HashSet.member x seen then yes else no
 
 ifNotProcessedBefore :: MonadState LetFinderState m => StableParserName -> m () -> m ()
 ifNotProcessedBefore x m = do !before <- getBefore; if HashSet.member x before then return () else m
@@ -199,7 +193,7 @@ addToTopology :: MonadState LetFinderState m => StableParserName -> m ()
 addToTopology x = modifyTopo (x:)
 
 addName :: MonadReader LetFinderCtx m => StableParserName -> m b -> m b
-addName x = localSeen (HashSet.insert x)
+addName x = local (HashSet.insert x)
 
 makeStableParserName :: MonadIO m => Free ParserF Void a -> m StableParserName
 -- Force evaluation of p to ensure that the stableName is correct first time

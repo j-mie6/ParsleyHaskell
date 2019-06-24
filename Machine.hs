@@ -40,21 +40,21 @@ newtype ΣVar a = ΣVar IΣVar
 newtype MVar a = MVar IMVar
 newtype ΦVar a = ΦVar IΦVar
 type ΦDecl k x xs ks a = (ΦVar x, k (x ': xs) ks a)
-newtype LetBinding a x = LetBinding (forall xs ks. Free3 M Void3 xs ((x ': xs) ': ks) a)
-letBind :: Free3 M Void3 xs ((x ': xs) ': ks) a -> LetBinding a x
+newtype LetBinding a x = LetBinding (forall xs. Free3 M Void3 xs (x ': xs) a)
+letBind :: Free3 M Void3 xs (x ': xs) a -> LetBinding a x
 letBind m = LetBinding (coerce m)
 
 instance Show (LetBinding a x) where show (LetBinding m) = show m
 
 data M k xs ks a where
   Halt      :: M k '[a] '[] a
-  Ret       :: M k (x ': xs) ((x ': xs) ': ks) a
+  Ret       :: M k (x ': xs) (x ': xs) a
   Push      :: WQ x -> !(k (x ': xs) ks a) -> M k xs ks a
   Pop       :: !(k xs ks a) -> M k (x ': xs) ks a
   Lift2     :: !(WQ (x -> y -> z)) -> !(k (z ': xs) ks a) -> M k (y ': x ': xs) ks a
   Sat       :: WQ (Char -> Bool) -> !(k (Char ': xs) ks a) -> M k xs ks a
   Call      :: !(MVar x) -> !(k (x ': xs) ks a) -> M k xs ks a
-  Jump      :: !(MVar x) -> M k xs ((x ': xs) ': ks) a
+  Jump      :: !(MVar x) -> M k xs (x ': xs) a
   Empt      :: M k xs ks a
   Commit    :: !Bool -> !(k xs ks a) -> M k xs ks a
   HardFork  :: !(k xs ks a) -> !(k xs ks a) -> !(Maybe (ΦDecl k x xs ks a)) -> M k xs ks a
@@ -66,8 +66,8 @@ data M k xs ks a where
   Restore   :: !(k xs ks a) -> M k xs ks a
   Case      :: !(k (x ': xs) ks a) -> !(k (y ': xs) ks a) -> M k (Either x y ': xs) ks a
   Choices   :: ![WQ (x -> Bool)] -> ![k xs ks a] -> M k (x ': xs) ks a
-  ChainIter :: !(ΣVar x) -> !(MVar x) -> M k ((x -> x) ': xs) ((x ': xs) ': ks) a
-  ChainInit :: !(ΣVar x) -> !(k xs ((x ': xs) ': ks) a) -> !(MVar x) -> !(k (x ': xs) ks a) -> M k (x ': xs) ks a
+  ChainIter :: !(ΣVar x) -> !(MVar x) -> M k ((x -> x) ': xs) (x ': xs) a
+  ChainInit :: !(ΣVar x) -> !(k xs (x ': xs) a) -> !(MVar x) -> !(k (x ': xs) ks a) -> M k (x ': xs) ks a
   LogEnter  :: String -> !(k xs ks a) -> M k xs ks a
   LogExit   :: String -> !(k xs ks a) -> M k xs ks a
 
@@ -75,12 +75,12 @@ fmapInstr :: WQ (x -> y) -> Free3 M f (y ': xs) ks a -> Free3 M f (x ': xs) ks a
 fmapInstr !f !m = Op3 (Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m)))
 
 data Γ s xs ks a = Γ { xs    :: QX xs
-                     , ks    :: QK s ks a
+                     , k     :: QK s ks a
                      , o     :: QO
                      , hs    :: QH s a
                      , cs    :: QC }
 
-newtype AbsExec s a x = AbsExec { runConcrete :: forall xs ks. X xs -> K s ((x ': xs) ': ks) a -> O# -> H s a -> C -> ST s (Maybe a) }
+newtype AbsExec s a x = AbsExec { runConcrete :: forall xs. X xs -> K s (x ': xs) a -> O# -> H s a -> C -> ST s (Maybe a) }
 newtype QAbsExec s a x = QAbsExec (TExpQ (AbsExec s a x))
 newtype QJoin s a x = QJoin (TExpQ (x -> O# -> ST s (Maybe a)))
 newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum)
@@ -174,8 +174,8 @@ readyExec m = trace ("Executing: " ++ show m) (fold3 absurd (Exec . alg) m)
 execHalt :: Reader (Ctx s a) (Γ s '[a] ks a -> QST s (Maybe a))
 execHalt = return $! \γ -> [|| return $! Just $! peekX ($$(xs γ)) ||]
 
-execRet :: Reader (Ctx s a) (Γ s (x ': xs) ((x ': xs) ': ks) a -> QST s (Maybe a))
-execRet = return $! \γ -> [|| $$(resume γ) ||]
+execRet :: Reader (Ctx s a) (Γ s (x ': xs) (x ': xs) a -> QST s (Maybe a))
+execRet = return $! \γ -> [|| let I# o# = $$(o γ) in $$(k γ) $$(xs γ) o# ||]
 
 execCall :: MVar x -> Exec s (x ': xs) ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
 execCall μ (Exec k) =
@@ -183,7 +183,7 @@ execCall μ (Exec k) =
      mk <- k
      return $! \γ@(Γ xs ks o hs cs) -> [|| let !(I# o#) = $$o in runConcrete $$m $$xs $$(suspend mk γ) o# $$hs $$cs ||]
 
-execJump :: MVar x -> Reader (Ctx s a) (Γ s xs ((x ': xs) ': ks) a -> QST s (Maybe a))
+execJump :: MVar x -> Reader (Ctx s a) (Γ s xs (x ': xs) a -> QST s (Maybe a))
 execJump μ =
   do !(QAbsExec m) <- askM μ
      return $! \γ@(Γ xs ks o hs cs) -> [|| let !(I# o#) = $$o in runConcrete $$m $$xs $$ks o# $$hs $$cs ||]
@@ -287,7 +287,7 @@ execChoices fs ks =
       ||]
 
 
-execChainIter :: ΣVar x -> MVar x -> Reader (Ctx s a) (Γ s ((x -> x) ': xs) ((x ': xs) ': ks) a -> QST s (Maybe a))
+execChainIter :: ΣVar x -> MVar x -> Reader (Ctx s a) (Γ s ((x -> x) ': xs) (x ': xs) a -> QST s (Maybe a))
 execChainIter σ μ =
   do !(QSTRef ref) <- askΣ σ
      !(QAbsExec k) <- askM μ
@@ -298,7 +298,7 @@ execChainIter σ μ =
           runConcrete $$k xs' $$ks o# $$hs (pokeC $$o $$cs)
        ||]
 
-execChainInit :: ΣVar x -> Exec s xs ((x ': xs) ': ks) a -> MVar x -> Exec s (x ': xs) ks a
+execChainInit :: ΣVar x -> Exec s xs (x ': xs) a -> MVar x -> Exec s (x ': xs) ks a
               -> Reader (Ctx s a) (Γ s (x ': xs) ks a -> QST s (Maybe a))
 execChainInit σ l μ k =
   do asks $! \ctx γ@(Γ xs ks o _ _) -> [||
@@ -318,7 +318,7 @@ execChainInit σ l μ k =
               -- NOTE: Only the offset and the check stack can change between interations of a chainPre
               do let I# o# = $$o
                  let loop o# !cs =
-                       $$(run l (Γ [||xs'||] [||pushK noreturn $$ks||] [||I# o#||] (hs γ') [||cs||])
+                       $$(run l (Γ [||xs'||] [||noreturn||] [||I# o#||] (hs γ') [||cs||])
                                 (insertM μ [||AbsExec (\_ _ o# _ (!cs) -> loop o# cs)||] (insertΣ σ [||ref||] ctx)))
                  loop o# $$(cs γ')
             ||]))
@@ -376,11 +376,8 @@ inputSizeCheck (Just n) p =
 raiseΓ :: Γ s xs ks a -> QST s (Maybe a)
 raiseΓ γ = [|| raise $$(hs γ) $$(cs γ) $$(o γ) ||]
 
-suspend :: (Γ s (x ': xs) ks a -> QST s (Maybe a)) -> Γ s xs ks a -> QK s ((x ': xs) ': ks) a
-suspend m γ = [|| pushK (\xs o# -> $$(m (γ {xs = [||xs||], o = [||I# o#||]}))) $$(ks γ) ||]
-
-resume :: Γ s (x ': xs) ((x ': xs) ': ks) a -> QST s (Maybe a)
-resume γ = [|| let I# o# = $$(o γ) in peekK $$(ks γ) $$(xs γ) o# ||]
+suspend :: (Γ s (x ': xs) ks a -> QST s (Maybe a)) -> Γ s xs ks a -> QK s (x ': xs) a
+suspend m γ = [|| \xs o# -> $$(m (γ {xs = [||xs||], o = [||I# o#||]})) ||]
 
 askM :: MonadReader (Ctx s a) m => MVar x -> m (QAbsExec s a x)
 askM μ = trace ("Getting: " ++ show μ) (asks (((DMap.! μ) . μs)))

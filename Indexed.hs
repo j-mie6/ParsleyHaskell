@@ -15,14 +15,14 @@ import Data.Maybe          (fromMaybe)
 class IFunctor (f :: (* -> *) -> * -> *) where
   imap :: (forall j. a j -> b j) -> f a i -> f b i
 
-class IFunctor3 (f :: ([*] -> [[*]] -> * -> *) -> [*] -> [[*]] -> * -> *) where
+class IFunctor3 (f :: ([*] -> [*] -> * -> *) -> [*] -> [*] -> * -> *) where
   imap3 :: (forall i' j' k'. a i' j' k' -> b i' j' k') -> f a i j k -> f b i j k
     
 data Free (f :: (* -> *) -> * -> *) (a :: * -> *) (k :: *) where
   Var :: a i -> Free f a i
   Op :: f (Free f a) i -> Free f a i
 
-data Free3 (f :: ([*] -> [[*]] -> * -> *) -> [*] -> [[*]] -> * -> *) (a :: [*] -> [[*]] -> * -> *) (i :: [*]) (j :: [[*]]) (k :: *) where
+data Free3 (f :: ([*] -> [*] -> * -> *) -> [*] -> [*] -> * -> *) (a :: [*] -> [*] -> * -> *) (i :: [*]) (j :: [*]) (k :: *) where
   Var3 :: a i j k -> Free3 f a i j k
   Op3 :: f (Free3 f a) i j k -> Free3 f a i j k
     

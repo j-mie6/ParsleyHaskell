@@ -37,7 +37,7 @@ newtype CodeGen b a =
 halt :: Free3 M Void3 '[a] '[] a
 halt = Op3 Halt
 
-ret :: Free3 M Void3 (x ': xs) ((x ': xs) ': ks) a
+ret :: Free3 M Void3 (x ': xs) (x ': xs) a
 ret = Op3 Ret
 
 codeGen :: Free ParserF Void a -> Free3 M Void3 (a ': xs) ks b -> IMVar -> IΣVar -> (Free3 M Void3 xs ks b, IΣVar)

@@ -13,13 +13,14 @@ import Data.STRef      (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.Array.Base (STUArray(..), UArray(..), newArray_, unsafeRead, unsafeWrite, MArray, getNumElements)
 import GHC.Prim        (Int#, Char#, newByteArray#, indexWideCharArray#)
 import GHC.Exts        (Int(..), Char(..), (-#), (+#), (*#))
+import Safe.Coerce     (coerce)
 
 data SList a = !a ::: !(SList a) | SNil
 data IList = ICons {-# UNPACK #-} !Int !IList | INil
 data HList xs where
   HNil :: HList '[]
   HCons :: !a -> !(HList as) -> HList (a ': as)
-data K s ks a where
+{-data K s ks a where
   KNil :: K s '[] a
   {- A key property of the pure semantics of the machine states that
      at the end of the execution of a machine, all the stacks shall
@@ -31,7 +32,8 @@ data K s ks a where
      concrete machine. As such, continuations are only required to
      demand the values of X and o, with all other values closed over
      during suspension. -}
-  KCons :: !(X xs -> O# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
+  KCons :: !(X xs -> O# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a-}
+type K s xs a = X xs -> O# -> ST s (Maybe a)
 
 newtype H s a = H (SList (O# -> H s a -> C -> ST s (Maybe a)))
 type X = HList
@@ -69,16 +71,12 @@ peekX :: X (a ': xs) -> a
 peekX !(HCons x xs) = x
 
 makeK :: ST s (K s '[] a)
-makeK = return $! KNil
-{-# INLINE pushK #-}
-pushK :: (X xs -> O# -> ST s (Maybe a)) -> K s ks a -> K s (xs ': ks) a
-pushK = KCons
-{-# INLINE popK #-}
-popK :: K s (xs ': ks) a -> (# (X xs -> O# -> ST s (Maybe a)), K s ks a #)
-popK !(KCons k ks) = (# k, ks #)
-{-# INLINE peekK #-}
-peekK :: K s (xs ': ks) a -> (X xs -> O# -> ST s (Maybe a))
-peekK !(KCons k ks) = k
+makeK = return $! noreturn
+--{-# INLINE pushK #-}
+{-pushK :: (X xs -> O# -> ST s (Maybe a)) -> K s xs a
+pushK = K-}
+{-peekK :: K s xs a -> (X xs -> O# -> ST s (Maybe a))
+peekK !(K k) = k -}
 noreturn :: X xs -> O# -> ST s (Maybe a)
 noreturn xs o# = error "Machine is only permitted return-by-failure"
 

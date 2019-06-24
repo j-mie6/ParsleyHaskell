@@ -85,7 +85,7 @@ liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
 liftA2 f p q = f <$> p <*> q
 
 many :: Parser a -> Parser [a]
-many p = pfoldr (lift' (:)) (WQ [] [||[]||]) p
+many = pfoldr (lift' (:)) (WQ [] [||[]||])
 
 manyN :: Int -> Parser a -> Parser [a]
 manyN n p = foldr (const (p <:>)) (many p) [1..n]

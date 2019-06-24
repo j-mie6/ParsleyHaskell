@@ -95,6 +95,7 @@ some = manyN 1
 
 skipMany :: Parser a -> Parser ()
 skipMany = pfoldr (lift' const >*< lift' id) (lift' ())
+--skipMany = pfoldl (lift' const) (lift' ())
 -- New implementation is stateless, so should work better!
 --skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
 

@@ -5,7 +5,6 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE FlexibleInstances #-}
 module MachineOps where
 
 import Utils           (TExpQ)
@@ -34,23 +33,18 @@ data K s ks a where
      during suspension. -}
   KCons :: !(X xs -> O# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a
 
-newtype Handler s a = Handler (O# -> Handler s a -> C -> D# -> ST s (Handled s a))
-newtype H s a = H (SList (O# -> H s a -> C -> D# -> ST s (Handled s a)))
+newtype H s a = H (SList (O# -> H s a -> C -> ST s (Maybe a)))
 type X = HList
 type C = IList
 type O = Int
 type O# = Int#
-type D = Int
-type D# = Int#
 data Input = Input {charAt :: TExpQ (Int -> Char), size :: TExpQ Int, substr :: TExpQ (Int -> Int -> UArray Int Char)}
-data Σ s = Σ { save :: QST s (), restore :: QST s (), rollback :: TExpQ (D -> ST s ()) }
 
 type QH s a = TExpQ (H s a)
 type QX xs = TExpQ (X xs)
 type QK s ks a = TExpQ (K s ks a)
 type QC = TExpQ IList
 type QO = TExpQ O
-type QD = TExpQ D
 type QST s a = TExpQ (ST s a)
 
 makeX :: ST s (X '[])
@@ -90,13 +84,11 @@ noreturn xs o# = error "Machine is only permitted return-by-failure"
 
 makeH :: ST s (H s a)
 makeH = return $! (H SNil)
-pushH :: (O# -> H s a -> C -> D# -> ST s (Handled s a)) -> H s a -> H s a
+pushH :: (O# -> H s a -> C -> ST s (Maybe a)) -> H s a -> H s a
 pushH !h !(H hs) = H (h:::hs)
 {-# INLINE popH_ #-}
 popH_ :: H s a -> H s a
 popH_ !(H (_:::hs)) = H hs
-fatal :: Handler s a 
-fatal = Handler (\_ _ _ _ -> handledBy (return Nothing))
 
 makeC :: ST s C
 makeC = return $! INil
@@ -112,44 +104,28 @@ popC_ !(ICons _ cs) = cs
 pokeC :: O -> C -> C
 pokeC o !(ICons _ cs) = ICons o cs
 
-modifyΣ :: STRef s (SList a) -> (a -> a) -> ST s ()
+newΣ :: x -> ST s (STRef s x)
+newΣ = newSTRef
+
+writeΣ :: STRef s x -> x -> ST s ()
+writeΣ = writeSTRef
+
+readΣ :: STRef s x -> ST s x
+readΣ = readSTRef
+
+modifyΣ :: STRef s x -> (x -> x) -> ST s ()
 modifyΣ σ f =
-  do (x:::xs) <- readSTRef σ
-     writeSTRef σ ((f $! x) ::: xs)
+  do x <- readSTRef σ
+     writeSTRef σ (f $! x)
 
-writeΣ :: STRef s (SList a) -> a -> ST s ()
-writeΣ σ = modifyΣ σ . const
-
-readΣ :: STRef s (SList a) -> ST s a
-readΣ σ =
-  do (x:::_) <- readSTRef σ
-     return $! x
-
-pokeΣ :: STRef s (SList a) -> a -> ST s a
-pokeΣ σ y =
-  do (x:::xs) <- readSTRef σ
-     writeSTRef σ (y:::xs)
-     return $! x
-
-newtype Handled s a = Handled {runHandler :: ST s (Maybe a)}
-{-# INLINE handledBy #-}
-handledBy :: ST s (Maybe a) -> ST s (Handled s a)
-handledBy = return . Handled
-
-setupHandler :: QH s a -> QC -> QO -> TExpQ (O# -> H s a -> C -> D# -> ST s (Handled s a)) ->
+setupHandler :: QH s a -> QC -> QO -> TExpQ (O# -> H s a -> C -> ST s (Maybe a)) ->
                                       (QH s a -> QC -> QST s (Maybe a)) -> QST s (Maybe a)
 setupHandler !hs !cs !o !h !k = k [|| pushH $$h $$hs ||][|| pushC $$o $$cs ||]
 
 {-# INLINE raise #-}
-raise :: H s a -> C -> O -> D -> ST s (Handled s a)
-raise (H SNil) !_ !_ !_                   = handledBy (return Nothing)
-raise (H (h:::hs')) !cs !(I# o#) !(I# d#) = h o# (H hs') cs d#
-
-recover :: Σ s -> QD -> QST s (Maybe a) -> QST s (Handled s a)
-recover σs d k = [||
-  do $$(rollback σs) $$d
-     handledBy $$k
-  ||]
+raise :: H s a -> C -> O -> ST s (Maybe a)
+raise (H SNil) !_ !_             = return Nothing
+raise (H (h:::hs')) !cs !(I# o#) = h o# (H hs') cs
 
 nextSafe :: Bool -> Input -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True input o p good bad = [|| let !c = $$(charAt input) $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else $$bad ||]

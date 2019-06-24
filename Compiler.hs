@@ -14,7 +14,7 @@ import ParserAST                  (ParserF(..), Parser(..))
 import Optimiser                  (optimise)
 import Analyser                   (terminationAnalysis)
 import CodeGenerator              (codeGen, halt, ret)
-import Machine                    (Machine(..), ΣVars, IMVar, IΣVar, MVar(..), letBind, LetBinding)
+import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), letBind, LetBinding)
 import Indexed                    (Free(Op), Void, fold', absurd)
 import Control.Applicative        (liftA2, liftA3)
 import Control.Monad              (forM_)
@@ -38,20 +38,20 @@ import Data.GADT.Show (GShow(..))
 import Data.Dependent.Sum (ShowTag(..))
 import Debug.Trace (traceShow)
 
-compile :: Parser a -> (Machine a, DMap MVar (LetBinding a), ΣVars, [IMVar])
+compile :: Parser a -> (Machine a, DMap MVar (LetBinding a), [IMVar])
 compile (Parser p) = 
   let !(p', μs, maxV, topo) = preprocess p
-      !(m, σs, maxΣ) = codeGen ({-terminationAnalysis -}p') halt (maxV + 1) 0
-      !(ms, σs') = compileLets μs σs (maxV + 1) maxΣ
-  in traceShow ms (Machine m, ms, σs', topo)
+      !(m, maxΣ) = codeGen ({-terminationAnalysis -}p') halt (maxV + 1) 0
+      !ms = compileLets μs (maxV + 1) maxΣ
+  in traceShow ms (Machine m, ms, topo)
 
-compileLets :: DMap MVar (Free ParserF Void) -> ΣVars -> IMVar -> IΣVar -> (DMap MVar (LetBinding a), ΣVars)
-compileLets μs σs maxV maxΣ = let (ms, σs', _) = DMap.foldrWithKey compileLet (DMap.empty, σs, maxΣ) μs in (ms, σs')
+compileLets :: DMap MVar (Free ParserF Void) -> IMVar -> IΣVar -> DMap MVar (LetBinding a)
+compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.empty, maxΣ) μs in ms
   where
-    compileLet :: MVar x -> Free ParserF Void x -> (DMap MVar (LetBinding a), ΣVars, IΣVar) -> (DMap MVar (LetBinding a), ΣVars, IΣVar)
-    compileLet (MVar μ) p (ms, σs, maxΣ) =
-      let (m, σs', maxΣ') = codeGen p ret maxV (maxΣ + 1)
-      in (DMap.insert (MVar μ) (letBind m) ms, σs ++ σs', maxΣ')
+    compileLet :: MVar x -> Free ParserF Void x -> (DMap MVar (LetBinding a), IΣVar) -> (DMap MVar (LetBinding a), IΣVar)
+    compileLet (MVar μ) p (ms, maxΣ) =
+      let (m, maxΣ') = codeGen p ret maxV (maxΣ + 1)
+      in (DMap.insert (MVar μ) (letBind m) ms, maxΣ')
 
 preprocess :: Free ParserF Void a -> (Free ParserF Void a, DMap MVar (Free ParserF Void), IMVar, [IMVar])
 preprocess p = let (lets, recs, topo) = findLets p in letInsertion lets recs topo p
@@ -202,7 +202,7 @@ makeStableParserName !p =
      return $! StableParserName name
 
 showM :: Parser a -> String
-showM = show . (\(x, _, _, _) -> x) . compile
+showM = show . (\(x, _, _) -> x) . compile
 
 instance Eq StableParserName where 
   (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)

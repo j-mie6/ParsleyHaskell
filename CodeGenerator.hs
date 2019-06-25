@@ -43,7 +43,7 @@ ret = Op3 Ret
 codeGen :: Free ParserF Void a -> Free3 M Void3 (a ': xs) ks b -> IMVar -> IΣVar -> (Free3 M Void3 xs ks b, IΣVar)
 codeGen p terminal μ0 σ0 = traceShow m (m, maxΣ)
   where
-    (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg (traceShow p p)) terminal) μ0 0 σ0 Set.empty
+    (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0 Set.empty
     alg = peephole |> (direct . imap present)
 
 peephole :: ParserF (History ParserF (CodeGen b)) a -> Maybe (CodeGen b a)

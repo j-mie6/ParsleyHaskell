@@ -20,26 +20,23 @@ data IList = ICons {-# UNPACK #-} !Int !IList | INil
 data HList xs where
   HNil :: HList '[]
   HCons :: !a -> !(HList as) -> HList (a ': as)
-{-data K s ks a where
-  KNil :: K s '[] a
-  {- A key property of the pure semantics of the machine states that
-     at the end of the execution of a machine, all the stacks shall
-     be empty. This also holds true of any recursive machines, for
-     obvious reasons. In the concrete machine, however, it is not
-     entirely necessary for this invariant to be obeyed: indeed the
-     stacks that would have otherwise been passed to the continuation
-     in the pure semantics were available to the caller in the
-     concrete machine. As such, continuations are only required to
-     demand the values of X and o, with all other values closed over
-     during suspension. -}
-  KCons :: !(X xs -> O# -> ST s (Maybe a)) -> !(K s ks a) -> K s (xs ': ks) a-}
-type K s xs a = X xs -> O# -> ST s (Maybe a)
 
 newtype H s a = H (SList (O# -> H s a -> C -> ST s (Maybe a)))
 type X = HList
 type C = IList
 type O = Int
 type O# = Int#
+{- A key property of the pure semantics of the machine states that
+    at the end of the execution of a machine, all the stacks shall
+    be empty. This also holds true of any recursive machines, for
+    obvious reasons. In the concrete machine, however, it is not
+    entirely necessary for this invariant to be obeyed: indeed the
+    stacks that would have otherwise been passed to the continuation
+    in the pure semantics were available to the caller in the
+    concrete machine. As such, continuations are only required to
+    demand the values of X and o, with all other values closed over
+    during suspension. -}
+type K s xs a = X xs -> O# -> ST s (Maybe a)
 data Input = Input {charAt :: TExpQ (Int -> Char), size :: TExpQ Int, substr :: TExpQ (Int -> Int -> UArray Int Char)}
 
 type QH s a = TExpQ (H s a)
@@ -53,7 +50,7 @@ makeX :: ST s (X '[])
 makeX = return $! HNil
 {-# INLINE pushX #-}
 pushX :: a -> X xs -> X (a ': xs)
-pushX = HCons
+pushX !x !xs = HCons x xs
 {-# INLINE popX #-}
 popX :: X (a ': xs) -> (# a, X xs #)
 popX !(HCons x xs) = (# x, xs #)
@@ -72,11 +69,6 @@ peekX !(HCons x xs) = x
 
 makeK :: ST s (K s '[] a)
 makeK = return $! noreturn
---{-# INLINE pushK #-}
-{-pushK :: (X xs -> O# -> ST s (Maybe a)) -> K s xs a
-pushK = K-}
-{-peekK :: K s xs a -> (X xs -> O# -> ST s (Maybe a))
-peekK !(K k) = k -}
 noreturn :: X xs -> O# -> ST s (Maybe a)
 noreturn xs o# = error "Machine is only permitted return-by-failure"
 
@@ -100,25 +92,26 @@ popC !(ICons o cs) = (# o, cs #)
 popC_ :: C -> C
 popC_ !(ICons _ cs) = cs
 pokeC :: O -> C -> C
-pokeC o !(ICons _ cs) = ICons o cs
+pokeC !o (ICons _ !cs) = ICons o cs
 
+{-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
-newΣ = newSTRef
-
+newΣ x = newSTRef x
+{-# INLINE writeΣ #-}
 writeΣ :: STRef s x -> x -> ST s ()
-writeΣ = writeSTRef
-
+writeΣ ref x = writeSTRef ref x
+{-# INLINE readΣ #-}
 readΣ :: STRef s x -> ST s x
-readΣ = readSTRef
-
+readΣ ref = readSTRef ref
+{-# INLINE modifyΣ #-}
 modifyΣ :: STRef s x -> (x -> x) -> ST s ()
 modifyΣ σ f =
-  do x <- readSTRef σ
-     writeSTRef σ (f $! x)
+  do x <- readΣ σ
+     writeΣ σ (f $! x)
 
 setupHandler :: QH s a -> QC -> QO -> TExpQ (O# -> H s a -> C -> ST s (Maybe a)) ->
                                       (QH s a -> QC -> QST s (Maybe a)) -> QST s (Maybe a)
-setupHandler !hs !cs !o !h !k = k [|| pushH $$h $$hs ||][|| pushC $$o $$cs ||]
+setupHandler !hs !cs !o !h !k = k [|| pushH $$h $$hs ||] [|| pushC $$o $$cs ||]
 
 {-# INLINE raise #-}
 raise :: H s a -> C -> O -> ST s (Maybe a)

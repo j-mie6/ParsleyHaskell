@@ -10,9 +10,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RecursiveDo #-}
 module Machine where
 
 import MachineOps                 --()
@@ -25,6 +23,7 @@ import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadRea
 import Data.STRef                 (STRef)
 import Data.Dependent.Map         (DMap)
 import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
+import Data.GADT.Show             (GShow(..))
 import Data.Array.Unboxed         (listArray)
 import Data.Array.Base            (UArray(..), unsafeAt, MArray, numElements, ixmap, elems)
 import GHC.Prim                   (Int#, Char#, newByteArray#, indexWideCharArray#)
@@ -33,7 +32,6 @@ import Safe.Coerce                (coerce)
 import Debug.Trace                (trace)
 import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
 import qualified Data.Dependent.Map as DMap ((!), insert, empty)
-import Data.GADT.Show (GShow(..))
 
 newtype Machine a = Machine { getMachine :: Free3 M Void3 '[] '[] a }
 newtype ΣVar a = ΣVar IΣVar
@@ -145,7 +143,7 @@ readyCalls topo ms start γ = foldr readyFunc (run start γ) topo
              in $$(rest (insertM μ [||recu||] ctx)) ||]
 
 readyExec :: Free3 M Void3 xs ks a -> Exec s xs ks a
-readyExec m = trace ("Executing: " ++ show m) (fold3 absurd (Exec . alg) m)
+readyExec = fold3 absurd (Exec . alg)
   where
     alg Halt                = execHalt
     alg Ret                 = execRet
@@ -380,13 +378,13 @@ suspend :: (Γ s (x ': xs) ks a -> QST s (Maybe a)) -> Γ s xs ks a -> QK s (x '
 suspend m γ = [|| \xs o# -> $$(m (γ {xs = [||xs||], o = [||I# o#||]})) ||]
 
 askM :: MonadReader (Ctx s a) m => MVar x -> m (QAbsExec s a x)
-askM μ = trace ("Getting: " ++ show μ) (asks (((DMap.! μ) . μs)))
+askM μ = asks (((DMap.! μ) . μs))
 
 askΣ :: MonadReader (Ctx s a) m => ΣVar x -> m (QSTRef s x)
-askΣ σ = trace ("Getting: " ++ show σ) (asks ((DMap.! σ) . σs))
+askΣ σ = asks ((DMap.! σ) . σs)
 
 askΦ :: MonadReader (Ctx s a) m => ΦVar x -> m (QJoin s a x)
-askΦ φ = trace ("Getting: " ++ show φ) (asks ((DMap.! φ) . φs))
+askΦ φ = asks ((DMap.! φ) . φs)
 
 instance IFunctor3 M where
   imap3 f Halt                           = Halt

@@ -1,12 +1,15 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE MagicHash #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE FlexibleInstances, MultiParamTypeClasses, UndecidableInstances, AllowAmbiguousTypes #-}
+{-# LANGUAGE GADTs,
+             DataKinds,
+             RecursiveDo,
+             RankNTypes,
+             BangPatterns,
+             MagicHash,
+             FlexibleContexts,
+             MultiWayIf,
+             FlexibleInstances, 
+             MultiParamTypeClasses, 
+             UndecidableInstances, 
+             AllowAmbiguousTypes #-}
 module Compiler(compile) where
 
 import Prelude hiding (pred)
@@ -30,20 +33,16 @@ import Data.HashMap.Strict        (HashMap)
 import Data.HashSet               (HashSet)
 import Data.Dependent.Map         (DMap)
 import GHC.Prim                   (StableName#)
-import Debug.Trace                (traceShow)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey)
-import Data.GADT.Show (GShow(..))
-import Data.Dependent.Sum (ShowTag(..))
-import Debug.Trace (traceShow)
 
 compile :: Parser a -> (Machine a, DMap MVar (LetBinding a), [IMVar])
 compile (Parser p) = 
   let !(p', μs, maxV, topo) = preprocess p
       !(m, maxΣ) = codeGen ({-terminationAnalysis -}p') halt (maxV + 1) 0
       !ms = compileLets μs (maxV + 1) maxΣ
-  in traceShow ms (Machine m, ms, topo)
+  in (Machine m, ms, topo)
 
 compileLets :: DMap MVar (Free ParserF Void) -> IMVar -> IΣVar -> DMap MVar (LetBinding a)
 compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.empty, maxΣ) μs in ms
@@ -209,6 +208,3 @@ instance Eq StableParserName where
 instance Hashable StableParserName where
   hash (StableParserName n) = hashStableName (StableName n)
   hashWithSalt salt (StableParserName n) = hashWithSalt salt (StableName n)
-
-instance Show (Free ParserF Void a) => ShowTag MVar (Free ParserF Void) where showTaggedPrec m = showsPrec
-instance Show (LetBinding a x) => ShowTag MVar (LetBinding a) where showTaggedPrec m = showsPrec

@@ -15,13 +15,13 @@ import GHC.Prim        (Int#, Char#, newByteArray#, indexWideCharArray#)
 import GHC.Exts        (Int(..), Char(..), (-#), (+#), (*#))
 import Safe.Coerce     (coerce)
 
-data SList a = !a ::: !(SList a) | SNil
-data IList = ICons {-# UNPACK #-} !Int !IList | INil
+data SList a = !a ::: SList a | SNil
+data IList = ICons {-# UNPACK #-} !Int IList | INil
 data HList xs where
   HNil :: HList '[]
   HCons :: !a -> !(HList as) -> HList (a ': as)
 
-newtype H s a = H (SList (O# -> H s a -> C -> ST s (Maybe a)))
+newtype H s a = H (SList (O# -> C -> ST s (Maybe a)))
 type X = HList
 type C = IList
 type O = Int
@@ -73,12 +73,12 @@ noreturn :: X xs -> O# -> ST s (Maybe a)
 noreturn xs o# = error "Machine is only permitted return-by-failure"
 
 makeH :: ST s (H s a)
-makeH = return $! (H SNil)
-pushH :: (O# -> H s a -> C -> ST s (Maybe a)) -> H s a -> H s a
-pushH !h !(H hs) = H (h:::hs)
+makeH = return $! H SNil
+pushH :: (O# -> C -> ST s (Maybe a)) -> H s a -> H s a
+pushH !h (H hs) = H (h:::hs)
 {-# INLINE popH_ #-}
 popH_ :: H s a -> H s a
-popH_ !(H (_:::hs)) = H hs
+popH_ (H (_:::hs)) = H hs
 
 makeC :: ST s C
 makeC = return $! INil
@@ -87,12 +87,12 @@ pushC :: O -> C -> C
 pushC = ICons
 {-# INLINE popC #-}
 popC :: C -> (# O, C #)
-popC !(ICons o cs) = (# o, cs #)
+popC (ICons o cs) = (# o, cs #)
 {-# INLINE popC_ #-}
 popC_ :: C -> C
-popC_ !(ICons _ cs) = cs
+popC_ (ICons _ cs) = cs
 pokeC :: O -> C -> C
-pokeC !o (ICons _ !cs) = ICons o cs
+pokeC !o (ICons _ cs) = ICons o cs
 
 {-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
@@ -109,14 +109,14 @@ modifyΣ σ f =
   do x <- readΣ σ
      writeΣ σ (f $! x)
 
-setupHandler :: QH s a -> QC -> QO -> TExpQ (O# -> H s a -> C -> ST s (Maybe a)) ->
+setupHandler :: QH s a -> QC -> QO -> TExpQ (H s a -> O# -> C -> ST s (Maybe a)) ->
                                       (QH s a -> QC -> QST s (Maybe a)) -> QST s (Maybe a)
-setupHandler !hs !cs !o !h !k = k [|| pushH $$h $$hs ||] [|| pushC $$o $$cs ||]
+setupHandler hs cs !o !h !k = k [|| pushH (\(!o#) (!cs) -> $$h $$hs o# cs) $$hs ||] [|| pushC $$o $$cs ||]
 
 {-# INLINE raise #-}
 raise :: H s a -> C -> O -> ST s (Maybe a)
-raise (H SNil) !_ !_             = return Nothing
-raise (H (h:::hs')) !cs !(I# o#) = h o# (H hs') cs
+raise (H SNil) cs !o          = return Nothing
+raise (H (h:::_)) cs !(I# o#) = h o# cs
 
 nextSafe :: Bool -> Input -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True input o p good bad = [|| let !c = $$(charAt input) $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else $$bad ||]

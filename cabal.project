@@ -1,9 +1,11 @@
 packages:.
 	 ../lift-plugin/lift-plugin
+     ./extra-worker-wrapper
 --profiling:true
 optimization:2
 allow-newer:yoda:all
-profiling-detail:all-functions
+--executable-dynamic:true
+profiling-detail:none
 
 --source-repository-package
 --    type: git

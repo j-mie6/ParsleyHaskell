@@ -80,7 +80,7 @@ tailTest = bgroup "tail-rec" [
   ]
 
 main :: IO ()
---main = rnf (Parsley.runParser longChoice "b") `seq` return ()
+--main = rnf (tailTestP (replicate 10000000 'a' ++ "b")) `seq` return ()
 main = --rnf (Parsley.runParser (manyTestParsley) (replicate 1000000 'a')) `seq` return (){-
   defaultMain [
     --combinatorGroup,

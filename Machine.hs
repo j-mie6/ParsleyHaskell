@@ -13,7 +13,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Machine where
 
-import MachineOps                 --()
+import MachineOps
 import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
 import Utils                      (WQ(..), lift', (>*<), TExpQ)
 import Data.Word                  (Word64)
@@ -23,7 +23,6 @@ import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadRea
 import Data.STRef                 (STRef)
 import Data.Dependent.Map         (DMap)
 import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
-import Data.GADT.Show             (GShow(..))
 import Data.Array.Unboxed         (listArray)
 import Data.Array.Base            (UArray(..), unsafeAt, MArray, numElements, ixmap, elems)
 import GHC.Prim                   (Int#, Char#, newByteArray#, indexWideCharArray#)
@@ -137,7 +136,7 @@ readyCalls topo ms start γ = foldr readyFunc (run start γ) topo
     readyFunc v rest ctx = 
       let μ = MVar v
           LetBinding k = ms DMap.! μ
-      in [|| let recu = AbsExec (\(!xs) (!ks) o# (!hs) (!cs) -> 
+      in [|| let recu = AbsExec (\(!xs) (!ks) o# (hs) (cs) -> 
                    $$(run (readyExec k) (Γ [||xs||] [||ks||] [||I# o#||] [||hs||] [||cs||]) 
                                         (insertM μ [||recu||] ctx)))
              in $$(rest (insertM μ [||recu||] ctx)) ||]
@@ -212,7 +211,7 @@ execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl $
   do mp <- p
      mq <- q
      asks $! \ctx γ ->
-       let handler = [||\o# hs cs ->
+       let handler = [||\hs o# cs ->
              let !(# c, cs' #) = popC cs
              in if c == (I# o#) then $$(mq (γ {o = [||I# o#||], hs = [||hs||], cs = [||cs'||]}))
                 else raise hs cs' (I# o#)
@@ -224,7 +223,7 @@ execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl $
   do mp <- inputSizeCheck constantInput p
      mq <- q
      asks $! \ctx γ ->
-       let handler = [||\_ hs cs ->
+       let handler = [||\hs _ cs ->
              let !(# o, cs' #) = popC cs
              in $$(mq (γ {o = [||o||], hs = [||hs||], cs = [||cs'||]}))
              ||]
@@ -235,12 +234,12 @@ execJoin φ = fmap (\(QJoin k) γ -> [|| let !(I# o#) = $$(o γ) in $$k (peekX $
 
 execAttempt :: Maybe Int -> Exec s xs ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
 execAttempt constantInput (Exec k) =
-  let handler = [||\(_ :: O#) hs cs -> let !(# o, cs' #) = popC cs in raise hs cs' o||]
+  let handler = [||\hs (_ :: O#) cs -> let !(# o, cs' #) = popC cs in raise hs cs' o||]
   in fmap (\mk γ -> setupHandlerΓ γ handler mk) (inputSizeCheck constantInput k)
 
 execLook :: Exec s xs ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
 execLook (Exec k) =
-  let handler = [||\o# hs cs -> raise hs (popC_ cs) (I# o#)||]
+  let handler = [||\hs o# cs -> raise hs (popC_ cs) (I# o#)||]
   in fmap (\mk γ -> setupHandlerΓ γ handler mk) k
 
 execNegLook :: Exec s xs ks a -> Exec s xs ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
@@ -248,7 +247,7 @@ execNegLook (Exec m) (Exec k) =
   do mm <- m
      mk <- k
      asks (\ctx γ ->
-       let handler = [||\_ hs cs ->
+       let handler = [||\hs _ cs ->
              let !(# o, cs' #) = popC cs
              in $$(mk (γ {o = [||o||], hs = [||hs||], cs = [||cs'||]}))
              ||]
@@ -302,7 +301,7 @@ execChainInit σ l μ k =
   do asks $! \ctx γ@(Γ xs ks o _ _) -> [||
        do let !(# x, xs' #) = popX $$xs
           ref <- newΣ x
-          $$(let handler = [||\o# hs cs ->
+          $$(let handler = [||\hs o# cs ->
                   let !(# c, cs' #) = popC cs
                   in if c == (I# o#) then
                        do y <- readΣ ref
@@ -341,13 +340,13 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
 execLogEnter :: String -> Exec s xs ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
 execLogEnter name k =
   do asks $! \ctx γ ->
-      let handler = [||\o# hs cs -> trace $$(preludeString name '<' (γ {o = [||I# o#||]}) ctx (color Red " Fail")) (raise hs cs (I# o#)) ||]
+      let handler = [||\hs o# cs -> trace $$(preludeString name '<' (γ {o = [||I# o#||]}) ctx (color Red " Fail")) (raise hs cs (I# o#)) ||]
       in (setupHandlerΓ γ handler (\γ' -> [|| trace $$(preludeString name '>' γ ctx "") $$(run k γ' (debugUp ctx))||]))
 
 execLogExit :: String -> Exec s xs ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
 execLogExit name k = asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(run k γ (debugDown ctx)) ||]
 
-setupHandlerΓ :: Γ s xs ks a -> TExpQ (O# -> H s a -> C -> ST s (Maybe a)) ->
+setupHandlerΓ :: Γ s xs ks a -> TExpQ (H s a -> O# -> C -> ST s (Maybe a)) ->
                                 (Γ s xs ks a -> QST s (Maybe a)) -> QST s (Maybe a)
 setupHandlerΓ γ !h !k = setupHandler (hs γ) (cs γ) (o γ) h (\hs cs -> k (γ {hs = hs, cs = cs}))
 
@@ -450,8 +449,6 @@ instance Show (Free3 M f xs ks a) where
 instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
 instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ
 instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
-
-instance GShow MVar where gshowsPrec = showsPrec
 
 instance GEq ΣVar where
   geq (ΣVar u) (ΣVar v)

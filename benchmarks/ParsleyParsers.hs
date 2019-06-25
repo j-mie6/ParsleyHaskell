@@ -31,8 +31,8 @@ pred = precedence [ Prefix [token "!" $> lift' Not]
                 <|> token "f" $> lift' F)
 
 phiTest :: Parser Char
---phiTest = try (char 'b') <|> char 'a' *> phiTest
-phiTest = skipMany (char 'a' {-<* skipMany (char 'c')-}) *> char 'b'
+phiTest = try (char 'b') <|> char 'a' *> phiTest
+--phiTest = skipMany (char 'a' {-<* skipMany (char 'c')-}) *> char 'b'
 
 -- Brainfuck benchmark
 deriving instance Lift BrainFuckOp

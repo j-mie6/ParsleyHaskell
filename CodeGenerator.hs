@@ -13,7 +13,6 @@ import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void, Void3, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
-import Control.Monad              ((<$!>))
 import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict (State, get, modify', runState, MonadState)
 import Fresh                      (VFreshT, HFreshT, runFreshT, evalFreshT, construct, MonadFresh(..), mapVFreshT)

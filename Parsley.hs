@@ -1,149 +1,156 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE UndecidableInstances #-}
-module Parsley ( Parser
-               , runParser
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DeriveLift #-}
+module Parsley ( Parser, runParser
                -- Functor
-               , fmap, (<$>), (<$), void
+               , fmap, (<$>), (<$), ($>), (<&>), void
                -- Applicative
                , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
                -- Alternative
-               , empty, (<|>), some, many, optional, choice
+               , empty, (<|>), (<+>), optional, option, choice, oneOf, noneOf, maybeP
                -- Monoidal
-               , Monoidal, unit, (<~>), (<~), (~>)
-               -- Monadic
-               , return, (>>=), (>>), mzero, mplus, join
+               , unit, (<~>), (<~), (~>)
+               -- Selective
+               , branch, select, match
+               -- "Monadic"
+               , (||=), (>>)
                -- Primitives
-               , satisfy, item, char
-               , lookAhead, try
+               , satisfy, item
+               , lookAhead, notFollowedBy, try
+               -- Iteratives
+               , chainl1, chainr1, chainPre, chainPost, chainl, chainr
+               , pfoldr, pfoldl
+               , many, manyN, some
+               , skipMany, skipManyN, skipSome
+               , sepBy, sepBy1, endBy, endBy1, manyTill, someTill
                -- Composites
-               , eof, notFollowedBy
-               , traverse, sequence, string
+               , char, eof, more
+               , traverse, sequence, string, token, repeat
+               , between
+               , (<?|>), (>?>), when, while, fromMaybeP
+               , debug
+               -- Expressions
+               , Level(..), precedence
+               -- Template Haskell Utils
+               , lift', (>*<), WQ(..), Lift
+               -- Template Haskell Crap
+               , bool
                ) where
 
-import Prelude hiding          ((*>), (<*), (>>), traverse, sequence, (<$), (<**>))
-import Control.Applicative     (Alternative, (<|>), empty, liftA2, liftA)
-import Control.Monad           (MonadPlus, mzero, mplus, liftM, liftM2, join, (<$!>))
-import Control.Monad.ST        (ST, runST)
-import Control.Monad.ST.Unsafe (unsafeInterleaveST)
-import Control.Monad.Reader    (ReaderT, lift, ask, runReaderT)
-import Data.STRef              (STRef, writeSTRef, readSTRef, modifySTRef', newSTRef)
-import System.IO.Unsafe        (unsafePerformIO)
-import Data.IORef              (IORef, writeIORef, readIORef, newIORef)
-import System.Mem.StableName   (StableName, makeStableName, hashStableName, eqStableName)
-import Data.Hashable           (Hashable, hashWithSalt, hash)
-import Data.HashSet            (HashSet)
-import qualified Data.HashSet as HashSet
-import Data.Array.Unboxed      (UArray, listArray, (!), bounds)
-import Data.Array.Base         (unsafeAt)
---import Unsafe.Coerce           (unsafeCoerce)
+import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat)
+import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
+import Compiler                   (compile)
+import Machine                    (exec)
+import Utils                      (lift', (>*<), WQ(..), TExpQ)
+import Data.Function              (fix)
+import Data.List                  (foldl')
+import Control.Monad.ST           (runST)
+import Language.Haskell.TH.Syntax (Lift)
 
-data HList xs where
-  HNil :: HList '[]
-  HCons :: !a -> !(HList as) -> HList (a ': as)
+{-
+PAPERS
+1) PLDI - Similar to the Garnishing paper, talk about deep embeddings of parsers, type-safe representation,
+          Free, type-safe compilation. Then go on to discuss the machine, its safety, its correspondance to
+          DFA with state? Acknowledgement of staging here, but not dicussed in detail. Talk about how
+          law based optimisations provide an additional boost. Mention a reliance on GHC to "do the right 
+          thing". Optimisations are not guaranteed to terminate at this stage?
+2) POPL - Foundational: differentiation of of grammars and how it corresponds to parsing. 
+          Furthermore, show the correspondance with the abstract machines (left
+          corresponds to handler stack pop, or backtracking)
+3) PLDI - MicroCompiler architecture, a.k.a how to stop relying on GHC (1): relations to multi-stage programming
+4) ICFP - Staging considerations for the machine (1): how is it actually orchestrated?
+5) ?    - Abstract Interpretation (loop finding, termination analysis, constant input analysis, more more more)
+6) IFL  - Error reporting in the parsers, lazy adaptation of the error stacks in P4S
+7) ?    - Error correcting parsers using foundation layed in (2)
+-}
 
--- AST
-data Parser a where
-  Pure      :: a -> Parser a
-  Satisfy   :: (Char -> Bool) -> Parser Char
-  (:<*>:)   :: Parser (a -> b) -> Parser a -> Parser b
-  (:*>:)    :: Parser a -> Parser b -> Parser b
-  (:<*:)    :: Parser a -> Parser b -> Parser a
-  (:>>=:)   :: Parser a -> (a -> Parser b) -> Parser b
-  (:<|>:)   :: Parser a -> Parser a -> Parser a
-  Empty     :: Parser a
-  Try       :: Parser a -> Parser a
-  LookAhead :: Parser a -> Parser a
-  Rec       :: Parser a -> Parser a
-  Many      :: Parser a -> Parser [a]
+fmap :: WQ (a -> b) -> Parser a -> Parser b
+fmap f = (pure f <*>)
 
-showAST :: Parser a -> String
-showAST (Pure _) = "(pure x)"
-showAST (pf :<*>: px) = concat ["(", showAST pf, " <*> ", showAST px, ")"]
-showAST (p :*>: q) = concat ["(", showAST p, " *> ", showAST q, ")"]
-showAST (p :<*: q) = concat ["(", showAST p, " <* ", showAST q, ")"]
-showAST (p :>>=: f) = concat ["(", showAST p, " >>= f)"]
-showAST (p :<|>: q) = concat ["(", showAST p, " <|> ", showAST q, ")"]
-showAST Empty = "empty"
-showAST (Try p) = concat ["(try ", showAST p, ")"]
-showAST (LookAhead p) = concat ["(lookAhead ", showAST p, ")"]
-showAST (Rec _) = "recursion point!"
-showAST (Many p) = concat ["(many ", showAST p, "]"]
-showAST (Satisfy _) = "(satisfy f)"
+(<$>) :: WQ (a -> b) -> Parser a -> Parser b
+(<$>) = fmap
 
--- Smart Constructors
-instance Functor Parser where fmap = liftA
-instance Applicative Parser where
-  pure = Pure
-  (<*>) = (:<*>:)
-(<*) :: Parser a -> Parser b -> Parser a
-(<*) = (:<*:)
-(*>) :: Parser a -> Parser b -> Parser b
-(*>) = (:*>:)
-instance Monad Parser where
-  return = Pure
-  (>>=) = (:>>=:)
-(>>) :: Parser a -> Parser b -> Parser b
-(>>) = (*>)
-instance Alternative Parser where
-  empty = Empty
-  (<|>) = (:<|>:)
-instance MonadPlus Parser where
-  mzero = empty
-  mplus = (<|>)
+void :: Parser a -> Parser ()
+void p = p *> unit
 
--- Additional Combinators
-many :: Parser a -> Parser [a]
-many p = let manyp = p <:> manyp <|> pure [] in manyp--Many p
-
-some :: Parser a -> Parser [a]
-some p = p <:> many p
-
-(<:>) :: Parser a -> Parser [a] -> Parser [a]
-(<:>) = liftA2 (:)
-
-(<**>) :: Parser a -> Parser (a -> b) -> Parser b
-(<**>) = liftA2 (flip ($))
-
-class Functor f => Monoidal f where
-  unit :: f ()
-  (<~>) :: f a -> f b -> f (a, b)
-
-(<~) :: Monoidal f => f a -> f b -> f a
-p <~ q = fst <$> (p <~> q)
-
-(~>) :: Monoidal f => f a -> f b -> f b
-p ~> q = snd <$> (p <~> q)
-
-instance (Functor f, Applicative f) => Monoidal f where
-  unit = pure ()
-  (<~>) = liftA2 (,)
-
-(<$) :: a -> Parser b -> Parser a
+(<$) :: WQ b -> Parser a -> Parser b
 x <$ p = p *> pure x
 
-satisfy :: (Char -> Bool) -> Parser Char
-satisfy = Satisfy
+($>) :: Parser a -> WQ b -> Parser b
+($>) = flip (<$)
 
-char :: Char -> Parser Char
-char c = satisfy (== c)
+(<&>) :: Parser a -> WQ (a -> b) -> Parser b
+(<&>) = flip fmap
 
-item :: Parser Char
-item = satisfy (const True)
+liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
+liftA2 f p q = f <$> p <*> q
 
-try :: Parser a -> Parser a
-try = Try
+many :: Parser a -> Parser [a]
+many = pfoldr (lift' (:)) (WQ [] [||[]||])
 
-lookAhead :: Parser a -> Parser a
-lookAhead = LookAhead
+manyN :: Int -> Parser a -> Parser [a]
+manyN n p = foldr (const (p <:>)) (many p) [1..n]
 
+some :: Parser a -> Parser [a]
+some = manyN 1
+
+skipMany :: Parser a -> Parser ()
+skipMany = pfoldr (lift' const >*< lift' id) (lift' ())
+--skipMany = pfoldl (lift' const) (lift' ())
+-- New implementation is stateless, so should work better!
+--skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
+
+skipManyN :: Int -> Parser a -> Parser ()
+skipManyN n p = foldr (const (p *>)) (skipMany p) [1..n]
+
+skipSome :: Parser a -> Parser ()
+skipSome = skipManyN 1
+
+(<+>) :: Parser a -> Parser b -> Parser (Either a b)
+p <+> q = lift' Left <$> p <|> lift' Right <$> q
+
+sepBy :: Parser a -> Parser b -> Parser [a]
+sepBy p sep = sepBy1 p sep <|> pure (WQ [] [||[]||])
+
+sepBy1 :: Parser a -> Parser b -> Parser [a]
+sepBy1 p sep = p <:> many (sep *> p)
+
+endBy :: Parser a -> Parser b -> Parser [a]
+endBy p sep = many (p <* sep)
+
+endBy1 :: Parser a -> Parser b -> Parser [a]
+endBy1 p sep = some (p <* sep)
+
+manyTill :: Parser a -> Parser b -> Parser [a]
+manyTill p end = let go = end $> WQ [] [||[]||] <|> p <:> go in go
+
+someTill :: Parser a -> Parser b -> Parser [a]
+someTill p end = notFollowedBy end *> (p <:> manyTill p end)
+
+-- Additional Combinators
+(<:>) :: Parser a -> Parser [a] -> Parser [a]
+(<:>) = liftA2 (lift' (:))
+
+(<**>) :: Parser a -> Parser (a -> b) -> Parser b
+(<**>) = liftA2 (WQ (flip ($)) [|| (flip ($)) ||])
+
+unit :: Parser ()
+unit = pure (lift' ())
+
+(<~>) :: Parser a -> Parser b -> Parser (a, b)
+(<~>) = liftA2 (lift' (,))
+
+(<~) :: Parser a -> Parser b -> Parser a
+(<~) = (<*)
+
+(~>) :: Parser a -> Parser b -> Parser b
+(~>) = (*>)
+
+(>>) :: Parser a -> Parser b -> Parser b
+(>>) = (*>)
+
+  -- Auxillary functions
 sequence :: [Parser a] -> Parser [a]
-sequence = foldr (<:>) (pure [])
+sequence = foldr (<:>) (pure (WQ [] [||[]||]))
 
 traverse :: (a -> Parser b) -> [a] -> Parser [b]
 traverse f = sequence . map f
@@ -151,317 +158,135 @@ traverse f = sequence . map f
 string :: String -> Parser String
 string = traverse char
 
-void :: Parser a -> Parser ()
-void = (() <$)
+oneOf :: [Char] -> Parser Char
+oneOf = choice . map char--satisfy (WQ (flip elem cs) [||flip elem cs||])
 
-optional :: Parser a -> Parser ()
-optional p = void p <|> unit
+noneOf :: [Char] -> Parser Char
+noneOf cs = satisfy (WQ (not . flip elem cs) [||not . flip elem cs||])
 
-choice :: [Parser a] -> Parser a
-choice = foldr (<|>) empty
-
--- NOTE: When the intrinsic is introduced to fix this properly, prove the law:
---   notFollowedBy . notFollowedBy = lookAhead
-notFollowedBy :: Parser a -> Parser ()
-notFollowedBy p = try (join ((try p *> return empty) <|> return unit))
-                  --try ((try p *> empty) <|> unit)
+token :: String -> Parser String
+token = try . string
 
 eof :: Parser ()
 eof = notFollowedBy item
 
-data StableParserName = forall a. StableParserName (StableName (Parser a))
-instance Eq StableParserName where (StableParserName n) == (StableParserName m) = eqStableName n m
-instance Hashable StableParserName where
-  hash (StableParserName n) = hashStableName n
-  hashWithSalt salt (StableParserName n) = hashWithSalt salt n
+more :: Parser ()
+more = lookAhead (void item)
 
-preprocess :: Parser a -> Parser a
-preprocess p = unsafePerformIO ((newIORef HashSet.empty) >>= runReaderT (preprocess' p))
+repeat :: Int -> Parser a -> Parser [a]
+repeat n p = traverse (const p) [1..n]
+
+between :: Parser o -> Parser c -> Parser a -> Parser a
+between open close p = open *> p <* close
+
+-- Parsing Primitives
+char :: Char -> Parser Char
+char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
+
+item :: Parser Char
+item = satisfy (WQ (const True) [|| const True ||])
+
+-- Composite Combinators
+optional :: Parser a -> Parser ()
+optional p = void p <|> unit
+
+option :: WQ a -> Parser a -> Parser a
+option x p = p <|> pure x
+
+choice :: [Parser a] -> Parser a
+choice = foldr (<|>) empty
+
+bool :: a -> a -> Bool -> a
+bool x y True  = x
+bool x y False = y
+
+constp :: Parser a -> Parser (b -> a)
+constp = (lift' const <$>)
+
+(<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
+cond <?|> (p, q) = branch (WQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
+
+(>?>) :: Parser a -> WQ (a -> Bool) -> Parser a
+p >?> (WQ f qf) = select (WQ g qg <$> p) empty
   where
-    preprocess' :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
-    preprocess' p = fix p >>= preprocess''
-    preprocess'' :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
-    preprocess'' (pf :<*>: px) = fmap optimise (liftM2 (:<*>:)  (preprocess' pf) (preprocess' px))
-    preprocess'' (p :*>: q)    = fmap optimise (liftM2 (:*>:)   (preprocess' p)  (preprocess' q))
-    preprocess'' (p :<*: q)    = fmap optimise (liftM2 (:<*:)   (preprocess' p)  (preprocess' q))
-    preprocess'' (p :>>=: f)   = fmap optimise (liftM (:>>=: f) (preprocess' p))
-    preprocess'' (p :<|>: q)   = fmap optimise (liftM2 (:<|>:)  (preprocess' p)  (preprocess' q))
-    preprocess'' Empty         = return Empty
-    preprocess'' (Try p)       = liftM Try (preprocess' p)
-    preprocess'' (LookAhead p) = liftM LookAhead (preprocess' p)
-    preprocess'' (Many p)      = liftM Many (preprocess' p)
-    preprocess'' p             = return p
+    g x = if f x then Right x else Left ()
+    qg = [||\x -> if $$qf x then Right x else Left ()||]
 
-    fix :: Parser a -> ReaderT (IORef (HashSet StableParserName)) IO (Parser a)
-    -- Force evaluation of p to ensure that the stableName is correct first time
-    fix !p =
-      do seenRef <- ask
-         seen <- lift (readIORef seenRef)
-         name <- StableParserName <$> lift (makeStableName p)
-         if HashSet.member name seen
-           then return (Rec p)
-           else do lift (writeIORef seenRef (HashSet.insert name seen))
-                   return p
+(||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
+p ||= f = match [minBound..maxBound] p f
 
-optimise :: Parser a -> Parser a
--- Applicative Optimisation
-optimise (Pure f :<*>: Pure x)            = pure (f x)
-optimise (Pure f :<*>: (Pure g :<*>: px)) = (f . g) <$> px
-optimise (Empty :<*>: _)                  = Empty
-optimise ((q :*>: pf) :<*>: px)           = q *> (optimise (pf <*> px))
-optimise (pf :<*>: (px :<*: q))           = optimise (optimise (pf <*> px) <* q)
-optimise (pf :<*>: (q :*>: Pure x))       = optimise (optimise (pf <*> pure x) <* q)
-optimise (pf :<*>: Empty)                 = pf *> empty
-optimise (pf :<*>: Pure x)                = ($x) <$> pf
--- Alternative Optimisation
-optimise (Pure x :<|>: _)                 = pure x
-optimise (Empty :<|>: p)                  = p
-optimise (p :<|>: Empty)                  = p
-optimise ((u :<|>: v) :<|>: w)            = u <|> optimise (v <|> w)
--- Monadic Optimisation
-optimise (Pure x :>>=: f)                 = f x
-optimise ((q :*>: p) :>>=: f)             = q *> optimise (p >>= f)
-optimise (Empty :>>=: f)                  = Empty
--- Sequential Optimisation
-optimise (Pure _ :*>: p)                  = p
-optimise ((p :*>: Pure _) :*>: q)         = p *> q
--- TODO Character and string fusion optimisation
-optimise (Empty :*>: _)                   = Empty
-optimise (p :*>: (q :*>: r))              = optimise (optimise (p *> q) *> r)
-optimise (p :<*: Pure _) = p
-optimise (p :<*: (q :*>: Pure _))         = optimise (p <* q)
--- TODO Character and string fusion optimisation
-optimise (p :<*: Empty)                   = p *> empty
-optimise (Pure x :<*: p)                  = optimise (p *> pure x)
-optimise (Empty :<*: _)                   = Empty
-optimise ((p :<*: q) :<*: r)              = optimise (p <* optimise (q <* r))
-optimise p                                = p
+when :: Parser Bool -> Parser () -> Parser ()
+when p q = p <?|> (q, unit)
 
-data M s xs a where
-  Halt         :: M s '[a] a
-  Push         :: !x -> M s (x ': xs) a -> M s xs a
-  Pop          :: M s xs a -> M s (b ': xs) a
-  App          :: M s (y ': xs) a -> M s (x ': (x -> y) ': xs) a
-  Sat          :: (Char -> Bool) -> M s (Char ': xs) a -> M s xs a
-  Bind         :: (x -> ST s (M s xs a)) -> M s (x ': xs) a
-  Empt         :: M s xs a
-  Commit       :: M s xs a -> M s xs a
-  SoftFork     :: M s xs a -> M s xs a -> M s xs a
-  HardFork     :: M s xs a -> M s xs a -> M s xs a
-  Attempt      :: M s xs a -> M s xs a
-  Look         :: M s xs a -> M s xs a
-  Restore      :: M s xs a -> M s xs a
-  ManyIter     :: STRef s [x] -> M s xs a -> M s (x ': xs) a
-  ManyInitSoft :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
-  ManyInitHard :: STRef s [x] -> M s xs a -> M s ([x] ': xs) a -> M s xs a
+while :: Parser Bool -> Parser ()
+while x = fix (when x)
 
-instance Show (M ss xs a) where
-  show Halt = "Halt"
-  show (Push _ k) = "(Push x " ++ show k ++ ")"
-  show (Pop k) = "(Pop " ++ show k ++ ")"
-  show (App k) = "(App " ++ show k ++ ")"
-  show (Sat _ k) = "(Sat f " ++ show k ++ ")"
-  show (Bind _) = "(Bind ?)"
-  show Empt = "Empt"
-  show (Commit k) = "(Commit " ++ show k ++ ")"
-  show (SoftFork p q) = "(SoftFork " ++ show p ++ " " ++ show q ++ ")"
-  show (HardFork p q) = "(HardFork " ++ show p ++ " " ++ show q ++ ")"
-  show (Attempt k) = "(Try " ++ show k ++ ")"
-  show (Look k) = "(Look " ++ show k ++ ")"
-  show (Restore k) = "(Restore " ++ show k ++ ")"
-  show (ManyIter _ k) = "(ManyIter " ++ show k ++ ")"
-  show (ManyInitSoft _ l k) = "(ManyInitSoft " ++ show l ++ " " ++ show k ++ ")"
-  show (ManyInitHard _ l k) = "(ManyInitHard " ++ show l ++ " " ++ show k ++ ")"
+select :: Parser (Either a b) -> Parser (a -> b) -> Parser b
+select p q = branch p q (pure (lift' id))
 
-compile :: Parser a -> ST s (M s '[] a)
-compile = flip compile' Halt
+fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
+fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
 
-compile' :: Parser a -> M s (a ': xs) b -> ST s (M s xs b)
-compile' (Pure x) m        = do return (Push x m)
-compile' (Satisfy p) m     = do return (Sat p m)
-compile' (pf :<*>: px) m   = do pxc <- compile' px (App m); compile' pf pxc
-compile' (p :*>: q) m      = do qc <- compile' q m; compile' p (Pop qc)
-compile' (p :<*: q) m      = do qc <- compile' q (Pop m); compile' p qc
-compile' Empty m           = do return Empt
---compile' (Try p :<|>: q) m = do SoftFork <$> compile' p (Commit m) <*> compile' q m
-compile' (p :<|>: q) m     = do HardFork <$> compile' p (Commit m) <*> compile' q m
-compile' (p :>>=: f) m     = do compile' p (Bind (flip compile' m . preprocess . f))
-compile' (Try p) m         = do Attempt <$> compile' p (Commit m)
-compile' (LookAhead p) m   = do Look <$> compile' p (Restore m)
---                              Using unsafeInterleaveST prevents this code from being compiled until it is asked for!
-compile' (Rec p) m         = do unsafeInterleaveST (compile' (preprocess p) m)
-{-compile' (Many (Try p)) m  =
-  mdo σ <- newSTRef []
-      manyp <- compile' p (ManyIter σ manyp)
-      return (ManyInitSoft σ manyp m)-}
-compile' (Many p) m        =
-  do σ <- newSTRef []
-     mdo manyp <- compile' p (ManyIter σ manyp)
-         return (ManyInitHard σ manyp m)
+maybeP :: Parser a -> Parser (Maybe a)
+maybeP p = lift' Just <$> p <|> pure (WQ Nothing [||Nothing||])
 
-type H s a = STRef s [ST s (Maybe a)]
-type X = HList
-type C s = STRef s [Int]
-type O s = STRef s Int
+chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
+chainl1 p op = chainPost p (lift' flip <$> op <*> p)
 
-makeX :: ST s (X '[])
-makeX = return HNil
-pushX :: a -> X xs -> X (a ': xs)
-pushX = HCons
-popX :: X (a ': xs) -> (a, X xs)
-popX (HCons x xs) = (x, xs)
-popX_ :: X (a ': xs) -> X xs
-popX_ (HCons x xs) = xs
-pokeX :: a -> X (a ': xs) -> X (a ': xs)
-pokeX y (HCons x xs) = HCons y xs
-modX :: (a -> b) -> X (a ': xs) -> X (b ': xs)
-modX f (HCons x xs) = HCons (f x) xs
-peekX :: X (a ': xs) -> a
-peekX (HCons x xs) = x
+chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
+chainr1 p op = let go = p <**> ((lift' flip <$> op <*> go) <|> pure (lift' id)) in go
 
-makeH :: ST s (H s a)
-makeH = newSTRef []
-emptyH :: H s a -> ST s Bool
-emptyH !hs = null <$!> readSTRef hs
-pushH :: ST s (Maybe a) -> H s a -> ST s ()
-pushH h hs = modifySTRef' hs (h:)
-popH :: H s a -> ST s (Maybe a)
-popH !href =
-  do !(h:hs) <- readSTRef href
-     writeSTRef href hs
-     h
-popH_ :: H s a -> ST s ()
-popH_ href = modifySTRef' href tail
+chainr :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
+chainr p op x = chainr1 p op <|> pure x
 
-makeC :: ST s (C s)
-makeC = newSTRef []
-pushC :: Int -> C s -> ST s ()
-pushC c cs = modifySTRef' cs (c:)
-popC :: C s -> ST s Int
-popC ref = do !(c:cs) <- readSTRef ref; writeSTRef ref cs; return c
-popC_ :: C s -> ST s ()
-popC_ ref = modifySTRef' ref tail
-pokeC :: Int -> C s -> ST s ()
-pokeC c cs = modifySTRef' cs (\(_:cs') -> c:cs')
+chainl :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
+chainl p op x = chainl1 p op <|> pure x
 
-makeO :: ST s (O s)
-makeO = newSTRef 0
-incO :: O s -> ST s ()
-incO o = modifySTRef' o (+1)
-getO :: O s -> ST s Int
-getO = readSTRef
-setO :: O s -> Int -> ST s ()
-setO = writeSTRef
-more :: UArray Int Char -> O s -> ST s Bool
-more input o = (size input >) <$!> readSTRef o
-next :: UArray Int Char -> O s -> ST s Char
-next input o = (unsafeAt input) <$!> readSTRef o
-nextSafe :: UArray Int Char -> O s -> (Char -> Bool) -> (Char -> ST s (Maybe a)) -> ST s (Maybe a) -> ST s (Maybe a)
-nextSafe input o p !good !bad =
-  do o' <-getO o
-     if size input > o' then let !c = unsafeAt input o' in if p c then do setO o (o' + 1); good c else bad
-     else bad
-size :: UArray Int Char -> Int
-size = snd . bounds
+pfoldr :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
+pfoldr f k p = chainPre (f <$> p) (pure k)
 
-eval :: String -> M s '[] a -> ST s (Maybe a)
-eval input m =
-  do xs <- makeX
-     hs <- makeH
-     cs <- makeC
-     o <- makeO
-     eval' xs hs cs o (listArray (0, length input) input) m
+pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
+pfoldl f k p = chainPost (pure k) (lift' flip >*< f <$> p)
 
-setupHandler :: H s a -> C s -> O s -> (ST s (Maybe a))-> ST s ()
-setupHandler hs cs o h =
-  do pushH h hs
-     o' <- getO o
-     pushC o' cs
+data Level a = InfixL  [Parser (a -> a -> a)]
+             | InfixR  [Parser (a -> a -> a)]
+             | Prefix  [Parser (a -> a)]
+             | Postfix [Parser (a -> a)]
 
-raise :: H s a -> ST s (Maybe a)
-raise href =
-  do hs <- readSTRef href
-     case hs of
-       [] -> return Nothing
-       h:hs' -> do writeSTRef href hs'
-                   h
-
--- NOTE: For performance, we might want to force evaluation of arguments
-eval' :: X xs -> H s a -> C s -> O s -> UArray Int Char -> M s xs a -> ST s (Maybe a)
-eval' xs _ _ _ _ Halt = return (Just (peekX xs))
-eval' xs hs cs o input (Push x k) = eval' (pushX x xs) hs cs o input k
-eval' xs hs cs o input (Pop k) = eval' (popX_ xs) hs cs o input k
-eval' xs hs cs o input (App k) = --let !(x, xs') = popX xs in eval' (modX ($ x) xs') hs cs o input k
-  let !(x, xs') = popX xs
-      !(f, xs'') = popX xs'
-  in eval' (pushX (f x) xs'') hs cs o input k
-eval' xs hs cs o input (Sat p k) = nextSafe input o p (\c -> eval' (pushX c xs) hs cs o input k) (raise hs)
-eval' xs hs cs o input (Bind f) =
-  do let !(x, xs') = popX xs
-     k <- f x
-     eval' xs' hs cs o input k
-eval' _ hs _ _ _ Empt = raise hs
-eval' xs hs cs o input (Commit k) = do popH_ hs; popC_ cs; eval' xs hs cs o input k
-eval' xs hs cs o input (SoftFork p q) =
-  do setupHandler hs cs o handler
-     eval' xs hs cs o input p
-  where handler = do o' <- popC cs
-                     setO o o'
-                     eval' xs hs cs o input q
-eval' xs hs cs o input (HardFork p q) =
-  do setupHandler hs cs o handler
-     eval' xs hs cs o input p
-  where handler = do o' <- getO o
-                     c <- popC cs
-                     if c == o' then do eval' xs hs cs o input q
-                     else raise hs
-eval' xs hs cs o input (Attempt k) =
-  do setupHandler hs cs o handler
-     eval' xs hs cs o input k
-  where handler = do o' <- popC cs
-                     setO o o'
-                     raise hs
-eval' xs hs cs o input (Look k) =
-  do setupHandler hs cs o handler
-     eval' xs hs cs o input k
-  where handler = do popC cs; raise hs
-eval' xs hs cs o input (Restore k) = do popH_ hs; o' <- popC cs; setO o o'; eval' xs hs cs o input k
-eval' xs hs cs o input (ManyIter σ k) =
-  do let !(x, xs') = popX xs
-     modifySTRef' σ (x:)
-     o' <- getO o
-     pokeC o' cs
-     eval' xs' hs cs o input k
-eval' xs hs cs o input (ManyInitHard σ l k) =
-  do setupHandler hs cs o handler
-     eval' xs hs cs o input l
-  where handler = do o' <- getO o
-                     c <- popC cs
-                     if c == o' then do ys <- readSTRef σ
-                                        writeSTRef σ []
-                                        eval' (pushX (reverse ys) xs) hs cs o input k
-                     else do writeSTRef σ []; raise hs
-eval' xs hs cs o input (ManyInitSoft σ l k) =
-  do setupHandler hs cs o handler
-     eval' xs hs cs o input l
-  where handler = do o' <-popC cs
-                     setO o o'
-                     ys <- readSTRef σ
-                     writeSTRef σ []
-                     eval' (pushX (reverse ys) xs) hs cs o input k
---eval' xs hs cs s o input _ = undefined
-
-runParser :: Parser a -> String -> Maybe a
-runParser p input = runST (compile (preprocess p) >>= eval input)
-{-
-data CompiledParser a = Compiled (forall s. M s '[] a)
-
-mkParser :: Parser a -> CompiledParser a
-mkParser p = Compiled (runST (slightyUnsafeLeak (compile (preprocess p))))
+-- TODO If subroutines are reintroduced to the language, then this needs subroutines to be efficient
+precedence :: [Level a] -> Parser a -> Parser a
+precedence levels atom = foldl' convert atom levels
   where
-    slightyUnsafeLeak :: (forall s. ST s (M s '[] a)) -> (forall s. ST s (M s' '[] a))
-    slightyUnsafeLeak = unsafeCoerce
+    convert x (InfixL ops)  = chainl1 x (choice ops)
+    convert x (InfixR ops)  = chainr1 x (choice ops)
+    convert x (Prefix ops)  = chainPre (choice ops) x
+    convert x (Postfix ops) = chainPost x (choice ops)
 
-runCompiledParser :: CompiledParser a -> String -> Maybe a
-runCompiledParser (Compiled p) input = runST (eval input p)
--}
+runParser :: Parser a -> TExpQ (String -> Maybe a)
+runParser p = [||\input -> runST $$(exec [||input||] (compile p))||]
+
+-- Fixities
+-- Functor
+infixl 4 <$>
+infixl 4 <$
+infixl 4 $>
+infixl 4 <&>
+-- Applicative
+--infixl 4 <*>
+--infixl 4 <*
+--infixl 4 *>
+infixl 4 <**>
+infixl 4 <:>
+-- Monoidal
+infixl 4 <~>
+infixl 4 <~
+infixl 4 ~>
+-- Alternative
+--infixl 3 <|>
+infixl 3 <+>
+-- Selective
+infixl 4 >?>
+infixl 4 <?|>
+-- "Monadic"
+infixl 1 ||=
+infixl 1 >>

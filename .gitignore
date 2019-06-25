@@ -1,0 +1,13 @@
+*.hi
+*.o
+*.svg
+/dist-newstyle/
+*.dump*
+/dump-core/
+*.hp
+*.prof
+*.verbose-core2core
+log
+.ghc.environment*
+benchmarks/Benchmarks
+hie.*

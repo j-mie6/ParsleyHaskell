@@ -1,21 +1,23 @@
+{-# LANGUAGE FlexibleContexts #-}
 module ParsecParsers where
 import CommonFunctions
 import Text.Parsec
+import Control.Monad.Identity (Identity)
 
-type Parser a = Parsec String () a
+type Parser s a = Parsec s () a
 
-($>) :: Parser a -> b -> Parser b
+($>) :: Stream s Identity Char => Parser s a -> b -> Parser s b
 ($>) = flip (<$)
 
-brainfuck :: Parser [BrainFuckOp]
-brainfuck = whitespace *>
-  many ( lexeme (char '>' $> RightPointer)
-     <|> lexeme (char '<' $> LeftPointer)
-     <|> lexeme (char '+' $> Increment)
-     <|> lexeme (char '-' $> Decrement)
-     <|> lexeme (char '.' $> Output)
-     <|> lexeme (char ',' $> Input)
-     <|> between (lexeme (char '(')) (lexeme (char ')')) (Loop <$> brainfuck)) <* eof
+brainfuck :: Stream s Identity Char => Parser s [BrainFuckOp]
+brainfuck = whitespace *> bf <* eof
   where
-    whitespace = optional (noneOf "<>+-.,[]")
+    bf = many ( lexeme (char '>' $> RightPointer)
+      <|> lexeme (char '<' $> LeftPointer)
+      <|> lexeme (char '+' $> Increment)
+      <|> lexeme (char '-' $> Decrement)
+      <|> lexeme (char '.' $> Output)
+      <|> lexeme (char ',' $> Input)
+      <|> between (lexeme (char '[')) (lexeme (char ']')) (Loop <$> bf))
+    whitespace = skipMany (noneOf "<>+-.,[]")
     lexeme p = p <* whitespace

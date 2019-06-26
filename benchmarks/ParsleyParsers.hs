@@ -31,21 +31,21 @@ pred = precedence [ Prefix [token "!" $> lift' Not]
                 <|> token "f" $> lift' F)
 
 phiTest :: Parser Char
-phiTest = try (char 'b') <|> char 'a' *> phiTest
---phiTest = skipMany (char 'a' {-<* skipMany (char 'c')-}) *> char 'b'
+--phiTest = try (char 'b') <|> char 'a' *> phiTest
+phiTest = skipMany (char 'a') *> char 'b'
 
 -- Brainfuck benchmark
 deriving instance Lift BrainFuckOp
 
 brainfuck :: Parser [BrainFuckOp]
-brainfuck = whitespace *> bf
+brainfuck = whitespace *> bf <* eof
   where
     whitespace = skipMany (noneOf "<>+-[]")
     lexeme p = p <* whitespace
-    bf = many ( (lexeme (char '>' $> lift' RightPointer))
-      <|> (lexeme (char '<' $> lift' LeftPointer))
-      <|> (lexeme (char '+' $> lift' Increment))
-      <|> (lexeme (char '-' $> lift' Decrement))
-      <|> (lexeme (char '.' $> lift' Output))
-      <|> (lexeme (char ',' $> lift' Input))
-      <|> (between (lexeme (char '[')) (lexeme (char ']')) (lift' Loop <$> brainfuck)))
+    bf = many ( lexeme ((token ">" $> lift' RightPointer)
+                    <|> (token "<" $> lift' LeftPointer)
+                    <|> (token "+" $> lift' Increment)
+                    <|> (token "-" $> lift' Decrement)
+                    <|> (token "." $> lift' Output)
+                    <|> (token "," $> lift' Input)
+                    <|> (between (lexeme (token "[")) (token "]") (lift' Loop <$> bf))))

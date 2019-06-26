@@ -1,9 +1,10 @@
 module NativeParsers where
 import CommonFunctions
 
-brainfuck :: String -> [BrainFuckOp]
+brainfuck :: String -> Maybe [BrainFuckOp]
 brainfuck input = 
   let walk :: String -> [BrainFuckOp] -> ([BrainFuckOp], String)
+      walk [] acc            = (reverse acc, [])
       walk input@(']':_) acc = (reverse acc, input)
       walk (c:rest) acc      = case c of
         '>' -> walk rest (RightPointer:acc)
@@ -20,7 +21,7 @@ brainfuck input =
                      ']':rest' -> (body, rest')
                      _ -> error "Unclosed loop"
   in case walk input [] of
-    (res, []) -> res
+    (res, []) -> Just res
     _         -> error "] closes a loop, but no loop was opened"
         
 tailTest :: String -> Maybe Char

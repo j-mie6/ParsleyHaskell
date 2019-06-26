@@ -1,25 +1,29 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE MagicHash #-}
-{-# LANGUAGE UnboxedTuples #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE GADTs,
+             DataKinds,
+             TypeOperators,
+             BangPatterns,
+             MagicHash,
+             UnboxedTuples,
+             TemplateHaskell,
+             FlexibleInstances,
+             TypeApplications #-}
 module MachineOps where
 
-import Utils           (TExpQ)
-import GHC.ST          (ST(..))
-import Data.STRef      (STRef, writeSTRef, readSTRef, newSTRef)
-import Data.Array.Base (STUArray(..), UArray(..), newArray_, unsafeRead, unsafeWrite, MArray, getNumElements)
-import GHC.Prim        (Int#, Char#, newByteArray#, indexWideCharArray#)
-import GHC.Exts        (Int(..), Char(..), (-#), (+#), (*#))
-import Safe.Coerce     (coerce)
+import Utils              (TExpQ)
+import GHC.ST             (ST(..))
+import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
+import Data.Array.Base    (STUArray(..), UArray(..), unsafeRead, unsafeWrite, MArray, getNumElements, listArray)
+import GHC.Prim           (Int#, Char#, newByteArray#, indexWideCharArray#, indexWord16Array#, ByteArray#, word2Int#, chr#)
+import GHC.Exts           (Int(..), Char(..), (-#), (+#), (*#))
+import Data.Text.Internal (Text(..))
+import Data.Text.Array    (aBA)
+import Safe.Coerce        (coerce)
 
 data SList a = !a ::: SList a | SNil
 data IList = ICons {-# UNPACK #-} !Int IList | INil
 data HList xs where
   HNil :: HList '[]
-  HCons :: !a -> !(HList as) -> HList (a ': as)
+  HCons :: !a -> HList as -> HList (a ': as)
 
 newtype H s a = H (SList (O# -> C -> ST s (Maybe a)))
 type X = HList
@@ -37,7 +41,33 @@ type O# = Int#
     demand the values of X and o, with all other values closed over
     during suspension. -}
 type K s xs a = X xs -> O# -> ST s (Maybe a)
-data Input = Input {charAt :: TExpQ (Int -> Char), size :: TExpQ Int, substr :: TExpQ (Int -> Int -> UArray Int Char)}
+data PreparedInput = PreparedInput (Int -> Char) Int (Int -> Int -> String)
+data InputOps = InputOps {charAt :: TExpQ (Int -> Char), size :: TExpQ Int, substr :: TExpQ (Int -> Int -> String)}
+
+class Input s where prepare :: TExpQ s -> TExpQ PreparedInput
+instance Input [Char] where prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
+instance Input Text where 
+  prepare qinput = [||
+      let (Text arr (I# off#) size) = $$qinput
+          arr# = (aBA arr)
+          charAt (I# i#) = C# (chr# (word2Int# (indexWord16Array# arr# (i#{- +# off#-}))))
+          substr m n = [charAt i | i <- [m..n]]
+      in PreparedInput charAt size substr
+    ||]
+instance Input (UArray Int Char) where 
+  prepare qinput = [||
+      let (UArray _ _ size input#) = $$qinput
+          charAt (I# i#) = C# (indexWideCharArray# input# i#)
+          substr m n = [charAt i | i <- [m..n]]
+      in PreparedInput charAt size substr
+    ||]
+-- TODO: Support?
+{-instance Input ByteString where
+  prepare qinput = [||
+      let input = $$qinput
+
+      in undefined
+    ||]-}
 
 type QH s a = TExpQ (H s a)
 type QX xs = TExpQ (X xs)
@@ -50,22 +80,22 @@ makeX :: ST s (X '[])
 makeX = return $! HNil
 {-# INLINE pushX #-}
 pushX :: a -> X xs -> X (a ': xs)
-pushX !x !xs = HCons x xs
+pushX !x xs = HCons x xs
 {-# INLINE popX #-}
 popX :: X (a ': xs) -> (# a, X xs #)
-popX !(HCons x xs) = (# x, xs #)
+popX (HCons x xs) = (# x, xs #)
 {-# INLINE popX_ #-}
 popX_ :: X (a ': xs) -> X xs
-popX_ !(HCons x xs) = xs
+popX_ (HCons x xs) = xs
 {-# INLINE pokeX #-}
 pokeX :: a -> X (a ': xs) -> X (a ': xs)
-pokeX y !(HCons x xs) = HCons y xs
+pokeX y (HCons x xs) = HCons y xs
 {-# INLINE modX #-}
 modX :: (a -> b) -> X (a ': xs) -> X (b ': xs)
-modX f !(HCons x xs) = HCons (f x) xs
+modX f (HCons x xs) = HCons (f $! x) xs
 {-# INLINE peekX #-}
 peekX :: X (a ': xs) -> a
-peekX !(HCons x xs) = x
+peekX (HCons x xs) = x
 
 makeK :: ST s (K s '[] a)
 makeK = return $! noreturn
@@ -106,7 +136,7 @@ readΣ ref = readSTRef ref
 {-# INLINE modifyΣ #-}
 modifyΣ :: STRef s x -> (x -> x) -> ST s ()
 modifyΣ σ f =
-  do x <- readΣ σ
+  do !x <- readΣ σ
      writeΣ σ (f $! x)
 
 setupHandler :: QH s a -> QC -> QO -> TExpQ (H s a -> O# -> C -> ST s (Maybe a)) ->
@@ -118,7 +148,7 @@ raise :: H s a -> C -> O -> ST s (Maybe a)
 raise (H SNil) cs !o          = return Nothing
 raise (H (h:::_)) cs !(I# o#) = h o# cs
 
-nextSafe :: Bool -> Input -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
+nextSafe :: Bool -> InputOps -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True input o p good bad = [|| let !c = $$(charAt input) $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else $$bad ||]
 nextSafe False input o p good bad = [||
     let bad' = $$bad in

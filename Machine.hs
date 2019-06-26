@@ -11,7 +11,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
-module Machine where
+module Machine (module Machine, Input(..)) where
 
 import MachineOps
 import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
@@ -62,7 +62,7 @@ data M k xs ks a where
   NegLook   :: !(k xs ks a) -> !(k xs ks a) -> M k xs ks a
   Restore   :: !(k xs ks a) -> M k xs ks a
   Case      :: !(k (x ': xs) ks a) -> !(k (y ': xs) ks a) -> M k (Either x y ': xs) ks a
-  Choices   :: ![WQ (x -> Bool)] -> ![k xs ks a] -> M k (x ': xs) ks a
+  Choices   :: ![WQ (x -> Bool)] -> ![k xs ks a] -> k xs ks a -> M k (x ': xs) ks a
   ChainIter :: !(ΣVar x) -> !(MVar x) -> M k ((x -> x) ': xs) (x ': xs) a
   ChainInit :: !(ΣVar x) -> !(k xs (x ': xs) a) -> !(MVar x) -> !(k (x ': xs) ks a) -> M k (x ': xs) ks a
   LogEnter  :: String -> !(k xs ks a) -> M k xs ks a
@@ -87,7 +87,7 @@ newtype QSTRef s x = QSTRef (TExpQ (STRef s x))
 data Ctx s a = Ctx { μs         :: DMap MVar (QAbsExec s a)
                    , φs         :: DMap ΦVar (QJoin s a)
                    , σs         :: DMap ΣVar (QSTRef s)
-                   , input      :: {-# UNPACK #-} !Input
+                   , input      :: {-# UNPACK #-} !InputOps
                    , constCount :: Int
                    , debugLevel :: Int }
 
@@ -116,18 +116,16 @@ newtype Exec s xs ks a = Exec (Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a)
 run :: Exec s xs ks a -> Γ s xs ks a -> Ctx s a -> QST s (Maybe a)
 run (Exec m) γ ctx = runReader m ctx γ
 
-exec :: TExpQ String -> (Machine a, DMap MVar (LetBinding a), [IMVar]) -> QST s (Maybe a)
+exec :: TExpQ PreparedInput -> (Machine a, DMap MVar (LetBinding a), [IMVar]) -> QST s (Maybe a)
 exec input (Machine !m, ms, topo) = [||
   do xs <- makeX
      ks <- makeK
      hs <- makeH
      cs <- makeC
-     let !(UArray _ _ size input#) = listArray (0, length $$input-1) $$input
-     let charAt (I# i#) = C# (indexWideCharArray# input# i#)
-     let substr i j = ixmap (i, j) id (UArray 0 (size - 1) size input#) :: UArray Int Char
+     let !(PreparedInput charAt size substr) = $$input
      $$(readyCalls topo ms (readyExec m) 
          (Γ [||xs||] [||ks||] [||0||] [||hs||] [||cs||])
-         (Ctx DMap.empty DMap.empty DMap.empty (Input [||charAt||] [||size||] [||substr||]) 0 0))
+         (Ctx DMap.empty DMap.empty DMap.empty (InputOps [||charAt||] [||size||] [||substr||]) 0 0))
   ||]
 
 readyCalls :: [IMVar] -> DMap MVar (LetBinding a) -> Exec s '[] '[] a -> Γ s '[] '[] a -> Ctx s a -> QST s (Maybe a)
@@ -162,7 +160,7 @@ readyExec = fold3 absurd (Exec . alg)
     alg (NegLook m k)       = execNegLook m k
     alg (Restore k)         = execRestore k
     alg (Case p q)          = execCase p q
-    alg (Choices fs ks)     = execChoices fs ks
+    alg (Choices fs ks def) = execChoices fs ks def
     alg (ChainIter σ μ)     = execChainIter σ μ
     alg (ChainInit σ l μ k) = execChainInit σ l μ k
     alg (LogEnter name k)   = execLogEnter name k
@@ -192,7 +190,7 @@ execPop :: Exec s xs ks a -> Reader (Ctx s a) (Γ s (x ': xs) ks a -> QST s (May
 execPop (Exec k) = fmap (\m γ -> m (γ {xs = [|| popX_ $$(xs γ) ||]})) k
 
 execLift2 :: WQ (x -> y -> z) -> Exec s (z ': xs) ks a -> Reader (Ctx s a) (Γ s (y ': x ': xs) ks a -> QST s (Maybe a))
-execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = [|| let !(# y, xs' #) = popX $$(xs γ); !(# x, xs'' #) = popX xs' in pushX ($$(_code f) x y) xs'' ||]})) k
+execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = [|| let (# y, xs' #) = popX $$(xs γ); (# x, xs'' #) = popX xs' in pushX ($$(_code f) x y) xs'' ||]})) k
 
 execSat :: WQ (Char -> Bool) -> Exec s (Char ': xs) ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
 execSat p (Exec k) =
@@ -272,15 +270,16 @@ execCase (Exec p) (Exec q) =
            Right y  -> $$(mq (γ {xs = [||pushX y xs'||]}))
        ||]
 
-execChoices :: forall x xs ks a s. [WQ (x -> Bool)] -> [Exec s xs ks a] -> Reader (Ctx s a) (Γ s (x ': xs) ks a -> QST s (Maybe a))
-execChoices fs ks = 
-  fmap (\mks γ -> [|| let (# x, xs' #) = popX $$(xs γ) in $$(go [||x||] fs mks (γ {xs = [||xs'||]})) ||]) (forM ks (\(Exec k) -> k))
+execChoices :: forall x xs ks a s. [WQ (x -> Bool)] -> [Exec s xs ks a] -> Exec s xs ks a -> Reader (Ctx s a) (Γ s (x ': xs) ks a -> QST s (Maybe a))
+execChoices fs ks (Exec def) = 
+  do mdef <- def
+     fmap (\mks γ -> [|| let !(# x, xs' #) = popX $$(xs γ) in $$(go [||x||] fs mks mdef (γ {xs = [||xs'||]})) ||]) (forM ks (\(Exec k) -> k))
   where
-    go :: TExpQ x -> [WQ (x -> Bool)] -> [Γ s xs ks a -> QST s (Maybe a)] -> Γ s xs ks a -> QST s (Maybe a)
-    go _ [] [] γ = raiseΓ γ
-    go x (f:fs) (mk:mks) γ = [||
+    go :: TExpQ x -> [WQ (x -> Bool)] -> [Γ s xs ks a -> QST s (Maybe a)] -> (Γ s xs ks a -> QST s (Maybe a)) -> Γ s xs ks a -> QST s (Maybe a)
+    go _ [] [] def γ = def γ
+    go x (f:fs) (mk:mks) def γ = [||
         if $$(_code f) $$x then $$(mk γ)
-        else $$(go x fs mks γ)
+        else $$(go x fs mks def γ)
       ||]
 
 
@@ -289,7 +288,7 @@ execChainIter σ μ =
   do !(QSTRef ref) <- askΣ σ
      !(QAbsExec k) <- askM μ
      return $! \(Γ xs ks o hs cs) -> [||
-       do let !(# g, xs' #) = popX $$xs
+       do let (# g, xs' #) = popX $$xs
           modifyΣ $$ref g
           let I# o# = $$o
           runConcrete $$k xs' $$ks o# $$hs (pokeC $$o $$cs)
@@ -332,7 +331,7 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     inputTrace   = [|| let replace '\n' = color Green "↙"
                            replace ' '  = color White "·"
                            replace c    = return c
-                       in concatMap replace (elems $$sub) ||]
+                       in concatMap replace $$sub ||]
     eof          = [|| if $$end == $$(size (input ctx)) then $$inputTrace ++ color Red "•" else $$inputTrace ||]
     prelude      = [|| concat [indent, dir : name, dir : " (", show $$offset, "): "] ||]
     caretSpace   = [|| replicate (length $$prelude + $$offset - $$start) ' ' ||]
@@ -406,7 +405,7 @@ instance IFunctor3 M where
   imap3 f (NegLook m k)                  = NegLook (f m) (f k)
   imap3 f (Restore k)                    = Restore (f k)
   imap3 f (Case p q)                     = Case (f p) (f q)
-  imap3 f (Choices fs ks)                = Choices fs (map f ks)
+  imap3 f (Choices fs ks def)            = Choices fs (map f ks) (f def)
   imap3 f (ChainIter σ μ)                = ChainIter σ μ
   imap3 f (ChainInit σ l μ k)            = ChainInit σ (f l) μ (f k)
   imap3 f (LogEnter name k)              = LogEnter name (f k)
@@ -440,7 +439,7 @@ instance Show (Free3 M f xs ks a) where
     alg (NegLook m k)                         = "(NegLook " ++ getConst3 m ++ " " ++ getConst3 k ++ ")"
     alg (Restore k)                           = "(Restore " ++ getConst3 k ++ ")"
     alg (Case m k)                            = "(Case " ++ getConst3 m ++ " " ++ getConst3 k ++ ")"
-    alg (Choices _ ks)                        = "(Choices " ++ show (map getConst3 ks) ++ ")"
+    alg (Choices _ ks def)                    = "(Choices " ++ show (map getConst3 ks) ++ " " ++ getConst3 def ++ ")"
     alg (ChainIter σ μ)                       = "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
     alg (ChainInit σ m μ k)                   = "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ getConst3 m ++ " " ++ getConst3 k ++ "}"
     alg (LogEnter _ k)                        = getConst3 k

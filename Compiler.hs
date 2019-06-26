@@ -91,7 +91,7 @@ findLetsAlg p q = LetFinder $ do
             LookAhead p     -> do runLetFinder p
             NotFollowedBy p -> do runLetFinder p
             Branch b p q    -> do runLetFinder b;  runLetFinder p; runLetFinder q
-            Match p _ qs    -> do runLetFinder p;  forM_ qs runLetFinder
+            Match p _ qs d  -> do runLetFinder p;  forM_ qs runLetFinder; runLetFinder d
             ChainPre op p   -> do runLetFinder op; runLetFinder p
             ChainPost p op  -> do runLetFinder p;  runLetFinder op
             Debug _ p       -> do runLetFinder p
@@ -145,7 +145,7 @@ postprocess (Try n p)         = LetInserter (fmap optimise (fmap (Try n) (runLet
 postprocess (LookAhead p)     = LetInserter (fmap optimise (fmap LookAhead (runLetInserter p)))
 postprocess (NotFollowedBy p) = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
 postprocess (Branch b p q)    = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
-postprocess (Match p fs qs)   = LetInserter (fmap optimise (liftA3 Match (runLetInserter p) (return fs) (traverse runLetInserter qs)))
+postprocess (Match p fs qs d) = LetInserter (fmap optimise (liftA4 Match (runLetInserter p) (return fs) (traverse runLetInserter qs) (runLetInserter d)))
 postprocess (ChainPre op p)   = LetInserter (fmap Op       (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
 postprocess (ChainPost p op)  = LetInserter (fmap Op       (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
 postprocess (Debug name p)    = LetInserter (fmap Op       (fmap (Debug name) (runLetInserter p)))
@@ -202,6 +202,9 @@ makeStableParserName !p =
 
 showM :: Parser a -> String
 showM = show . (\(x, _, _) -> x) . compile
+
+liftA4 :: Applicative f => (a -> b -> c -> d -> e) -> f a -> f b -> f c -> f d -> f e
+liftA4 f u v w x = liftA3 f u v w <*> x
 
 instance Eq StableParserName where 
   (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)

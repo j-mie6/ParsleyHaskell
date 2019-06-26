@@ -34,7 +34,7 @@ constantInput = getConst . histo (const (Const Nothing)) (alg1 |> (Const . alg2 
     alg2 (LookAhead (Const p))                  = p
     alg2 (NotFollowedBy (Const p))              = p
     alg2 (Branch (Const b) (Const p) (Const q)) = b <+> (p <==> q)
-    alg2 (Match (Const p) _ qs)                 = p <+> (foldr1 (<==>) (map getConst qs))
+    alg2 (Match (Const p) _ qs (Const def))     = p <+> (foldr (<==>) def (map getConst qs))
     alg2 (Debug _ (Const p))                    = p
     alg2 (Let False _ (Const p))                = p
     alg2 _                                      = Nothing
@@ -125,7 +125,7 @@ terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold ab
            x | neverSucceeds x -> runTerm q
            Prop s1 Some i1     -> do ~(Prop s2 f i2) <- runTerm q; return $! Prop (s1 &&& s2) (Some ||| f) (i1 && i2)
     alg (Branch b p q)                       = liftA2 branching (runTerm b) (sequence [runTerm p, runTerm q])
-    alg (Match p _ qs)                       = liftA2 branching (runTerm p) (traverse runTerm qs)
+    alg (Match p _ qs def)                   = liftA2 branching (runTerm p) (traverse runTerm (def:qs))
     alg (ChainPre op p)                      =
       do x <- runTerm op; case x of
            -- Never failing implies you must either loop or not consume input

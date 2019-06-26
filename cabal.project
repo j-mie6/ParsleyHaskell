@@ -4,7 +4,6 @@ packages:.
 --profiling:true
 optimization:2
 allow-newer:yoda:all
---executable-dynamic:true
 profiling-detail:none
 
 --source-repository-package

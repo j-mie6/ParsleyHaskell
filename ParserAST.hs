@@ -47,8 +47,8 @@ notFollowedBy = Parser . Op . NotFollowedBy . unParser
 try :: Parser a -> Parser a
 try = Parser . Op . Try Nothing . unParser
 
-match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b
-match vs (Parser p) f = Parser (Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs)))
+match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
+match vs (Parser p) f (Parser def) = Parser (Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs) def))
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (Op (Branch c p q))
@@ -84,7 +84,7 @@ data ParserF (k :: * -> *) (a :: *) where
     Let           :: Bool -> MVar a -> k a -> ParserF k a
     NotFollowedBy :: k a -> ParserF k ()
     Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF k c
-    Match         :: k a -> [WQ (a -> Bool)] -> [k b] -> ParserF k b
+    Match         :: k a -> [WQ (a -> Bool)] -> [k b] -> k b -> ParserF k b
     ChainPre      :: k (a -> a) -> k a -> ParserF k a
     ChainPost     :: k a -> k (a -> a) -> ParserF k a
     Debug         :: String -> k a -> ParserF k a
@@ -103,7 +103,7 @@ instance IFunctor ParserF where
   imap f (Let r v p)       = Let r v (f p)
   imap f (NotFollowedBy p) = NotFollowedBy (f p)
   imap f (Branch b p q)    = Branch (f b) (f p) (f q)
-  imap f (Match p fs qs)   = Match (f p) fs (map f qs)
+  imap f (Match p fs qs d) = Match (f p) fs (map f qs) (f d)
   imap f (ChainPre op p)   = ChainPre (f op) (f p)
   imap f (ChainPost p op)  = ChainPost (f p) (f op)
   imap f (Debug name p)    = Debug name (f p)
@@ -125,7 +125,7 @@ instance Show (Free ParserF f a) where
       alg (Let True v _)                         = concat ["(rec ", show v, ")"]
       alg (NotFollowedBy (Const p))              = concat ["(notFollowedBy ", p, ")"]
       alg (Branch (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-      alg (Match (Const p) fs qs)                = concat ["(match ", p, " ", show (map getConst qs), ")"]
+      alg (Match (Const p) fs qs (Const def))    = concat ["(match ", p, " ", show (map getConst qs), " ", def, ")"]
       alg (ChainPre (Const op) (Const p))        = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const p) (Const op))       = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const p))                    = p

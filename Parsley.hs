@@ -1,5 +1,8 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE DeriveLift #-}
+{-# LANGUAGE TemplateHaskell,
+             DeriveLift,
+             RankNTypes,
+             TypeApplications,
+             ScopedTypeVariables #-}
 module Parsley ( Parser, runParser
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
@@ -36,15 +39,16 @@ module Parsley ( Parser, runParser
                , bool
                ) where
 
-import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat)
+import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
 import Compiler                   (compile)
-import Machine                    (exec)
+import Machine                    (exec, Input(..))
 import Utils                      (lift', (>*<), WQ(..), TExpQ)
 import Data.Function              (fix)
 import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
+import Data.Text.IO               (readFile)
 
 fmap :: WQ (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
@@ -142,10 +146,13 @@ string :: String -> Parser String
 string = traverse char
 
 oneOf :: [Char] -> Parser Char
-oneOf = choice . map char--satisfy (WQ (flip elem cs) [||flip elem cs||])
+oneOf cs = match cs item (\c -> pure (WQ c [||c||])) empty --satisfy (WQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
 
 noneOf :: [Char] -> Parser Char
-noneOf cs = satisfy (WQ (not . flip elem cs) [||not . flip elem cs||])
+noneOf cs = satisfy (WQ (not . flip elem cs) [||\c -> not $$(ofChars cs [||c||])||])
+
+ofChars :: [Char] -> TExpQ Char -> TExpQ Bool
+ofChars = foldr (\c rest qc -> [|| c == $$qc || $$(rest qc) ||]) (const [||False||])
 
 token :: String -> Parser String
 token = try . string
@@ -196,7 +203,7 @@ p >?> (WQ f qf) = select (WQ g qg <$> p) empty
     qg = [||\x -> if $$qf x then Right x else Left ()||]
 
 (||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
-p ||= f = match [minBound..maxBound] p f
+p ||= f = match [minBound..maxBound] p f empty
 
 when :: Parser Bool -> Parser () -> Parser ()
 when p q = p <?|> (q, unit)
@@ -244,8 +251,11 @@ precedence levels atom = foldl' convert atom levels
     convert x (Prefix ops)  = chainPre (choice ops) x
     convert x (Postfix ops) = chainPost x (choice ops)
 
-runParser :: Parser a -> TExpQ (String -> Maybe a)
-runParser p = [||\input -> runST $$(exec [||input||] (compile p))||]
+runParser :: forall input a. Input input => Parser a -> TExpQ (input -> Maybe a)
+runParser p = [||\input -> runST $$(exec (prepare @input [||input||]) (compile p))||]
+
+parseFromFile :: Parser a -> TExpQ (FilePath -> IO (Maybe a))
+parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) input)||]
 
 -- Fixities
 -- Functor

@@ -20,71 +20,82 @@ import qualified Text.Parsec as Parsec
 import CommonFunctions
 
 import Text.Megaparsec
-import Text.Megaparsec.Char
 import Data.Text (Text, pack)
+import qualified Data.Text.IO
 
 deriving instance Generic Pred
 deriving instance NFData Pred
 deriving instance Generic BrainFuckOp
 deriving instance NFData BrainFuckOp
 
-parsecParse :: ParsecParsers.Parser a -> String -> Maybe a
-parsecParse p input = either (const Nothing) Just (Parsec.parse p "" input)
+parsecParseS :: ParsecParsers.Parser String a -> String -> Maybe a
+parsecParseS p input = either (const Nothing) Just (Parsec.parse p "" input)
 
-manyTestParsley :: String -> Maybe Pred
-manyTestParsley = -- $$(Parsley.runParser (Parsley.chainl1 Parsley.digit Parsley.plus))--}
-                  -- $$(Parsley.runParser (Parsley.while ((Parsley.WQ (== 'a') [||(== 'a')||]) Parsley.<$> Parsley.item
-                  --                        Parsley.<* Parsley.while ((Parsley.WQ (== 'b') [||(== 'b')||]) Parsley.<$> Parsley.item))))
-                  $$(Parsley.runParser ({-Parsley.void -}ParsleyParsers.pred))
+parsecParseT :: ParsecParsers.Parser Text a -> String -> Maybe a
+parsecParseT p input = either (const Nothing) Just (Parsec.parse p "" (pack input))
+
+megaParseS :: MegaparsecParsers.Parser String a -> String -> Maybe a
+megaParseS = Text.Megaparsec.parseMaybe
+
+megaParseT :: MegaparsecParsers.Parser Text a -> String -> Maybe a
+megaParseT p = Text.Megaparsec.parseMaybe p . pack
 
 tailTestP :: String -> Maybe Char
 tailTestP = $$(Parsley.runParser ParsleyParsers.phiTest)
 
-tailTestP' :: String -> Maybe Char
-tailTestP' = parseMaybe (skipMany (char 'a') *> char 'b' :: Parsec () String Char)
+brainfuckParsley :: String -> Maybe [BrainFuckOp]
+brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
---brainfuckParsley :: String -> Maybe [BrainFuckOp]
---brainfuckParsley = $$(Parsley.runParser ParsleyParsers.brainfuck)
-
-{-longChoice :: Parsley.Parser Char
-longChoice = Parsley.choice (map Parsley.char (replicate 1000000 'a' ++ "b"))-}
-
-{-combinatorGroup :: Benchmark
-combinatorGroup =
-  --let longChoice' = Parsley.mkParser longChoice in
-  bgroup "combinators" [
-    --bench "longChoice"             $ nf (Parsley.runCompiledParser longChoice') "b",
-    bench "manyTestParsley 0"      $ nf manyTestParsley (replicate 0 'a'),--(take 0 ('0':cycle "+1")),
-    bench "manyTestParsley 1"      $ nf manyTestParsley (replicate 1 'a'),--(take 1 ('0':cycle "+1")),
-    bench "manyTestParsley 10"     $ nf manyTestParsley (replicate 10 'a'),--(take 11 ('0':cycle "+1")),
-    bench "manyTestParsley 100"    $ nf manyTestParsley (replicate 100 'a'),--(take 101 ('0':cycle "+1")),
-    bench "manyTestParsley 1000"   $ nf manyTestParsley (replicate 1000 'a'),--(take 1001 ('0':cycle "+1")),
-    bench "manyTestParsley 10,000" $ nf manyTestParsley (replicate 10000 'a')--(take 10001 ('0':cycle "+1"))
-  ]
-
-crossMany :: Benchmark
-crossMany = env (return $ take 1001 ('0':cycle "+1")) $ \input -> bgroup "many" [
-    bench "manyParsley 1000" $ nf manyTestParsley input,
-    bench "manyYodaBad 1000" $ nf (Yoda.parse manyTestYodaBad)        input,
-    bench "manyYodaOk 1000"  $ nf (Yoda.parse manyTestYodaOk)         input
-  ]-}
+brainfuckParsley' :: Text -> Maybe [BrainFuckOp]
+brainfuckParsley' = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
 tailTest :: Benchmark
-tailTest = bgroup "tail-rec" [
-    bench "tail-rec 0"      $ nf tailTestP (replicate 0 'a' ++ "b"),--(take 0 ('0':cycle "+1")),
-    bench "tail-rec 1"      $ nf tailTestP (replicate 1 'a' ++ "b"),--(take 1 ('0':cycle "+1")),
-    bench "tail-rec 10"     $ nf tailTestP (replicate 10 'a' ++ "b"),--(take 11 ('0':cycle "+1")),
-    bench "tail-rec 100"    $ nf tailTestP (replicate 100 'a' ++ "b"),--(take 101 ('0':cycle "+1")),
-    bench "tail-rec 1000"   $ nf tailTestP (replicate 1000 'a' ++ "b"),--(take 1001 ('0':cycle "+1")),
-    bench "tail-rec 10,000" $ nf tailTestP (replicate 10000 'a' ++ "b")--(take 10001 ('0':cycle "+1"))
-  ]
+tailTest = bgroup "tail-rec" [ bench "tail-rec 0"      $ nf tailTestP (replicate 0 'a' ++ "b")
+                             , bench "tail-rec 1"      $ nf tailTestP (replicate 1 'a' ++ "b")
+                             , bench "tail-rec 10"     $ nf tailTestP (replicate 10 'a' ++ "b")
+                             , bench "tail-rec 100"    $ nf tailTestP (replicate 100 'a' ++ "b")
+                             , bench "tail-rec 1000"   $ nf tailTestP (replicate 1000 'a' ++ "b")
+                             , bench "tail-rec 10,000" $ nf tailTestP (replicate 10000 'a' ++ "b")
+                             ]
+  
+benchmark :: NFData a => String -> [FilePath] -> String -> (String -> Maybe a) -> Benchmark
+benchmark name filenames lib parser = env (load filenames) (bgroup (concat [name, " (", lib, ")"]) . (tasks filenames))
+  where
+    load :: [FilePath] -> IO [String]
+    load = traverse readFile
+    tasks :: [FilePath] -> [String] -> [Benchmark]
+    tasks filenames inputs = 
+      let go [] _ = []
+          go (f:fs) n = bench f (nf parser (inputs !! n)) : go fs (n+1)
+      in go filenames 0
+
+benchmarkT :: NFData a => String -> [FilePath] -> String -> (Text -> Maybe a) -> Benchmark
+benchmarkT name filenames lib parser = env (load filenames) (bgroup (concat [name, " (", lib, ")"]) . (tasks filenames))
+  where
+    load :: [FilePath] -> IO [Text]
+    load = traverse Data.Text.IO.readFile
+    tasks :: [FilePath] -> [Text] -> [Benchmark]
+    tasks filenames inputs = 
+      let go [] _ = []
+          go (f:fs) n = bench f (nf parser (inputs !! n)) : go fs (n+1)
+      in go filenames 0
+
+testP :: Text -> Maybe Char
+testP = $$(Parsley.runParser Parsley.item)
 
 main :: IO ()
 --main = rnf (tailTestP (replicate 10000000 'a' ++ "b")) `seq` return ()
-main = --rnf (Parsley.runParser (manyTestParsley) (replicate 1000000 'a')) `seq` return (){-
-  defaultMain [
-    --combinatorGroup,
-    --crossMany
-    tailTest
-  ]--}-}
---main = print (manyTestParsley ("!!!!t&&!f&&t"))
+--main = print (testP (pack "abc"))
+main = --{-
+  let bfTest = benchmark "Brainfuck" ["inputs/helloworld.bf", "inputs/helloworld_golfed.bf", "inputs/compiler.bf"]
+      bfTest' = benchmarkT "Brainfuck" ["inputs/helloworld.bf", "inputs/helloworld_golfed.bf", "inputs/compiler.bf"]
+  in defaultMain [ bfTest "Parsley" brainfuckParsley
+                 , bfTest' "Parsley" brainfuckParsley'
+                 , bfTest "Parsley" (brainfuckParsley' . pack)
+                 , bfTest "Parsec String" (parsecParseS ParsecParsers.brainfuck)
+                 , bfTest "Parsec Text" (parsecParseT ParsecParsers.brainfuck)
+                 , bfTest "Mega String" (megaParseS MegaparsecParsers.brainfuck)
+                 , bfTest "Mega Text" (megaParseT MegaparsecParsers.brainfuck)
+                 , bfTest "Native" NativeParsers.brainfuck
+                 --, tailTest 
+                 ]--}-}

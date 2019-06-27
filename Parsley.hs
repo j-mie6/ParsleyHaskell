@@ -2,7 +2,8 @@
              DeriveLift,
              RankNTypes,
              TypeApplications,
-             ScopedTypeVariables #-}
+             ScopedTypeVariables,
+             FlexibleContexts #-}
 module Parsley ( Parser, runParser
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
@@ -253,7 +254,7 @@ precedence levels atom = foldl' convert atom levels
     convert x (Prefix ops)  = chainPre (choice ops) x
     convert x (Postfix ops) = chainPost x (choice ops)
 
-runParser :: forall input a. Input input => Parser a -> TExpQ (input -> Maybe a)
+runParser :: forall input a. Input input Int => Parser a -> TExpQ (input -> Maybe a)
 runParser p = [||\input -> runST $$(exec (prepare @input [||input||]) (compile p))||]
 
 parseFromFile :: Parser a -> TExpQ (FilePath -> IO (Maybe a))

@@ -3,7 +3,8 @@
              UnboxedTuples,
              TemplateHaskell,
              FlexibleInstances,
-             TypeApplications #-}
+             TypeApplications,
+             MultiParamTypeClasses #-}
 module Input where
 
 import Utils                    (TExpQ)
@@ -16,22 +17,22 @@ import Data.ByteString.Internal (ByteString(..))
 import GHC.ForeignPtr           (ForeignPtr(..))
 import qualified Data.Text as Text (length, index)
 
-data PreparedInput = PreparedInput (Int -> (# Char, Int #)) (Int -> Bool) Int
-newtype Text16     = Text16 Text
+data PreparedInput rep = PreparedInput (rep -> (# Char, rep #)) (rep -> Bool) rep
+newtype Text16         = Text16 Text
 
-class Input s where 
-  prepare :: TExpQ s -> TExpQ PreparedInput
+class Input s rep where
+  prepare :: TExpQ s -> TExpQ (PreparedInput rep)
 
-instance Input [Char] where prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
+instance Input [Char] Int where prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 
-instance Input (UArray Int Char) where 
+instance Input (UArray Int Char) Int where 
   prepare qinput = [||
       let UArray _ _ size input# = $$qinput
           next i@(I# i#) = (# C# (indexWideCharArray# input# i#), i + 1 #)
       in PreparedInput next (< size) 0
     ||]
 
-instance Input Text16 where 
+instance Input Text16 Int where 
   prepare qinput = [||
       let Text16 (Text arr off size) = $$qinput
           arr# = aBA arr
@@ -40,7 +41,7 @@ instance Input Text16 where
     ||]
 
 -- I'd *strongly* advise against using this, parsing complexity is O(n^2) for this variant
-instance Input Text where
+instance Input Text Int where
   prepare qinput = [||
       let input = $$qinput
           size = Text.length input
@@ -48,7 +49,7 @@ instance Input Text where
       in PreparedInput next (< size) 0
     ||]
 
-instance Input ByteString where
+instance Input ByteString Int where
   prepare qinput = [||
       let PS (ForeignPtr addr# final) off size = $$qinput
           next i@(I# i#) = 

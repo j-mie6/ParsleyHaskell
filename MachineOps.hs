@@ -4,25 +4,15 @@
              BangPatterns,
              MagicHash,
              UnboxedTuples,
-             TemplateHaskell,
-             FlexibleInstances,
-             TypeApplications #-}
+             TemplateHaskell #-}
 module MachineOps where
 
 import Utils              (TExpQ)
-import GHC.ST             (ST(..))
+import Control.Monad.ST   (ST)
 import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
-import Data.Array.Base    (STUArray(..), UArray(..), unsafeRead, unsafeWrite, MArray, getNumElements, listArray)
-import GHC.Prim           (Int#, Char#, ByteArray#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#)
-import GHC.Exts           (Int(..), Char(..), (-#), (+#), (*#))
-import Data.Text.Internal (Text(..))
-import Data.Text.Array    (aBA)
-import Data.ByteString.Internal (ByteString(..))
-import GHC.ForeignPtr     (ForeignPtr(..))
+import GHC.Prim           (Int#)
+import GHC.Exts           (Int(..))
 import Safe.Coerce        (coerce)
-import qualified Data.ByteString.Char8 as BS (pack)
-import qualified Data.Text as Text (pack)
-
 
 data SList a = !a ::: SList a | SNil
 data IList = ICons {-# UNPACK #-} !Int IList | INil
@@ -46,33 +36,7 @@ type O# = Int#
     demand the values of X and o, with all other values closed over
     during suspension. -}
 type K s xs a = X xs -> O# -> ST s (Maybe a)
-data PreparedInput = PreparedInput (Int -> Char) Int
-data InputOps = InputOps {charAt :: TExpQ (Int -> Char), size :: TExpQ Int}
-
-class Input s where prepare :: TExpQ s -> TExpQ PreparedInput
-instance Input [Char] where prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
-instance Input Text where 
-  prepare qinput = [||
-      let Text arr (I# off#) size = $$qinput
-          arr# = aBA arr
-          charAt (I# i#) = C# (chr# (word2Int# (indexWord16Array# arr# (i#{- +# off#-}))))
-      in PreparedInput charAt size
-    ||]
-instance Input (UArray Int Char) where 
-  prepare qinput = [||
-      let UArray _ _ size input# = $$qinput
-          charAt (I# i#) = C# (indexWideCharArray# input# i#)
-      in PreparedInput charAt size
-    ||]
-instance Input ByteString where
-  prepare qinput = [||
-      let PS (ForeignPtr addr# final) (I# off#) size = $$qinput
-          charAt (I# i#) = 
-            case readWord8OffAddr# addr# ({-off# +# -}i#) realWorld# of
-              (# s', x #) -> case touch# final s' of 
-                _ -> C# (chr# (word2Int# x))
-      in PreparedInput charAt size
-    ||]
+data InputOps = InputOps {more :: TExpQ (Int -> Bool), next :: TExpQ (Int -> (# Char, Int #))}
 
 type QH s a = TExpQ (H s a)
 type QX xs = TExpQ (X xs)
@@ -154,9 +118,9 @@ raise (H SNil) cs !o          = return Nothing
 raise (H (h:::_)) cs !(I# o#) = h o# cs
 
 nextSafe :: Bool -> InputOps -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
-nextSafe True input o p good bad = [|| let !c = $$(charAt input) $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else $$bad ||]
+nextSafe True input o p good bad = [|| let !(# c, o' #) = $$(next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
 nextSafe False input o p good bad = [||
     let bad' = $$bad in
-      if  $$(size input) > $$o then let !c = $$(charAt input) $$o in if $$p c then $$(good [|| $$o + 1 ||] [|| c ||]) else bad'
+      if  $$(more input) $$o then let !(# c, o' #) = $$(next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else bad'
       else bad'
   ||]

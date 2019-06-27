@@ -1,19 +1,21 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MagicHash #-}
-{-# LANGUAGE UnboxedTuples #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FlexibleContexts #-}
-module Machine (module Machine, Input(..)) where
+{-# LANGUAGE GADTs,
+             DataKinds,
+             TypeOperators,
+             RankNTypes,
+             BangPatterns,
+             FlexibleInstances,
+             MagicHash,
+             UnboxedTuples,
+             TemplateHaskell,
+             PolyKinds,
+             ScopedTypeVariables,
+             GeneralizedNewtypeDeriving,
+             FlexibleContexts,
+             RecordWildCards #-}
+module Machine where
 
 import MachineOps
+import Input                      (PreparedInput(..))
 import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
 import Utils                      (WQ(..), lift', (>*<), TExpQ)
 import Data.Word                  (Word64)
@@ -122,10 +124,10 @@ exec input (Machine !m, ms, topo) = [||
      ks <- makeK
      hs <- makeH
      cs <- makeC
-     let !(PreparedInput charAt size) = $$input
+     let !(PreparedInput next more offset) = $$input
      $$(readyCalls topo ms (readyExec m) 
-         (Γ [||xs||] [||ks||] [||0||] [||hs||] [||cs||])
-         (Ctx DMap.empty DMap.empty DMap.empty (InputOps [||charAt||] [||size||]) 0 0))
+         (Γ [||xs||] [||ks||] [||offset||] [||hs||] [||cs||])
+         (Ctx DMap.empty DMap.empty DMap.empty (InputOps [||more||] [||next||]) 0 0))
   ||]
 
 readyCalls :: [IMVar] -> DMap MVar (LetBinding a) -> Exec s '[] '[] a -> Γ s '[] '[] a -> Ctx s a -> QST s (Maybe a)
@@ -176,12 +178,12 @@ execCall :: MVar x -> Exec s (x ': xs) ks a -> Reader (Ctx s a) (Γ s xs ks a ->
 execCall μ (Exec k) =
   do !(QAbsExec m) <- askM μ
      mk <- k
-     return $! \γ@(Γ xs ks o hs cs) -> [|| let !(I# o#) = $$o in runConcrete $$m $$xs $$(suspend mk γ) o# $$hs $$cs ||]
+     return $! \γ@Γ{..} -> [|| let !(I# o#) = $$o in runConcrete $$m $$xs $$(suspend mk γ) o# $$hs $$cs ||]
 
 execJump :: MVar x -> Reader (Ctx s a) (Γ s xs (x ': xs) a -> QST s (Maybe a))
 execJump μ =
   do !(QAbsExec m) <- askM μ
-     return $! \γ@(Γ xs ks o hs cs) -> [|| let !(I# o#) = $$o in runConcrete $$m $$xs $$ks o# $$hs $$cs ||]
+     return $! \γ@Γ{..} -> [|| let !(I# o#) = $$o in runConcrete $$m $$xs $$k o# $$hs $$cs ||]
 
 execPush :: WQ x -> Exec s (x ': xs) ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
 execPush x (Exec k) = fmap (\m γ -> m (γ {xs = [|| pushX $$(_code x) $$(xs γ) ||]})) k
@@ -264,7 +266,7 @@ execCase (Exec p) (Exec q) =
   do mp <- p
      mq <- q
      return $! \γ -> [||
-         let !(# e, xs' #) = popX $$(xs γ)
+         let (# e, xs' #) = popX $$(xs γ)
          in case e of
            Left x -> $$(mp (γ {xs = [||pushX x xs'||]}))
            Right y  -> $$(mq (γ {xs = [||pushX y xs'||]}))
@@ -286,19 +288,19 @@ execChoices fs ks (Exec def) =
 execChainIter :: ΣVar x -> MVar x -> Reader (Ctx s a) (Γ s ((x -> x) ': xs) (x ': xs) a -> QST s (Maybe a))
 execChainIter σ μ =
   do !(QSTRef ref) <- askΣ σ
-     !(QAbsExec k) <- askM μ
-     return $! \(Γ xs ks o hs cs) -> [||
+     !(QAbsExec l) <- askM μ
+     return $! \Γ{..} -> [||
        do let (# g, xs' #) = popX $$xs
           modifyΣ $$ref g
           let I# o# = $$o
-          runConcrete $$k xs' $$ks o# $$hs (pokeC $$o $$cs)
+          runConcrete $$l xs' $$k o# $$hs (pokeC $$o $$cs)
        ||]
 
 execChainInit :: ΣVar x -> Exec s xs (x ': xs) a -> MVar x -> Exec s (x ': xs) ks a
               -> Reader (Ctx s a) (Γ s (x ': xs) ks a -> QST s (Maybe a))
 execChainInit σ l μ k =
   do asks $! \ctx γ@(Γ xs ks o _ _) -> [||
-       do let !(# x, xs' #) = popX $$xs
+       do let (# x, xs' #) = popX $$xs
           ref <- newΣ x
           $$(let handler = [||\hs o# cs ->
                   let !(# c, cs' #) = popC cs
@@ -323,18 +325,20 @@ execChainInit σ l μ k =
 preludeString :: String -> Char -> Γ s xs ks a -> Ctx s a -> String -> TExpQ String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    offset       = o γ
-    indent       = replicate (debugLevel ctx * 2) ' '
-    start        = [|| max ($$offset - 5) 0 ||]
-    end          = [|| min ($$offset + 6) $$(size (input ctx)) ||]
-    sub          = [|| [$$(charAt (input ctx)) i | i <- [$$start..($$end - 1)]] ||]
-    inputTrace   = [|| let replace '\n' = color Green "↙"
-                           replace ' '  = color White "·"
-                           replace c    = return c
-                       in concatMap replace $$sub ||]
-    eof          = [|| if $$end == $$(size (input ctx)) then $$inputTrace ++ color Red "•" else $$inputTrace ||]
-    prelude      = [|| concat [indent, dir : name, dir : " (", show $$offset, "): "] ||]
-    caretSpace   = [|| replicate (length $$prelude + $$offset - $$start) ' ' ||]
+    offset     = o γ
+    indent     = replicate (debugLevel ctx * 2) ' '
+    start      = [|| max ($$offset - 5) 0 ||]
+    end        = [|| $$offset + 5 ||]
+    inputTrace = [|| let replace '\n' = color Green "↙"
+                         replace ' '  = color White "·"
+                         replace c    = return c
+                         go i 
+                           | i == $$end = []
+                           | otherwise  = let (# c, i' #) = $$(next (input ctx)) i in replace c ++ go i'
+                     in go $$start ||]
+    eof        = [|| if $$(more (input ctx)) $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]
+    prelude    = [|| concat [indent, dir : name, dir : " (", show $$offset, "): "] ||]
+    caretSpace = [|| replicate (length $$prelude + $$offset - $$start) ' ' ||]
 
 execLogEnter :: String -> Exec s xs ks a -> Reader (Ctx s a) (Γ s xs ks a -> QST s (Maybe a))
 execLogEnter name k =
@@ -365,7 +369,7 @@ inputSizeCheck (Just n) p =
      mp <- local (addConstCount 1) p
      if skip then return $! mp
      else fmap (\ctx γ -> [|| 
-       if $$(size (input ctx)) > (n + $$(o γ) - 1) then $$(mp γ)
+       if $$(more (input ctx)) (n + $$(o γ) - 1) then $$(mp γ)
        else $$(raiseΓ γ)
       ||]) ask
 

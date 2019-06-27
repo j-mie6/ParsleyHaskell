@@ -37,12 +37,14 @@ module Parsley ( Parser, runParser
                , lift', (>*<), WQ(..), Lift
                -- Template Haskell Crap
                , bool
+               , module Input
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
+import Input hiding               (PreparedInput(..))
 import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
 import Compiler                   (compile)
-import Machine                    (exec, Input(..))
+import Machine                    (exec)
 import Utils                      (lift', (>*<), WQ(..), TExpQ)
 import Data.Function              (fix)
 import Data.List                  (foldl')
@@ -255,7 +257,7 @@ runParser :: forall input a. Input input => Parser a -> TExpQ (input -> Maybe a)
 runParser p = [||\input -> runST $$(exec (prepare @input [||input||]) (compile p))||]
 
 parseFromFile :: Parser a -> TExpQ (FilePath -> IO (Maybe a))
-parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) input)||]
+parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]
 
 -- Fixities
 -- Functor

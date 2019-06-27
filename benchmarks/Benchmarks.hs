@@ -4,13 +4,17 @@
              DeriveAnyClass,
              DeriveGeneric,
              DataKinds, 
-             TypeOperators #-}
+             TypeOperators,
+             TypeFamilies,
+             FlexibleContexts #-}
 module Main where
-import Criterion.Main  (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
-import Control.DeepSeq (NFData(rnf))
-import GHC.Generics    (Generic)
-import Data.Text       (Text)
-import Data.ByteString (ByteString)
+import Criterion.Main         (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
+import Control.DeepSeq        (NFData(rnf))
+import GHC.Generics           (Generic)
+import Control.Monad.Identity (Identity)
+import Data.Text              (Text)
+import Data.ByteString        (ByteString)
+import Parsley                (Text16(..))
 import qualified ParsleyParsers
 import qualified YodaParsers
 import qualified ParsecParsers
@@ -54,7 +58,7 @@ deriving instance NFData BrainFuckOp
 brainfuckParsleyS :: String -> Maybe [BrainFuckOp]
 brainfuckParsleyS = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
-brainfuckParsleyT :: Text -> Maybe [BrainFuckOp]
+brainfuckParsleyT :: Text16 -> Maybe [BrainFuckOp]
 brainfuckParsleyT = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
 brainfuckParsleyB :: ByteString -> Maybe [BrainFuckOp]
@@ -66,27 +70,21 @@ brainfuck =
       bfTest = benchmark ["inputs/helloworld.bf", "inputs/helloworld_golfed.bf", "inputs/compiler.bf"]
   in bgroup "Brainfuck"
        [ bfTest string     "Parsley (String)"     brainfuckParsleyS
-       , bfTest text       "Parsley (Text)"       brainfuckParsleyT
+       , bfTest text       "Parsley (Text)"       (brainfuckParsleyT . Text16)
        , bfTest bytestring "Parsley (ByteString)" brainfuckParsleyB
-       , bfTest string     "Parsec (String)"      (parsecParseS ParsecParsers.brainfuck)
-       , bfTest text       "Parsec (Text)"        (parsecParseT ParsecParsers.brainfuck)
-       , bfTest string     "Mega (String)"        (megaParseS MegaparsecParsers.brainfuck)
-       , bfTest text       "Mega (Text)"          (megaParseT MegaparsecParsers.brainfuck)
+       , bfTest string     "Parsec (String)"      (parsecParse ParsecParsers.brainfuck)
+       , bfTest text       "Parsec (Text)"        (parsecParse ParsecParsers.brainfuck)
+       , bfTest string     "Mega (String)"        (megaParse MegaparsecParsers.brainfuck)
+       , bfTest text       "Mega (Text)"          (megaParse MegaparsecParsers.brainfuck)
        , bfTest string     "Native"               NativeParsers.brainfuck
        ]
 
 -- Utils
-parsecParseS :: ParsecParsers.Parser String a -> String -> Maybe a
-parsecParseS p = either (const Nothing) Just . Parsec.parse p ""
+parsecParse :: Parsec.Stream s Identity Char => ParsecParsers.Parser s a -> s -> Maybe a
+parsecParse p = either (const Nothing) Just  . Parsec.parse p ""
 
-parsecParseT :: ParsecParsers.Parser Text a -> Text -> Maybe a
-parsecParseT p = either (const Nothing) Just  . Parsec.parse p ""
-
-megaParseS :: MegaparsecParsers.Parser String a -> String -> Maybe a
-megaParseS = Megaparsec.parseMaybe
-
-megaParseT :: MegaparsecParsers.Parser Text a -> Text -> Maybe a
-megaParseT = Megaparsec.parseMaybe
+megaParse :: (Megaparsec.Stream s, Megaparsec.Token s ~ Char) => MegaparsecParsers.Parser s a -> s -> Maybe a
+megaParse = Megaparsec.parseMaybe
 
 string     :: FilePath -> IO String
 string     = readFile

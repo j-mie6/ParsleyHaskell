@@ -13,11 +13,16 @@ import Utils              (TExpQ)
 import GHC.ST             (ST(..))
 import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.Array.Base    (STUArray(..), UArray(..), unsafeRead, unsafeWrite, MArray, getNumElements, listArray)
-import GHC.Prim           (Int#, Char#, newByteArray#, indexWideCharArray#, indexWord16Array#, ByteArray#, word2Int#, chr#)
+import GHC.Prim           (Int#, Char#, ByteArray#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#)
 import GHC.Exts           (Int(..), Char(..), (-#), (+#), (*#))
 import Data.Text.Internal (Text(..))
 import Data.Text.Array    (aBA)
+import Data.ByteString.Internal (ByteString(..))
+import GHC.ForeignPtr     (ForeignPtr(..))
 import Safe.Coerce        (coerce)
+import qualified Data.ByteString.Char8 as BS (pack)
+import qualified Data.Text as Text (pack)
+
 
 data SList a = !a ::: SList a | SNil
 data IList = ICons {-# UNPACK #-} !Int IList | INil
@@ -41,33 +46,33 @@ type O# = Int#
     demand the values of X and o, with all other values closed over
     during suspension. -}
 type K s xs a = X xs -> O# -> ST s (Maybe a)
-data PreparedInput = PreparedInput (Int -> Char) Int (Int -> Int -> String)
-data InputOps = InputOps {charAt :: TExpQ (Int -> Char), size :: TExpQ Int, substr :: TExpQ (Int -> Int -> String)}
+data PreparedInput = PreparedInput (Int -> Char) Int
+data InputOps = InputOps {charAt :: TExpQ (Int -> Char), size :: TExpQ Int}
 
 class Input s where prepare :: TExpQ s -> TExpQ PreparedInput
 instance Input [Char] where prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 instance Input Text where 
   prepare qinput = [||
-      let (Text arr (I# off#) size) = $$qinput
-          arr# = (aBA arr)
+      let Text arr (I# off#) size = $$qinput
+          arr# = aBA arr
           charAt (I# i#) = C# (chr# (word2Int# (indexWord16Array# arr# (i#{- +# off#-}))))
-          substr m n = [charAt i | i <- [m..n]]
-      in PreparedInput charAt size substr
+      in PreparedInput charAt size
     ||]
 instance Input (UArray Int Char) where 
   prepare qinput = [||
-      let (UArray _ _ size input#) = $$qinput
+      let UArray _ _ size input# = $$qinput
           charAt (I# i#) = C# (indexWideCharArray# input# i#)
-          substr m n = [charAt i | i <- [m..n]]
-      in PreparedInput charAt size substr
+      in PreparedInput charAt size
     ||]
--- TODO: Support?
-{-instance Input ByteString where
+instance Input ByteString where
   prepare qinput = [||
-      let input = $$qinput
-
-      in undefined
-    ||]-}
+      let PS (ForeignPtr addr# final) (I# off#) size = $$qinput
+          charAt (I# i#) = 
+            case readWord8OffAddr# addr# ({-off# +# -}i#) realWorld# of
+              (# s', x #) -> case touch# final s' of 
+                _ -> C# (chr# (word2Int# x))
+      in PreparedInput charAt size
+    ||]
 
 type QH s a = TExpQ (H s a)
 type QX xs = TExpQ (X xs)

@@ -122,10 +122,10 @@ exec input (Machine !m, ms, topo) = [||
      ks <- makeK
      hs <- makeH
      cs <- makeC
-     let !(PreparedInput charAt size substr) = $$input
+     let !(PreparedInput charAt size) = $$input
      $$(readyCalls topo ms (readyExec m) 
          (Γ [||xs||] [||ks||] [||0||] [||hs||] [||cs||])
-         (Ctx DMap.empty DMap.empty DMap.empty (InputOps [||charAt||] [||size||] [||substr||]) 0 0))
+         (Ctx DMap.empty DMap.empty DMap.empty (InputOps [||charAt||] [||size||]) 0 0))
   ||]
 
 readyCalls :: [IMVar] -> DMap MVar (LetBinding a) -> Exec s '[] '[] a -> Γ s '[] '[] a -> Ctx s a -> QST s (Maybe a)
@@ -327,7 +327,7 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     indent       = replicate (debugLevel ctx * 2) ' '
     start        = [|| max ($$offset - 5) 0 ||]
     end          = [|| min ($$offset + 6) $$(size (input ctx)) ||]
-    sub          = [|| $$(substr (input ctx)) $$start ($$end - 1) ||]
+    sub          = [|| [$$(charAt (input ctx)) i | i <- [$$start..($$end - 1)]] ||]
     inputTrace   = [|| let replace '\n' = color Green "↙"
                            replace ' '  = color White "·"
                            replace c    = return c

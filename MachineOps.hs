@@ -36,7 +36,11 @@ type O# = Int#
     demand the values of X and o, with all other values closed over
     during suspension. -}
 type K s xs a = X xs -> O# -> ST s (Maybe a)
-data InputOps = InputOps {more :: TExpQ (Int -> Bool), next :: TExpQ (Int -> (# Char, Int #))}
+data InputOps = InputOps { _more  :: TExpQ (Int -> Bool)
+                         , _next  :: TExpQ (Int -> (# Char, Int #))
+                         , _same  :: TExpQ (Int -> Int -> Bool)
+                         , _box   :: TExpQ (Int# -> Int)
+                         , _unbox :: TExpQ (Int -> Int#) }
 
 type QH s a = TExpQ (H s a)
 type QX xs = TExpQ (X xs)
@@ -118,9 +122,9 @@ raise (H SNil) cs !o          = return Nothing
 raise (H (h:::_)) cs !(I# o#) = h o# cs
 
 nextSafe :: Bool -> InputOps -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
-nextSafe True input o p good bad = [|| let !(# c, o' #) = $$(next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
+nextSafe True input o p good bad = [|| let !(# c, o' #) = $$(_next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
 nextSafe False input o p good bad = [||
     let bad' = $$bad in
-      if  $$(more input) $$o then let !(# c, o' #) = $$(next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else bad'
+      if  $$(_more input) $$o then let !(# c, o' #) = $$(_next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else bad'
       else bad'
   ||]

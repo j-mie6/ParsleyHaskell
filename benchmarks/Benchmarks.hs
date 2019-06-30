@@ -6,7 +6,8 @@
              DataKinds, 
              TypeOperators,
              TypeFamilies,
-             FlexibleContexts #-}
+             FlexibleContexts,
+             NumericUnderscores #-}
 module Main where
 import Criterion.Main         (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq        (NFData(rnf))
@@ -29,15 +30,14 @@ import qualified Data.Attoparsec.Text       as AttoparsecText
 import qualified Data.Attoparsec.ByteString as AttoparsecByteString
 import qualified Data.Text.IO
 import qualified Data.ByteString
+import qualified Data.ByteString.Char8 (pack)
 import CommonFunctions
 
-brainfuckParsleyF :: FilePath -> IO (Maybe [BrainFuckOp])
-brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyParsers.brainfuck)
-
 main :: IO ()
---main = do r <- (brainfuckParsleyF "inputs/compilerdup.bf"); rnf r `seq` return (){-
+--main = do rnf (regexP (Data.ByteString.Char8.pack (concat (replicate 100000_00 "ab")))) `seq` return (){-
 main =
-  defaultMain [ brainfuck
+  defaultMain [ regex
+              , brainfuck
               , tailTest 
               ]--}
 
@@ -51,8 +51,21 @@ tailTest = bgroup "tail-rec" [ bench "tail-rec 0"      $ nf tailTestP (replicate
                              , bench "tail-rec 10"     $ nf tailTestP (replicate 10 'a' ++ "b")
                              , bench "tail-rec 100"    $ nf tailTestP (replicate 100 'a' ++ "b")
                              , bench "tail-rec 1000"   $ nf tailTestP (replicate 1000 'a' ++ "b")
-                             , bench "tail-rec 10,000" $ nf tailTestP (replicate 10000 'a' ++ "b")
+                             , bench "tail-rec 10,000" $ nf tailTestP (replicate 10_000 'a' ++ "b")
                              ]
+
+-- Regex Wars 2019
+regexP :: ByteString -> Maybe Bool
+regexP = $$(Parsley.runParser ParsleyParsers.regex)
+
+regex :: Benchmark
+regex = env (return ( Data.ByteString.Char8.pack (concat (replicate 1000 "ab"))
+                    , Data.ByteString.Char8.pack (concat (replicate 10_000 "ab"))
+                    , Data.ByteString.Char8.pack (concat (replicate 100_000 "ab")))) $ \(~(i1, i2, i3)) -> 
+          bgroup "regex" [ bench "regex 1000" $ nf regexP i1
+                         , bench "regex 10000" $ nf regexP i2
+                         , bench "regex 100000" $ nf regexP i3
+                         ]
 
 -- BrainFuck Benchmark
 deriving instance Generic BrainFuckOp

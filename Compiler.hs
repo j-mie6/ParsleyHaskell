@@ -32,17 +32,19 @@ import Data.Hashable              (Hashable, hashWithSalt, hash)
 import Data.HashMap.Strict        (HashMap)
 import Data.HashSet               (HashSet)
 import Data.Dependent.Map         (DMap)
-import GHC.Prim                   (StableName#)
+import GHC.Prim                   (StableName#, unsafeCoerce#)
+import GHC.Exts                   (Int(..))
+import Debug.Trace                (trace)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
-import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey)
+import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey, size)
 
 compile :: Parser a -> (Machine a, DMap MVar (LetBinding a), [IMVar])
 compile (Parser p) = 
   let !(p', μs, maxV, topo) = preprocess p
       !(m, maxΣ) = codeGen ({-terminationAnalysis -}p') halt (maxV + 1) 0
       !ms = compileLets μs (maxV + 1) maxΣ
-  in (Machine m, ms, topo)
+  in trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (Machine m, ms, topo)
 
 compileLets :: DMap MVar (Free ParserF Void) -> IMVar -> IΣVar -> DMap MVar (LetBinding a)
 compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.empty, maxΣ) μs in ms
@@ -127,11 +129,11 @@ letInsertion lets recs topo p = (p', μs, μMax, map (vs HashMap.!) topo)
          | HashSet.member name lets ->
              case HashMap.lookup name vs of
                Just v  -> let μ = MVar v in return $! optimise (Let False μ (μs DMap.! μ))
-               Nothing -> do -- no mdo here, let bindings are not recursive!
+               Nothing -> mdo -- no mdo here, let bindings are not recursive! (well, actually, I want to do the put before the recursion soooo....)
                  v <- newVar
                  let μ = MVar v
-                 q' <- runLetInserter (postprocess q)
                  put (HashMap.insert name v vs, DMap.insert μ q' μs)
+                 q' <- runLetInserter (postprocess q)
                  return $! optimise (Let False μ q')
          | otherwise -> do runLetInserter (postprocess q)
 
@@ -211,3 +213,6 @@ instance Eq StableParserName where
 instance Hashable StableParserName where
   hash (StableParserName n) = hashStableName (StableName n)
   hashWithSalt salt (StableParserName n) = hashWithSalt salt (StableName n)
+
+-- There is great evil in this world, and I'm probably responsible for half of it
+instance Show StableParserName where show (StableParserName n) = show (I# (unsafeCoerce# n))

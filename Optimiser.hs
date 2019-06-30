@@ -144,9 +144,10 @@ optimise (Match p fs qs def)
 -- Distributivity Law: f <$> match vs p g def            = match vs p ((f <$>) . g) (f <$> def)
 optimise (Op (Pure f) :<*>: (Op (Match p fs qs def)))    = Op (Match p fs (map (optimise . (f <$>)) qs) (optimise (f <$> def)))
 -- Trivial let-bindings - NOTE: These will get moved when Let nodes no longer have the "source" in them
-optimise (Let False _ p@(Op (Pure _)))                   = p
-optimise (Let False _ p@(Op Empty))                      = p
-optimise (Let False _ p@(Op (Satisfy _)))                = p
+optimise (Let False _ p@(Op (Pure _)))                          = p
+optimise (Let False _ p@(Op Empty))                             = p
+optimise (Let False _ p@(Op (Satisfy _)))                       = p
+optimise (Let False _ p@(Op (Op (Satisfy _) :*>: Op (Pure x)))) = p
 -- Applicative-fusion across let boundary?
 --optimise (Let _ p@(Op ()))
 optimise p                                               = Op p

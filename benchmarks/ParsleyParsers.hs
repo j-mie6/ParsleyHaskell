@@ -49,3 +49,10 @@ brainfuck = whitespace *> bf <* eof
                     <|> (token "." $> lift' Output)
                     <|> (token "," $> lift' Input)
                     <|> (between (lexeme (token "[")) (token "]") (lift' Loop <$> bf))))
+
+-- Regex Benchmark
+regex :: Parser Bool
+regex = skipMany (aStarb *> aStarb) *> char 'a' $> lift' True <|> pure (lift' False)
+  where
+    aStarb = aStar *> char 'b'
+    aStar = skipMany (char 'a')

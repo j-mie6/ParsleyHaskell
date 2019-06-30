@@ -84,9 +84,9 @@ newtype AbsExec s a x = AbsExec { runConcrete :: forall xs. X xs -> K s (x ': xs
 newtype QAbsExec s a x = QAbsExec (TExpQ (AbsExec s a x))
 newtype QJoin s a x = QJoin (TExpQ (x -> O# -> ST s (Maybe a)))
 newtype QHandler s a = QHandler (TExpQ (O# -> O# -> ST s (Maybe a)))
-newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum)
-newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum)
-newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum)
+newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
+newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum, Show)
+newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype QSTRef s x = QSTRef (TExpQ (STRef s x))
 newtype QSTRefU s x = QSTRefU (TExpQ (STRefU s x))
 data Ctx s a = Ctx { μs         :: DMap MVar (QAbsExec s a)
@@ -137,7 +137,7 @@ run :: Exec s xs ks a -> Γ s xs ks a -> Ctx s a -> QST s (Maybe a)
 run (Exec m) γ ctx = runReader m ctx γ
 
 exec :: TExpQ (PreparedInput (Rep O) O O#) -> (Machine a, DMap MVar (LetBinding a), [IMVar]) -> QST s (Maybe a)
-exec input (Machine !m, ms, topo) = [||
+exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
   do xs <- makeX
      ks <- makeK
      hs <- makeH
@@ -396,13 +396,13 @@ suspend :: (Γ s (x ': xs) ks a -> QST s (Maybe a)) -> Γ s xs ks a -> QK s (x '
 suspend m γ = [|| \xs o# -> $$(m (γ {xs = [||xs||], o = [||I# o#||]})) ||]
 
 askM :: MonadReader (Ctx s a) m => MVar x -> m (QAbsExec s a x)
-askM μ = asks (((DMap.! μ) . μs))
+askM μ = {-trace ("fetching " ++ show μ) $ -}asks (((DMap.! μ) . μs))
 
 askΣ :: MonadReader (Ctx s a) m => ΣVar x -> m (QSTRef s x)
-askΣ σ = asks ((DMap.! σ) . σs)
+askΣ σ = {-trace ("fetching " ++ show σ) $ -}asks ((DMap.! σ) . σs)
 
 askΦ :: MonadReader (Ctx s a) m => ΦVar x -> m (QJoin s a x)
-askΦ φ = asks ((DMap.! φ) . φs)
+askΦ φ = {-trace ("fetching " ++ show φ) $ -}asks ((DMap.! φ) . φs)
 
 askSTC :: MonadReader (Ctx s a) m => ΣVar x -> m (QSTRefU s O)
 askSTC (ΣVar v) = asks ((Map.! v) . stcs)

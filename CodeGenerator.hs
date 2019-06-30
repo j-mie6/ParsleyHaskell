@@ -19,7 +19,7 @@ import Fresh                      (VFreshT, HFreshT, runFreshT, evalFreshT, cons
 import Control.Monad.Trans        (lift)
 import Data.Set                   (Set)
 import Data.Maybe                 (isJust)
-import Debug.Trace                (traceShow)
+import Debug.Trace                (traceShow, trace)
 import qualified Data.Set as Set
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFreshT IΣVar (Reader (Set IMVar)))) a
@@ -40,7 +40,7 @@ ret :: Free3 M Void3 (x ': xs) (x ': xs) a
 ret = Op3 Ret
 
 codeGen :: Free ParserF Void a -> Free3 M Void3 (a ': xs) ks b -> IMVar -> IΣVar -> (Free3 M Void3 xs ks b, IΣVar)
-codeGen p terminal μ0 σ0 = traceShow m (m, maxΣ)
+codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0 Set.empty
     alg = peephole |> (direct . imap present)

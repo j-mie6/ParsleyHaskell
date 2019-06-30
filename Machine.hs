@@ -23,6 +23,7 @@ import Control.Monad              (forM)
 import Control.Monad.ST           (ST)
 import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadReader)
 import Data.STRef                 (STRef)
+import Data.STRef.Unboxed         (STRefU, newSTRefU, readSTRefU, writeSTRefU)
 import Data.Map.Strict            (Map)
 import Data.Dependent.Map         (DMap)
 import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
@@ -87,10 +88,11 @@ newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum)
 newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum)
 newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum)
 newtype QSTRef s x = QSTRef (TExpQ (STRef s x))
+newtype QSTRefU s x = QSTRefU (TExpQ (STRefU s x))
 data Ctx s a = Ctx { μs         :: DMap MVar (QAbsExec s a)
                    , φs         :: DMap ΦVar (QJoin s a)
                    , σs         :: DMap ΣVar (QSTRef s)
-                   , mh         :: Map IMVar (QHandler s a)
+                   , stcs       :: Map IΣVar (QSTRefU s O)
                    , input      :: {-# UNPACK #-} !InputOps
                    , constCount :: Int
                    , debugLevel :: Int }
@@ -115,8 +117,8 @@ insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 insertΣ :: ΣVar x -> TExpQ (STRef s x) -> Ctx s a -> Ctx s a
 insertΣ σ qref ctx = ctx {σs = DMap.insert σ (QSTRef qref) (σs ctx)}
 
-insertH :: MVar x -> TExpQ (O# -> O# -> ST s (Maybe a)) -> Ctx s a -> Ctx s a
-insertH (MVar v) qh ctx = ctx {mh = Map.insert v (QHandler qh) (mh ctx)}
+insertSTC :: ΣVar x -> TExpQ (STRefU s O) -> Ctx s a -> Ctx s a
+insertSTC (ΣVar v) qref ctx = ctx {stcs = Map.insert v (QSTRefU qref) (stcs ctx)}
 
 addConstCount :: Int -> Ctx s a -> Ctx s a
 addConstCount x ctx = ctx {constCount = constCount ctx + x}
@@ -299,12 +301,12 @@ execChainIter :: ΣVar x -> MVar x -> Reader (Ctx s a) (Γ s ((x -> x) ': xs) (x
 execChainIter σ μ =
   do !(QSTRef ref) <- askΣ σ
      !(QAbsExec l) <- askM μ
-     !(QHandler h) <- askH μ
+     !(QSTRefU cref) <- askSTC σ
      asks $! \ctx γ@Γ{..} -> [||
        do let (# g, xs' #) = popX $$xs
           modifyΣ $$ref g
-          let handler o# = $$h o# ($$(unbox ctx) $$o)
-          runConcrete $$l xs' $$k ($$(unbox ctx) $$o) (pokeH handler $$hs)
+          writeSTRefU $$cref $$o
+          runConcrete $$l xs' $$k ($$(unbox ctx) $$o) $$hs
        ||]
 
 execChainInit :: ΣVar x -> Exec s xs (x ': xs) a -> MVar x -> Exec s (x ': xs) ks a
@@ -313,21 +315,22 @@ execChainInit σ l μ k =
   do asks $! \ctx γ@(Γ xs ks o _) -> [||
        do let (# x, xs' #) = popX $$xs
           ref <- newΣ x
-          $$(let handler = [||\hs o# c# ->
-                    if $$(same ctx) ($$(box ctx) c#) ($$(box ctx) o#) then
-                      do y <- readΣ ref
-                         $$(run k (γ {xs = [|| pokeX y $$xs ||],
-                                      o = [||$$(box ctx) o#||],
-                                      hs = [||hs||]}) ctx)
-                     else raise hs ($$(box ctx) o#)
+          cref <- newSTRefU $$o
+          $$(let handler = [||\hs o# _ ->
+                    do c <- readSTRefU cref
+                       if $$(same ctx) c ($$(box ctx) o#) then
+                          do y <- readΣ ref
+                             $$(run k (γ {xs = [|| pokeX y $$xs ||],
+                                          o = [||$$(box ctx) o#||],
+                                          hs = [||hs||]}) ctx)
+                       else raise hs ($$(box ctx) o#)
                    ||]
-                 qh = [||$$handler $$(hs γ)||]
              in setupHandlerΓ γ handler (\γ' -> [||
               -- NOTE: Only the offset and the handler stack can change between interations of a chainPre
-              do let loop o# hs =
-                       $$(run l (Γ [||xs'||] [||noreturn||] [||$$(box ctx) o#||] [||hs||])
-                                (insertH μ qh (insertM μ [||AbsExec (\_ _ o# hs -> loop o# hs)||] (insertΣ σ [||ref||] ctx))))
-                 loop ($$(unbox ctx) $$o) $$(hs γ')
+              do let loop o# =
+                       $$(run l (Γ [||xs'||] [||noreturn||] [||$$(box ctx) o#||] (hs γ'))
+                                (insertSTC σ [||cref||] (insertM μ [||AbsExec (\_ _ o# _ -> loop o#)||] (insertΣ σ [||ref||] ctx))))
+                 loop ($$(unbox ctx) $$o)
             ||]))
       ||]
 
@@ -401,8 +404,8 @@ askΣ σ = asks ((DMap.! σ) . σs)
 askΦ :: MonadReader (Ctx s a) m => ΦVar x -> m (QJoin s a x)
 askΦ φ = asks ((DMap.! φ) . φs)
 
-askH :: MonadReader (Ctx s a) m => MVar x -> m (QHandler s a)
-askH (MVar v) = asks ((Map.! v) . mh)
+askSTC :: MonadReader (Ctx s a) m => ΣVar x -> m (QSTRefU s O)
+askSTC (ΣVar v) = asks ((Map.! v) . stcs)
 
 instance IFunctor3 M where
   imap3 f Halt                           = Halt

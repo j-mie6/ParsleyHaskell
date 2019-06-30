@@ -35,7 +35,7 @@ brainfuckParsleyF :: FilePath -> IO (Maybe [BrainFuckOp])
 brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyParsers.brainfuck)
 
 main :: IO ()
-main = do r <- (brainfuckParsleyF "inputs/compilerdup.bf"); rnf r `seq` return (){-
+--main = do r <- (brainfuckParsleyF "inputs/compilerdup.bf"); rnf r `seq` return (){-
 main =
   defaultMain [ brainfuck
               , tailTest 

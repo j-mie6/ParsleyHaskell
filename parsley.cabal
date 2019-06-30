@@ -49,6 +49,7 @@ cabal-version:       >=1.10
 executable benchmarks
   build-depends:       base >=4.10 && <5, parsley, criterion >=1.5 && <1.6, yoda, deepseq, dump-core, lift-plugin, template-haskell, pretty-terminal, parsec, attoparsec, megaparsec, text, mtl, bytestring
   other-modules:       ParsleyParsers, YodaParsers, ParsecParsers, MegaparsecParsers, AttoparsecParsers, NativeParsers, CommonFunctions
+  other-extensions:    TemplateHaskell
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010
@@ -62,7 +63,7 @@ library
   other-modules:       Compiler, Indexed, Machine, MachineOps, Utils, Optimiser, Analyser, ParserAST, CodeGenerator, Fresh, Input
 
   -- LANGUAGE extensions used by modules in this package.
-  other-extensions:    InstanceSigs, GADTs, DataKinds, TypeOperators, RecursiveDo, RankNTypes, BangPatterns, FlexibleInstances, UndecidableInstances
+  other-extensions:    TemplateHaskell
 
   -- Other library packages from which modules are imported.
   build-depends:       base >=4.10 && <5, mtl >=2.2 && <2.3, hashable >=1.2 && <1.3, unordered-containers >=0.2 && <0.3, array >=0.5 && <0.6, dump-core, ghc-prim, unboxed-ref, safe-coerce, template-haskell, containers, dependent-map, dependent-sum, lift-plugin, pretty-terminal, text, bytestring
@@ -72,5 +73,4 @@ library
 
   -- Base language which the package is written in.
   default-language:    Haskell2010
-  --ghc-options:         -g -fplugin=LiftPlugin
   ghc-options:         -fplugin=LiftPlugin

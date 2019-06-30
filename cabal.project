@@ -1,7 +1,7 @@
 packages:.
 	 ../lift-plugin/lift-plugin
      ./extra-worker-wrapper
-profiling:true
+--profiling:true
 optimization:2
 allow-newer:yoda:all
 profiling-detail:none

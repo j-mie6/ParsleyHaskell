@@ -4,7 +4,7 @@
              TypeApplications,
              ScopedTypeVariables,
              FlexibleContexts #-}
-module Parsley ( Parser, runParser
+module Parsley ( Parser, runParser, parseFromFile
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
                -- Applicative

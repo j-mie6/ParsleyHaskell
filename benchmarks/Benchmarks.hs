@@ -31,12 +31,15 @@ import qualified Data.Text.IO
 import qualified Data.ByteString
 import CommonFunctions
 
+brainfuckParsleyF :: FilePath -> IO (Maybe [BrainFuckOp])
+brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyParsers.brainfuck)
+
 main :: IO ()
---main = rnf (tailTestP (replicate 10000000 'a' ++ "b")) `seq` return ()
-main = --{-
+main = do r <- (brainfuckParsleyF "inputs/compilerdup.bf"); rnf r `seq` return (){-
+main =
   defaultMain [ brainfuck
-                 --, tailTest 
-              ]--}-}
+              , tailTest 
+              ]--}
 
 -- Tail Recursion Benchmark
 tailTestP :: String -> Maybe Char

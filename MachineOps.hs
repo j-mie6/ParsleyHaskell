@@ -15,14 +15,12 @@ import GHC.Exts           (Int(..))
 import Safe.Coerce        (coerce)
 
 data SList a = !a ::: SList a | SNil
-data IList = ICons {-# UNPACK #-} !Int IList | INil
 data HList xs where
   HNil :: HList '[]
   HCons :: !a -> HList as -> HList (a ': as)
 
-newtype H s a = H (SList (O# -> C -> ST s (Maybe a)))
+newtype H s a = H (SList (O# -> ST s (Maybe a)))
 type X = HList
-type C = IList
 type O = Int
 type O# = Int#
 {- A key property of the pure semantics of the machine states that
@@ -36,12 +34,15 @@ type O# = Int#
     demand the values of X and o, with all other values closed over
     during suspension. -}
 type K s xs a = X xs -> O# -> ST s (Maybe a)
-data InputOps = InputOps {more :: TExpQ (Int -> Bool), next :: TExpQ (Int -> (# Char, Int #))}
+data InputOps = InputOps { _more  :: TExpQ (Int -> Bool)
+                         , _next  :: TExpQ (Int -> (# Char, Int #))
+                         , _same  :: TExpQ (Int -> Int -> Bool)
+                         , _box   :: TExpQ (Int# -> Int)
+                         , _unbox :: TExpQ (Int -> Int#) }
 
 type QH s a = TExpQ (H s a)
 type QX xs = TExpQ (X xs)
 type QK s ks a = TExpQ (K s ks a)
-type QC = TExpQ IList
 type QO = TExpQ O
 type QST s a = TExpQ (ST s a)
 
@@ -73,25 +74,14 @@ noreturn xs o# = error "Machine is only permitted return-by-failure"
 
 makeH :: ST s (H s a)
 makeH = return $! H SNil
-pushH :: (O# -> C -> ST s (Maybe a)) -> H s a -> H s a
+pushH :: (O# -> ST s (Maybe a)) -> H s a -> H s a
 pushH !h (H hs) = H (h:::hs)
 {-# INLINE popH_ #-}
 popH_ :: H s a -> H s a
 popH_ (H (_:::hs)) = H hs
-
-makeC :: ST s C
-makeC = return $! INil
-{-# INLINE pushC #-}
-pushC :: O -> C -> C
-pushC = ICons
-{-# INLINE popC #-}
-popC :: C -> (# O, C #)
-popC (ICons o cs) = (# o, cs #)
-{-# INLINE popC_ #-}
-popC_ :: C -> C
-popC_ (ICons _ cs) = cs
-pokeC :: O -> C -> C
-pokeC !o (ICons _ cs) = ICons o cs
+{-# INLINE pokeH #-}
+pokeH :: (O# -> ST s (Maybe a)) -> H s a -> H s a
+pokeH !h (H (_:::hs)) = H (h:::hs)
 
 {-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
@@ -108,19 +98,19 @@ modifyΣ σ f =
   do !x <- readΣ σ
      writeΣ σ (f $! x)
 
-setupHandler :: QH s a -> QC -> QO -> TExpQ (H s a -> O# -> C -> ST s (Maybe a)) ->
-                                      (QH s a -> QC -> QST s (Maybe a)) -> QST s (Maybe a)
-setupHandler hs cs !o !h !k = k [|| pushH (\(!o#) (!cs) -> $$h $$hs o# cs) $$hs ||] [|| pushC $$o $$cs ||]
+setupHandler :: QH s a -> QO -> TExpQ (H s a -> O# -> O# -> ST s (Maybe a)) ->
+                                (QH s a -> QST s (Maybe a)) -> QST s (Maybe a)
+setupHandler hs !o !h !k = k [|| let I# c# = $$o in pushH (\(!o#) -> $$h $$hs o# c#) $$hs ||]
 
 {-# INLINE raise #-}
-raise :: H s a -> C -> O -> ST s (Maybe a)
-raise (H SNil) cs !o          = return Nothing
-raise (H (h:::_)) cs !(I# o#) = h o# cs
+raise :: H s a -> O -> ST s (Maybe a)
+raise (H SNil) !o          = return Nothing
+raise (H (h:::_)) !(I# o#) = h o#
 
 nextSafe :: Bool -> InputOps -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
-nextSafe True input o p good bad = [|| let !(# c, o' #) = $$(next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
+nextSafe True input o p good bad = [|| let !(# c, o' #) = $$(_next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
 nextSafe False input o p good bad = [||
     let bad' = $$bad in
-      if  $$(more input) $$o then let !(# c, o' #) = $$(next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else bad'
+      if  $$(_more input) $$o then let !(# c, o' #) = $$(_next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else bad'
       else bad'
   ||]

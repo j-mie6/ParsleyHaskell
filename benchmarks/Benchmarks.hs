@@ -32,11 +32,11 @@ import qualified Data.ByteString
 import CommonFunctions
 
 main :: IO ()
---main = rnf (tailTestP (replicate 10000000 'a' ++ "b")) `seq` return ()
-main = --{-
+--main = rnf (tailTestP (replicate 10000000 'a' ++ "b")) `seq` return (){-
+main =
   defaultMain [ brainfuck
-                 --, tailTest 
-              ]--}-}
+              , tailTest 
+              ]--}
 
 -- Tail Recursion Benchmark
 tailTestP :: String -> Maybe Char

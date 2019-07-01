@@ -43,7 +43,7 @@ data InputOps = InputOps { _more  :: TExpQ (Int -> Bool)
 type QH s a = TExpQ (H s a)
 type QX xs = TExpQ (X xs)
 type QK s ks a = TExpQ (K s ks a)
-type QO = TExpQ O
+type QO o = TExpQ O
 type QST s a = TExpQ (ST s a)
 
 makeX :: ST s (X '[])
@@ -98,8 +98,8 @@ modifyΣ σ f =
   do !x <- readΣ σ
      writeΣ σ (f $! x)
 
-setupHandler :: QH s a -> QO -> TExpQ (H s a -> O# -> O# -> ST s (Maybe a)) ->
-                                (QH s a -> QST s (Maybe a)) -> QST s (Maybe a)
+setupHandler :: QH s a -> QO o -> TExpQ (H s a -> O# -> O# -> ST s (Maybe a)) ->
+                                 (QH s a -> QST s (Maybe a)) -> QST s (Maybe a)
 setupHandler hs !o !h !k = k [|| let I# c# = $$o in pushH (\(!o#) -> $$h $$hs o# c#) $$hs ||]
 
 {-# INLINE raise #-}
@@ -107,7 +107,7 @@ raise :: H s a -> O -> ST s (Maybe a)
 raise (H SNil) !o          = return Nothing
 raise (H (h:::_)) !(I# o#) = h o#
 
-nextSafe :: Bool -> InputOps -> QO -> TExpQ (Char -> Bool) -> (QO -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
+nextSafe :: Bool -> InputOps -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True input o p good bad = [|| let !(# c, o' #) = $$(_next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
 nextSafe False input o p good bad = [||
     let bad' = $$bad in

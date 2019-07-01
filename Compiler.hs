@@ -39,17 +39,17 @@ import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, ins
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey, size)
 
-compile :: Parser a -> (Machine a, DMap MVar (LetBinding a), [IMVar])
+compile :: Parser a -> (Machine o a, DMap MVar (LetBinding o a), [IMVar])
 compile (Parser p) = 
   let !(p', μs, maxV, topo) = preprocess p
       !(m, maxΣ) = codeGen ({-terminationAnalysis -}p') halt (maxV + 1) 0
       !ms = compileLets μs (maxV + 1) maxΣ
   in trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (Machine m, ms, topo)
 
-compileLets :: DMap MVar (Free ParserF Void) -> IMVar -> IΣVar -> DMap MVar (LetBinding a)
+compileLets :: DMap MVar (Free ParserF Void) -> IMVar -> IΣVar -> DMap MVar (LetBinding o a)
 compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.empty, maxΣ) μs in ms
   where
-    compileLet :: MVar x -> Free ParserF Void x -> (DMap MVar (LetBinding a), IΣVar) -> (DMap MVar (LetBinding a), IΣVar)
+    compileLet :: MVar x -> Free ParserF Void x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
     compileLet (MVar μ) p (ms, maxΣ) =
       let (m, maxΣ') = codeGen p ret maxV (maxΣ + 1)
       in (DMap.insert (MVar μ) (letBind m) ms, maxΣ')

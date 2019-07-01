@@ -30,22 +30,22 @@ runCodeGenStack m μ0 φ0 σ0 seen0 =
    flip evalFreshT μ0 . 
    flip evalFreshT φ0) m
 
-newtype CodeGen b a = 
-  CodeGen {runCodeGen :: forall xs' ks'. Free3 M Void3 (a ': xs') ks' b -> CodeGenStack (Free3 M Void3 xs' ks' b)}
+newtype CodeGen o b a = 
+  CodeGen {runCodeGen :: forall xs' ks'. Free3 (M o) Void3 (a ': xs') ks' b -> CodeGenStack (Free3 (M o) Void3 xs' ks' b)}
 
-halt :: Free3 M Void3 '[a] '[] a
+halt :: Free3 (M o) Void3 '[a] '[] a
 halt = Op3 Halt
 
-ret :: Free3 M Void3 (x ': xs) (x ': xs) a
+ret :: Free3 (M o) Void3 (x ': xs) (x ': xs) a
 ret = Op3 Ret
 
-codeGen :: Free ParserF Void a -> Free3 M Void3 (a ': xs) ks b -> IMVar -> IΣVar -> (Free3 M Void3 xs ks b, IΣVar)
+codeGen :: Free ParserF Void a -> Free3 (M o) Void3 (a ': xs) ks b -> IMVar -> IΣVar -> (Free3 (M o) Void3 xs ks b, IΣVar)
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0 Set.empty
     alg = peephole |> (direct . imap present)
 
-peephole :: ParserF (History ParserF (CodeGen b)) a -> Maybe (CodeGen b a)
+peephole :: ParserF (History ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
 peephole !(Era _ (Pure f) :<*>: Era p _) = Just $ CodeGen $ \(!m) -> runCodeGen p (fmapInstr f m)
 peephole !(Era _ (Era _ (Pure f) :<*>: Era p _) :<*>: Era q _) = Just $ CodeGen $ \(!m) ->
   do qc <- runCodeGen q (Op3 (Lift2 f m))
@@ -63,7 +63,7 @@ peephole !(Era _ (Era _ (Try n (Era p _)) :*>: Era _ (Pure x)) :<|>: Era q _) = 
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
-direct :: ParserF (CodeGen b) a -> CodeGen b a
+direct :: ParserF (CodeGen o b) a -> CodeGen o b a
 direct !(Pure x)            = CodeGen $ \(!m) -> do return $! (Op3 (Push x m))
 direct !(Satisfy p)         = CodeGen $ \(!m) -> do return $! (Op3 (Sat p m))
 direct !(pf :<*>: px)       = CodeGen $ \(!m) -> do !pxc <- runCodeGen px (Op3 (Lift2 (lift' ($)) m)); runCodeGen pf pxc
@@ -98,13 +98,13 @@ direct !(ChainPost p op) = CodeGen $ \(!m) ->
      freshM (runCodeGen p (Op3 (ChainInit σ opc μ m)))
 direct !(Debug name p) = CodeGen $ \(!m) -> fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
 
-tailCallOptimise :: MVar x -> Free3 M Void3 (x ': xs) ks a -> Free3 M Void3 xs ks a
+tailCallOptimise :: MVar x -> Free3 (M o) Void3 (x ': xs) ks a -> Free3 (M o) Void3 xs ks a
 tailCallOptimise μ (Op3 Ret) = Op3 (Jump μ)
 tailCallOptimise μ k         = Op3 (Call μ k)
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret or Halt
 -- However, I'm not yet sure about the interactions with try yet...
-deadCommitOptimisation :: Bool -> Free3 M Void3 xs ks a -> Free3 M Void3 xs ks a
+deadCommitOptimisation :: Bool -> Free3 (M o) Void3 xs ks a -> Free3 (M o) Void3 xs ks a
 deadCommitOptimisation True m       = Op3 (Commit True m)
 deadCommitOptimisation _ (Op3 Ret)  = Op3 Ret
 deadCommitOptimisation _ (Op3 Halt) = Op3 Halt
@@ -132,7 +132,7 @@ ifSeenM (MVar v) seen unseen =
 addM :: MonadReader (Set IMVar) m => MVar x -> m a -> m a
 addM (MVar v) = local (Set.insert v)
 
-makeΦ :: Free3 M Void3 (x ': xs) ks a -> CodeGenStack (Maybe (ΦDecl (Free3 M Void3) x xs ks a), Free3 M Void3 (x ': xs) ks a)
+makeΦ :: Free3 (M o) Void3 (x ': xs) ks a -> CodeGenStack (Maybe (ΦDecl (Free3 (M o) Void3) x xs ks a), Free3 (M o) Void3 (x ': xs) ks a)
 makeΦ m | elidable m = return $! (Nothing, m)
   where 
     -- This is double-φ optimisation:   If a φ-node points directly to another φ-node, then it can be elided

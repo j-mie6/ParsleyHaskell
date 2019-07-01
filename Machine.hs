@@ -75,11 +75,11 @@ fmapInstr :: WQ (x -> y) -> Free3 (M o) f (y ': xs) ks a -> Free3 (M o) f (x ': 
 fmapInstr !f !m = Op3 (Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m)))
 
 data Γ s o xs ks a = Γ { xs    :: QX xs
-                       , k     :: QK s ks a
+                       , k     :: QK s o ks a
                        , o     :: QO o
-                       , hs    :: QH s a }
+                       , hs    :: QH s o a }
 
-newtype AbsExec s o a x = AbsExec { runConcrete :: forall xs. X xs -> K s (x ': xs) a -> O# -> H s a -> ST s (Maybe a) }
+newtype AbsExec s o a x = AbsExec { runConcrete :: forall xs. X xs -> K s o (x ': xs) a -> O# -> H s o a -> ST s (Maybe a) }
 newtype QAbsExec s o a x = QAbsExec (TExpQ (AbsExec s o a x))
 newtype QJoin s o a x = QJoin (TExpQ (x -> O# -> ST s (Maybe a)))
 newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
@@ -369,8 +369,8 @@ execLogEnter name k =
 execLogExit :: String -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execLogExit name k = asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(run k γ (debugDown ctx)) ||]
 
-setupHandlerΓ :: Γ s o xs ks a -> TExpQ (H s a -> O# -> O# -> ST s (Maybe a)) ->
-                                (Γ s o xs ks a -> QST s (Maybe a)) -> QST s (Maybe a)
+setupHandlerΓ :: Γ s o xs ks a -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a)) ->
+                                  (Γ s o xs ks a -> QST s (Maybe a)) -> QST s (Maybe a)
 setupHandlerΓ γ !h !k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
 
 setupJoinPoint :: Maybe (ΦDecl (Exec s o) x xs ks a) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a)) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
@@ -396,7 +396,7 @@ inputSizeCheck (Just n) p =
 raiseΓ :: Γ s o xs ks a -> QST s (Maybe a)
 raiseΓ γ = [|| raise $$(hs γ) $$(o γ) ||]
 
-suspend :: (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> QK s (x ': xs) a
+suspend :: (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> QK s o (x ': xs) a
 suspend m γ = [|| \xs o# -> $$(m (γ {xs = [||xs||], o = [||I# o#||]})) ||]
 
 askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)

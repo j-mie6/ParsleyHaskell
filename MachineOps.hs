@@ -20,7 +20,7 @@ data HList xs where
   HNil :: HList '[]
   HCons :: !a -> HList as -> HList (a ': as)
 
-newtype H s a = H (SList (O# -> ST s (Maybe a)))
+newtype H s o a = H (SList (O# -> ST s (Maybe a)))
 type X = HList
 type O = Int
 type O# = Int#
@@ -34,7 +34,7 @@ type O# = Int#
     concrete machine. As such, continuations are only required to
     demand the values of X and o, with all other values closed over
     during suspension. -}
-type K s xs a = X xs -> O# -> ST s (Maybe a)
+type K s o xs a = X xs -> O# -> ST s (Maybe a)
 data InputOps s o = InputOps { _more      :: TExpQ (Int -> Bool)
                              , _next      :: TExpQ (Int -> (# Char, Int #))
                              , _same      :: TExpQ (Int -> Int -> Bool)
@@ -44,9 +44,9 @@ data InputOps s o = InputOps { _more      :: TExpQ (Int -> Bool)
                              , _readCRef  :: TExpQ (CRef s O -> ST s O)
                              , _writeCRef :: TExpQ (CRef s O -> O -> ST s ()) }
 
-type QH s a = TExpQ (H s a)
+type QH s o a = TExpQ (H s o a)
 type QX xs = TExpQ (X xs)
-type QK s ks a = TExpQ (K s ks a)
+type QK s o ks a = TExpQ (K s o ks a)
 type QO o = TExpQ O
 type QST s a = TExpQ (ST s a)
 
@@ -71,21 +71,18 @@ modX f (HCons x xs) = HCons (f $! x) xs
 peekX :: X (a ': xs) -> a
 peekX (HCons x xs) = x
 
-makeK :: ST s (K s '[] a)
+makeK :: ST s (K s o '[] a)
 makeK = return $! noreturn
 noreturn :: X xs -> O# -> ST s (Maybe a)
 noreturn xs o# = error "Machine is only permitted return-by-failure"
 
-makeH :: ST s (H s a)
+makeH :: ST s (H s o a)
 makeH = return $! H SNil
-pushH :: (O# -> ST s (Maybe a)) -> H s a -> H s a
+pushH :: (O# -> ST s (Maybe a)) -> H s o a -> H s o a
 pushH !h (H hs) = H (h:::hs)
 {-# INLINE popH_ #-}
-popH_ :: H s a -> H s a
+popH_ :: H s o a -> H s o a
 popH_ (H (_:::hs)) = H hs
-{-# INLINE pokeH #-}
-pokeH :: (O# -> ST s (Maybe a)) -> H s a -> H s a
-pokeH !h (H (_:::hs)) = H (h:::hs)
 
 {-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
@@ -102,12 +99,12 @@ modifyΣ σ f =
   do !x <- readΣ σ
      writeΣ σ (f $! x)
 
-setupHandler :: QH s a -> QO o -> TExpQ (H s a -> O# -> O# -> ST s (Maybe a)) ->
-                                 (QH s a -> QST s (Maybe a)) -> QST s (Maybe a)
+setupHandler :: QH s o a -> QO o -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a)) ->
+                                    (QH s o a -> QST s (Maybe a)) -> QST s (Maybe a)
 setupHandler hs !o !h !k = k [|| let I# c# = $$o in pushH (\(!o#) -> $$h $$hs o# c#) $$hs ||]
 
 {-# INLINE raise #-}
-raise :: H s a -> O -> ST s (Maybe a)
+raise :: H s o a -> O -> ST s (Maybe a)
 raise (H SNil) !o          = return Nothing
 raise (H (h:::_)) !(I# o#) = h o#
 

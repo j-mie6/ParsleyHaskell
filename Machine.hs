@@ -93,26 +93,26 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
                      , stcs       :: Map IΣVar (QCRef s O)
-                     , input      :: {-# UNPACK #-} !(InputOps s o)
+                     , ops        :: {-# UNPACK #-} !(InputOps s o)
                      , constCount :: Int
                      , debugLevel :: Int }
 
 more      :: Ctx s o a -> TExpQ (O -> Bool)
-more      = _more      . input
+more      = _more      . ops
 next      :: Ctx s o a -> TExpQ (O -> (# Char, O #))
-next      = _next      . input
+next      = _next      . ops
 same      :: Ctx s o a -> TExpQ (O -> O -> Bool)
-same      = _same      . input
+same      = _same      . ops
 unbox     :: Ctx s o a -> TExpQ (O -> O#)
-unbox     = _unbox     . input
+unbox     = _unbox     . ops
 box       :: Ctx s o a -> TExpQ (O# -> O)
-box       = _box       . input
+box       = _box       . ops
 newCRef   :: Ctx s o a -> TExpQ (O -> ST s (CRef s O))
-newCRef   = _newCRef   . input
+newCRef   = _newCRef   . ops
 readCRef  :: Ctx s o a -> TExpQ (CRef s O -> ST s O) 
-readCRef  = _readCRef  . input
+readCRef  = _readCRef  . ops
 writeCRef :: Ctx s o a -> TExpQ (CRef s O -> O -> ST s ())
-writeCRef = _writeCRef . input
+writeCRef = _writeCRef . ops
 
 insertM :: MVar x -> TExpQ (AbsExec s o a x) -> Ctx s o a -> Ctx s o a
 insertM μ q ctx = ctx {μs = DMap.insert μ (QAbsExec q) (μs ctx)}
@@ -142,7 +142,7 @@ newtype Exec s o xs ks a = Exec (Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Ma
 run :: Exec s o xs ks a -> Γ s o xs ks a -> Ctx s o a -> QST s (Maybe a)
 run (Exec m) γ ctx = runReader m ctx γ
 
-type Handlers o = (HardForkHandler o, SoftForkHandler o, AttemptHandler o, NegLookHandler o, ChainHandler o)
+type Handlers o = (HardForkHandler o, SoftForkHandler o, AttemptHandler o, NegLookHandler o, ChainHandler o, LogHandler o)
 class HardForkHandler o where
   hardForkHandler :: (Γ s o xs ks a -> QST s (Maybe a)) -> Ctx s o a -> Γ s o xs ks a -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a))
 class SoftForkHandler o where
@@ -155,6 +155,8 @@ class NegLookHandler o where
 class ChainHandler o where
   chainHandler :: (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> TExpQ (STRef s x) -> TExpQ (CRef s O) 
                -> Ctx s o a -> Γ s o (x ': xs) ks a -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a))
+class LogHandler o where
+  logHandler :: String -> Ctx s o a -> Γ s o xs ks a -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a))
 
 exec :: TExpQ (PreparedInput (Rep O) s O O#) -> (Machine O a, DMap MVar (LetBinding O a), [IMVar]) -> QST s (Maybe a)
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
@@ -170,11 +172,11 @@ exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
 readyCalls :: Handlers o => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] '[] a -> Γ s o '[] '[] a -> Ctx s o a -> QST s (Maybe a)
 readyCalls topo ms start γ = foldr readyFunc (run start γ) topo
   where
-    readyFunc v rest ctx = 
+    readyFunc v rest (ctx :: Ctx s o a) = 
       let μ = MVar v
           LetBinding k = ms DMap.! μ
       in [|| let recu = AbsExec (\(!xs) (!ks) o# hs ->
-                   $$(run (readyExec k) (Γ [||xs||] [||ks||] [||I# o#||] [||hs||]) 
+                   $$(run (readyExec k) (Γ [||xs||] [||ks||] [||$$(box ctx) o#||] [||hs||]) 
                                         (insertM μ [||recu||] ctx)))
              in $$(rest (insertM μ [||recu||] ctx)) ||]
 
@@ -238,7 +240,7 @@ execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = [|| let (# y, xs' #) = popX $$
 execSat :: WQ (Char -> Bool) -> Exec s o (Char ': xs) ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execSat p (Exec k) =
   do mk <- k
-     asks $! \ctx γ -> nextSafe (skipBounds ctx) (input ctx) (o γ) (_code p) (\o c -> mk (γ {xs = [|| pushX $$c $$(xs γ) ||], o = o})) (raiseΓ γ)
+     asks $! \ctx γ -> nextSafe (skipBounds ctx) (ops ctx) (o γ) (_code p) (\o c -> mk (γ {xs = [|| pushX $$c $$(xs γ) ||], o = o})) (raiseΓ γ)
 
 execEmpt :: Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execEmpt = return raiseΓ
@@ -251,7 +253,7 @@ execHardFork :: HardForkHandler o => Exec s o xs ks a -> Exec s o xs ks a -> May
 execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl $
   do mp <- p
      mq <- q
-     asks $! \ctx γ -> setupHandlerΓ γ (hardForkHandler mq ctx γ) mp
+     asks $! \ctx γ -> setupHandlerΓ ctx γ (hardForkHandler mq ctx γ) mp
 
 instance HardForkHandler O where
   hardForkHandler mq ctx γ = let bx = box ctx in [||\hs o# c# ->
@@ -263,7 +265,7 @@ execSoftFork :: SoftForkHandler o => Maybe Int -> Exec s o xs ks a -> Exec s o x
 execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl $
   do mp <- inputSizeCheck constantInput p
      mq <- q
-     asks $! \ctx γ -> setupHandlerΓ γ (softForkHandler mq ctx γ) mp
+     asks $! \ctx γ -> setupHandlerΓ ctx γ (softForkHandler mq ctx γ) mp
 
 instance SoftForkHandler O where
   softForkHandler mq ctx γ = [||\hs _ c# ->
@@ -274,7 +276,7 @@ execJoin :: ΦVar x -> Reader (Ctx s o a) (Γ s o (x ': xs) ks a -> QST s (Maybe
 execJoin φ = fmap (\(QJoin k) γ -> [|| let !(I# o#) = $$(o γ) in $$k (peekX $$(xs γ)) o# ||]) (asks ((DMap.! φ) . φs))
 
 execAttempt :: AttemptHandler o => Maybe Int -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
-execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; asks (\ctx γ -> setupHandlerΓ γ (attemptHandler ctx) mk)
+execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; asks (\ctx γ -> setupHandlerΓ ctx γ (attemptHandler ctx) mk)
 
 instance AttemptHandler O where attemptHandler ctx = let bx = box ctx in [||\hs _ c# -> raise hs ($$bx c#)||]
 
@@ -288,7 +290,7 @@ execNegLook :: NegLookHandler o => Exec s o xs ks a -> Exec s o xs ks a -> Reade
 execNegLook (Exec m) (Exec k) =
   do mm <- m
      mk <- k
-     asks $! \ctx γ -> setupHandlerΓ γ (negLookHandler2 ctx) (\γ' -> setupHandlerΓ γ' (negLookHandler1 mk ctx γ) mm)
+     asks $! \ctx γ -> setupHandlerΓ ctx γ (negLookHandler2 ctx) (\γ' -> setupHandlerΓ ctx γ' (negLookHandler1 mk ctx γ) mm)
 
 instance NegLookHandler O where
   negLookHandler1 mk ctx γ = let bx = box ctx in [||\hs _ c# -> $$(mk (γ {o = [||$$bx c#||], hs = [||popH_ hs||]}))||]
@@ -338,7 +340,7 @@ execChainInit σ l μ (Exec k) =
        do let (# x, xs' #) = popX $$xs
           ref <- newΣ x
           cref <- $$(newCRef ctx) $$o
-          $$(setupHandlerΓ γ (chainHandler mk [||ref||] [||cref||] ctx γ) (\γ' -> [||
+          $$(setupHandlerΓ ctx γ (chainHandler mk [||ref||] [||cref||] ctx γ) (\γ' -> [||
               -- NOTE: Only the offset and the handler stack can change between interations of a chainPre
               do let loop o# =
                        $$(run l (Γ [||xs'||] [||noreturn||] [||$$(box ctx) o#||] (hs γ'))
@@ -379,18 +381,20 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     prelude    = [|| concat [indent, dir : name, dir : " (", show $$offset, "): "] ||]
     caretSpace = [|| replicate (length $$prelude + $$offset - $$start) ' ' ||]
 
-execLogEnter :: String -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
+execLogEnter :: LogHandler o => String -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execLogEnter name k =
   do asks $! \ctx γ ->
-      let handler = [||\hs o# _ -> trace $$(preludeString name '<' (γ {o = [||$$(box ctx) o#||]}) ctx (color Red " Fail")) (raise hs ($$(box ctx) o#)) ||]
-      in (setupHandlerΓ γ handler (\γ' -> [|| trace $$(preludeString name '>' γ ctx "") $$(run k γ' (debugUp ctx))||]))
+      (setupHandlerΓ ctx γ (logHandler name ctx γ) (\γ' -> [|| trace $$(preludeString name '>' γ ctx "") $$(run k γ' (debugUp ctx))||]))
+
+instance LogHandler O where
+  logHandler name ctx γ = [||\hs o# _ -> trace $$(preludeString name '<' (γ {o = [||$$(box ctx) o#||]}) ctx (color Red " Fail")) (raise hs ($$(box ctx) o#)) ||]
 
 execLogExit :: String -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execLogExit name k = asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(run k γ (debugDown ctx)) ||]
 
-setupHandlerΓ :: Γ s o xs ks a -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a)) ->
-                                  (Γ s o xs ks a -> QST s (Maybe a)) -> QST s (Maybe a)
-setupHandlerΓ γ !h !k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
+setupHandlerΓ :: Ctx s o a -> Γ s o xs ks a -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a)) ->
+                                              (Γ s o xs ks a -> QST s (Maybe a)) -> QST s (Maybe a)
+setupHandlerΓ ctx γ !h !k = setupHandler (ops ctx) (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
 
 setupJoinPoint :: Maybe (ΦDecl (Exec s o) x xs ks a) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a)) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 setupJoinPoint Nothing mx = mx

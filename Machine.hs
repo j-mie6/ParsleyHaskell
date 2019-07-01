@@ -28,8 +28,6 @@ import Data.STRef                 (STRef)
 import Data.Map.Strict            (Map)
 import Data.Dependent.Map         (DMap)
 import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
-import GHC.Prim                   (Int#, Char#, newByteArray#, indexWideCharArray#)
-import GHC.Exts                   (Int(..), Char(..), (-#), (+#), (*#))
 import Safe.Coerce                (coerce)
 import Debug.Trace                (trace)
 import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
@@ -169,7 +167,7 @@ exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
          (Ctx DMap.empty DMap.empty DMap.empty Map.empty (InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||]) 0 0))
   ||]
 
-readyCalls :: Handlers o => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] '[] a -> Γ s o '[] '[] a -> Ctx s o a -> QST s (Maybe a)
+readyCalls :: (Handlers o, Suspend o) => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] '[] a -> Γ s o '[] '[] a -> Ctx s o a -> QST s (Maybe a)
 readyCalls topo ms start γ = foldr readyFunc (run start γ) topo
   where
     readyFunc v rest (ctx :: Ctx s o a) = 
@@ -180,10 +178,10 @@ readyCalls topo ms start γ = foldr readyFunc (run start γ) topo
                                         (insertM μ [||recu||] ctx)))
              in $$(rest (insertM μ [||recu||] ctx)) ||]
 
-readyExec :: Handlers o => Free3 (M o) Void3 xs ks a -> Exec s o xs ks a
+readyExec :: (Handlers o, Suspend o) => Free3 (M o) Void3 xs ks a -> Exec s o xs ks a
 readyExec = fold3 absurd (Exec . alg)
   where
-    alg :: Handlers o => M o (Exec s o) xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
+    alg :: (Handlers o, Suspend o) => M o (Exec s o) xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
     alg Halt                = execHalt
     alg Ret                 = execRet
     alg (Call μ k)          = execCall μ k
@@ -213,14 +211,13 @@ execHalt :: Reader (Ctx s o a) (Γ s o '[a] ks a -> QST s (Maybe a))
 execHalt = return $! \γ -> [|| return $! Just $! peekX ($$(xs γ)) ||]
 
 execRet :: Reader (Ctx s o a) (Γ s o (x ': xs) (x ': xs) a -> QST s (Maybe a))
-execRet = asks $! \ctx γ -> [|| let !o# = $$(unbox ctx) $$(o γ) in ($$(k γ) $! $$(xs γ)) o# ||]
+execRet = asks $! \ctx γ -> [|| let !o# = $$(unbox ctx) $$(o γ) in $$(k γ) $$(xs γ) o# ||]
 
-execCall :: MVar x -> Exec s o (x ': xs) ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
+execCall :: Suspend o => MVar x -> Exec s o (x ': xs) ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execCall μ (Exec k) =
   do !(QAbsExec m) <- askM μ
      mk <- k
-     ub <- asks unbox
-     return $! \γ@Γ{..} -> [|| let !o# = $$ub $$o in runConcrete $$m $$xs $$(suspend mk γ) o# $$hs ||]
+     asks $ \ctx γ@Γ{..} -> [|| let !o# = $$(unbox ctx) $$o in runConcrete $$m $$xs $$(suspend ctx mk γ) o# $$hs ||]
 
 execJump :: MVar x -> Reader (Ctx s o a) (Γ s o xs (x ': xs) a -> QST s (Maybe a))
 execJump μ =
@@ -273,7 +270,10 @@ instance SoftForkHandler O where
     ||]
 
 execJoin :: ΦVar x -> Reader (Ctx s o a) (Γ s o (x ': xs) ks a -> QST s (Maybe a))
-execJoin φ = fmap (\(QJoin k) γ -> [|| let !(I# o#) = $$(o γ) in $$k (peekX $$(xs γ)) o# ||]) (asks ((DMap.! φ) . φs))
+execJoin φ = 
+  do QJoin k <- asks ((DMap.! φ) . φs)
+     ub <- asks unbox
+     return $! \γ -> [|| $$k (peekX $$(xs γ)) ($$ub $$(o γ)) ||]
 
 execAttempt :: AttemptHandler o => Maybe Int -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; asks (\ctx γ -> setupHandlerΓ ctx γ (attemptHandler ctx) mk)
@@ -419,8 +419,11 @@ inputSizeCheck (Just n) p =
 raiseΓ :: Γ s o xs ks a -> QST s (Maybe a)
 raiseΓ γ = [|| raise $$(hs γ) $$(o γ) ||]
 
-suspend :: (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> QK (Rep o) s (Unboxed o) (x ': xs) a
-suspend m γ = [|| \xs o# -> $$(m (γ {xs = [||xs||], o = [||I# o#||]})) ||]
+class Suspend o where
+  suspend :: Ctx s o a -> (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> QK (Rep o) s (Unboxed o) (x ': xs) a
+
+instance Suspend O where
+  suspend ctx m γ = [|| \xs o# -> $$(m (γ {xs = [||xs||], o = [||$$(box ctx) o#||]})) ||]
 
 askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
 askM μ = {-trace ("fetching " ++ show μ) $ -}asks (((DMap.! μ) . μs))

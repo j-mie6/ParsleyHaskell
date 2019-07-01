@@ -135,7 +135,7 @@ newtype Exec s o xs ks a = Exec (Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Ma
 run :: Exec s o xs ks a -> Γ s o xs ks a -> Ctx s o a -> QST s (Maybe a)
 run (Exec m) γ ctx = runReader m ctx γ
 
-exec :: TExpQ (PreparedInput (Rep O) O O#) -> (Machine O a, DMap MVar (LetBinding O a), [IMVar]) -> QST s (Maybe a)
+exec :: TExpQ (PreparedInput O) -> (Machine O a, DMap MVar (LetBinding O a), [IMVar]) -> QST s (Maybe a)
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
   do xs <- makeX
      ks <- makeK

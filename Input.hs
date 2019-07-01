@@ -18,35 +18,49 @@ import Data.Text.Array          (aBA)
 import Data.Text.Internal       (Text(..))
 import Data.ByteString.Internal (ByteString(..))
 import GHC.ForeignPtr           (ForeignPtr(..))
+import Control.Monad.ST         (ST)
+import Data.STRef               (STRef)
+import Data.STRef.Unboxed       (STRefU)
 import qualified Data.Text as Text (length, index)
 
-data PreparedInput k rep (urep :: TYPE k) = PreparedInput (rep -> (# Char, rep #)) (rep -> Bool) (rep -> rep -> Bool) rep (urep -> rep) (rep -> urep)
+data PreparedInput rep = PreparedInput {-next-} (rep -> (# Char, rep #))
+                                       {-more-} (rep -> Bool)
+                                       {-same-} (rep -> rep -> Bool)
+                                       {-box-} rep (Unboxed rep -> rep)
+                                       {-unbox-} (rep -> Unboxed rep)
+                                       {-newC-} 
+                                       {-readC-} 
+                                       {-writeC-} 
 newtype Text16                            = Text16 Text
 
-data OffString = OffString !Int !String
+data OffString = OffString {-# UNPACK #-} !Int !String
 
 type family Rep rep where
   Rep Int = IntRep
   Rep OffString = LiftedRep
 
-class Input s (rep :: *) where
-  type Unboxed rep :: TYPE (Rep rep)
-  prepare :: TExpQ s -> TExpQ (PreparedInput (Rep rep) rep (Unboxed rep))
+type family Unboxed rep :: TYPE (Rep rep) where
+  Unboxed Int = Int#
+  Unboxed OffString = OffString
+
+type family CRef s rep where
+  CRef s Int = STRefU s Int
+  CRef s OffString = STRef s OffString
+
+class Input s rep where
+  prepare :: TExpQ s -> TExpQ (PreparedInput rep)
 
 instance Input [Char] Int where 
-  type Unboxed Int = Int#
   prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 
 instance Input (UArray Int Char) Int where 
-  type Unboxed Int = Int#
   prepare qinput = [||
       let UArray _ _ size input# = $$qinput
           next i@(I# i#) = (# C# (indexWideCharArray# input# i#), i + 1 #)
       in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#)
     ||]
 
-instance Input Text16 Int where 
-  type Unboxed Int = Int#
+instance Input Text16 Int where
   prepare qinput = [||
       let Text16 (Text arr off size) = $$qinput
           arr# = aBA arr
@@ -56,7 +70,6 @@ instance Input Text16 Int where
 
 -- I'd *strongly* advise against using this, parsing complexity is O(n^2) for this variant
 instance Input Text Int where
-  type Unboxed Int = Int#
   prepare qinput = [||
       let input = $$qinput
           size = Text.length input
@@ -65,7 +78,6 @@ instance Input Text Int where
     ||]
 
 instance Input ByteString Int where
-  type Unboxed Int = Int#
   prepare qinput = [||
       let PS (ForeignPtr addr# final) off size = $$qinput
           next i@(I# i#) = 

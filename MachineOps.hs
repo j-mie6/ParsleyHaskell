@@ -13,6 +13,7 @@ import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import GHC.Prim           (Int#)
 import GHC.Exts           (Int(..))
 import Safe.Coerce        (coerce)
+import Input              (CRef)
 
 data SList a = !a ::: SList a | SNil
 data HList xs where
@@ -34,11 +35,14 @@ type O# = Int#
     demand the values of X and o, with all other values closed over
     during suspension. -}
 type K s xs a = X xs -> O# -> ST s (Maybe a)
-data InputOps = InputOps { _more  :: TExpQ (Int -> Bool)
-                         , _next  :: TExpQ (Int -> (# Char, Int #))
-                         , _same  :: TExpQ (Int -> Int -> Bool)
-                         , _box   :: TExpQ (Int# -> Int)
-                         , _unbox :: TExpQ (Int -> Int#) }
+data InputOps s o = InputOps { _more      :: TExpQ (Int -> Bool)
+                             , _next      :: TExpQ (Int -> (# Char, Int #))
+                             , _same      :: TExpQ (Int -> Int -> Bool)
+                             , _box       :: TExpQ (Int# -> Int)
+                             , _unbox     :: TExpQ (Int -> Int#)
+                             , _newCRef   :: TExpQ (O -> ST s (CRef s O))
+                             , _readCRef  :: TExpQ (CRef s O -> ST s O)
+                             , _writeCRef :: TExpQ (CRef s O -> O -> ST s ()) }
 
 type QH s a = TExpQ (H s a)
 type QX xs = TExpQ (X xs)
@@ -107,7 +111,7 @@ raise :: H s a -> O -> ST s (Maybe a)
 raise (H SNil) !o          = return Nothing
 raise (H (h:::_)) !(I# o#) = h o#
 
-nextSafe :: Bool -> InputOps -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
+nextSafe :: Bool -> InputOps s o -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True input o p good bad = [|| let !(# c, o' #) = $$(_next input) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
 nextSafe False input o p good bad = [||
     let bad' = $$bad in

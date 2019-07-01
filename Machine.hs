@@ -15,7 +15,7 @@
 module Machine where
 
 import MachineOps
-import Input                      (PreparedInput(..), Rep)
+import Input                      (PreparedInput(..), Rep, CRef)
 import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
 import Utils                      (WQ(..), lift', (>*<), TExpQ)
 import Data.Word                  (Word64)
@@ -23,7 +23,6 @@ import Control.Monad              (forM)
 import Control.Monad.ST           (ST)
 import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadReader)
 import Data.STRef                 (STRef)
-import Data.STRef.Unboxed         (STRefU, newSTRefU, readSTRefU, writeSTRefU)
 import Data.Map.Strict            (Map)
 import Data.Dependent.Map         (DMap)
 import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
@@ -87,25 +86,31 @@ newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype QSTRef s x = QSTRef (TExpQ (STRef s x))
-newtype QSTRefU s x = QSTRefU (TExpQ (STRefU s x))
+newtype QCRef s x = QCRef (TExpQ (CRef s x))
 data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
-                     , stcs       :: Map IΣVar (QSTRefU s O)
-                     , input      :: {-# UNPACK #-} !InputOps
+                     , stcs       :: Map IΣVar (QCRef s O)
+                     , input      :: {-# UNPACK #-} !(InputOps s o)
                      , constCount :: Int
                      , debugLevel :: Int }
 
-more  :: Ctx s o a -> TExpQ (O -> Bool)
-more  = _more  . input
-next  :: Ctx s o a -> TExpQ (O -> (# Char, O #))
-next  = _next  . input
-same  :: Ctx s o a -> TExpQ (O -> O -> Bool)
-same  = _same  . input
-unbox :: Ctx s o a -> TExpQ (O -> O#)
-unbox = _unbox . input
-box   :: Ctx s o a -> TExpQ (O# -> O)
-box   = _box   . input
+more      :: Ctx s o a -> TExpQ (O -> Bool)
+more      = _more      . input
+next      :: Ctx s o a -> TExpQ (O -> (# Char, O #))
+next      = _next      . input
+same      :: Ctx s o a -> TExpQ (O -> O -> Bool)
+same      = _same      . input
+unbox     :: Ctx s o a -> TExpQ (O -> O#)
+unbox     = _unbox     . input
+box       :: Ctx s o a -> TExpQ (O# -> O)
+box       = _box       . input
+newCRef   :: Ctx s o a -> TExpQ (O -> ST s (CRef s O))
+newCRef   = _newCRef   . input
+readCRef  :: Ctx s o a -> TExpQ (CRef s O -> ST s O) 
+readCRef  = _readCRef  . input
+writeCRef :: Ctx s o a -> TExpQ (CRef s O -> O -> ST s ())
+writeCRef = _writeCRef . input
 
 insertM :: MVar x -> TExpQ (AbsExec s o a x) -> Ctx s o a -> Ctx s o a
 insertM μ q ctx = ctx {μs = DMap.insert μ (QAbsExec q) (μs ctx)}
@@ -116,8 +121,8 @@ insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 insertΣ :: ΣVar x -> TExpQ (STRef s x) -> Ctx s o a -> Ctx s o a
 insertΣ σ qref ctx = ctx {σs = DMap.insert σ (QSTRef qref) (σs ctx)}
 
-insertSTC :: ΣVar x -> TExpQ (STRefU s O) -> Ctx s o a -> Ctx s o a
-insertSTC (ΣVar v) qref ctx = ctx {stcs = Map.insert v (QSTRefU qref) (stcs ctx)}
+insertSTC :: ΣVar x -> TExpQ (CRef s O) -> Ctx s o a -> Ctx s o a
+insertSTC (ΣVar v) qref ctx = ctx {stcs = Map.insert v (QCRef qref) (stcs ctx)}
 
 addConstCount :: Int -> Ctx s o a -> Ctx s o a
 addConstCount x ctx = ctx {constCount = constCount ctx + x}
@@ -135,15 +140,15 @@ newtype Exec s o xs ks a = Exec (Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Ma
 run :: Exec s o xs ks a -> Γ s o xs ks a -> Ctx s o a -> QST s (Maybe a)
 run (Exec m) γ ctx = runReader m ctx γ
 
-exec :: TExpQ (PreparedInput O) -> (Machine O a, DMap MVar (LetBinding O a), [IMVar]) -> QST s (Maybe a)
+exec :: TExpQ (PreparedInput (Rep O) s O O#) -> (Machine O a, DMap MVar (LetBinding O a), [IMVar]) -> QST s (Maybe a)
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
   do xs <- makeX
      ks <- makeK
      hs <- makeH
-     let !(PreparedInput next more same offset box unbox) = $$input
+     let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef ) = $$input
      $$(readyCalls topo ms (readyExec m) 
          (Γ [||xs||] [||ks||] [||offset||] [||hs||])
-         (Ctx DMap.empty DMap.empty DMap.empty Map.empty (InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||]) 0 0))
+         (Ctx DMap.empty DMap.empty DMap.empty Map.empty (InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||]) 0 0))
   ||]
 
 readyCalls :: [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] '[] a -> Γ s o '[] '[] a -> Ctx s o a -> QST s (Maybe a)
@@ -300,11 +305,11 @@ execChainIter :: ΣVar x -> MVar x -> Reader (Ctx s o a) (Γ s o ((x -> x) ': xs
 execChainIter σ μ =
   do !(QSTRef ref) <- askΣ σ
      !(QAbsExec l) <- askM μ
-     !(QSTRefU cref) <- askSTC σ
+     !(QCRef cref) <- askSTC σ
      asks $! \ctx γ@Γ{..} -> [||
        do let (# g, xs' #) = popX $$xs
           modifyΣ $$ref g
-          writeSTRefU $$cref $$o
+          $$(writeCRef ctx) $$cref $$o
           runConcrete $$l xs' $$k ($$(unbox ctx) $$o) $$hs
        ||]
 
@@ -314,9 +319,9 @@ execChainInit σ l μ k =
   do asks $! \ctx γ@(Γ xs ks o _) -> [||
        do let (# x, xs' #) = popX $$xs
           ref <- newΣ x
-          cref <- newSTRefU $$o
+          cref <- $$(newCRef ctx) $$o
           $$(let handler = [||\hs o# _ ->
-                    do c <- readSTRefU cref
+                    do c <- $$(readCRef ctx) cref
                        if $$(same ctx) c ($$(box ctx) o#) then
                           do y <- readΣ ref
                              $$(run k (γ {xs = [|| pokeX y $$xs ||],
@@ -403,7 +408,7 @@ askΣ σ = {-trace ("fetching " ++ show σ) $ -}asks ((DMap.! σ) . σs)
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin s o a x)
 askΦ φ = {-trace ("fetching " ++ show φ) $ -}asks ((DMap.! φ) . φs)
 
-askSTC :: MonadReader (Ctx s o a) m => ΣVar x -> m (QSTRefU s O)
+askSTC :: MonadReader (Ctx s o a) m => ΣVar x -> m (QCRef s O)
 askSTC (ΣVar v) = asks ((Map.! v) . stcs)
 
 instance IFunctor3 (M o) where

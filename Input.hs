@@ -19,19 +19,20 @@ import Data.Text.Internal       (Text(..))
 import Data.ByteString.Internal (ByteString(..))
 import GHC.ForeignPtr           (ForeignPtr(..))
 import Control.Monad.ST         (ST)
-import Data.STRef               (STRef)
-import Data.STRef.Unboxed       (STRefU)
+import Data.STRef               (STRef, newSTRef, readSTRef, writeSTRef)
+import Data.STRef.Unboxed       (STRefU, newSTRefU, readSTRefU, writeSTRefU)
 import qualified Data.Text as Text (length, index)
 
-data PreparedInput rep = PreparedInput {-next-} (rep -> (# Char, rep #))
-                                       {-more-} (rep -> Bool)
-                                       {-same-} (rep -> rep -> Bool)
-                                       {-box-} rep (Unboxed rep -> rep)
-                                       {-unbox-} (rep -> Unboxed rep)
-                                       {-newC-} 
-                                       {-readC-} 
-                                       {-writeC-} 
-newtype Text16                            = Text16 Text
+data PreparedInput k s rep (urep :: TYPE k) = PreparedInput {-next-}   (rep -> (# Char, rep #))
+                                                            {-more-}   (rep -> Bool)
+                                                            {-same-}   (rep -> rep -> Bool)
+                                                            {-init-}   rep 
+                                                            {-box-}    (urep -> rep)
+                                                            {-unbox-}  (rep -> urep)
+                                                            {-newC-}   (rep -> ST s (CRef s rep))
+                                                            {-readC-}  (CRef s rep -> ST s rep)
+                                                            {-writeC-} (CRef s rep -> rep -> ST s ())
+newtype Text16 = Text16 Text
 
 data OffString = OffString {-# UNPACK #-} !Int !String
 
@@ -39,52 +40,54 @@ type family Rep rep where
   Rep Int = IntRep
   Rep OffString = LiftedRep
 
-type family Unboxed rep :: TYPE (Rep rep) where
-  Unboxed Int = Int#
-  Unboxed OffString = OffString
-
 type family CRef s rep where
   CRef s Int = STRefU s Int
   CRef s OffString = STRef s OffString
 
-class Input s rep where
-  prepare :: TExpQ s -> TExpQ (PreparedInput rep)
+class Input input rep where
+  type Unboxed rep :: TYPE (Rep rep)
+  prepare :: TExpQ input -> TExpQ (PreparedInput (Rep rep) s rep (Unboxed rep))
 
 instance Input [Char] Int where 
+  type Unboxed Int = Int#
   prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 
 instance Input (UArray Int Char) Int where 
+  type Unboxed Int = Int#
   prepare qinput = [||
       let UArray _ _ size input# = $$qinput
           next i@(I# i#) = (# C# (indexWideCharArray# input# i#), i + 1 #)
-      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#)
+      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU
     ||]
 
 instance Input Text16 Int where
+  type Unboxed Int = Int#
   prepare qinput = [||
       let Text16 (Text arr off size) = $$qinput
           arr# = aBA arr
           next i@(I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), i + 1 #)
-      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#)
+      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU
     ||]
 
 -- I'd *strongly* advise against using this, parsing complexity is O(n^2) for this variant
 instance Input Text Int where
+  type Unboxed Int = Int#
   prepare qinput = [||
       let input = $$qinput
           size = Text.length input
           next i = (# Text.index input i, i + 1 #)
-      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#)
+      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU
     ||]
 
 instance Input ByteString Int where
+  type Unboxed Int = Int#
   prepare qinput = [||
       let PS (ForeignPtr addr# final) off size = $$qinput
           next i@(I# i#) = 
             case readWord8OffAddr# addr# i# realWorld# of
               (# s', x #) -> case touch# final s' of 
                 _ -> (# C# (chr# (word2Int# x)), i + 1 #)
-      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#)
+      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU
     ||]
 
 --accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peekByteOff ptr (I# (off# +# i#))

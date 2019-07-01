@@ -53,7 +53,7 @@ executable benchmarks
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=LiftPlugin 
+  ghc-options:         -rtsopts -fplugin=LiftPlugin -fprint-explicit-kinds -fprint-explicit-runtime-reps
   --fplugin=DumpCore
 
 library
@@ -74,4 +74,4 @@ library
 
   -- Base language which the package is written in.
   default-language:    Haskell2010
-  ghc-options:         -fplugin=LiftPlugin
+  ghc-options:         -fplugin=LiftPlugin -fprint-explicit-kinds -fprint-explicit-runtime-reps

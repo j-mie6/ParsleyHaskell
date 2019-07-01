@@ -6,7 +6,8 @@
              BangPatterns,
              MagicHash,
              UnboxedTuples,
-             TemplateHaskell #-}
+             TemplateHaskell,
+             TypeSynonymInstances #-}
 module MachineOps where
 
 import Utils              (TExpQ)
@@ -101,14 +102,16 @@ modifyΣ σ f =
   do !x <- readΣ σ
      writeΣ σ (f $! x)
 
-setupHandler :: InputOps s o -> QH s o a -> QO o -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a)) ->
-                                                    (QH s o a -> QST s (Maybe a)) -> QST s (Maybe a)
-setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]
+class FailureOps o where
+  setupHandler :: InputOps s o -> QH s o a -> QO o -> TExpQ (H s o a -> O# -> O# -> ST s (Maybe a)) ->
+                                                      (QH s o a -> QST s (Maybe a)) -> QST s (Maybe a)
+  raise :: InputOps s o -> TExpQ (H s o a -> O -> ST s (Maybe a))
 
-{-# INLINE raise #-}
-raise :: H s o a -> O -> ST s (Maybe a)
-raise (H SNil) !o          = return Nothing
-raise (H (h:::_)) !(I# o#) = h o#
+instance FailureOps O where
+  setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]
+  raise ops = [||\(H hs) (!o) -> case hs of
+    SNil -> return Nothing
+    h:::_ -> h ($$(_unbox ops) o) ||]
 
 nextSafe :: Bool -> InputOps s o -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True ops o p good bad = [|| let !(# c, o' #) = $$(_next ops) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]

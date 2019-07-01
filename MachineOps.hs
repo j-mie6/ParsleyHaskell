@@ -1,5 +1,7 @@
 {-# LANGUAGE GADTs,
              DataKinds,
+             KindSignatures,
+             PolyKinds,
              TypeOperators,
              BangPatterns,
              MagicHash,
@@ -11,7 +13,7 @@ import Utils              (TExpQ)
 import Control.Monad.ST   (ST)
 import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import GHC.Prim           (Int#)
-import GHC.Exts           (Int(..))
+import GHC.Exts           (Int(..), TYPE)
 import Safe.Coerce        (coerce)
 import Input              (CRef)
 
@@ -34,19 +36,19 @@ type O# = Int#
     concrete machine. As such, continuations are only required to
     demand the values of X and o, with all other values closed over
     during suspension. -}
-type K s o xs a = X xs -> O# -> ST s (Maybe a)
-data InputOps s o = InputOps { _more      :: TExpQ (Int -> Bool)
-                             , _next      :: TExpQ (Int -> (# Char, Int #))
-                             , _same      :: TExpQ (Int -> Int -> Bool)
-                             , _box       :: TExpQ (Int# -> Int)
-                             , _unbox     :: TExpQ (Int -> Int#)
+type K k s (o# :: TYPE k) xs a = X xs -> O# -> ST s (Maybe a)
+data InputOps s o = InputOps { _more      :: TExpQ (O -> Bool)
+                             , _next      :: TExpQ (O -> (# Char, O #))
+                             , _same      :: TExpQ (O -> O -> Bool)
+                             , _box       :: TExpQ (O# -> O)
+                             , _unbox     :: TExpQ (O -> O#)
                              , _newCRef   :: TExpQ (O -> ST s (CRef s O))
                              , _readCRef  :: TExpQ (CRef s O -> ST s O)
                              , _writeCRef :: TExpQ (CRef s O -> O -> ST s ()) }
 
 type QH s o a = TExpQ (H s o a)
 type QX xs = TExpQ (X xs)
-type QK s o ks a = TExpQ (K s o ks a)
+type QK k s (o# :: TYPE k) ks a = TExpQ (K k s o# ks a)
 type QO o = TExpQ O
 type QST s a = TExpQ (ST s a)
 
@@ -71,10 +73,10 @@ modX f (HCons x xs) = HCons (f $! x) xs
 peekX :: X (a ': xs) -> a
 peekX (HCons x xs) = x
 
-makeK :: ST s (K s o '[] a)
+makeK :: ST s (K k s o '[] a)
 makeK = return $! noreturn
-noreturn :: X xs -> O# -> ST s (Maybe a)
-noreturn xs o# = error "Machine is only permitted return-by-failure"
+noreturn :: K k s o xs a
+noreturn xs = error "Machine is only permitted return-by-failure"
 
 makeH :: ST s (H s o a)
 makeH = return $! H SNil

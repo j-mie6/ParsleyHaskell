@@ -24,15 +24,18 @@ import Data.STRef               (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.STRef.Unboxed       (STRefU, newSTRefU, readSTRefU, writeSTRefU)
 import qualified Data.Text as Text (length, index)
 
-data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}   (rep -> (# Char, rep #))
-                                                            {-more-}   (rep -> Bool)
-                                                            {-same-}   (rep -> rep -> Bool)
-                                                            {-init-}   rep 
-                                                            {-box-}    (urep -> rep)
-                                                            {-unbox-}  (rep -> urep)
-                                                            {-newC-}   (rep -> ST s (CRef s rep))
-                                                            {-readC-}  (CRef s rep -> ST s rep)
-                                                            {-writeC-} (CRef s rep -> rep -> ST s ())
+data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}       (rep -> (# Char, rep #))
+                                                            {-more-}       (rep -> Bool)
+                                                            {-same-}       (rep -> rep -> Bool)
+                                                            {-init-}       rep 
+                                                            {-box-}        (urep -> rep)
+                                                            {-unbox-}      (rep -> urep)
+                                                            {-newCRef-}    (rep -> ST s (CRef s rep))
+                                                            {-readCRef-}   (CRef s rep -> ST s rep)
+                                                            {-writeCRef-}  (CRef s rep -> rep -> ST s ())
+                                                            {-shiftLeft-}  (rep -> Int -> rep)
+                                                            {-shiftRight-} (rep -> Int -> rep)
+                                                            {-offToInt-}   (rep -> Int)
 newtype Text16 = Text16 Text
 
 data OffString = OffString {-# UNPACK #-} !Int !String
@@ -58,7 +61,8 @@ instance Input (UArray Int Char) Int where
   prepare qinput = [||
       let UArray _ _ size input# = $$qinput
           next i@(I# i#) = (# C# (indexWideCharArray# input# i#), i + 1 #)
-      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU
+          o << i = max (o - i) 0
+      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
     ||]
 
 instance Input Text16 Int where
@@ -67,7 +71,8 @@ instance Input Text16 Int where
       let Text16 (Text arr off size) = $$qinput
           arr# = aBA arr
           next i@(I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), i + 1 #)
-      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU
+          o << i = max (o - i) 0
+      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
     ||]
 
 -- I'd *strongly* advise against using this, parsing complexity is O(n^2) for this variant
@@ -77,7 +82,8 @@ instance Input Text Int where
       let input = $$qinput
           size = Text.length input
           next i = (# Text.index input i, i + 1 #)
-      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU
+          o << i = max (o - i) 0
+      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
     ||]
 
 instance Input ByteString Int where
@@ -88,7 +94,8 @@ instance Input ByteString Int where
             case readWord8OffAddr# addr# i# realWorld# of
               (# s', x #) -> case touch# final s' of 
                 _ -> (# C# (chr# (word2Int# x)), i + 1 #)
-      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU
+          o << i = max (o - i) 0
+      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
     ||]
 
 --accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peekByteOff ptr (I# (off# +# i#))

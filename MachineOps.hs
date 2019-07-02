@@ -41,14 +41,17 @@ type O# = Int#
     during suspension. -}
 type K s o xs a = K_ (Rep o) s (Unboxed o) xs a
 type K_ r s (o# :: TYPE r) xs a = X xs -> o# -> ST s (Maybe a)
-data InputOps s o = InputOps { _more      :: TExpQ (o -> Bool)
-                             , _next      :: TExpQ (o -> (# Char, o #))
-                             , _same      :: TExpQ (o -> o -> Bool)
-                             , _box       :: TExpQ (Unboxed o -> o)
-                             , _unbox     :: TExpQ (o -> Unboxed o)
-                             , _newCRef   :: TExpQ (o -> ST s (CRef s o))
-                             , _readCRef  :: TExpQ (CRef s o -> ST s o)
-                             , _writeCRef :: TExpQ (CRef s o -> o -> ST s ()) }
+data InputOps s o = InputOps { _more       :: TExpQ (o -> Bool)
+                             , _next       :: TExpQ (o -> (# Char, o #))
+                             , _same       :: TExpQ (o -> o -> Bool)
+                             , _box        :: TExpQ (Unboxed o -> o)
+                             , _unbox      :: TExpQ (o -> Unboxed o)
+                             , _newCRef    :: TExpQ (o -> ST s (CRef s o))
+                             , _readCRef   :: TExpQ (CRef s o -> ST s o)
+                             , _writeCRef  :: TExpQ (CRef s o -> o -> ST s ())
+                             , _shiftLeft  :: TExpQ (o -> Int -> o)
+                             , _shiftRight :: TExpQ (o -> Int -> o)
+                             , _offToInt   :: TExpQ (o -> Int) }
 
 newtype AbsExec r s (o# :: TYPE r) a x = AbsExec (forall xs. X xs -> K_ r s o# (x ': xs) a -> o# -> H_ r s o# a -> ST s (Maybe a))
 newtype QAbsExec s o a x = QAbsExec (TExpQ (AbsExec (Rep o) s (Unboxed o) a x))

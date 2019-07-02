@@ -92,22 +92,28 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
                      , constCount :: Int
                      , debugLevel :: Int }
 
-more      :: Ctx s o a -> TExpQ (o -> Bool)
-more      = _more      . ops
-next      :: Ctx s o a -> TExpQ (o -> (# Char, o #))
-next      = _next      . ops
-same      :: Ctx s o a -> TExpQ (o -> o -> Bool)
-same      = _same      . ops
-unbox     :: Ctx s o a -> TExpQ (o -> Unboxed o)
-unbox     = _unbox     . ops
-box       :: Ctx s o a -> TExpQ (Unboxed o -> o)
-box       = _box       . ops
-newCRef   :: Ctx s o a -> TExpQ (o -> ST s (CRef s o))
-newCRef   = _newCRef   . ops
-readCRef  :: Ctx s o a -> TExpQ (CRef s o -> ST s o) 
-readCRef  = _readCRef  . ops
-writeCRef :: Ctx s o a -> TExpQ (CRef s o -> o -> ST s ())
-writeCRef = _writeCRef . ops
+more       :: Ctx s o a -> TExpQ (o -> Bool)
+more       = _more       . ops
+next       :: Ctx s o a -> TExpQ (o -> (# Char, o #))
+next       = _next       . ops
+same       :: Ctx s o a -> TExpQ (o -> o -> Bool)
+same       = _same       . ops
+unbox      :: Ctx s o a -> TExpQ (o -> Unboxed o)
+unbox      = _unbox      . ops
+box        :: Ctx s o a -> TExpQ (Unboxed o -> o)
+box        = _box        . ops
+newCRef    :: Ctx s o a -> TExpQ (o -> ST s (CRef s o))
+newCRef    = _newCRef    . ops
+readCRef   :: Ctx s o a -> TExpQ (CRef s o -> ST s o) 
+readCRef   = _readCRef   . ops
+writeCRef  :: Ctx s o a -> TExpQ (CRef s o -> o -> ST s ())
+writeCRef  = _writeCRef  . ops
+shiftLeft  :: Ctx s o a -> TExpQ (o -> Int -> o)
+shiftLeft  = _shiftLeft  . ops
+shiftRight :: Ctx s o a -> TExpQ (o -> Int -> o)
+shiftRight = _shiftRight . ops
+offToInt   :: Ctx s o a -> TExpQ (o -> Int)
+offToInt   = _offToInt   . ops
 
 insertM :: MVar x -> TExpQ (AbsExec (Rep o) s (Unboxed o) a x) -> Ctx s o a -> Ctx s o a
 insertM μ q ctx = ctx {μs = DMap.insert μ (QAbsExec q) (μs ctx)}
@@ -159,10 +165,12 @@ exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
   do xs <- makeX
      ks <- makeK
      hs <- makeH
-     let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef ) = $$input
+     let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
      $$(readyCalls topo ms (readyExec m) 
          (Γ [||xs||] [||ks||] [||offset||] [||hs||])
-         (Ctx DMap.empty DMap.empty DMap.empty Map.empty (InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||]) 0 0))
+         (Ctx DMap.empty DMap.empty DMap.empty Map.empty 
+              (InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]) 
+              0 0))
   ||]
 
 readyCalls :: Ops o => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] '[] a -> Γ s o '[] '[] a -> Ctx s o a -> QST s (Maybe a)
@@ -354,22 +362,23 @@ execSwap :: Exec s o (x ': y ': xs) ks a -> Reader (Ctx s o a) (Γ s o (y ': x '
 execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = [||let (# y, xs' #) = popX $$(xs γ); (# x, xs'' #) = popX xs' in pushX x (pushX y xs'')||]})) k
 
 preludeString :: String -> Char -> Γ s o xs ks a -> Ctx s o a -> String -> TExpQ String
-preludeString name dir γ ctx ends = [||""||]{-[|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
+preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset     = o γ
     indent     = replicate (debugLevel ctx * 2) ' '
-    start      = [|| max ($$offset - 5) 0 ||]
-    end        = [|| $$offset + 5 ||]
+    toInt      = offToInt ctx
+    start      = [|| $$(shiftLeft ctx) $$offset 5 ||]
+    end        = [|| $$(shiftRight ctx) $$offset 5 ||]
     inputTrace = [|| let replace '\n' = color Green "↙"
                          replace ' '  = color White "·"
                          replace c    = return c
                          go i 
-                           | i == $$end = []
+                           | $$toInt i == $$toInt $$end = []
                            | otherwise  = let (# c, i' #) = $$(next ctx) i in replace c ++ go i'
                      in go $$start ||]
     eof        = [|| if $$(more ctx) $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]
-    prelude    = [|| concat [indent, dir : name, dir : " (", show $$offset, "): "] ||]
-    caretSpace = [|| replicate (length $$prelude + $$offset - $$start) ' ' ||]-}
+    prelude    = [|| concat [indent, dir : name, dir : " (", show ($$toInt $$offset), "): "] ||]
+    caretSpace = [|| replicate (length $$prelude + $$toInt $$offset - $$toInt $$start) ' ' ||]
 
 execLogEnter :: LogHandler o => String -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execLogEnter name k =
@@ -427,14 +436,14 @@ instance RecBuilder O where
 
 inputSizeCheck :: FailureOps o => Maybe Int -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a)) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 inputSizeCheck Nothing p = p
-inputSizeCheck (Just n) p = p
-{-  do skip <- asks skipBounds
+inputSizeCheck (Just n) p =
+  do skip <- asks skipBounds
      mp <- local (addConstCount 1) p
      if skip then return $! mp
      else fmap (\ctx γ -> [|| 
-       if $$(more ctx) (n + $$(o γ) - 1) then $$(mp γ)
+       if $$(more ctx) ($$(shiftRight ctx) $$(o γ) (n - 1)) then $$(mp γ)
        else $$(raiseΓ ctx γ)
-      ||]) ask-}
+      ||]) ask
 
 raiseΓ :: FailureOps o => Ctx s o a -> Γ s o xs ks a -> QST s (Maybe a)
 raiseΓ ctx γ = [|| $$(raise (ops ctx)) $$(hs γ) $$(o γ) ||]

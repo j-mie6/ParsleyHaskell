@@ -19,6 +19,7 @@ import GHC.Prim           (Int#)
 import GHC.Exts           (Int(..), TYPE)
 import Safe.Coerce        (coerce)
 import Input              (Rep, CRef, Unboxed, OffString)
+import Data.Text          (Text)
 
 data SList a = !a ::: SList a | SNil
 data HList xs where
@@ -131,6 +132,7 @@ instance FailureOps _o where                                                    
 } 
 deriveFailureOps(O)
 deriveFailureOps(OffString)
+deriveFailureOps(Text)
 
 class ConcreteExec o where
   runConcrete :: InputOps s o -> TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> X xs -> K s o (x ': xs) a -> o -> H s o a -> ST s (Maybe a))
@@ -139,6 +141,7 @@ class ConcreteExec o where
 instance ConcreteExec _o where runConcrete ops = [||\(AbsExec m) xs ks o hs -> m xs ks ($$(_unbox ops) o) hs||]
 deriveConcreteExec(O)
 deriveConcreteExec(OffString)
+deriveConcreteExec(Text)
 
 nextSafe :: Bool -> InputOps s o -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True ops o p good bad = [|| let !(# c, o' #) = $$(_next ops) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]

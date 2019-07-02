@@ -17,6 +17,7 @@ import GHC.Prim                 (Int#, ByteArray#, indexWideCharArray#, indexWor
 import GHC.Exts                 (Int(..), Char(..), TYPE, RuntimeRep(..))
 import Data.Text.Array          (aBA)
 import Data.Text.Internal       (Text(..))
+import Data.Text.Unsafe         (iter, Iter(..), iter_, reverseIter_)
 import Data.ByteString.Internal (ByteString(..))
 import GHC.ForeignPtr           (ForeignPtr(..))
 import Control.Monad.ST         (ST)
@@ -38,7 +39,8 @@ data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}       (rep 
                                                             {-offToInt-}   (rep -> Int)
 newtype Text16 = Text16 Text
 newtype CharList = CharList String
-data OffString = OffString {-# UNPACK #-} !Int !String
+data OffString = OffString {-# UNPACK #-} !Int String
+data Chars = More {-# UNPACK #-} !Char Chars | Empty
 
 type family Rep rep where
   Rep Int = IntRep
@@ -78,17 +80,6 @@ instance Input Text16 Int where
       in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
     ||]
 
--- I'd *strongly* advise against using this, parsing complexity is O(n^2) for this variant
-instance Input Text Int where
-  type Unboxed Int = Int#
-  prepare qinput = [||
-      let input = $$qinput
-          size = Text.length input
-          next i = (# Text.index input i, i + 1 #)
-          o << i = max (o - i) 0
-      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
-    ||]
-
 instance Input ByteString Int where
   type Unboxed Int = Int#
   prepare qinput = [||
@@ -108,12 +99,36 @@ instance Input CharList OffString where
           size = length input
           next (OffString i (c:cs)) = (# c, OffString (i+1) cs #)
           more (OffString i _) = i < size
-          OffString o cs >> i = OffString (o + i) (drop i cs)
-          toInt (OffString i _) = i
           same (OffString i _) (OffString j _) = i == j
           box (# i, cs #) = OffString (I# i) cs
           unbox (OffString (I# i) cs) = (# i, cs #)
+          OffString o cs >> i = OffString (o + i) (drop i cs)
+          toInt (OffString i _) = i
       in PreparedInput next more same (OffString 0 input) {-id id-} box unbox newSTRef readSTRef writeSTRef const (>>) toInt
+    ||]
+
+instance Input Text Text where
+  type Unboxed Text = Text
+  prepare qinput = [||
+      let input = $$qinput
+          next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off+d) (unconsumed-d) #)
+          more (Text _ _ unconsumed) = unconsumed > 0
+          same (Text _ i _) (Text _ j _) = i == j
+          -- Using these for fix length look-ahead is really inefficient, we could package up a Chars along with it?
+          (Text arr off unconsumed) << i = go i off unconsumed
+            where
+              go 0 off' unconsumed' = Text arr off' unconsumed'
+              go n off' unconsumed' 
+                | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
+                | otherwise = Text arr off' unconsumed'
+          (Text arr off unconsumed) >> i = go i off unconsumed
+            where
+              go 0 off' unconsumed' = Text arr off' unconsumed'
+              go n off' unconsumed' 
+                | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
+                | otherwise = Text arr off' unconsumed'
+          toInt (Text arr off unconsumed) = div off 2
+      in PreparedInput next more same input id id newSTRef readSTRef writeSTRef (<<) (>>) toInt
     ||]
 
 --accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peekByteOff ptr (I# (off# +# i#))

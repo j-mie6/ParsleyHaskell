@@ -32,6 +32,7 @@ import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GO
 import Safe.Coerce                (coerce)
 import Debug.Trace                (trace)
 import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
+import Data.Text                  (Text)
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty)
 
@@ -264,6 +265,7 @@ instance HardForkHandler _o where                                               
     ||]
 deriveHardForkHandler(O)
 deriveHardForkHandler(OffString)
+deriveHardForkHandler(Text)
 
 execSoftFork :: (SoftForkHandler o, JoinBuilder o) => Maybe Int -> Exec s o xs ks a -> Exec s o xs ks a -> Maybe (ΦDecl (Exec s o) x xs ks a) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl $
@@ -275,6 +277,7 @@ execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl $
 instance SoftForkHandler _o where softForkHandler mq ctx γ = [||\hs _ (!c#) -> $$(mq (γ {o = [||$$(box ctx) c#||], hs = [||hs||]}))||]
 deriveSoftForkHandler(O)
 deriveSoftForkHandler(OffString)
+deriveSoftForkHandler(Text)
 
 execJoin :: ΦVar x -> Reader (Ctx s o a) (Γ s o (x ': xs) ks a -> QST s (Maybe a))
 execJoin φ = 
@@ -289,6 +292,7 @@ execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; as
 instance AttemptHandler _o where attemptHandler ctx = let bx = box ctx in [||\hs _ (!c#) -> $$(raise (ops ctx)) hs ($$bx c#)||]
 deriveAttemptHandler(O)
 deriveAttemptHandler(OffString)
+deriveAttemptHandler(Text)
 
 execTell :: Exec s o (o ': xs) ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execTell (Exec k) = fmap (\mk γ -> mk (γ {xs = [||pushX $$(o γ) $$(xs γ)||]})) k
@@ -310,6 +314,7 @@ instance NegLookHandler _o where                                                
 }
 deriveNegLookHandler(O)
 deriveNegLookHandler(OffString)
+deriveNegLookHandler(Text)
 
 execCase :: Exec s o (x ': xs) ks a -> Exec s o (y ': xs) ks a -> Reader (Ctx s o a) (Γ s o (Either x y ': xs) ks a -> QST s (Maybe a))
 execCase (Exec p) (Exec q) =
@@ -376,6 +381,7 @@ instance ChainHandler _o where                       \
       } ||]
 deriveChainHandler(O)
 deriveChainHandler(OffString)
+deriveChainHandler(Text)
 
 execSwap :: Exec s o (x ': y ': xs) ks a -> Reader (Ctx s o a) (Γ s o (y ': x ': xs) ks a -> QST s (Maybe a))
 execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = [||let (# y, xs' #) = popX $$(xs γ); (# x, xs'' #) = popX xs' in pushX x (pushX y xs'')||]})) k
@@ -411,6 +417,7 @@ instance LogHandler _o where                                                    
     ||]
 deriveLogHandler(O)
 deriveLogHandler(OffString)
+deriveLogHandler(Text)
 
 execLogExit :: String -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execLogExit name k = asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(run k γ (debugDown ctx)) ||]
@@ -440,6 +447,7 @@ instance JoinBuilder _o where                                                   
 }
 deriveJoinBuilder(O)
 deriveJoinBuilder(OffString)
+deriveJoinBuilder(Text)
 
 class RecBuilder o where
   buildIter :: Ctx s o a -> MVar x -> ΣVar x -> Exec s o xs (x ': xs) a 
@@ -470,6 +478,7 @@ instance RecBuilder _o where                                                    
 }
 deriveRecBuilder(O)
 deriveRecBuilder(OffString)
+deriveRecBuilder(Text)
 
 inputSizeCheck :: FailureOps o => Maybe Int -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a)) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 inputSizeCheck Nothing p = p
@@ -497,6 +506,7 @@ instance KOps _o where                                                          
 }
 deriveKOps(O)
 deriveKOps(OffString)
+deriveKOps(Text)
 
 askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
 askM μ = {-trace ("fetching " ++ show μ) $ -}asks (((DMap.! μ) . μs))

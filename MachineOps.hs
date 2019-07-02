@@ -8,7 +8,8 @@
              UnboxedTuples,
              TemplateHaskell,
              TypeSynonymInstances,
-             RankNTypes #-}
+             RankNTypes,
+             CPP #-}
 module MachineOps where
 
 import Utils              (TExpQ)
@@ -17,7 +18,7 @@ import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import GHC.Prim           (Int#)
 import GHC.Exts           (Int(..), TYPE)
 import Safe.Coerce        (coerce)
-import Input              (Rep, CRef, Unboxed)
+import Input              (Rep, CRef, Unboxed, OffString)
 
 data SList a = !a ::: SList a | SNil
 data HList xs where
@@ -118,18 +119,26 @@ class FailureOps o where
                -> (QH s o a -> QST s (Maybe a)) -> QST s (Maybe a)
   raise :: InputOps s o -> TExpQ (H s o a -> o -> ST s (Maybe a))
 
-instance FailureOps O where
-  setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]
-  raise ops = [||\(H hs) (!o) -> case hs of
-    SNil -> return Nothing
-    h:::_ -> h ($$(_unbox ops) o) ||]
-
+#define deriveFailureOps(_o)                                                                        \
+instance FailureOps _o where                                                                        \
+{                                                                                                   \
+  setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]; \
+  raise ops = [||\(H hs) (!o) -> case hs of                                                         \
+  {                                                                                                 \
+    SNil -> return Nothing;                                                                         \
+    h:::_ -> h ($$(_unbox ops) o);                                                                  \
+  } ||];                                                                                            \
+} 
+deriveFailureOps(O)
+deriveFailureOps(OffString)
 
 class ConcreteExec o where
   runConcrete :: InputOps s o -> TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> X xs -> K s o (x ': xs) a -> o -> H s o a -> ST s (Maybe a))
 
-instance ConcreteExec O where
-  runConcrete ops = [||\(AbsExec m) xs ks o hs -> m xs ks ($$(_unbox ops) o) hs||]
+#define deriveConcreteExec(_o) \
+instance ConcreteExec _o where runConcrete ops = [||\(AbsExec m) xs ks o hs -> m xs ks ($$(_unbox ops) o) hs||]
+deriveConcreteExec(O)
+deriveConcreteExec(OffString)
 
 nextSafe :: Bool -> InputOps s o -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
 nextSafe True ops o p good bad = [|| let !(# c, o' #) = $$(_next ops) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]

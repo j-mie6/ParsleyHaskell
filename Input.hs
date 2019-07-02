@@ -37,16 +37,18 @@ data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}       (rep 
                                                             {-shiftRight-} (rep -> Int -> rep)
                                                             {-offToInt-}   (rep -> Int)
 newtype Text16 = Text16 Text
-
+newtype CharList = CharList String
 data OffString = OffString {-# UNPACK #-} !Int !String
 
 type family Rep rep where
   Rep Int = IntRep
   Rep OffString = LiftedRep
+  Rep Text = LiftedRep
 
 type family CRef s rep where
   CRef s Int = STRefU s Int
   CRef s OffString = STRef s OffString
+  CRef s Text = STRef s Text
 
 class Input input rep | input -> rep where
   type Unboxed rep :: TYPE (Rep rep)
@@ -96,6 +98,19 @@ instance Input ByteString Int where
                 _ -> (# C# (chr# (word2Int# x)), i + 1 #)
           o << i = max (o - i) 0
       in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
+    ||]
+
+instance Input CharList OffString where
+  type Unboxed OffString = OffString
+  prepare qinput = [||
+      let CharList input = $$qinput
+          size = length input
+          next (OffString i (c:cs)) = (# c, OffString (i+1) cs #)
+          more (OffString i _) = i < size
+          OffString o cs >> i = OffString (o + i) (drop i cs)
+          toInt (OffString i _) = i
+          same (OffString i _) (OffString j _) = i == j
+      in PreparedInput next more same (OffString 0 input) id id newSTRef readSTRef writeSTRef const (>>) toInt
     ||]
 
 --accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peekByteOff ptr (I# (off# +# i#))

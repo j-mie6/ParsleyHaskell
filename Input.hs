@@ -7,7 +7,8 @@
              MultiParamTypeClasses,
              TypeFamilies,
              PolyKinds,
-             DataKinds #-}
+             DataKinds,
+             FunctionalDependencies #-}
 module Input where
 
 import Utils                    (TExpQ)
@@ -23,7 +24,7 @@ import Data.STRef               (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.STRef.Unboxed       (STRefU, newSTRefU, readSTRefU, writeSTRefU)
 import qualified Data.Text as Text (length, index)
 
-data PreparedInput k s rep (urep :: TYPE k) = PreparedInput {-next-}   (rep -> (# Char, rep #))
+data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}   (rep -> (# Char, rep #))
                                                             {-more-}   (rep -> Bool)
                                                             {-same-}   (rep -> rep -> Bool)
                                                             {-init-}   rep 
@@ -44,7 +45,7 @@ type family CRef s rep where
   CRef s Int = STRefU s Int
   CRef s OffString = STRef s OffString
 
-class Input input rep where
+class Input input rep | input -> rep where
   type Unboxed rep :: TYPE (Rep rep)
   prepare :: TExpQ input -> TExpQ (PreparedInput (Rep rep) s rep (Unboxed rep))
 

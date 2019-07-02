@@ -45,7 +45,7 @@ import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (
 import Input hiding               (PreparedInput(..))
 import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
 import Compiler                   (compile)
-import Machine                    (exec)
+import Machine                    (exec, Ops)
 import Utils                      (lift', (>*<), WQ(..), TExpQ)
 import Data.Function              (fix)
 import Data.List                  (foldl')
@@ -254,8 +254,8 @@ precedence levels atom = foldl' convert atom levels
     convert x (Prefix ops)  = chainPre (choice ops) x
     convert x (Postfix ops) = chainPost x (choice ops)
 
-runParser :: forall input a. Input input Int => Parser a -> TExpQ (input -> Maybe a)
-runParser p = [||\input -> runST $$(exec (prepare @input [||input||]) (compile p))||]
+runParser :: forall input a rep. (Input input rep, Ops rep) => Parser a -> TExpQ (input -> Maybe a)
+runParser p = [||\input -> runST $$(exec (prepare @input @rep [||input||]) (compile p))||]
 
 parseFromFile :: Parser a -> TExpQ (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

@@ -7,7 +7,8 @@
              TypeOperators,
              TypeFamilies,
              FlexibleContexts,
-             NumericUnderscores #-}
+             NumericUnderscores,
+             UnboxedTuples #-}
 module Main where
 import Criterion.Main         (Benchmark, bgroup, bench, whnf, nf, defaultMain, env)
 import Control.DeepSeq        (NFData(rnf))
@@ -15,7 +16,7 @@ import GHC.Generics           (Generic)
 import Control.Monad.Identity (Identity)
 import Data.Text              (Text)
 import Data.ByteString        (ByteString)
-import Parsley                (Text16(..))
+import Parsley                (Text16(..), CharList(..))
 import qualified ParsleyParsers
 import qualified YodaParsers
 import qualified ParsecParsers
@@ -36,8 +37,8 @@ import CommonFunctions
 main :: IO ()
 --main = do rnf (regexP (Data.ByteString.Char8.pack (concat (replicate 100000_00 "ab")))) `seq` return (){-
 main =
-  defaultMain [ regex
-              , brainfuck
+  defaultMain [ --regex
+              {-,-} brainfuck
               , tailTest 
               ]--}
 
@@ -80,12 +81,16 @@ brainfuckParsleyT = $$(Parsley.runParser ParsleyParsers.brainfuck)
 brainfuckParsleyB :: ByteString -> Maybe [BrainFuckOp]
 brainfuckParsleyB = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
+brainfuckParsleySS :: CharList -> Maybe [BrainFuckOp]
+brainfuckParsleySS = $$(Parsley.runParser ParsleyParsers.brainfuck)
+
 brainfuck :: Benchmark
 brainfuck =
   let bfTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe [BrainFuckOp]) -> Benchmark
       bfTest = benchmark ["inputs/helloworld.bf", "inputs/helloworld_golfed.bf", "inputs/compiler.bf"]
   in bgroup "Brainfuck"
-       [ bfTest string     "Parsley (String)"     brainfuckParsleyS
+       [ bfTest string     "Parsley (Stream)"     (brainfuckParsleySS . CharList)
+       , bfTest string     "Parsley (String)"     brainfuckParsleyS
        , bfTest text       "Parsley (Text)"       (brainfuckParsleyT . Text16)
        , bfTest bytestring "Parsley (ByteString)" brainfuckParsleyB
        , bfTest string     "Parsec (String)"      (parsecParse ParsecParsers.brainfuck)

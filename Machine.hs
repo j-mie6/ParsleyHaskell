@@ -257,8 +257,8 @@ execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl $
      asks $! \ctx γ -> setupHandlerΓ ctx γ (hardForkHandler mq ctx γ) mp
 
 #define deriveHardForkHandler(_o)                                                            \
-instance HardForkHandler _o where                                                             \
-  hardForkHandler mq ctx γ = let bx = box ctx in [||\hs o# c# ->                             \
+instance HardForkHandler _o where                                                            \
+  hardForkHandler mq ctx γ = let bx = box ctx in [||\hs (!o#) (!c#) ->                       \
       if $$(same ctx) ($$bx c#) ($$bx o#) then $$(mq (γ {o = [||$$bx o#||], hs = [||hs||]})) \
       else $$(raise (ops ctx)) hs ($$bx o#)                                                  \
     ||]
@@ -272,7 +272,7 @@ execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl $
      asks $! \ctx γ -> setupHandlerΓ ctx γ (softForkHandler mq ctx γ) mp
 
 #define deriveSoftForkHandler(_o) \
-instance SoftForkHandler _o where softForkHandler mq ctx γ = [||\hs _ c# -> $$(mq (γ {o = [||$$(box ctx) c#||], hs = [||hs||]}))||]
+instance SoftForkHandler _o where softForkHandler mq ctx γ = [||\hs _ (!c#) -> $$(mq (γ {o = [||$$(box ctx) c#||], hs = [||hs||]}))||]
 deriveSoftForkHandler(O)
 deriveSoftForkHandler(OffString)
 
@@ -286,7 +286,7 @@ execAttempt :: AttemptHandler o => Maybe Int -> Exec s o xs ks a -> Reader (Ctx 
 execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; asks (\ctx γ -> setupHandlerΓ ctx γ (attemptHandler ctx) mk)
 
 #define deriveAttemptHandler(_o) \
-instance AttemptHandler _o where attemptHandler ctx = let bx = box ctx in [||\hs _ c# -> $$(raise (ops ctx)) hs ($$bx c#)||]
+instance AttemptHandler _o where attemptHandler ctx = let bx = box ctx in [||\hs _ (!c#) -> $$(raise (ops ctx)) hs ($$bx c#)||]
 deriveAttemptHandler(O)
 deriveAttemptHandler(OffString)
 
@@ -302,11 +302,11 @@ execNegLook (Exec m) (Exec k) =
      mk <- k
      asks $! \ctx γ -> setupHandlerΓ ctx γ (negLookHandler2 ctx) (\γ' -> setupHandlerΓ ctx γ' (negLookHandler1 mk ctx γ) mm)
 
-#define deriveNegLookHandler(_o)                                                                                        \
-instance NegLookHandler _o where                                                                                         \
-{                                                                                                                       \
-  negLookHandler1 mk ctx γ = let bx = box ctx in [||\hs _ c# -> $$(mk (γ {o = [||$$bx c#||], hs = [||popH_ hs||]}))||]; \
-  negLookHandler2 ctx = let bx = box ctx in [||\hs _ c# -> $$(raise (ops ctx)) hs ($$bx c#)||]                          \
+#define deriveNegLookHandler(_o)                                                                                           \
+instance NegLookHandler _o where                                                                                           \
+{                                                                                                                          \
+  negLookHandler1 mk ctx γ = let bx = box ctx in [||\hs _ (!c#) -> $$(mk (γ {o = [||$$bx c#||], hs = [||popH_ hs||]}))||]; \
+  negLookHandler2 ctx = let bx = box ctx in [||\hs _ (!c#) -> $$(raise (ops ctx)) hs ($$bx c#)||]                          \
 }
 deriveNegLookHandler(O)
 deriveNegLookHandler(OffString)
@@ -360,7 +360,7 @@ execChainInit σ l μ (Exec k) =
 
 #define deriveChainHandler(_o)                       \
 instance ChainHandler _o where                       \
-  chainHandler mk ref cref ctx γ = [||\hs o# _ ->    \
+  chainHandler mk ref cref ctx γ = [||\hs (!o#) _ -> \
       do                                             \
       {                                              \
         c <- $$(readCRef ctx) $$cref;                \
@@ -450,23 +450,23 @@ class RecBuilder o where
             -> (Ctx s o a -> QST s (Maybe a)) 
             -> QST s (Maybe a)
 
-#define deriveRecBuilder(_o)                                                                                  \
-instance RecBuilder _o where                                                                                  \
-{                                                                                                             \
-  buildIter ctx μ σ l ref cref xs hs o = [||                                                                  \
-      do                                                                                                      \
-      {                                                                                                       \
-        let {loop o# =                                                                                        \
-          $$(run l (Γ xs [||noreturn||] [||$$(box ctx) o#||] hs)                                              \
-                   (insertSTC σ cref (insertM μ [||AbsExec (\_ _ o# _ -> loop o#)||] (insertΣ σ ref ctx))))}; \
-        loop ($$(unbox ctx) $$o)                                                                              \
-      } ||];                                                                                                  \
-  buildRec ctx μ body k = [||                                                                                 \
-    let recu = AbsExec (\(!xs) (!ks) o# hs ->                                                                 \
-          $$(body (Γ [||xs||] [||ks||] [||$$(box ctx) o#||] [||hs||])                                         \
-                  (insertM μ [||recu||] ctx)))                                                                \
-    in $$(k (insertM μ [||recu||] ctx))                                                                       \
-    ||]                                                                                                       \
+#define deriveRecBuilder(_o)                                                                                     \
+instance RecBuilder _o where                                                                                     \
+{                                                                                                                \
+  buildIter ctx μ σ l ref cref xs hs o = [||                                                                     \
+      do                                                                                                         \
+      {                                                                                                          \
+        let {loop !o# =                                                                                          \
+          $$(run l (Γ xs [||noreturn||] [||$$(box ctx) o#||] hs)                                                 \
+                   (insertSTC σ cref (insertM μ [||AbsExec (\_ _ (!o#) _ -> loop o#)||] (insertΣ σ ref ctx))))}; \
+        loop ($$(unbox ctx) $$o)                                                                                 \
+      } ||];                                                                                                     \
+  buildRec ctx μ body k = [||                                                                                    \
+    let recu = AbsExec (\(!xs) (!ks) (!o#) hs ->                                                                 \
+          $$(body (Γ [||xs||] [||ks||] [||$$(box ctx) o#||] [||hs||])                                            \
+                  (insertM μ [||recu||] ctx)))                                                                   \
+    in $$(k (insertM μ [||recu||] ctx))                                                                          \
+    ||]                                                                                                          \
 }
 deriveRecBuilder(O)
 deriveRecBuilder(OffString)
@@ -489,11 +489,11 @@ class KOps o where
   suspend :: Ctx s o a -> (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> QK s o (x ': xs) a
   resume :: Ctx s o a -> Γ s o (x ': xs) (x ': xs) a -> QST s (Maybe a)
 
-#define deriveKOps(_o)                                                                     \
-instance KOps _o where                                                                     \
-{                                                                                          \
-  suspend ctx m γ = [|| \xs o# -> $$(m (γ {xs = [||xs||], o = [||$$(box ctx) o#||]})) ||]; \
-  resume ctx γ = [|| $$(k γ) $$(xs γ) ($$(unbox ctx) $$(o γ)) ||]                          \
+#define deriveKOps(_o)                                                                        \
+instance KOps _o where                                                                        \
+{                                                                                             \
+  suspend ctx m γ = [|| \xs (!o#) -> $$(m (γ {xs = [||xs||], o = [||$$(box ctx) o#||]})) ||]; \
+  resume ctx γ = [|| $$(k γ) $$(xs γ) ($$(unbox ctx) $$(o γ)) ||]                             \
 }
 deriveKOps(O)
 deriveKOps(OffString)

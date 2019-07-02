@@ -42,7 +42,8 @@ data OffString = OffString {-# UNPACK #-} !Int !String
 
 type family Rep rep where
   Rep Int = IntRep
-  Rep OffString = LiftedRep
+  --Rep OffString = OffString
+  Rep OffString = 'TupleRep '[IntRep, LiftedRep]
   Rep Text = LiftedRep
 
 type family CRef s rep where
@@ -101,7 +102,7 @@ instance Input ByteString Int where
     ||]
 
 instance Input CharList OffString where
-  type Unboxed OffString = OffString
+  type Unboxed OffString = (# Int#, String #)
   prepare qinput = [||
       let CharList input = $$qinput
           size = length input
@@ -110,7 +111,9 @@ instance Input CharList OffString where
           OffString o cs >> i = OffString (o + i) (drop i cs)
           toInt (OffString i _) = i
           same (OffString i _) (OffString j _) = i == j
-      in PreparedInput next more same (OffString 0 input) id id newSTRef readSTRef writeSTRef const (>>) toInt
+          box (# i, cs #) = OffString (I# i) cs
+          unbox (OffString (I# i) cs) = (# i, cs #)
+      in PreparedInput next more same (OffString 0 input) {-id id-} box unbox newSTRef readSTRef writeSTRef const (>>) toInt
     ||]
 
 --accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peekByteOff ptr (I# (off# +# i#))

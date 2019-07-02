@@ -41,17 +41,21 @@ newtype Text16 = Text16 Text
 newtype CharList = CharList String
 data OffString = OffString {-# UNPACK #-} !Int String
 data Chars = More {-# UNPACK #-} !Char Chars | Empty
+data Stream = Stream {-# UNPACK #-} !Char Stream 
+data OffStream = OffStream {-# UNPACK #-} !Int Stream
 
 type family Rep rep where
   Rep Int = IntRep
   --Rep OffString = OffString
   Rep OffString = 'TupleRep '[IntRep, LiftedRep]
   Rep Text = LiftedRep
+  Rep OffStream = LiftedRep
 
 type family CRef s rep where
   CRef s Int = STRefU s Int
   CRef s OffString = STRef s OffString
   CRef s Text = STRef s Text
+  CRef s OffStream = STRef s OffStream
 
 class Input input rep | input -> rep where
   type Unboxed rep :: TYPE (Rep rep)
@@ -129,6 +133,20 @@ instance Input Text Text where
                 | otherwise = Text arr off' unconsumed'
           toInt (Text arr off unconsumed) = div off 2
       in PreparedInput next more same input id id newSTRef readSTRef writeSTRef (<<) (>>) toInt
+    ||]
+
+instance Input Stream OffStream where
+  type Unboxed OffStream = OffStream
+  prepare qinput = [||
+      let input = $$qinput
+          next (OffStream o (Stream c cs)) = (# c, OffStream (o + 1) cs #)
+          same (OffStream i _) (OffStream j _) = i == j
+          (OffStream o cs) >> i = OffStream (o + i) (sdrop i cs)
+            where 
+              sdrop 0 cs = cs
+              sdrop n (Stream _ cs) = sdrop (n-1) cs
+          toInt (OffStream o _) = o
+      in PreparedInput next (const True) same (OffStream 0 input) id id newSTRef readSTRef writeSTRef const (>>) toInt
     ||]
 
 --accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peekByteOff ptr (I# (off# +# i#))

@@ -18,7 +18,7 @@
 module Machine where
 
 import MachineOps
-import Input                      (PreparedInput(..), Rep, CRef, Unboxed, OffString)
+import Input                      (PreparedInput(..), Rep, CRef, Unboxed, OffString, OffStream)
 import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
 import Utils                      (WQ(..), lift', (>*<), TExpQ)
 import Data.Word                  (Word64)
@@ -266,6 +266,7 @@ instance HardForkHandler _o where                                               
 deriveHardForkHandler(O)
 deriveHardForkHandler(OffString)
 deriveHardForkHandler(Text)
+deriveHardForkHandler(OffStream)
 
 execSoftFork :: (SoftForkHandler o, JoinBuilder o) => Maybe Int -> Exec s o xs ks a -> Exec s o xs ks a -> Maybe (ΦDecl (Exec s o) x xs ks a) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl $
@@ -278,6 +279,7 @@ instance SoftForkHandler _o where softForkHandler mq ctx γ = [||\hs _ (!c#) -> 
 deriveSoftForkHandler(O)
 deriveSoftForkHandler(OffString)
 deriveSoftForkHandler(Text)
+deriveSoftForkHandler(OffStream)
 
 execJoin :: ΦVar x -> Reader (Ctx s o a) (Γ s o (x ': xs) ks a -> QST s (Maybe a))
 execJoin φ = 
@@ -293,6 +295,7 @@ instance AttemptHandler _o where attemptHandler ctx = let bx = box ctx in [||\hs
 deriveAttemptHandler(O)
 deriveAttemptHandler(OffString)
 deriveAttemptHandler(Text)
+deriveAttemptHandler(OffStream)
 
 execTell :: Exec s o (o ': xs) ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execTell (Exec k) = fmap (\mk γ -> mk (γ {xs = [||pushX $$(o γ) $$(xs γ)||]})) k
@@ -315,6 +318,7 @@ instance NegLookHandler _o where                                                
 deriveNegLookHandler(O)
 deriveNegLookHandler(OffString)
 deriveNegLookHandler(Text)
+deriveNegLookHandler(OffStream)
 
 execCase :: Exec s o (x ': xs) ks a -> Exec s o (y ': xs) ks a -> Reader (Ctx s o a) (Γ s o (Either x y ': xs) ks a -> QST s (Maybe a))
 execCase (Exec p) (Exec q) =
@@ -382,6 +386,7 @@ instance ChainHandler _o where                       \
 deriveChainHandler(O)
 deriveChainHandler(OffString)
 deriveChainHandler(Text)
+deriveChainHandler(OffStream)
 
 execSwap :: Exec s o (x ': y ': xs) ks a -> Reader (Ctx s o a) (Γ s o (y ': x ': xs) ks a -> QST s (Maybe a))
 execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = [||let (# y, xs' #) = popX $$(xs γ); (# x, xs'' #) = popX xs' in pushX x (pushX y xs'')||]})) k
@@ -418,6 +423,7 @@ instance LogHandler _o where                                                    
 deriveLogHandler(O)
 deriveLogHandler(OffString)
 deriveLogHandler(Text)
+deriveLogHandler(OffStream)
 
 execLogExit :: String -> Exec s o xs ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execLogExit name k = asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(run k γ (debugDown ctx)) ||]
@@ -448,6 +454,7 @@ instance JoinBuilder _o where                                                   
 deriveJoinBuilder(O)
 deriveJoinBuilder(OffString)
 deriveJoinBuilder(Text)
+deriveJoinBuilder(OffStream)
 
 class RecBuilder o where
   buildIter :: Ctx s o a -> MVar x -> ΣVar x -> Exec s o xs (x ': xs) a 
@@ -479,6 +486,7 @@ instance RecBuilder _o where                                                    
 deriveRecBuilder(O)
 deriveRecBuilder(OffString)
 deriveRecBuilder(Text)
+deriveRecBuilder(OffStream)
 
 inputSizeCheck :: FailureOps o => Maybe Int -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a)) -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 inputSizeCheck Nothing p = p
@@ -507,6 +515,7 @@ instance KOps _o where                                                          
 deriveKOps(O)
 deriveKOps(OffString)
 deriveKOps(Text)
+deriveKOps(OffStream)
 
 askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
 askM μ = {-trace ("fetching " ++ show μ) $ -}asks (((DMap.! μ) . μs))

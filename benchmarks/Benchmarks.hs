@@ -16,7 +16,7 @@ import GHC.Generics           (Generic)
 import Control.Monad.Identity (Identity)
 import Data.Text              (Text)
 import Data.ByteString        (ByteString)
-import Parsley                (Text16(..), CharList(..))
+import Parsley                (Text16(..), CharList(..), Stream)
 import qualified ParsleyParsers
 import qualified YodaParsers
 import qualified ParsecParsers
@@ -42,15 +42,8 @@ main =
               , tailTest 
               ]--}
 
--- Rep of String
-stringRepS :: CharList -> Maybe String
-stringRepS = $$(Parsley.runParser (Parsley.token "abc"))
-
-stringRepT :: Text -> Maybe String
-stringRepT = $$(Parsley.runParser (Parsley.token "abc"))
-
-stringRepA :: String -> Maybe String
-stringRepA = $$(Parsley.runParser (Parsley.token "abc"))
+streams :: Stream -> Maybe String
+streams = $$(Parsley.runParser (Parsley.token "abc" Parsley.<* Parsley.eof))
 
 -- Tail Recursion Benchmark
 tailTestP :: CharList -> Maybe Char

@@ -19,14 +19,13 @@ import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import GHC.Prim           (Int#)
 import GHC.Exts           (Int(..), TYPE)
 import Safe.Coerce        (coerce)
-import Input              (Rep, CRef, Unboxed, OffString, OffStream)
+import Input              (Rep, CRef, Unboxed, OffWith)
 import Data.Text          (Text)
 
 #define inputInstances(derivation) \
 derivation(O)                      \
-derivation(OffString)              \
-derivation(Text)                   \
-derivation(OffStream)
+derivation((OffWith s))            \
+derivation(Text)                   
 
 data SList a = !a ::: SList a | SNil
 data HList xs where

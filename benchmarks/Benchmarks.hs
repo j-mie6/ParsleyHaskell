@@ -31,6 +31,7 @@ import qualified Data.Attoparsec.Text       as AttoparsecText
 import qualified Data.Attoparsec.ByteString as AttoparsecByteString
 import qualified Data.Text.IO
 import qualified Data.ByteString
+import qualified Data.ByteString.Lazy
 import qualified Data.ByteString.Char8 (pack)
 import CommonFunctions
 
@@ -42,7 +43,7 @@ main =
               , tailTest 
               ]--}
 
-streams :: Stream -> Maybe String
+streams :: Data.ByteString.Lazy.ByteString -> Maybe String
 streams = $$(Parsley.runParser (Parsley.token "abc" Parsley.<* Parsley.eof))
 
 -- Tail Recursion Benchmark

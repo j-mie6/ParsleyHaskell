@@ -23,7 +23,8 @@ import GHC.ForeignPtr           (ForeignPtr(..))
 import Control.Monad.ST         (ST)
 import Data.STRef               (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.STRef.Unboxed       (STRefU, newSTRefU, readSTRefU, writeSTRefU)
-import qualified Data.Text as Text (length, index)
+import qualified Data.Text                     as Text (length, index)
+import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import Language.Haskell.TH      (Q, Type)
 
 data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}       (rep -> (# Char, rep #))
@@ -40,28 +41,40 @@ data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}       (rep 
                                                             {-offToInt-}   (rep -> Int)
 newtype Text16 = Text16 Text
 newtype CharList = CharList String
-data OffString = OffString {-# UNPACK #-} !Int String
-data Chars = More {-# UNPACK #-} !Char Chars | Empty
 data Stream = {-# UNPACK #-} !Char :> Stream 
-data OffStream = OffStream {-# UNPACK #-} !Int Stream
 
 nomore :: Stream
 nomore = '\0' :> nomore
 
 {-inputTypes :: [Q Type]
-inputTypes = [[t|Int|], [t|OffString|], [t|Text|], [t|OffStream|]]-}
+inputTypes = [[t|Int|], [t|OffWith s|], [t|Text|]]-}
+
+data OffWith s = OffWith {-# UNPACK #-} !Int s
+
+offWith :: s -> OffWith s
+offWith s = OffWith 0 s
+
+offWithBox :: (# Int#, s #) -> OffWith s
+offWithBox (# i, s #) = OffWith (I# i) s
+
+offWithUnbox :: OffWith s -> (# Int#, s #)
+offWithUnbox (OffWith (I# i) s) = (# i, s #)
+
+offWithSame :: OffWith s -> OffWith s -> Bool
+offWithSame (OffWith i _) (OffWith j _) = i == j
+
+offWithToInt :: OffWith s -> Int
+offWithToInt (OffWith i _) = i
 
 type family Rep rep where
   Rep Int = IntRep
-  Rep OffString = 'TupleRep '[IntRep, LiftedRep]
   Rep Text = LiftedRep
-  Rep OffStream = LiftedRep
+  Rep (OffWith s) = 'TupleRep '[IntRep, LiftedRep]
 
 type family CRef s rep where
   CRef s Int = STRefU s Int
-  CRef s OffString = STRef s OffString
   CRef s Text = STRef s Text
-  CRef s OffStream = STRef s OffStream
+  CRef s (OffWith ss) = STRef s (OffWith ss)
 
 class Input input rep | input -> rep where
   type Unboxed rep :: TYPE (Rep rep)
@@ -102,19 +115,15 @@ instance Input ByteString Int where
       in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
     ||]
 
-instance Input CharList OffString where
-  type Unboxed OffString = (# Int#, String #)
+instance Input CharList (OffWith String) where
+  type Unboxed (OffWith String) = (# Int#, String #)
   prepare qinput = [||
       let CharList input = $$qinput
           size = length input
-          next (OffString i (c:cs)) = (# c, OffString (i+1) cs #)
-          more (OffString i _) = i < size
-          same (OffString i _) (OffString j _) = i == j
-          box (# i, cs #) = OffString (I# i) cs
-          unbox (OffString (I# i) cs) = (# i, cs #)
-          OffString o cs >> i = OffString (o + i) (drop i cs)
-          toInt (OffString i _) = i
-      in PreparedInput next more same (OffString 0 input) box unbox newSTRef readSTRef writeSTRef const (>>) toInt
+          next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
+          more (OffWith i _) = i < size
+          OffWith o cs >> i = OffWith (o + i) (drop i cs)
+      in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newSTRef readSTRef writeSTRef const (>>) offWithToInt
     ||]
 
 instance Input Text Text where
@@ -141,16 +150,37 @@ instance Input Text Text where
       in PreparedInput next more same input id id newSTRef readSTRef writeSTRef (<<) (>>) toInt
     ||]
 
-instance Input Stream OffStream where
-  type Unboxed OffStream = OffStream
+instance Input Lazy.ByteString (OffWith Lazy.ByteString) where
+  type Unboxed (OffWith Lazy.ByteString) = (# Int#, Lazy.ByteString #)
   prepare qinput = [||
       let input = $$qinput
-          next (OffStream o (c :> cs)) = (# c, OffStream (o + 1) cs #)
-          same (OffStream i _) (OffStream j _) = i == j
-          (OffStream o cs) >> i = OffStream (o + i) (sdrop i cs)
-            where 
+          next (OffWith i (Lazy.Chunk (PS ptr@(ForeignPtr addr# final) off@(I# off#) size) cs)) = 
+            case readWord8OffAddr# addr# off# realWorld# of
+              (# s', x #) -> case touch# final s' of 
+                _ -> (# C# (chr# (word2Int# x)), OffWith (i+1) (if size == 1 then cs 
+                                                                else Lazy.Chunk (PS ptr (off+1) (size-1)) cs) #)
+          more (OffWith _ Lazy.Empty) = False
+          more _ = True
+          ow@(OffWith _ (Lazy.Empty)) << _ = ow
+          OffWith o (Lazy.Chunk (PS ptr off size) cs) << i =
+            let d = min off i
+            in OffWith (o - d) (Lazy.Chunk (PS ptr (off - d) (size + d)) cs)
+          ow@(OffWith _ Lazy.Empty) >> _ = ow
+          OffWith o (Lazy.Chunk (PS ptr off size) cs) >> i
+            | i < size  = OffWith (o + i) (Lazy.Chunk (PS ptr (off + i) (size - i)) cs)
+            -- | i == size = OffWith (o + i) cs
+            | otherwise = OffWith (o + i) cs >> (i - size)
+      in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newSTRef readSTRef writeSTRef (<<) (>>) offWithToInt
+    ||]
+
+instance Input Stream (OffWith Stream) where
+  type Unboxed (OffWith Stream) = (# Int#, Stream #)
+  prepare qinput = [||
+      let input = $$qinput
+          next (OffWith o (c :> cs)) = (# c, OffWith (o + 1) cs #)
+          (OffWith o cs) >> i = OffWith (o + i) (sdrop i cs)
+            where
               sdrop 0 cs = cs
               sdrop n (_ :> cs) = sdrop (n-1) cs
-          toInt (OffStream o _) = o
-      in PreparedInput next (const True) same (OffStream 0 input) id id newSTRef readSTRef writeSTRef const (>>) toInt
+      in PreparedInput next (const True) offWithSame (offWith input) offWithBox offWithUnbox newSTRef readSTRef writeSTRef const (>>) offWithToInt
     ||]

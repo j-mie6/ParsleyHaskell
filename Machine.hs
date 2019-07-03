@@ -19,7 +19,7 @@
 module Machine where
 
 import MachineOps
-import Input                      (PreparedInput(..), Rep, CRef, Unboxed, OffString, OffStream)
+import Input                      (PreparedInput(..), Rep, CRef, Unboxed, OffWith)
 import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
 import Utils                      (WQ(..), lift', (>*<), TExpQ)
 import Data.Word                  (Word64)
@@ -39,9 +39,8 @@ import qualified Data.Dependent.Map as DMap ((!), insert, empty)
 
 #define inputInstances(derivation) \
 derivation(O)                      \
-derivation(OffString)              \
-derivation(Text)                   \
-derivation(OffStream)
+derivation((OffWith s))            \
+derivation(Text)
 
 newtype Machine o a = Machine { getMachine :: Free3 (M o) Void3 '[] '[] a }
 newtype ΣVar a = ΣVar IΣVar
@@ -370,7 +369,7 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     inputTrace = [|| let replace '\n' = color Green "↙"
                          replace ' '  = color White "·"
                          replace c    = return c
-                         go i 
+                         go i
                            | $$same i $$end = []
                            | otherwise  = let (# c, i' #) = $$next i in replace c ++ go i'
                      in go $$start ||]
@@ -472,11 +471,8 @@ instance KOps _o where                                                          
 {                                                                                   \
   suspend m γ = [|| \xs (!o#) -> $$(m (γ {xs = [||xs||], o = [||$$box o#||]})) ||]; \
   resume γ = [|| $$(k γ) $$(xs γ) ($$unbox $$(o γ)) ||]                             \
-}
-deriveKOps(O)
-deriveKOps(OffString)
-deriveKOps(Text)
-deriveKOps(OffStream)
+};
+inputInstances(deriveKOps)
 
 askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
 askM μ = {-trace ("fetching " ++ show μ) $ -}asks (((DMap.! μ) . μs))

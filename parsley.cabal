@@ -74,4 +74,4 @@ library
 
   -- Base language which the package is written in.
   default-language:    Haskell2010
-  ghc-options:         -fplugin=LiftPlugin -fprint-explicit-kinds -fprint-explicit-runtime-reps -pgmP cpphs -optP --cpp -v3
+  ghc-options:         -fplugin=LiftPlugin -fprint-explicit-kinds -fprint-explicit-runtime-reps -pgmP cpphs -optP --cpp

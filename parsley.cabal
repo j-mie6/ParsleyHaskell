@@ -67,10 +67,11 @@ library
 
   -- Other library packages from which modules are imported.
   build-depends:       base >=4.10 && <5, mtl >=2.2 && <2.3, hashable >=1.2 && <1.3, unordered-containers >=0.2 && <0.3, array >=0.5 && <0.6, dump-core, ghc-prim, unboxed-ref, safe-coerce, template-haskell, containers, dependent-map, dependent-sum, lift-plugin, pretty-terminal, text, bytestring
-
+  build-tools: cpphs >= 1.19
+  
   -- Directories containing source files.
   -- hs-source-dirs:
 
   -- Base language which the package is written in.
   default-language:    Haskell2010
-  ghc-options:         -fplugin=LiftPlugin -fprint-explicit-kinds -fprint-explicit-runtime-reps
+  ghc-options:         -fplugin=LiftPlugin -fprint-explicit-kinds -fprint-explicit-runtime-reps -pgmP cpphs -optP --cpp -v3

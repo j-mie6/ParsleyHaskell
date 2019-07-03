@@ -24,6 +24,7 @@ import Control.Monad.ST         (ST)
 import Data.STRef               (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.STRef.Unboxed       (STRefU, newSTRefU, readSTRefU, writeSTRefU)
 import qualified Data.Text as Text (length, index)
+--import Language.Haskell.TH      (Q, Type)
 
 data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}       (rep -> (# Char, rep #))
                                                             {-more-}       (rep -> Bool)
@@ -41,12 +42,17 @@ newtype Text16 = Text16 Text
 newtype CharList = CharList String
 data OffString = OffString {-# UNPACK #-} !Int String
 data Chars = More {-# UNPACK #-} !Char Chars | Empty
-data Stream = Stream {-# UNPACK #-} !Char Stream 
+data Stream = {-# UNPACK #-} !Char :> Stream 
 data OffStream = OffStream {-# UNPACK #-} !Int Stream
+
+nomore :: Stream
+nomore = '\0' :> nomore
+
+{-inputTypes :: [Q Type]
+inputTypes = [[t|Int|], [t|OffString|], [t|Text|], [t|OffStream|]]-}
 
 type family Rep rep where
   Rep Int = IntRep
-  --Rep OffString = OffString
   Rep OffString = 'TupleRep '[IntRep, LiftedRep]
   Rep Text = LiftedRep
   Rep OffStream = LiftedRep
@@ -108,7 +114,7 @@ instance Input CharList OffString where
           unbox (OffString (I# i) cs) = (# i, cs #)
           OffString o cs >> i = OffString (o + i) (drop i cs)
           toInt (OffString i _) = i
-      in PreparedInput next more same (OffString 0 input) {-id id-} box unbox newSTRef readSTRef writeSTRef const (>>) toInt
+      in PreparedInput next more same (OffString 0 input) box unbox newSTRef readSTRef writeSTRef const (>>) toInt
     ||]
 
 instance Input Text Text where
@@ -139,69 +145,12 @@ instance Input Stream OffStream where
   type Unboxed OffStream = OffStream
   prepare qinput = [||
       let input = $$qinput
-          next (OffStream o (Stream c cs)) = (# c, OffStream (o + 1) cs #)
+          next (OffStream o (c :> cs)) = (# c, OffStream (o + 1) cs #)
           same (OffStream i _) (OffStream j _) = i == j
           (OffStream o cs) >> i = OffStream (o + i) (sdrop i cs)
             where 
               sdrop 0 cs = cs
-              sdrop n (Stream _ cs) = sdrop (n-1) cs
+              sdrop n (_ :> cs) = sdrop (n-1) cs
           toInt (OffStream o _) = o
       in PreparedInput next (const True) same (OffStream 0 input) id id newSTRef readSTRef writeSTRef const (>>) toInt
     ||]
-
---accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peekByteOff ptr (I# (off# +# i#))
---accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peek (ptr `plusPtr` (I# (off# +# i#)))
---accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> peekElemOff ptr (I# (off# +# i#))
---accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \ptr -> readWord8OffPtr ptr (I# (off# +# i#))
---accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \Ptr addr# -> readWord8OffPtr (Ptr (addr#)) (I# (off# +# i#))
---accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \Ptr addr# -> 
---  IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', W8# x #)
---accursedUnutterablePerformIO $ withForeignPtr (ForeignPtr addr# final) $ \Ptr addr# -> 
---  IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)
---accursedUnutterablePerformIO $ 
---  do r <- IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)
---     touchForeignPtr (ForeignPtr addr# final)
---     return r
---accursedUnutterablePerformIO $ 
---  do r <- IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)
---     touch final
---     return r
---accursedUnutterablePerformIO $ 
---  do r <- IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)
---     IO $ \s -> case touch# final s of s' -> (# s', () #)
---     IO $ \s -> (# s, r #)
---accursedUnutterablePerformIO $ 
---  do r <- IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)
---     (IO $ \s -> case touch# final s of s' -> (# s', () #)) >> (IO $ \s -> (# s, r #))
---accursedUnutterablePerformIO $ 
---  do r <- IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)
---     IO $ \s -> case (\s -> case touch# final s of s' -> (# s', () #)) s of (# s', _ #) -> (\s -> (# s, r #)) s'
---accursedUnutterablePerformIO $ 
---  do r <- IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)
---     IO $ \s -> case (\s -> case touch# final s of s' -> (# s', () #)) s of (# s', _ #) -> (# s', r #)
---accursedUnutterablePerformIO $ 
---  do r <- IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)
---     IO $ \s -> case touch# final s of s' -> (# s', r #)
---accursedUnutterablePerformIO $ 
---  (IO $ \s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)) 
---    >>= (\r -> IO $ \s -> case touch# final s of s' -> (# s', r #)) 
---accursedUnutterablePerformIO $ 
---  IO $ \s -> 
---    case (\s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)) s of
---      (# s', x #) -> (\r s -> case touch# final s of s' -> (# s', r #)) x s'
---accursedUnutterablePerformIO $ 
---  IO $ \s -> 
---    case (\s -> case readWord8OffAddr# addr# (off# +# i#) s of (# s', x #) -> (# s', C# (chr# (word2Int# x)) #)) s of
---      (# s', x #) -> case touch# final s' of s'' -> (# s'', x #)
---accursedUnutterablePerformIO $ 
---  IO $ \s -> 
---    case readWord8OffAddr# addr# (off# +# i#) s of
---      (# s', x #) -> case touch# final s' of 
---        s'' -> (# s'', C# (chr# (word2Int# x)) #)
--- case (\s -> 
---   case readWord8OffAddr# addr# (off# +# i#) s of
---     (# s', x #) -> case touch# final s' of 
---       s'' -> (# s'', C# (chr# (word2Int# x)) #)) realWorld# of (# _, r #) -> r
--- case readWord8OffAddr# addr# (off# +# i#) realWorld# of
---   (# s', x #) -> case touch# final s' of 
---     _ -> C# (chr# (word2Int# x))

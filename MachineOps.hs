@@ -9,7 +9,8 @@
              TemplateHaskell,
              TypeSynonymInstances,
              RankNTypes,
-             CPP #-}
+             CPP,
+             ImplicitParams #-}
 module MachineOps where
 
 import Utils              (TExpQ)
@@ -20,6 +21,12 @@ import GHC.Exts           (Int(..), TYPE)
 import Safe.Coerce        (coerce)
 import Input              (Rep, CRef, Unboxed, OffString, OffStream)
 import Data.Text          (Text)
+
+#define inputInstances(derivation) \
+derivation(O)                      \
+derivation(OffString)              \
+derivation(Text)                   \
+derivation(OffStream)
 
 data SList a = !a ::: SList a | SNil
 data HList xs where
@@ -54,6 +61,29 @@ data InputOps s o = InputOps { _more       :: TExpQ (o -> Bool)
                              , _shiftLeft  :: TExpQ (o -> Int -> o)
                              , _shiftRight :: TExpQ (o -> Int -> o)
                              , _offToInt   :: TExpQ (o -> Int) }
+
+more       :: (?ops :: InputOps s o) => TExpQ (o -> Bool)
+more       = _more       ?ops
+next       :: (?ops :: InputOps s o) => TExpQ (o -> (# Char, o #))
+next       = _next       ?ops
+same       :: (?ops :: InputOps s o) => TExpQ (o -> o -> Bool)
+same       = _same       ?ops
+unbox      :: (?ops :: InputOps s o) => TExpQ (o -> Unboxed o)
+unbox      = _unbox      ?ops
+box        :: (?ops :: InputOps s o) => TExpQ (Unboxed o -> o)
+box        = _box        ?ops
+newCRef    :: (?ops :: InputOps s o) => TExpQ (o -> ST s (CRef s o))
+newCRef    = _newCRef    ?ops
+readCRef   :: (?ops :: InputOps s o) => TExpQ (CRef s o -> ST s o) 
+readCRef   = _readCRef   ?ops
+writeCRef  :: (?ops :: InputOps s o) => TExpQ (CRef s o -> o -> ST s ())
+writeCRef  = _writeCRef  ?ops
+shiftLeft  :: (?ops :: InputOps s o) => TExpQ (o -> Int -> o)
+shiftLeft  = _shiftLeft  ?ops
+shiftRight :: (?ops :: InputOps s o) => TExpQ (o -> Int -> o)
+shiftRight = _shiftRight ?ops
+offToInt   :: (?ops :: InputOps s o) => TExpQ (o -> Int)
+offToInt   = _offToInt   ?ops
 
 newtype AbsExec r s (o# :: TYPE r) a x = AbsExec (forall xs. X xs -> K_ r s o# (x ': xs) a -> o# -> H_ r s o# a -> ST s (Maybe a))
 newtype QAbsExec s o a x = QAbsExec (TExpQ (AbsExec (Rep o) s (Unboxed o) a x))
@@ -115,40 +145,44 @@ modifyΣ σ f =
      writeΣ σ (f $! x)
 
 class FailureOps o where
-  setupHandler :: InputOps s o -> QH s o a -> QO o
+  setupHandler :: (?ops :: InputOps s o) => QH s o a -> QO o
                -> TExpQ (H s o a -> Unboxed o -> Unboxed o -> ST s (Maybe a)) 
                -> (QH s o a -> QST s (Maybe a)) -> QST s (Maybe a)
-  raise :: InputOps s o -> TExpQ (H s o a -> o -> ST s (Maybe a))
+  raise :: (?ops :: InputOps s o) => TExpQ (H s o a -> o -> ST s (Maybe a))
 
-#define deriveFailureOps(_o)                                                                        \
-instance FailureOps _o where                                                                        \
-{                                                                                                   \
-  setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]; \
-  raise ops = [||\(H hs) (!o) -> case hs of                                                         \
-  {                                                                                                 \
-    SNil -> return Nothing;                                                                         \
-    h:::_ -> h ($$(_unbox ops) o);                                                                  \
-  } ||];                                                                                            \
-} 
-deriveFailureOps(O)
-deriveFailureOps(OffString)
-deriveFailureOps(Text)
-deriveFailureOps(OffStream)
+#define deriveFailureOps(_o)                                                             \
+instance FailureOps _o where                                                             \
+{                                                                                        \
+  setupHandler hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$unbox $$o)) $$hs ||]; \
+  raise = [||\(H hs) (!o) -> case hs of                                                  \
+  {                                                                                      \
+    SNil -> return Nothing;                                                              \
+    h:::_ -> h ($$unbox o);                                                              \
+  } ||];                                                                                 \
+};
+inputInstances(deriveFailureOps)
+
+-- RIP Dream :(
+{-$(let derive _o = [d| 
+        instance FailureOps _o where
+          setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]
+          raise ops = [||\(H hs) (!o) -> case hs of 
+              SNil -> return Nothing
+              h:::_ -> h ($$(_unbox ops) o)
+            ||]
+        |] in traverse derive inputTypes)-}
 
 class ConcreteExec o where
-  runConcrete :: InputOps s o -> TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> X xs -> K s o (x ': xs) a -> o -> H s o a -> ST s (Maybe a))
+  runConcrete :: (?ops :: InputOps s o) => TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> X xs -> K s o (x ': xs) a -> o -> H s o a -> ST s (Maybe a))
 
 #define deriveConcreteExec(_o) \
-instance ConcreteExec _o where runConcrete ops = [||\(AbsExec m) xs ks o hs -> m xs ks ($$(_unbox ops) o) hs||]
-deriveConcreteExec(O)
-deriveConcreteExec(OffString)
-deriveConcreteExec(Text)
-deriveConcreteExec(OffStream)
+instance ConcreteExec _o where { runConcrete = [||\(AbsExec m) xs ks o hs -> m xs ks ($$unbox o) hs||] };
+inputInstances(deriveConcreteExec)
 
-nextSafe :: Bool -> InputOps s o -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
-nextSafe True ops o p good bad = [|| let !(# c, o' #) = $$(_next ops) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
-nextSafe False ops o p good bad = [||
+nextSafe :: (?ops :: InputOps s o) => Bool -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)
+nextSafe True o p good bad = [|| let !(# c, o' #) = $$next $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
+nextSafe False o p good bad = [||
     let bad' = $$bad in
-      if  $$(_more ops) $$o then let !(# c, o' #) = $$(_next ops) $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else bad'
+      if  $$more $$o then let !(# c, o' #) = $$next $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else bad'
       else bad'
   ||]

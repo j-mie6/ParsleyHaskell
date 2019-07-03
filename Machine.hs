@@ -151,7 +151,7 @@ exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
      ks <- makeK
      hs <- makeH
      let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
-     $$(let ?ops = InputOps InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
+     $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
         in readyCalls topo ms (readyExec m) 
              (Γ [||xs||] [||ks||] [||offset||] [||hs||])
              (Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0))

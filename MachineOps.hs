@@ -85,7 +85,7 @@ shiftRight = _shiftRight ?ops
 offToInt   :: (?ops :: InputOps s o) => TExpQ (o -> Int)
 offToInt   = _offToInt   ?ops
 
-newtype AbsExec r s (o# :: TYPE r) a x = AbsExec (forall xs. X xs -> K_ r s o# x a -> o# -> H_ r s o# a -> ST s (Maybe a))
+newtype AbsExec r s (o# :: TYPE r) a x = AbsExec (K_ r s o# x a -> o# -> H_ r s o# a -> ST s (Maybe a))
 newtype QAbsExec s o a x = QAbsExec (TExpQ (AbsExec (Rep o) s (Unboxed o) a x))
 newtype QJoin r s (o# :: TYPE r) a x = QJoin (TExpQ (x -> o# -> ST s (Maybe a)))
 
@@ -173,10 +173,10 @@ inputInstances(deriveFailureOps)
         |] in traverse derive inputTypes)-}
 
 class ConcreteExec o where
-  runConcrete :: (?ops :: InputOps s o) => TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> X xs -> K s o x a -> o -> H s o a -> ST s (Maybe a))
+  runConcrete :: (?ops :: InputOps s o) => TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> K s o x a -> o -> H s o a -> ST s (Maybe a))
 
 #define deriveConcreteExec(_o) \
-instance ConcreteExec _o where { runConcrete = [||\(AbsExec m) xs ks o hs -> m xs ks ($$unbox o) hs||] };
+instance ConcreteExec _o where { runConcrete = [||\(AbsExec m) ks o hs -> m ks ($$unbox o) hs||] };
 inputInstances(deriveConcreteExec)
 
 nextSafe :: (?ops :: InputOps s o) => Bool -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)

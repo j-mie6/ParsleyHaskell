@@ -48,7 +48,7 @@ newtype ΣVar a = ΣVar IΣVar
 newtype MVar a = MVar IMVar
 newtype ΦVar a = ΦVar IΦVar
 type ΦDecl k x xs ks a = (ΦVar x, k (x ': xs) ks a)
-newtype LetBinding o a x = LetBinding (forall xs. Free3 (M o) Void3 xs x a)
+newtype LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a)
 letBind :: Free3 (M o) Void3 xs x a -> LetBinding o a x
 letBind m = LetBinding (coerce m)
 
@@ -56,7 +56,7 @@ instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
 data M o k xs ks a where
   Halt      :: M o k '[a] Void a
-  Ret       :: M o k (x ': xs) x a
+  Ret       :: M o k '[x] x a
   Push      :: WQ x -> !(k (x ': xs) ks a) -> M o k xs ks a
   Pop       :: !(k xs ks a) -> M o k (x ': xs) ks a
   Lift2     :: !(WQ (x -> y -> z)) -> !(k (z ': xs) ks a) -> M o k (y ': x ': xs) ks a
@@ -75,7 +75,7 @@ data M o k xs ks a where
   Case      :: !(k (x ': xs) ks a) -> !(k (y ': xs) ks a) -> M o k (Either x y ': xs) ks a
   Choices   :: ![WQ (x -> Bool)] -> ![k xs ks a] -> k xs ks a -> M o k (x ': xs) ks a
   ChainIter :: !(ΣVar x) -> !(MVar x) -> M o k ((x -> x) ': xs) x a
-  ChainInit :: !(ΣVar x) -> !(k xs x a) -> !(MVar x) -> !(k (x ': xs) ks a) -> M o k (x ': xs) ks a
+  ChainInit :: !(ΣVar x) -> !(k '[] x a) -> !(MVar x) -> !(k (x ': xs) ks a) -> M o k (x ': xs) ks a
   Swap      :: k (x ': y ': xs) ks a -> M o k (y ': x ': xs) ks a
   LogEnter  :: String -> !(k xs ks a) -> M o k xs ks a
   LogExit   :: String -> !(k xs ks a) -> M o k xs ks a
@@ -204,12 +204,12 @@ execCall :: (?ops :: InputOps s o, ConcreteExec o, KOps o) => MVar x -> Exec s o
 execCall μ (Exec k) =
   do !(QAbsExec m) <- askM μ
      mk <- k
-     return $ \γ@Γ{..} -> [|| $$runConcrete $$m $$xs $$(suspend mk γ) $$o $$hs ||]
+     return $ \γ@Γ{..} -> [|| $$runConcrete $$m $$(suspend mk γ) $$o $$hs ||]
 
 execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> Reader (Ctx s o a) (Γ s o xs x a -> QST s (Maybe a))
 execJump μ =
   do !(QAbsExec m) <- askM μ
-     return $! \γ@Γ{..} -> [|| $$runConcrete $$m $$xs $$k $$o $$hs ||]
+     return $! \γ@Γ{..} -> [|| $$runConcrete $$m $$k $$o $$hs ||]
 
 execPush :: WQ x -> Exec s o (x ': xs) ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
 execPush x (Exec k) = fmap (\m γ -> m (γ {xs = [|| pushX $$(_code x) $$(xs γ) ||]})) k
@@ -319,13 +319,12 @@ execChainIter σ μ =
      !(QAbsExec l) <- askM μ
      !(QCRef cref) <- askSTC σ
      return $! \γ@Γ{..} -> [||
-       do let (# g, xs' #) = popX $$xs
-          modifyΣ $$ref g
+       do modifyΣ $$ref (peekX $$xs)
           $$writeCRef $$cref $$o
-          $$runConcrete $$l xs' $$k $$o $$hs
+          $$runConcrete $$l $$k $$o $$hs
        ||]
 
-execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x -> Exec s o xs x a -> MVar x -> Exec s o (x ': xs) ks a
+execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x -> Exec s o '[] x a -> MVar x -> Exec s o (x ': xs) ks a
               -> Reader (Ctx s o a) (Γ s o (x ': xs) ks a -> QST s (Maybe a))
 execChainInit σ l μ (Exec k) =
   do mk <- k
@@ -421,11 +420,11 @@ instance JoinBuilder _o where                                                   
 inputInstances(deriveJoinBuilder)
 
 class RecBuilder o where
-  buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o xs x a 
+  buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o '[] x a 
             -> TExpQ (STRef s x) -> TExpQ (CRef s o)
             -> QX xs -> QH s o a  -> QO o -> QST s (Maybe a)
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
-            -> (forall xs. Γ s o xs x a -> Ctx s o a -> QST s (Maybe a)) 
+            -> (Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a)) 
             -> (Ctx s o a -> QST s (Maybe a)) 
             -> QST s (Maybe a)
 
@@ -436,13 +435,13 @@ instance RecBuilder _o where                                                    
       do                                                                                                         \
       {                                                                                                          \
         let {loop !o# =                                                                                          \
-          $$(run l (Γ xs [||noreturn||] [||$$bx o#||] hs)                                                        \
-                   (insertSTC σ cref (insertM μ [||AbsExec (\_ _ (!o#) _ -> loop o#)||] (insertΣ σ ref ctx))))}; \
+          $$(run l (Γ [||HNil||] [||noreturn||] [||$$bx o#||] hs)                                                        \
+                   (insertSTC σ cref (insertM μ [||AbsExec (\_ (!o#) _ -> loop o#)||] (insertΣ σ ref ctx))))}; \
         loop ($$unbox $$o)                                                                                       \
       } ||];                                                                                                     \
   buildRec ctx μ body k = let bx = box in [||                                                                    \
-    let recu = AbsExec (\(!xs) (!ks) (!o#) hs ->                                                                 \
-          $$(body (Γ [||xs||] [||ks||] [||$$bx o#||] [||hs||])                                                   \
+    let recu = AbsExec (\(!ks) (!o#) hs ->                                                                 \
+          $$(body (Γ [||HNil||] [||ks||] [||$$bx o#||] [||hs||])                                                   \
                   (insertM μ [||recu||] ctx)))                                                                   \
     in $$(k (insertM μ [||recu||] ctx))                                                                          \
     ||]                                                                                                          \

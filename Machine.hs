@@ -81,7 +81,7 @@ data M o k xs r a where
 fmapInstr :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> Free3 (M o) f (x ': xs) r a
 fmapInstr !f !m = Op3 (Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m)))
 
-data Γ s o xs r a = Γ { xs    :: QX xs
+data Γ s o xs r a = Γ { xs    :: QList xs
                       , k     :: QK s o r a
                       , o     :: QO o
                       , hs    :: QH s o a }
@@ -145,13 +145,12 @@ class FailureOps o => LogHandler o where
 
 exec :: Ops o => TExpQ (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding o a), [IMVar]) -> QST s (Maybe a)
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
-  do xs <- makeX
-     ks <- makeK
+  do ks <- makeK
      hs <- makeH
      let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
      $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
         in readyCalls topo ms (readyExec m) 
-             (Γ [||xs||] [||ks||] [||offset||] [||hs||])
+             (Γ makeX [||ks||] [||offset||] [||hs||])
              (Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0))
   ||]
 
@@ -193,7 +192,7 @@ readyExec = fold3 absurd (Exec . alg)
     alg (LogExit name k)    = execLogExit name k
 
 execHalt :: Reader (Ctx s o a) (Γ s o '[a] r a -> QST s (Maybe a))
-execHalt = return $! \γ -> [|| return $! Just $! peekX ($$(xs γ)) ||]
+execHalt = return $! \γ -> [|| return $! Just $! $$(peekX (xs γ)) ||]
 
 execRet :: (?ops :: InputOps s o, KOps o) => Reader (Ctx s o a) (Γ s o (x ': xs) x a -> QST s (Maybe a))
 execRet = return $! resume
@@ -210,18 +209,18 @@ execJump μ =
      return $! \γ@Γ{..} -> [|| $$runConcrete $$m $$k $$o $$hs ||]
 
 execPush :: WQ x -> Exec s o (x ': xs) r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-execPush x (Exec k) = fmap (\m γ -> m (γ {xs = [|| pushX $$(_code x) $$(xs γ) ||]})) k
+execPush x (Exec k) = fmap (\m γ -> m (γ {xs = pushX (_code x) (xs γ)})) k
 
 execPop :: Exec s o xs r a -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
-execPop (Exec k) = fmap (\m γ -> m (γ {xs = [|| popX_ $$(xs γ) ||]})) k
+execPop (Exec k) = fmap (\m γ -> m (γ {xs = popX_ (xs γ)})) k
 
 execLift2 :: WQ (x -> y -> z) -> Exec s o (z ': xs) r a -> Reader (Ctx s o a) (Γ s o (y ': x ': xs) r a -> QST s (Maybe a))
-execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = [|| let (# y, xs' #) = popX $$(xs γ); (# x, xs'' #) = popX xs' in pushX ($$(_code f) x y) xs'' ||]})) k
+execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = let (# y, xs' #) = popX (xs γ); (# x, xs'' #) = popX xs' in pushX [||$$(_code f) $$x $$y||] xs''})) k
 
 execSat :: (?ops :: InputOps s o, FailureOps o) => WQ (Char -> Bool) -> Exec s o (Char ': xs) r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
 execSat p (Exec k) =
   do mk <- k
-     asks $! \ctx γ -> nextSafe (skipBounds ctx) (o γ) (_code p) (\o c -> mk (γ {xs = [|| pushX $$c $$(xs γ) ||], o = o})) (raiseΓ γ)
+     asks $! \ctx γ -> nextSafe (skipBounds ctx) (o γ) (_code p) (\o c -> mk (γ {xs = pushX c (xs γ), o = o})) (raiseΓ γ)
 
 execEmpt :: (?ops :: InputOps s o, FailureOps o) => Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
 execEmpt = return $! raiseΓ
@@ -259,7 +258,7 @@ inputInstances(deriveSoftForkHandler)
 execJoin :: (?ops :: InputOps s o) => ΦVar x -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
 execJoin φ = 
   do QJoin k <- asks ((DMap.! φ) . φs)
-     return $! \γ -> [|| $$k (peekX $$(xs γ)) ($$unbox $$(o γ)) ||]
+     return $! \γ -> [|| $$k $$(peekX (xs γ)) ($$unbox $$(o γ)) ||]
 
 execAttempt :: (?ops :: InputOps s o, AttemptHandler o) => Maybe Int -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
 execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; return $! \γ -> setupHandlerΓ γ attemptHandler mk
@@ -269,10 +268,10 @@ instance AttemptHandler _o where { attemptHandler = [||\hs _ (!c#) -> $$raise hs
 inputInstances(deriveAttemptHandler)
 
 execTell :: Exec s o (o ': xs) r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-execTell (Exec k) = fmap (\mk γ -> mk (γ {xs = [||pushX $$(o γ) $$(xs γ)||]})) k
+execTell (Exec k) = fmap (\mk γ -> mk (γ {xs = pushX (o γ) (xs γ)})) k
 
 execSeek :: Exec s o xs r a -> Reader (Ctx s o a) (Γ s o (o ': xs) r a -> QST s (Maybe a))
-execSeek (Exec k) = fmap (\mk γ -> [||let (# o, xs' #) = popX $$(xs γ) in $$(mk (γ {xs = [||xs'||], o=[||o||]}))||]) k
+execSeek (Exec k) = fmap (\mk γ -> let (# o, xs' #) = popX (xs γ) in mk (γ {xs = xs', o=o})) k
 
 execNegLook :: (?ops :: InputOps s o, NegLookHandler o) => Exec s o xs r a -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
 execNegLook (Exec m) (Exec k) =
@@ -292,17 +291,16 @@ execCase :: Exec s o (x ': xs) r a -> Exec s o (y ': xs) r a -> Reader (Ctx s o 
 execCase (Exec p) (Exec q) =
   do mp <- p
      mq <- q
-     return $! \γ -> [||
-         let (# e, xs' #) = popX $$(xs γ)
-         in case e of
-           Left x -> $$(mp (γ {xs = [||pushX x xs'||]}))
-           Right y  -> $$(mq (γ {xs = [||pushX y xs'||]}))
-       ||]
+     return $! \γ ->
+         let (# e, xs' #) = popX (xs γ)
+         in [||case $$e of
+           Left x -> $$(mp (γ {xs = pushX [||x||] xs'}))
+           Right y  -> $$(mq (γ {xs = pushX [||y||] xs'}))||]
 
 execChoices :: forall x xs r a s o. [WQ (x -> Bool)] -> [Exec s o xs r a] -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
 execChoices fs ks (Exec def) = 
   do mdef <- def
-     fmap (\mks γ -> [|| let !(# x, xs' #) = popX $$(xs γ) in $$(go [||x||] fs mks mdef (γ {xs = [||xs'||]})) ||]) (forM ks (\(Exec k) -> k))
+     fmap (\mks γ -> let !(# x, xs' #) = popX (xs γ) in go x fs mks mdef (γ {xs = xs'})) (forM ks (\(Exec k) -> k))
   where
     go :: TExpQ x -> [WQ (x -> Bool)] -> [Γ s o xs r a -> QST s (Maybe a)] -> (Γ s o xs r a -> QST s (Maybe a)) -> Γ s o xs r a -> QST s (Maybe a)
     go _ [] [] def γ = def γ
@@ -317,7 +315,7 @@ execChainIter σ μ =
      !(QAbsExec l) <- askM μ
      !(QCRef cref) <- askSTC σ
      return $! \γ@Γ{..} -> [||
-       do modifyΣ $$ref (peekX $$xs)
+       do modifyΣ $$ref $$(peekX xs)
           $$writeCRef $$cref $$o
           $$runConcrete $$l $$k $$o $$hs
        ||]
@@ -327,35 +325,34 @@ execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x
 execChainInit σ l μ (Exec k) =
   do mk <- k
      asks $! \ctx γ@(Γ xs ks o _) -> [||
-       do let (# x, xs' #) = popX $$xs
-          ref <- newΣ x
-          cref <- $$newCRef $$o
-          $$(setupHandlerΓ γ (chainHandler mk [||ref||] [||cref||] γ) (\γ' -> 
-            buildIter ctx μ σ l [||ref||] [||cref||] [||xs'||] (hs γ') o))
+        do ref <- newΣ $$(peekX xs)
+           cref <- $$newCRef $$o
+           $$(setupHandlerΓ γ (chainHandler mk [||ref||] [||cref||] γ) (\γ' -> 
+              buildIter ctx μ σ l [||ref||] [||cref||] (hs γ') o))
       ||]
 
-#define deriveChainHandler(_o)                       \
-instance ChainHandler _o where                       \
-{                                                    \
-  chainHandler mk ref cref γ = [||\hs (!o#) _ ->     \
-      do                                             \
-      {                                              \
-        c <- $$readCRef $$cref;                      \
-        if $$same c ($$box o#) then                  \
-          do                                         \
-          {                                          \
-            y <- readΣ $$ref;                        \
-            $$(mk (γ {xs = [|| pokeX y $$(xs γ) ||], \
-                      o = [|| $$box o# ||],          \
-                      hs = [||hs||]}))               \
-          }                                          \
-        else $$raise hs ($$box o#)                   \
-      } ||]                                          \
+#define deriveChainHandler(_o)                   \
+instance ChainHandler _o where                   \
+{                                                \
+  chainHandler mk ref cref γ = [||\hs (!o#) _ -> \
+      do                                         \
+      {                                          \
+        c <- $$readCRef $$cref;                  \
+        if $$same c ($$box o#) then              \
+          do                                     \
+          {                                      \
+            y <- readΣ $$ref;                    \
+            $$(mk (γ {xs = pokeX [||y||] (xs γ), \
+                      o = [|| $$box o# ||],      \
+                      hs = [||hs||]}))           \
+          }                                      \
+        else $$raise hs ($$box o#)               \
+      } ||]                                      \
 };
 inputInstances(deriveChainHandler)
 
 execSwap :: Exec s o (x ': y ': xs) r a -> Reader (Ctx s o a) (Γ s o (y ': x ': xs) r a -> QST s (Maybe a))
-execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = [||let (# y, xs' #) = popX $$(xs γ); (# x, xs'' #) = popX xs' in pushX x (pushX y xs'')||]})) k
+execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = let (# y, xs' #) = popX (xs γ); (# x, xs'' #) = popX xs' in pushX x (pushX y xs'')})) k
 
 preludeString :: (?ops :: InputOps s o) => String -> Char -> Γ s o xs r a -> Ctx s o a -> String -> TExpQ String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
@@ -401,26 +398,26 @@ class JoinBuilder o where
                  -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a)) 
                  -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
 
-#define deriveJoinBuilder(_o)                                                        \
-instance JoinBuilder _o where                                                        \
-{                                                                                    \
-  setupJoinPoint Nothing mx = mx;                                                    \
-  setupJoinPoint (Just (φ, (Exec k))) mx =                                           \
-    do                                                                               \
-    {                                                                                \
-      ctx <- ask;                                                                    \
-      fmap (\mk γ -> [||                                                             \
-        let join x o# = $$(mk (γ {xs = [||pushX x $$(xs γ)||], o = [||$$box o#||]})) \
-        in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))                            \
-      ||]) k                                                                         \
-    }                                                                                \
+#define deriveJoinBuilder(_o)                                                      \
+instance JoinBuilder _o where                                                      \
+{                                                                                  \
+  setupJoinPoint Nothing mx = mx;                                                  \
+  setupJoinPoint (Just (φ, (Exec k))) mx =                                         \
+    do                                                                             \
+    {                                                                              \
+      ctx <- ask;                                                                  \
+      fmap (\mk γ -> [||                                                           \
+        let join x o# = $$(mk (γ {xs = pushX [||x||] (xs γ), o = [||$$box o#||]})) \
+        in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))                          \
+      ||]) k                                                                       \
+    }                                                                              \
 };
 inputInstances(deriveJoinBuilder)
 
 class RecBuilder o where
   buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o '[] x a 
             -> TExpQ (STRef s x) -> TExpQ (CRef s o)
-            -> QX xs -> QH s o a  -> QO o -> QST s (Maybe a)
+            -> QH s o a  -> QO o -> QST s (Maybe a)
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
             -> (Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a)) 
             -> (Ctx s o a -> QST s (Maybe a)) 
@@ -429,17 +426,17 @@ class RecBuilder o where
 #define deriveRecBuilder(_o)                                                                         \
 instance RecBuilder _o where                                                                         \
 {                                                                                                    \
-  buildIter ctx μ σ l ref cref xs hs o = let bx = box in [||                                         \
+  buildIter ctx μ σ l ref cref hs o = let bx = box in [||                                            \
       do                                                                                             \
       {                                                                                              \
         let {loop !o# =                                                                              \
-          $$(run l (Γ [||HNil||] [||noreturn||] [||$$bx o#||] hs)                                    \
+          $$(run l (Γ QNil [||noreturn||] [||$$bx o#||] hs)                                          \
                    (insertSTC σ cref (insertM μ [||\_ (!o#) _ -> loop o#||] (insertΣ σ ref ctx))))}; \
         loop ($$unbox $$o)                                                                           \
       } ||];                                                                                         \
   buildRec ctx μ body k = let bx = box in [||                                                        \
       let recu !ks !o# hs =                                                                          \
-            $$(body (Γ [||HNil||] [||ks||] [||$$bx o#||] [||hs||])                                   \
+            $$(body (Γ QNil [||ks||] [||$$bx o#||] [||hs||])                                         \
                     (insertM μ [||recu||] ctx))                                                      \
       in $$(k (insertM μ [||recu||] ctx))                                                            \
     ||]                                                                                              \
@@ -464,11 +461,11 @@ class KOps o where
   suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) r a -> QST s (Maybe a)) -> Γ s o xs r a -> QK s o x a
   resume :: (?ops :: InputOps s o) => Γ s o (x ': xs) x a -> QST s (Maybe a)
 
-#define deriveKOps(_o)                                                                           \
-instance KOps _o where                                                                           \
-{                                                                                                \
-  suspend m γ = [|| \x (!o#) -> $$(m (γ {xs = [||pushX x $$(xs γ)||], o = [||$$box o#||]})) ||]; \
-  resume γ = [|| $$(k γ) (peekX $$(xs γ)) ($$unbox $$(o γ)) ||]                                  \
+#define deriveKOps(_o)                                                                         \
+instance KOps _o where                                                                         \
+{                                                                                              \
+  suspend m γ = [|| \x (!o#) -> $$(m (γ {xs = pushX [||x||] (xs γ), o = [||$$box o#||]})) ||]; \
+  resume γ = [|| $$(k γ) $$(peekX (xs γ)) ($$unbox $$(o γ)) ||]                                \
 };
 inputInstances(deriveKOps)
 

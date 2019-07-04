@@ -39,24 +39,24 @@ main :: IO ()
 --main = do rnf (regexP (Data.ByteString.Char8.pack (concat (replicate 100000_00 "ab")))) `seq` return (){-
 main =
   defaultMain [ {-regex
-              ,-} brainfuck
-              , tailTest 
+              , brainfuck
+              ,-} tailTest 
               ]--}
 
 streams :: Data.ByteString.Lazy.ByteString -> Maybe String
 streams = $$(Parsley.runParser (Parsley.token "abc" Parsley.<* Parsley.eof))
 
 -- Tail Recursion Benchmark
-tailTestP :: CharList -> Maybe Char
+tailTestP :: String -> Maybe Char
 tailTestP = $$(Parsley.runParser ParsleyParsers.phiTest)
 
 tailTest :: Benchmark
-tailTest = bgroup "tail-rec" [ bench "tail-rec 0"      $ nf (tailTestP . CharList) (replicate 0 'a' ++ "b")
-                             , bench "tail-rec 1"      $ nf (tailTestP . CharList) (replicate 1 'a' ++ "b")
-                             , bench "tail-rec 10"     $ nf (tailTestP . CharList) (replicate 10 'a' ++ "b")
-                             , bench "tail-rec 100"    $ nf (tailTestP . CharList) (replicate 100 'a' ++ "b")
-                             , bench "tail-rec 1000"   $ nf (tailTestP . CharList) (replicate 1000 'a' ++ "b")
-                             , bench "tail-rec 10,000" $ nf (tailTestP . CharList) (replicate 10_000 'a' ++ "b")
+tailTest = bgroup "tail-rec" [ bench "tail-rec 0"      $ nf (tailTestP) (replicate 0 'a' ++ "b")
+                             , bench "tail-rec 1"      $ nf (tailTestP) (replicate 1 'a' ++ "b")
+                             , bench "tail-rec 10"     $ nf (tailTestP) (replicate 10 'a' ++ "b")
+                             , bench "tail-rec 100"    $ nf (tailTestP) (replicate 100 'a' ++ "b")
+                             , bench "tail-rec 1000"   $ nf (tailTestP) (replicate 1000 'a' ++ "b")
+                             , bench "tail-rec 10,000" $ nf (tailTestP) (replicate 10_000 'a' ++ "b")
                              ]
 
 -- Regex Wars 2019

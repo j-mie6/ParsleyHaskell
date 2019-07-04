@@ -40,7 +40,7 @@ deriving instance Lift BrainFuckOp
 brainfuck :: Parser [BrainFuckOp]
 brainfuck = whitespace *> bf <* eof
   where
-    whitespace = skipMany (noneOf "<>+-[]")
+    whitespace = skipMany (noneOf "<>+-[],.")
     lexeme p = p <* whitespace
     bf = many ( lexeme ((token ">" $> lift' RightPointer)
                     <|> (token "<" $> lift' LeftPointer)

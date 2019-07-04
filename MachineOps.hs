@@ -29,17 +29,13 @@ derivation((OffWith s))            \
 derivation(Text)                   
 
 data SList a = !a ::: SList a | SNil
-data HList xs where
-  HNil :: HList '[]
-  HCons :: !a -> HList as -> HList (a ': as)
-
 data QList xs where
   QNil :: QList '[]
   QCons :: !(TExpQ a) -> QList as -> QList (a ': as)
 
 type H s o a = H_ (Rep o) s (Unboxed o) a
 type H_ r s (o# :: TYPE r) a = SList (o# -> ST s (Maybe a))
-type X = HList
+type X = QList
 type O = Int
 type O# = Int#
 {- A key property of the pure semantics of the machine states that
@@ -94,31 +90,27 @@ newtype QAbsExec s o a x = QAbsExec (TExpQ (AbsExec (Rep o) s (Unboxed o) a x))
 newtype QJoin r s (o# :: TYPE r) a x = QJoin (TExpQ (x -> o# -> ST s (Maybe a)))
 
 type QH s o a = TExpQ (H s o a)
-type QX xs = TExpQ (X xs)
 type QK s o x a = TExpQ (K s o x a)
 type QO o = TExpQ o
 type QST s a = TExpQ (ST s a)
 
-makeX :: ST s (X '[])
-makeX = return $! HNil
+makeX :: X '[]
+makeX = QNil
 {-# INLINE pushX #-}
-pushX :: a -> X xs -> X (a ': xs)
-pushX x xs = HCons x xs
+pushX :: TExpQ a -> X xs -> X (a ': xs)
+pushX x xs = QCons x xs
 {-# INLINE popX #-}
-popX :: X (a ': xs) -> (# a, X xs #)
-popX (HCons x xs) = (# x, xs #)
+popX :: X (a ': xs) -> (# TExpQ a, X xs #)
+popX (QCons x xs) = (# x, xs #)
 {-# INLINE popX_ #-}
 popX_ :: X (a ': xs) -> X xs
-popX_ (HCons x xs) = xs
+popX_ (QCons x xs) = xs
 {-# INLINE pokeX #-}
-pokeX :: a -> X (a ': xs) -> X (a ': xs)
-pokeX y (HCons x xs) = HCons y xs
-{-# INLINE modX #-}
-modX :: (a -> b) -> X (a ': xs) -> X (b ': xs)
-modX f (HCons x xs) = HCons (f $! x) xs
+pokeX :: TExpQ a -> X (b ': xs) -> X (a ': xs)
+pokeX y (QCons x xs) = QCons y xs
 {-# INLINE peekX #-}
-peekX :: X (a ': xs) -> a
-peekX (HCons x xs) = x
+peekX :: X (a ': xs) -> TExpQ a
+peekX (QCons x xs) = x
 
 makeK :: ST s (K_ k s o Void a)
 makeK = return $! noreturn
@@ -160,7 +152,7 @@ instance FailureOps _o where                                                    
   setupHandler hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$unbox $$o)) $$hs ||]; \
   raise = [||\hs (!o) -> case hs of                                                      \
   {                                                                                      \
-    SNil -> return Nothing;                                                              \
+    SNil -> (return Nothing :: ST s (Maybe a));                                          \
     h:::_ -> h ($$unbox o);                                                              \
   } ||];                                                                                 \
 };

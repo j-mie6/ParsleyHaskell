@@ -17,7 +17,7 @@ import ParserAST                  (ParserF(..), Parser(..))
 import Optimiser                  (optimise)
 import Analyser                   (terminationAnalysis)
 import CodeGenerator              (codeGen, halt, ret)
-import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), letBind, LetBinding)
+import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
 import Indexed                    (Free(Op), Void1, fold', absurd)
 import Control.Applicative        (liftA2, liftA3)
 import Control.Monad              (forM_)
@@ -52,7 +52,7 @@ compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.em
     compileLet :: MVar x -> Free ParserF Void1 x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
     compileLet (MVar μ) p (ms, maxΣ) =
       let (m, maxΣ') = codeGen p ret maxV (maxΣ + 1)
-      in (DMap.insert (MVar μ) (letBind m) ms, maxΣ')
+      in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
 
 preprocess :: Free ParserF Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
 preprocess p = let (lets, recs, topo) = findLets p in letInsertion lets recs topo p

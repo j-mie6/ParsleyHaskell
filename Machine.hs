@@ -49,8 +49,6 @@ newtype MVar a = MVar IMVar
 newtype ΦVar a = ΦVar IΦVar
 type ΦDecl k x xs ks a = (ΦVar x, k (x ': xs) ks a)
 newtype LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a)
-letBind :: Free3 (M o) Void3 xs x a -> LetBinding o a x
-letBind m = LetBinding (coerce m)
 
 instance Show (LetBinding o a x) where show (LetBinding m) = show m
 

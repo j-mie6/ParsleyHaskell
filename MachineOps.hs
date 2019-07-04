@@ -33,8 +33,12 @@ data HList xs where
   HNil :: HList '[]
   HCons :: !a -> HList as -> HList (a ': as)
 
+data QList xs where
+  QNil :: QList '[]
+  QCons :: !(TExpQ a) -> QList as -> QList (a ': as)
+
 type H s o a = H_ (Rep o) s (Unboxed o) a
-newtype H_ r s (o# :: TYPE r) a = H (SList (o# -> ST s (Maybe a)))
+type H_ r s (o# :: TYPE r) a = SList (o# -> ST s (Maybe a))
 type X = HList
 type O = Int
 type O# = Int#
@@ -85,7 +89,7 @@ shiftRight = _shiftRight ?ops
 offToInt   :: (?ops :: InputOps s o) => TExpQ (o -> Int)
 offToInt   = _offToInt   ?ops
 
-newtype AbsExec r s (o# :: TYPE r) a x = AbsExec (K_ r s o# x a -> o# -> H_ r s o# a -> ST s (Maybe a))
+type AbsExec r s (o# :: TYPE r) a x = K_ r s o# x a -> o# -> H_ r s o# a -> ST s (Maybe a)
 newtype QAbsExec s o a x = QAbsExec (TExpQ (AbsExec (Rep o) s (Unboxed o) a x))
 newtype QJoin r s (o# :: TYPE r) a x = QJoin (TExpQ (x -> o# -> ST s (Maybe a)))
 
@@ -119,15 +123,15 @@ peekX (HCons x xs) = x
 makeK :: ST s (K_ k s o Void a)
 makeK = return $! noreturn
 noreturn :: K_ k s o x a
-noreturn xs = error "Machine is only permitted return-by-failure"
+noreturn x = error "Machine is only permitted return-by-failure"
 
 makeH :: ST s (H_ r s o# a)
-makeH = return $! H SNil
+makeH = return $! SNil
 pushH :: (o# -> ST s (Maybe a)) -> H_ r s o# a -> H_ r s o# a
-pushH !h (H hs) = H (h:::hs)
+pushH !h hs = (h:::hs)
 {-# INLINE popH_ #-}
 popH_ :: H_ r s o# a -> H_ r s o# a
-popH_ (H (_:::hs)) = H hs
+popH_ (_:::hs) = hs
 
 {-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
@@ -154,7 +158,7 @@ class FailureOps o where
 instance FailureOps _o where                                                             \
 {                                                                                        \
   setupHandler hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$unbox $$o)) $$hs ||]; \
-  raise = [||\(H hs) (!o) -> case hs of                                                  \
+  raise = [||\hs (!o) -> case hs of                                                      \
   {                                                                                      \
     SNil -> return Nothing;                                                              \
     h:::_ -> h ($$unbox o);                                                              \
@@ -176,7 +180,7 @@ class ConcreteExec o where
   runConcrete :: (?ops :: InputOps s o) => TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> K s o x a -> o -> H s o a -> ST s (Maybe a))
 
 #define deriveConcreteExec(_o) \
-instance ConcreteExec _o where { runConcrete = [||\(AbsExec m) ks o hs -> m ks ($$unbox o) hs||] };
+instance ConcreteExec _o where { runConcrete = [||\m ks o hs -> m ks ($$unbox o) hs||] };
 inputInstances(deriveConcreteExec)
 
 nextSafe :: (?ops :: InputOps s o) => Bool -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)

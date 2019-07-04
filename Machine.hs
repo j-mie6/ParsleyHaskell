@@ -426,23 +426,23 @@ class RecBuilder o where
             -> (Ctx s o a -> QST s (Maybe a)) 
             -> QST s (Maybe a)
 
-#define deriveRecBuilder(_o)                                                                                     \
-instance RecBuilder _o where                                                                                     \
-{                                                                                                                \
-  buildIter ctx μ σ l ref cref xs hs o = let bx = box in [||                                                     \
-      do                                                                                                         \
-      {                                                                                                          \
-        let {loop !o# =                                                                                          \
-          $$(run l (Γ [||HNil||] [||noreturn||] [||$$bx o#||] hs)                                                        \
-                   (insertSTC σ cref (insertM μ [||AbsExec (\_ (!o#) _ -> loop o#)||] (insertΣ σ ref ctx))))}; \
-        loop ($$unbox $$o)                                                                                       \
-      } ||];                                                                                                     \
-  buildRec ctx μ body k = let bx = box in [||                                                                    \
-    let recu = AbsExec (\(!ks) (!o#) hs ->                                                                 \
-          $$(body (Γ [||HNil||] [||ks||] [||$$bx o#||] [||hs||])                                                   \
-                  (insertM μ [||recu||] ctx)))                                                                   \
-    in $$(k (insertM μ [||recu||] ctx))                                                                          \
-    ||]                                                                                                          \
+#define deriveRecBuilder(_o)                                                                         \
+instance RecBuilder _o where                                                                         \
+{                                                                                                    \
+  buildIter ctx μ σ l ref cref xs hs o = let bx = box in [||                                         \
+      do                                                                                             \
+      {                                                                                              \
+        let {loop !o# =                                                                              \
+          $$(run l (Γ [||HNil||] [||noreturn||] [||$$bx o#||] hs)                                    \
+                   (insertSTC σ cref (insertM μ [||\_ (!o#) _ -> loop o#||] (insertΣ σ ref ctx))))}; \
+        loop ($$unbox $$o)                                                                           \
+      } ||];                                                                                         \
+  buildRec ctx μ body k = let bx = box in [||                                                        \
+      let recu !ks !o# hs =                                                                          \
+            $$(body (Γ [||HNil||] [||ks||] [||$$bx o#||] [||hs||])                                   \
+                    (insertM μ [||recu||] ctx))                                                      \
+      in $$(k (insertM μ [||recu||] ctx))                                                            \
+    ||]                                                                                              \
 };
 inputInstances(deriveRecBuilder)
 
@@ -464,11 +464,11 @@ class KOps o where
   suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) r a -> QST s (Maybe a)) -> Γ s o xs r a -> QK s o x a
   resume :: (?ops :: InputOps s o) => Γ s o (x ': xs) x a -> QST s (Maybe a)
 
-#define deriveKOps(_o)                                                              \
-instance KOps _o where                                                              \
-{                                                                                   \
+#define deriveKOps(_o)                                                                           \
+instance KOps _o where                                                                           \
+{                                                                                                \
   suspend m γ = [|| \x (!o#) -> $$(m (γ {xs = [||pushX x $$(xs γ)||], o = [||$$box o#||]})) ||]; \
-  resume γ = [|| $$(k γ) (peekX $$(xs γ)) ($$unbox $$(o γ)) ||]                             \
+  resume γ = [|| $$(k γ) (peekX $$(xs γ)) ($$unbox $$(o γ)) ||]                                  \
 };
 inputInstances(deriveKOps)
 

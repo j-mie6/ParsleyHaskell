@@ -7,7 +7,7 @@ module Analyser (constantInput, terminationAnalysis) where
 
 import ParserAST                  (ParserF(..))
 import Machine                    (IMVar, MVar(..))
-import Indexed                    (Free, History(Era), Void, Const(..), imap, fold, histo, present, (|>), absurd)
+import Indexed                    (Free, History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
 import Control.Monad.State.Strict (State, get, put, evalState)
@@ -18,25 +18,25 @@ import qualified Data.Set        as Set
 
 -- Constant Input Consumption Analysis
 constantInput :: Free ParserF f a -> Maybe Int
-constantInput = getConst . histo (const (Const Nothing)) (alg1 |> (Const . alg2 . imap present))
+constantInput = getConst1 . histo (const (Const1 Nothing)) (alg1 |> (Const1 . alg2 . imap present))
   where
-    alg1 :: ParserF (History ParserF (Const (Maybe Int))) a -> Maybe (Const (Maybe Int) a)
-    alg1 (Era (Const n) (Try _ _) :<|>: Era (Const q) _) = Just (Const (n <==> q))
+    alg1 :: ParserF (History ParserF (Const1 (Maybe Int))) a -> Maybe (Const1 (Maybe Int) a)
+    alg1 (Era (Const1 n) (Try _ _) :<|>: Era (Const1 q) _) = Just (Const1 (n <==> q))
     alg1 _ = Nothing
-    alg2 :: ParserF (Const (Maybe Int)) a -> Maybe Int
+    alg2 :: ParserF (Const1 (Maybe Int)) a -> Maybe Int
     alg2 (Pure _)                               = Just 0
     alg2 (Satisfy _)                            = Just 1
-    alg2 (Const p :<*>: Const q)                = p <+> q
-    alg2 (Const p :*>: Const q)                 = p <+> q
-    alg2 (Const p :<*: Const q)                 = p <+> q
+    alg2 (Const1 p :<*>: Const1 q)                = p <+> q
+    alg2 (Const1 p :*>: Const1 q)                 = p <+> q
+    alg2 (Const1 p :<*: Const1 q)                 = p <+> q
     alg2 Empty                                  = Just 0
     alg2 (Try n _)                              = n
-    alg2 (LookAhead (Const p))                  = p
-    alg2 (NotFollowedBy (Const p))              = p
-    alg2 (Branch (Const b) (Const p) (Const q)) = b <+> (p <==> q)
-    alg2 (Match (Const p) _ qs (Const def))     = p <+> (foldr (<==>) def (map getConst qs))
-    alg2 (Debug _ (Const p))                    = p
-    alg2 (Let False _ (Const p))                = p
+    alg2 (LookAhead (Const1 p))                  = p
+    alg2 (NotFollowedBy (Const1 p))              = p
+    alg2 (Branch (Const1 b) (Const1 p) (Const1 q)) = b <+> (p <==> q)
+    alg2 (Match (Const1 p) _ qs (Const1 def))     = p <+> (foldr (<==>) def (map getConst1 qs))
+    alg2 (Debug _ (Const1 p))                    = p
+    alg2 (Let False _ (Const1 p))                = p
     alg2 _                                      = Nothing
 
 -- Termination Analysis (Generalised left-recursion checker)
@@ -92,7 +92,7 @@ branching (Prop Some f _) ps = Prop (foldr (|||) Some (map success ps)) f False
 
 --data InferredTerm = Loops | Safe | Undecidable
 newtype Termination a = Termination {runTerm :: ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop}
-terminationAnalysis :: Free ParserF Void a -> Free ParserF Void a
+terminationAnalysis :: Free ParserF Void1 a -> Free ParserF Void1 a
 terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold absurd (Termination . alg) p)) Set.empty) Map.empty)) then p
                         else error "Parser will loop indefinitely: either it is left-recursive or iterates over pure computations"
   where

@@ -18,7 +18,7 @@ import Optimiser                  (optimise)
 import Analyser                   (terminationAnalysis)
 import CodeGenerator              (codeGen, halt, ret)
 import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), letBind, LetBinding)
-import Indexed                    (Free(Op), Void, fold', absurd)
+import Indexed                    (Free(Op), Void1, fold', absurd)
 import Control.Applicative        (liftA2, liftA3)
 import Control.Monad              (forM_)
 import Control.Monad.Reader       (ReaderT, runReaderT, local, ask, asks, MonadReader)
@@ -46,18 +46,18 @@ compile (Parser p) =
       !ms = compileLets μs (maxV + 1) maxΣ
   in trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (Machine m, ms, topo)
 
-compileLets :: DMap MVar (Free ParserF Void) -> IMVar -> IΣVar -> DMap MVar (LetBinding o a)
+compileLets :: DMap MVar (Free ParserF Void1) -> IMVar -> IΣVar -> DMap MVar (LetBinding o a)
 compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.empty, maxΣ) μs in ms
   where
-    compileLet :: MVar x -> Free ParserF Void x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
+    compileLet :: MVar x -> Free ParserF Void1 x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
     compileLet (MVar μ) p (ms, maxΣ) =
       let (m, maxΣ') = codeGen p ret maxV (maxΣ + 1)
       in (DMap.insert (MVar μ) (letBind m) ms, maxΣ')
 
-preprocess :: Free ParserF Void a -> (Free ParserF Void a, DMap MVar (Free ParserF Void), IMVar, [IMVar])
+preprocess :: Free ParserF Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
 preprocess p = let (lets, recs, topo) = findLets p in letInsertion lets recs topo p
 
-data StableParserName = forall a. StableParserName (StableName# (Free ParserF Void a))
+data StableParserName = forall a. StableParserName (StableName# (Free ParserF Void1 a))
 data LetFinderState = LetFinderState { preds  :: HashMap StableParserName Int
                                      , recs   :: HashSet StableParserName
                                      , before :: HashSet StableParserName
@@ -68,7 +68,7 @@ newtype LetFinder a = LetFinder { runLetFinder :: StateT LetFinderState (ReaderT
 reverseFilter :: (a -> Bool) -> [a] -> [a]
 reverseFilter p = foldl' (\xs x -> if p x then x : xs else xs) []
 
-findLets :: Free ParserF Void a -> (HashSet StableParserName, HashSet StableParserName, [StableParserName])
+findLets :: Free ParserF Void1 a -> (HashSet StableParserName, HashSet StableParserName, [StableParserName])
 findLets p = (lets, recs, reverseFilter letBound topo) 
   where
     letBound = flip HashSet.member (HashSet.union lets recs)
@@ -77,7 +77,7 @@ findLets p = (lets, recs, reverseFilter letBound topo)
     LetFinderState preds recs _ topo = unsafePerformIO (runReaderT (execStateT (runLetFinder (fold' absurd findLetsAlg p)) state) ctx)
     lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
 
-findLetsAlg :: Free ParserF Void a -> ParserF LetFinder a -> LetFinder a
+findLetsAlg :: Free ParserF Void1 a -> ParserF LetFinder a -> LetFinder a
 findLetsAlg p q = LetFinder $ do 
   name <- makeStableParserName p
   addPred name
@@ -105,15 +105,15 @@ newtype LetInserter a =
   LetInserter {
       runLetInserter :: HFreshT IMVar 
                         (StateT ( HashMap StableParserName IMVar
-                                , DMap MVar (Free ParserF Void)) IO) 
-                        (Free ParserF Void a)
+                                , DMap MVar (Free ParserF Void1)) IO) 
+                        (Free ParserF Void1 a)
     }
-letInsertion :: HashSet StableParserName -> HashSet StableParserName -> [StableParserName] -> Free ParserF Void a -> (Free ParserF Void a, DMap MVar (Free ParserF Void), IMVar, [IMVar])
+letInsertion :: HashSet StableParserName -> HashSet StableParserName -> [StableParserName] -> Free ParserF Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
 letInsertion lets recs topo p = (p', μs, μMax, map (vs HashMap.!) topo)
   where
     m = fold' absurd alg p
     ((p', μMax), (vs, μs)) = unsafePerformIO (runStateT (runFreshT (runLetInserter m) 0) (HashMap.empty, DMap.empty))
-    alg :: Free ParserF Void a -> ParserF LetInserter a -> LetInserter a
+    alg :: Free ParserF Void1 a -> ParserF LetInserter a -> LetInserter a
     alg p q = LetInserter $ do
       name <- makeStableParserName p
       (vs, μs) <- get
@@ -196,7 +196,7 @@ addToTopology x = modifyTopo (x:)
 addName :: MonadReader LetFinderCtx m => StableParserName -> m b -> m b
 addName x = local (HashSet.insert x)
 
-makeStableParserName :: MonadIO m => Free ParserF Void a -> m StableParserName
+makeStableParserName :: MonadIO m => Free ParserF Void1 a -> m StableParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
 makeStableParserName !p =
   do !(StableName name) <- liftIO (makeStableName p)

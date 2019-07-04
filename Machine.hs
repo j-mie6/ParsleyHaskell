@@ -34,6 +34,7 @@ import Safe.Coerce                (coerce)
 import Debug.Trace                (trace)
 import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
 import Data.Text                  (Text)
+import Data.Void                  (Void)
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty)
 
@@ -42,26 +43,26 @@ derivation(O)                      \
 derivation((OffWith s))            \
 derivation(Text)
 
-newtype Machine o a = Machine { getMachine :: Free3 (M o) Void3 '[] '[] a }
+newtype Machine o a = Machine { getMachine :: Free3 (M o) Void3 '[] Void a }
 newtype ΣVar a = ΣVar IΣVar
 newtype MVar a = MVar IMVar
 newtype ΦVar a = ΦVar IΦVar
 type ΦDecl k x xs ks a = (ΦVar x, k (x ': xs) ks a)
-newtype LetBinding o a x = LetBinding (forall xs. Free3 (M o) Void3 xs (x ': xs) a)
-letBind :: Free3 (M o) Void3 xs (x ': xs) a -> LetBinding o a x
+newtype LetBinding o a x = LetBinding (forall xs. Free3 (M o) Void3 xs x a)
+letBind :: Free3 (M o) Void3 xs x a -> LetBinding o a x
 letBind m = LetBinding (coerce m)
 
 instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
 data M o k xs ks a where
-  Halt      :: M o k '[a] '[] a
-  Ret       :: M o k (x ': xs) (x ': xs) a
+  Halt      :: M o k '[a] Void a
+  Ret       :: M o k (x ': xs) x a
   Push      :: WQ x -> !(k (x ': xs) ks a) -> M o k xs ks a
   Pop       :: !(k xs ks a) -> M o k (x ': xs) ks a
   Lift2     :: !(WQ (x -> y -> z)) -> !(k (z ': xs) ks a) -> M o k (y ': x ': xs) ks a
   Sat       :: WQ (Char -> Bool) -> !(k (Char ': xs) ks a) -> M o k xs ks a
   Call      :: !(MVar x) -> !(k (x ': xs) ks a) -> M o k xs ks a
-  Jump      :: !(MVar x) -> M o k xs (x ': xs) a
+  Jump      :: !(MVar x) -> M o k xs x a
   Empt      :: M o k xs ks a
   Commit    :: !Bool -> !(k xs ks a) -> M o k xs ks a
   HardFork  :: !(k xs ks a) -> !(k xs ks a) -> !(Maybe (ΦDecl k x xs ks a)) -> M o k xs ks a
@@ -73,8 +74,8 @@ data M o k xs ks a where
   NegLook   :: !(k xs ks a) -> !(k xs ks a) -> M o k xs ks a
   Case      :: !(k (x ': xs) ks a) -> !(k (y ': xs) ks a) -> M o k (Either x y ': xs) ks a
   Choices   :: ![WQ (x -> Bool)] -> ![k xs ks a] -> k xs ks a -> M o k (x ': xs) ks a
-  ChainIter :: !(ΣVar x) -> !(MVar x) -> M o k ((x -> x) ': xs) (x ': xs) a
-  ChainInit :: !(ΣVar x) -> !(k xs (x ': xs) a) -> !(MVar x) -> !(k (x ': xs) ks a) -> M o k (x ': xs) ks a
+  ChainIter :: !(ΣVar x) -> !(MVar x) -> M o k ((x -> x) ': xs) x a
+  ChainInit :: !(ΣVar x) -> !(k xs x a) -> !(MVar x) -> !(k (x ': xs) ks a) -> M o k (x ': xs) ks a
   Swap      :: k (x ': y ': xs) ks a -> M o k (y ': x ': xs) ks a
   LogEnter  :: String -> !(k xs ks a) -> M o k xs ks a
   LogExit   :: String -> !(k xs ks a) -> M o k xs ks a
@@ -156,7 +157,7 @@ exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
              (Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0))
   ||]
 
-readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] '[] a -> Γ s o '[] '[] a -> Ctx s o a -> QST s (Maybe a)
+readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> QST s (Maybe a)
 readyCalls topo ms start γ = foldr readyFunc (run start γ) topo
   where
     readyFunc v rest (ctx :: Ctx s o a) = 
@@ -196,7 +197,7 @@ readyExec = fold3 absurd (Exec . alg)
 execHalt :: Reader (Ctx s o a) (Γ s o '[a] ks a -> QST s (Maybe a))
 execHalt = return $! \γ -> [|| return $! Just $! peekX ($$(xs γ)) ||]
 
-execRet :: (?ops :: InputOps s o, KOps o) => Reader (Ctx s o a) (Γ s o (x ': xs) (x ': xs) a -> QST s (Maybe a))
+execRet :: (?ops :: InputOps s o, KOps o) => Reader (Ctx s o a) (Γ s o (x ': xs) x a -> QST s (Maybe a))
 execRet = return $! resume
 
 execCall :: (?ops :: InputOps s o, ConcreteExec o, KOps o) => MVar x -> Exec s o (x ': xs) ks a -> Reader (Ctx s o a) (Γ s o xs ks a -> QST s (Maybe a))
@@ -205,7 +206,7 @@ execCall μ (Exec k) =
      mk <- k
      return $ \γ@Γ{..} -> [|| $$runConcrete $$m $$xs $$(suspend mk γ) $$o $$hs ||]
 
-execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> Reader (Ctx s o a) (Γ s o xs (x ': xs) a -> QST s (Maybe a))
+execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> Reader (Ctx s o a) (Γ s o xs x a -> QST s (Maybe a))
 execJump μ =
   do !(QAbsExec m) <- askM μ
      return $! \γ@Γ{..} -> [|| $$runConcrete $$m $$xs $$k $$o $$hs ||]
@@ -312,7 +313,7 @@ execChoices fs ks (Exec def) =
         else $$(go x fs mks def γ)
       ||]
 
-execChainIter :: (?ops :: InputOps s o, ConcreteExec o) => ΣVar x -> MVar x -> Reader (Ctx s o a) (Γ s o ((x -> x) ': xs) (x ': xs) a -> QST s (Maybe a))
+execChainIter :: (?ops :: InputOps s o, ConcreteExec o) => ΣVar x -> MVar x -> Reader (Ctx s o a) (Γ s o ((x -> x) ': xs) x a -> QST s (Maybe a))
 execChainIter σ μ =
   do !(QSTRef ref) <- askΣ σ
      !(QAbsExec l) <- askM μ
@@ -324,7 +325,7 @@ execChainIter σ μ =
           $$runConcrete $$l xs' $$k $$o $$hs
        ||]
 
-execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x -> Exec s o xs (x ': xs) a -> MVar x -> Exec s o (x ': xs) ks a
+execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x -> Exec s o xs x a -> MVar x -> Exec s o (x ': xs) ks a
               -> Reader (Ctx s o a) (Γ s o (x ': xs) ks a -> QST s (Maybe a))
 execChainInit σ l μ (Exec k) =
   do mk <- k
@@ -420,11 +421,11 @@ instance JoinBuilder _o where                                                   
 inputInstances(deriveJoinBuilder)
 
 class RecBuilder o where
-  buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o xs (x ': xs) a 
+  buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o xs x a 
             -> TExpQ (STRef s x) -> TExpQ (CRef s o)
             -> QX xs -> QH s o a  -> QO o -> QST s (Maybe a)
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
-            -> (forall xs. Γ s o xs (x ': xs) a -> Ctx s o a -> QST s (Maybe a)) 
+            -> (forall xs. Γ s o xs x a -> Ctx s o a -> QST s (Maybe a)) 
             -> (Ctx s o a -> QST s (Maybe a)) 
             -> QST s (Maybe a)
 
@@ -463,14 +464,14 @@ raiseΓ :: (?ops :: InputOps s o, FailureOps o) => Γ s o xs ks a -> QST s (Mayb
 raiseΓ γ = [|| $$raise $$(hs γ) $$(o γ) ||]
 
 class KOps o where
-  suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> QK s o (x ': xs) a
-  resume :: (?ops :: InputOps s o) => Γ s o (x ': xs) (x ': xs) a -> QST s (Maybe a)
+  suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> QK s o x a
+  resume :: (?ops :: InputOps s o) => Γ s o (x ': xs) x a -> QST s (Maybe a)
 
 #define deriveKOps(_o)                                                              \
 instance KOps _o where                                                              \
 {                                                                                   \
-  suspend m γ = [|| \xs (!o#) -> $$(m (γ {xs = [||xs||], o = [||$$box o#||]})) ||]; \
-  resume γ = [|| $$(k γ) $$(xs γ) ($$unbox $$(o γ)) ||]                             \
+  suspend m γ = [|| \x (!o#) -> $$(m (γ {xs = [||pushX x $$(xs γ)||], o = [||$$box o#||]})) ||]; \
+  resume γ = [|| $$(k γ) (peekX $$(xs γ)) ($$unbox $$(o γ)) ||]                             \
 };
 inputInstances(deriveKOps)
 

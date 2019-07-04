@@ -8,13 +8,13 @@
 {-# LANGUAGE TemplateHaskell #-}
 module ParserAST where
 
-import Indexed                    (IFunctor, Free(Op), Void, Const(..), imap, fold)
+import Indexed                    (IFunctor, Free(Op), Void1, Const1(..), imap, fold)
 import Machine                    (IMVar, MVar(..))
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 
 -- Parser wrapper type
-newtype Parser a = Parser {unParser :: Free ParserF Void a}
+newtype Parser a = Parser {unParser :: Free ParserF Void1 a}
 
 -- Core smart constructors
 pure :: WQ a -> Parser a
@@ -109,23 +109,23 @@ instance IFunctor ParserF where
   imap f (Debug name p)    = Debug name (f p)
 
 instance Show (Free ParserF f a) where
-  show = getConst . fold (const (Const "")) (Const . alg)
+  show = getConst1 . fold (const (Const1 "")) (Const1 . alg)
     where
       alg (Pure x)                               = "(pure x)"
       alg (Satisfy _)                            = "(satisfy f)"
-      alg (Const pf :<*>: Const px)              = concat ["(", pf, " <*> ",  px, ")"]
-      alg (Const p :*>: Const q)                 = concat ["(", p, " *> ", q, ")"]
-      alg (Const p :<*: Const q)                 = concat ["(", p, " <* ", q, ")"]
-      alg (Const p :<|>: Const q)                = concat ["(", p, " <|> ", q, ")"]
+      alg (Const1 pf :<*>: Const1 px)              = concat ["(", pf, " <*> ",  px, ")"]
+      alg (Const1 p :*>: Const1 q)                 = concat ["(", p, " *> ", q, ")"]
+      alg (Const1 p :<*: Const1 q)                 = concat ["(", p, " <* ", q, ")"]
+      alg (Const1 p :<|>: Const1 q)                = concat ["(", p, " <|> ", q, ")"]
       alg Empty                                  = "empty"
-      alg (Try Nothing (Const p))                = concat ["(try ? ", p, ")"]
-      alg (Try (Just n) (Const p))               = concat ["(try ", show n, " ", p, ")"]
-      alg (LookAhead (Const p))                  = concat ["(lookAhead ", p, ")"]
+      alg (Try Nothing (Const1 p))                = concat ["(try ? ", p, ")"]
+      alg (Try (Just n) (Const1 p))               = concat ["(try ", show n, " ", p, ")"]
+      alg (LookAhead (Const1 p))                  = concat ["(lookAhead ", p, ")"]
       alg (Let False v _)                        = concat ["(let-bound ", show v, ")"]
       alg (Let True v _)                         = concat ["(rec ", show v, ")"]
-      alg (NotFollowedBy (Const p))              = concat ["(notFollowedBy ", p, ")"]
-      alg (Branch (Const b) (Const p) (Const q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-      alg (Match (Const p) fs qs (Const def))    = concat ["(match ", p, " ", show (map getConst qs), " ", def, ")"]
-      alg (ChainPre (Const op) (Const p))        = concat ["(chainPre ", op, " ", p, ")"]
-      alg (ChainPost (Const p) (Const op))       = concat ["(chainPost ", p, " ", op, ")"]
-      alg (Debug _ (Const p))                    = p
+      alg (NotFollowedBy (Const1 p))              = concat ["(notFollowedBy ", p, ")"]
+      alg (Branch (Const1 b) (Const1 p) (Const1 q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
+      alg (Match (Const1 p) fs qs (Const1 def))    = concat ["(match ", p, " ", show (map getConst1 qs), " ", def, ")"]
+      alg (ChainPre (Const1 op) (Const1 p))        = concat ["(chainPre ", op, " ", p, ")"]
+      alg (ChainPost (Const1 p) (Const1 op))       = concat ["(chainPost ", p, " ", op, ")"]
+      alg (Debug _ (Const1 p))                    = p

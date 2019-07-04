@@ -21,6 +21,7 @@ import GHC.Exts           (Int(..), TYPE)
 import Safe.Coerce        (coerce)
 import Input              (Rep, CRef, Unboxed, OffWith)
 import Data.Text          (Text)
+import Data.Void          (Void)
 
 #define inputInstances(derivation) \
 derivation(O)                      \
@@ -47,8 +48,8 @@ type O# = Int#
     concrete machine. As such, continuations are only required to
     demand the values of X and o, with all other values closed over
     during suspension. -}
-type K s o xs a = K_ (Rep o) s (Unboxed o) xs a
-type K_ r s (o# :: TYPE r) xs a = X xs -> o# -> ST s (Maybe a)
+type K s o x a = K_ (Rep o) s (Unboxed o) x a
+type K_ r s (o# :: TYPE r) x a = x -> o# -> ST s (Maybe a)
 data InputOps s o = InputOps { _more       :: TExpQ (o -> Bool)
                              , _next       :: TExpQ (o -> (# Char, o #))
                              , _same       :: TExpQ (o -> o -> Bool)
@@ -84,13 +85,13 @@ shiftRight = _shiftRight ?ops
 offToInt   :: (?ops :: InputOps s o) => TExpQ (o -> Int)
 offToInt   = _offToInt   ?ops
 
-newtype AbsExec r s (o# :: TYPE r) a x = AbsExec (forall xs. X xs -> K_ r s o# (x ': xs) a -> o# -> H_ r s o# a -> ST s (Maybe a))
+newtype AbsExec r s (o# :: TYPE r) a x = AbsExec (forall xs. X xs -> K_ r s o# x a -> o# -> H_ r s o# a -> ST s (Maybe a))
 newtype QAbsExec s o a x = QAbsExec (TExpQ (AbsExec (Rep o) s (Unboxed o) a x))
 newtype QJoin r s (o# :: TYPE r) a x = QJoin (TExpQ (x -> o# -> ST s (Maybe a)))
 
 type QH s o a = TExpQ (H s o a)
 type QX xs = TExpQ (X xs)
-type QK s o ks a = TExpQ (K s o ks a)
+type QK s o x a = TExpQ (K s o x a)
 type QO o = TExpQ o
 type QST s a = TExpQ (ST s a)
 
@@ -98,7 +99,7 @@ makeX :: ST s (X '[])
 makeX = return $! HNil
 {-# INLINE pushX #-}
 pushX :: a -> X xs -> X (a ': xs)
-pushX !x xs = HCons x xs
+pushX x xs = HCons x xs
 {-# INLINE popX #-}
 popX :: X (a ': xs) -> (# a, X xs #)
 popX (HCons x xs) = (# x, xs #)
@@ -115,9 +116,9 @@ modX f (HCons x xs) = HCons (f $! x) xs
 peekX :: X (a ': xs) -> a
 peekX (HCons x xs) = x
 
-makeK :: ST s (K_ k s o '[] a)
+makeK :: ST s (K_ k s o Void a)
 makeK = return $! noreturn
-noreturn :: K_ k s o xs a
+noreturn :: K_ k s o x a
 noreturn xs = error "Machine is only permitted return-by-failure"
 
 makeH :: ST s (H_ r s o# a)
@@ -172,7 +173,7 @@ inputInstances(deriveFailureOps)
         |] in traverse derive inputTypes)-}
 
 class ConcreteExec o where
-  runConcrete :: (?ops :: InputOps s o) => TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> X xs -> K s o (x ': xs) a -> o -> H s o a -> ST s (Maybe a))
+  runConcrete :: (?ops :: InputOps s o) => TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> X xs -> K s o x a -> o -> H s o a -> ST s (Maybe a))
 
 #define deriveConcreteExec(_o) \
 instance ConcreteExec _o where { runConcrete = [||\(AbsExec m) xs ks o hs -> m xs ks ($$unbox o) hs||] };

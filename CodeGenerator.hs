@@ -10,7 +10,7 @@ module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..))
 import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, fmapInstr)
-import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void, Void3, imap, histo, present, (|>), absurd)
+import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
@@ -20,6 +20,7 @@ import Control.Monad.Trans        (lift)
 import Data.Set                   (Set)
 import Data.Maybe                 (isJust)
 import Debug.Trace                (traceShow, trace)
+import Data.Void                  (Void)
 import qualified Data.Set as Set
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFreshT IΣVar (Reader (Set IMVar)))) a
@@ -33,13 +34,13 @@ runCodeGenStack m μ0 φ0 σ0 seen0 =
 newtype CodeGen o b a = 
   CodeGen {runCodeGen :: forall xs' ks'. Free3 (M o) Void3 (a ': xs') ks' b -> CodeGenStack (Free3 (M o) Void3 xs' ks' b)}
 
-halt :: Free3 (M o) Void3 '[a] '[] a
+halt :: Free3 (M o) Void3 '[a] Void a
 halt = Op3 Halt
 
-ret :: Free3 (M o) Void3 (x ': xs) (x ': xs) a
+ret :: Free3 (M o) Void3 (x ': xs) x a
 ret = Op3 Ret
 
-codeGen :: Free ParserF Void a -> Free3 (M o) Void3 (a ': xs) ks b -> IMVar -> IΣVar -> (Free3 (M o) Void3 xs ks b, IΣVar)
+codeGen :: Free ParserF Void1 a -> Free3 (M o) Void3 (a ': xs) ks b -> IMVar -> IΣVar -> (Free3 (M o) Void3 xs ks b, IΣVar)
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0 Set.empty

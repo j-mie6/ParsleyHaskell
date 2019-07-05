@@ -237,7 +237,7 @@ execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl $
 #define deriveHardForkHandler(_o)                                  \
 instance HardForkHandler _o where                                  \
 {                                                                  \
-  hardForkHandler mq γ = [||\(!h) (!o#) (!c#) ->                   \
+  hardForkHandler mq γ = [||\h (!o#) (!c#) ->                   \
       if $$same ($$box c#) ($$box o#) then                         \
         $$(mq (γ {o = [||$$box o#||], hs = pushH [||h||] (hs γ)})) \
       else h o#                                                    \
@@ -252,7 +252,7 @@ execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl $
      return $! \γ -> setupHandlerΓ γ (softForkHandler mq γ) mp
 
 #define deriveSoftForkHandler(_o) \
-instance SoftForkHandler _o where { softForkHandler mq γ = [||\(!h) _ (!c#) -> $$(mq (γ {o = [||$$box c#||], hs = pushH [||h||] (hs γ)}))||] };
+instance SoftForkHandler _o where { softForkHandler mq γ = [||\h _ (!c#) -> $$(mq (γ {o = [||$$box c#||], hs = pushH [||h||] (hs γ)}))||] };
 inputInstances(deriveSoftForkHandler)
 
 execJoin :: (?ops :: InputOps s o) => ΦVar x -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
@@ -264,7 +264,7 @@ execAttempt :: (?ops :: InputOps s o, AttemptHandler o) => Maybe Int -> Exec s o
 execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; return $! \γ -> setupHandlerΓ γ attemptHandler mk
 
 #define deriveAttemptHandler(_o) \
-instance AttemptHandler _o where { attemptHandler = [||\(!h) _ (!c#) -> h c#||] };
+instance AttemptHandler _o where { attemptHandler = [||\h _ (!c#) -> h c#||] };
 inputInstances(deriveAttemptHandler)
 
 execTell :: Exec s o (o ': xs) r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
@@ -283,7 +283,7 @@ execNegLook (Exec m) (Exec k) =
 instance NegLookHandler _o where                                              \
 {                                                                             \
   negLookHandler1 mk γ = [||\_ _ (!c#) -> $$(mk (γ {o = [||$$box c#||]}))||]; \
-  negLookHandler2 = [||\(!h) _ (!c#) -> h c#||]                               \
+  negLookHandler2 = [||\h _ (!c#) -> h c#||]                               \
 };
 inputInstances(deriveNegLookHandler)
 
@@ -334,7 +334,7 @@ execChainInit σ l μ (Exec k) =
 #define deriveChainHandler(_o)                     \
 instance ChainHandler _o where                     \
 {                                                  \
-  chainHandler mk ref cref γ = [||\(!h) (!o#) _ -> \
+  chainHandler mk ref cref γ = [||\h (!o#) _ -> \
       do                                           \
       {                                            \
         c <- $$readCRef $$cref;                    \
@@ -435,7 +435,7 @@ instance RecBuilder _o where                                                    
         loop ($$unbox $$o)                                                                           \
       } ||];                                                                                         \
   buildRec ctx μ body k = let bx = box in [||                                                        \
-      let recu !ks !o# !h =                                                                          \
+      let recu !ks !o# h =                                                                          \
             $$(body (Γ QNil [||ks||] [||$$bx o#||] (pushH [||h||] makeH))                            \
                     (insertM μ [||recu||] ctx))                                                      \
       in $$(k (insertM μ [||recu||] ctx))                                                            \

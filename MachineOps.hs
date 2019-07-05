@@ -17,7 +17,7 @@ import Utils              (TExpQ)
 import Control.Monad.ST   (ST)
 import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import GHC.Prim           (Int#)
-import GHC.Exts           (Int(..), TYPE)
+import GHC.Exts           (Int(..), TYPE, RuntimeRep(..))
 import Safe.Coerce        (coerce)
 import Input              (Rep, CRef, Unboxed, OffWith)
 import Data.Text          (Text)
@@ -26,15 +26,15 @@ import Data.Void          (Void)
 #define inputInstances(derivation) \
 derivation(O)                      \
 derivation((OffWith s))            \
-derivation(Text)                   
+derivation(Text)
 
-data SList a = !a ::: SList a | SNil
+--data SList a = !a ::: SList a | SNil
 data QList xs where
   QNil :: QList '[]
   QCons :: !(TExpQ a) -> QList as -> QList (a ': as)
 
 type H s o a = H_ (Rep o) s (Unboxed o) a
-type H_ r s (o# :: TYPE r) a = SList (o# -> ST s (Maybe a))
+type H_ r s (o# :: TYPE r) a = o# -> ST s (Maybe a)
 type X = QList
 type O = Int
 type O# = Int#
@@ -117,13 +117,13 @@ makeK = return $! noreturn
 noreturn :: K_ k s o x a
 noreturn x = error "Machine is only permitted return-by-failure"
 
-makeH :: ST s (H_ r s o# a)
-makeH = return $! SNil
-pushH :: (o# -> ST s (Maybe a)) -> H_ r s o# a -> H_ r s o# a
-pushH !h hs = (h:::hs)
+makeH :: [TExpQ (H_ r s o# a)]
+makeH = []
+pushH :: TExpQ (H_ r s o# a) -> [TExpQ (H_ r s o# a)] -> [TExpQ (H_ r s o# a)]
+pushH h hs = (h:hs)
 {-# INLINE popH_ #-}
-popH_ :: H_ r s o# a -> H_ r s o# a
-popH_ (_:::hs) = hs
+popH_ :: [TExpQ (H_ r s o# a)] -> [TExpQ (H_ r s o# a)]
+popH_ (_:hs) = hs
 
 {-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
@@ -141,20 +141,23 @@ modifyΣ σ f =
      writeΣ σ (f $! x)
 
 class FailureOps o where
-  setupHandler :: (?ops :: InputOps s o) => QH s o a -> QO o
+  setupHandler :: (?ops :: InputOps s o) => [QH s o a] -> QO o
                -> TExpQ (H s o a -> Unboxed o -> Unboxed o -> ST s (Maybe a)) 
-               -> (QH s o a -> QST s (Maybe a)) -> QST s (Maybe a)
-  raise :: (?ops :: InputOps s o) => TExpQ (H s o a -> o -> ST s (Maybe a))
+               -> ([QH s o a] -> QST s (Maybe a)) -> QST s (Maybe a)
+  raise :: (?ops :: InputOps s o) => [QH s o a] -> TExpQ (o -> ST s (Maybe a))
 
-#define deriveFailureOps(_o)                                                             \
-instance FailureOps _o where                                                             \
-{                                                                                        \
-  setupHandler hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$unbox $$o)) $$hs ||]; \
-  raise = [||\hs (!o) -> case hs of                                                      \
-  {                                                                                      \
-    SNil -> (return Nothing :: ST s (Maybe a));                                          \
-    h:::_ -> h ($$unbox o);                                                              \
-  } ||];                                                                                 \
+#define deriveFailureOps(_o)                                   \
+instance FailureOps _o where                                   \
+{                                                              \
+  setupHandler hs !o !h !k =                                   \
+    let h' = case hs of                                        \
+    {                                                          \
+      h':_ -> h';                                              \
+      [] -> [||\o# -> return Nothing :: ST s (Maybe a)||]      \
+    }                                                          \
+    in k (pushH [||\(!o#) -> $$h $$h' o# ($$unbox $$o)||] hs); \
+  raise [] = [||\(!o) -> return Nothing||];                    \
+  raise (h:_) = [||\(!o) -> $$h ($$unbox o)||];                \
 };
 inputInstances(deriveFailureOps)
 
@@ -169,10 +172,14 @@ inputInstances(deriveFailureOps)
         |] in traverse derive inputTypes)-}
 
 class ConcreteExec o where
-  runConcrete :: (?ops :: InputOps s o) => TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> K s o x a -> o -> H s o a -> ST s (Maybe a))
+  runConcrete :: (?ops :: InputOps s o) => [TExpQ (H s o a)] -> TExpQ (AbsExec (Rep o) s (Unboxed o) a x -> K s o x a -> o -> ST s (Maybe a))
 
-#define deriveConcreteExec(_o) \
-instance ConcreteExec _o where { runConcrete = [||\m ks o hs -> m ks ($$unbox o) hs||] };
+#define deriveConcreteExec(_o)                                                    \
+instance ConcreteExec _o where                                                    \
+{                                                                                 \
+  runConcrete []    = [||\m ks o -> m ks ($$unbox o) $! \o# -> return Nothing||]; \
+  runConcrete (h:_) = [||\m ks o -> m ks ($$unbox o) $! $$h||]                    \
+};
 inputInstances(deriveConcreteExec)
 
 nextSafe :: (?ops :: InputOps s o) => Bool -> QO o -> TExpQ (Char -> Bool) -> (QO o -> TExpQ Char -> QST s (Maybe a)) -> QST s (Maybe a) -> QST s (Maybe a)

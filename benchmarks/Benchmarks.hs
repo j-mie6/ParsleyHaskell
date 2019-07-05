@@ -38,9 +38,9 @@ import CommonFunctions
 main :: IO ()
 --main = do rnf (regexP (Data.ByteString.Char8.pack (concat (replicate 100000_00 "ab")))) `seq` return (){-
 main =
-  defaultMain [ {-regex
+  defaultMain [ regex
               , brainfuck
-              ,-} tailTest 
+              , tailTest 
               ]--}
 
 streams :: Data.ByteString.Lazy.ByteString -> Maybe String

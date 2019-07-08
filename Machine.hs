@@ -19,28 +19,29 @@
 module Machine where
 
 import MachineOps
-import Input                      (PreparedInput(..), Rep, CRef, Unboxed, OffWith)
-import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
-import Utils                      (WQ(..), lift', (>*<), TExpQ)
-import Data.Word                  (Word64)
-import Control.Monad              (forM)
-import Control.Monad.ST           (ST)
-import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadReader)
-import Data.STRef                 (STRef)
-import Data.Map.Strict            (Map)
-import Data.Dependent.Map         (DMap)
-import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
-import Safe.Coerce                (coerce)
-import Debug.Trace                (trace)
-import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
-import Data.Text                  (Text)
-import Data.Void                  (Void)
+import Input                 (PreparedInput(..), Rep, CRef, Unboxed, OffWith, UnpackedLazyByteString)
+import Indexed               (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
+import Utils                 (WQ(..), lift', (>*<), TExpQ)
+import Data.Word             (Word64)
+import Control.Monad         (forM)
+import Control.Monad.ST      (ST)
+import Control.Monad.Reader  (ask, asks, local, Reader, runReader, MonadReader)
+import Data.STRef            (STRef)
+import Data.Map.Strict       (Map)
+import Data.Dependent.Map    (DMap)
+import Data.GADT.Compare     (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
+import Safe.Coerce           (coerce)
+import Debug.Trace           (trace)
+import System.Console.Pretty (color, Color(Green, White, Red, Blue))
+import Data.Text             (Text)
+import Data.Void             (Void)
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty)
 
 #define inputInstances(derivation) \
 derivation(O)                      \
 derivation((OffWith s))            \
+derivation(UnpackedLazyByteString) \
 derivation(Text)
 
 newtype Machine o a = Machine { getMachine :: Free3 (M o) Void3 '[] Void a }
@@ -237,7 +238,7 @@ execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl $
 #define deriveHardForkHandler(_o)                                  \
 instance HardForkHandler _o where                                  \
 {                                                                  \
-  hardForkHandler mq γ = [||\h (!o#) (!c#) ->                   \
+  hardForkHandler mq γ = [||\h (!o#) (!c#) ->                      \
       if $$same ($$box c#) ($$box o#) then                         \
         $$(mq (γ {o = [||$$box o#||], hs = pushH [||h||] (hs γ)})) \
       else h o#                                                    \
@@ -283,7 +284,7 @@ execNegLook (Exec m) (Exec k) =
 instance NegLookHandler _o where                                              \
 {                                                                             \
   negLookHandler1 mk γ = [||\_ _ (!c#) -> $$(mk (γ {o = [||$$box c#||]}))||]; \
-  negLookHandler2 = [||\h _ (!c#) -> h c#||]                               \
+  negLookHandler2 = [||\h _ (!c#) -> h c#||]                                  \
 };
 inputInstances(deriveNegLookHandler)
 
@@ -334,7 +335,7 @@ execChainInit σ l μ (Exec k) =
 #define deriveChainHandler(_o)                     \
 instance ChainHandler _o where                     \
 {                                                  \
-  chainHandler mk ref cref γ = [||\h (!o#) _ -> \
+  chainHandler mk ref cref γ = [||\h (!o#) _ ->    \
       do                                           \
       {                                            \
         c <- $$readCRef $$cref;                    \
@@ -435,7 +436,7 @@ instance RecBuilder _o where                                                    
         loop ($$unbox $$o)                                                                           \
       } ||];                                                                                         \
   buildRec ctx μ body k = let bx = box in [||                                                        \
-      let recu !ks !o# h =                                                                          \
+      let recu !ks !o# h =                                                                           \
             $$(body (Γ QNil [||ks||] [||$$bx o#||] (pushH [||h||] makeH))                            \
                     (insertM μ [||recu||] ctx))                                                      \
       in $$(k (insertM μ [||recu||] ctx))                                                            \

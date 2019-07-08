@@ -36,12 +36,17 @@ import qualified Data.ByteString.Char8 (pack)
 import CommonFunctions
 
 main :: IO ()
---main = do rnf (regexP (Data.ByteString.Char8.pack (concat (replicate 100000_00 "ab")))) `seq` return (){-
+main = do input <- lazy_bytestring "inputs/as.txt"
+          let Just u = (as input)
+          print u {-rnf (regexP (Data.ByteString.Char8.pack (concat (replicate 100000_00 "ab")))) `seq` return ()-}{-
 main =
   defaultMain [ regex
               , brainfuck
               , tailTest 
               ]--}
+
+as :: Data.ByteString.Lazy.ByteString -> Maybe ()
+as = $$(Parsley.runParser (Parsley.skipMany (Parsley.char 'a') Parsley.<* Parsley.eof))
 
 streams :: Data.ByteString.Lazy.ByteString -> Maybe String
 streams = $$(Parsley.runParser (Parsley.token "abc" Parsley.<* Parsley.eof))
@@ -88,20 +93,24 @@ brainfuckParsleyB = $$(Parsley.runParser ParsleyParsers.brainfuck)
 brainfuckParsleySS :: CharList -> Maybe [BrainFuckOp]
 brainfuckParsleySS = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
+brainfuckParsleyLB :: Data.ByteString.Lazy.ByteString -> Maybe [BrainFuckOp]
+brainfuckParsleyLB = $$(Parsley.runParser ParsleyParsers.brainfuck)
+
 brainfuck :: Benchmark
 brainfuck =
   let bfTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe [BrainFuckOp]) -> Benchmark
       bfTest = benchmark ["inputs/helloworld.bf", "inputs/helloworld_golfed.bf", "inputs/compiler.bf"]
   in bgroup "Brainfuck"
-       [ bfTest string     "Parsley (Stream)"     (brainfuckParsleySS . CharList)
-       , bfTest string     "Parsley (String)"     brainfuckParsleyS
-       , bfTest text       "Parsley (Text)"       (brainfuckParsleyT . Text16)
-       , bfTest bytestring "Parsley (ByteString)" brainfuckParsleyB
-       , bfTest string     "Parsec (String)"      (parsecParse ParsecParsers.brainfuck)
-       , bfTest text       "Parsec (Text)"        (parsecParse ParsecParsers.brainfuck)
-       , bfTest string     "Mega (String)"        (megaParse MegaparsecParsers.brainfuck)
-       , bfTest text       "Mega (Text)"          (megaParse MegaparsecParsers.brainfuck)
-       , bfTest string     "Native"               NativeParsers.brainfuck
+       [ bfTest string          "Parsley (Stream)"          (brainfuckParsleySS . CharList)
+       , bfTest string          "Parsley (String)"          brainfuckParsleyS
+       , bfTest text            "Parsley (Text)"            (brainfuckParsleyT . Text16)
+       , bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB
+       , bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
+       , bfTest string          "Parsec (String)"           (parsecParse ParsecParsers.brainfuck)
+       , bfTest text            "Parsec (Text)"             (parsecParse ParsecParsers.brainfuck)
+       , bfTest string          "Mega (String)"             (megaParse MegaparsecParsers.brainfuck)
+       , bfTest text            "Mega (Text)"               (megaParse MegaparsecParsers.brainfuck)
+       , bfTest string          "Native"                    NativeParsers.brainfuck
        ]
 
 -- Utils
@@ -111,12 +120,14 @@ parsecParse p = either (const Nothing) Just  . Parsec.parse p ""
 megaParse :: (Megaparsec.Stream s, Megaparsec.Token s ~ Char) => MegaparsecParsers.Parser s a -> s -> Maybe a
 megaParse = Megaparsec.parseMaybe
 
-string     :: FilePath -> IO String
-string     = readFile
-text       :: FilePath -> IO Text
-text       = Data.Text.IO.readFile
-bytestring :: FilePath -> IO ByteString
-bytestring = Data.ByteString.readFile
+string          :: FilePath -> IO String
+string          = readFile
+text            :: FilePath -> IO Text
+text            = Data.Text.IO.readFile
+bytestring      :: FilePath -> IO ByteString
+bytestring      = Data.ByteString.readFile
+lazy_bytestring :: FilePath -> IO Data.ByteString.Lazy.ByteString
+lazy_bytestring = Data.ByteString.Lazy.readFile
 
 benchmark :: (NFData a, NFData rep) => [FilePath] -> (FilePath -> IO rep) -> String -> (rep -> Maybe a) -> Benchmark
 benchmark filenames load lib parser = env (traverse load filenames) (bgroup lib . (tasks filenames))

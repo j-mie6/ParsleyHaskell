@@ -19,13 +19,14 @@ import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import GHC.Prim           (Int#)
 import GHC.Exts           (Int(..), TYPE, RuntimeRep(..))
 import Safe.Coerce        (coerce)
-import Input              (Rep, CRef, Unboxed, OffWith)
+import Input              (Rep, CRef, Unboxed, OffWith, UnpackedLazyByteString)
 import Data.Text          (Text)
 import Data.Void          (Void)
 
 #define inputInstances(derivation) \
 derivation(O)                      \
 derivation((OffWith s))            \
+derivation(UnpackedLazyByteString) \
 derivation(Text)
 
 --data SList a = !a ::: SList a | SNil

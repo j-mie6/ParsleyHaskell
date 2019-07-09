@@ -87,10 +87,11 @@ type family Rep rep where
   Rep (OffWith s) = 'TupleRep '[IntRep, LiftedRep]
   Rep (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
 
+-- I think these can *all* be STRefU s Int... the chain handler only uses _same
 type family CRef s rep where
   CRef s Int = STRefU s Int
   CRef s Text = STRef s Text
-  CRef s UnpackedLazyByteString = STRef s UnpackedLazyByteString
+  CRef s UnpackedLazyByteString = STRefU s Int
   CRef s (OffWith ss) = STRef s (OffWith ss)
   CRef s (Text, Stream) = STRef s (Text, Stream)
 
@@ -101,7 +102,6 @@ type family Unboxed rep = (urep :: TYPE (Rep rep)) | urep -> rep where
   Unboxed (OffWith s) = (# Int#, s #)
   Unboxed (Text, Stream) = (# Text, Stream #)
   
-
 class Input input rep | input -> rep where
   prepare :: TExpQ input -> TExpQ (PreparedInput (Rep rep) s rep (Unboxed rep))
 
@@ -200,7 +200,7 @@ instance Input Lazy.ByteString UnpackedLazyByteString where
             case readWord8OffAddr# addr# off# realWorld# of
               (# s', x #) -> case touch# final s' of 
                 _ -> (# C# (chr# (word2Int# x)), 
-                    if size > 1 then UnpackedLazyByteString (i+1) addr# final (off+1) (size-1) cs
+                    if size /= 1 then UnpackedLazyByteString (i+1) addr# final (off+1) (size-1) cs
                     else case cs of
                       Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> UnpackedLazyByteString (i+1) addr'# final' off' size' cs'
                       Lazy.Empty -> emptyUnpackedLazyByteString (i+1)
@@ -208,23 +208,24 @@ instance Input Lazy.ByteString UnpackedLazyByteString where
           more (UnpackedLazyByteString _ _ _ _ 0 _) = False
           more _ = True
           same (UnpackedLazyByteString i _ _ _ _ _) (UnpackedLazyByteString j _ _ _ _ _) = i == j
-          {-ow@(OffWith _ (Lazy.Empty)) << _ = ow
-          OffWith o (Lazy.Chunk (PS ptr off size) cs) << i =
-            let d = min off i
-            in OffWith (o - d) (Lazy.Chunk (PS ptr (off - d) (size + d)) cs)
-          ow@(OffWith _ Lazy.Empty) >> _ = ow
-          OffWith o (Lazy.Chunk (PS ptr off size) cs) >> i
-            | i < size  = OffWith (o + i) (Lazy.Chunk (PS ptr (off + i) (size - i)) cs)
-            | otherwise = OffWith (o + i) cs >> (i - size)-}
-          (<<) = undefined
-          (>>) = undefined
+          UnpackedLazyByteString i addr# final off size cs << j =
+            let d = min off j
+            in UnpackedLazyByteString (i - d) addr# final (off - d) (size + d) cs
+          (!(UnpackedLazyByteString i addr# final off size cs)) >> j
+            | j < size  = UnpackedLazyByteString (i + j) addr# final (off + j) (size - j) cs
+            | otherwise = case cs of
+              Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> UnpackedLazyByteString (i + size) addr'# final' off' size' cs' >> (j - size)
+              Lazy.Empty -> emptyUnpackedLazyByteString (i + size)
           initial = case input of
             Lazy.Chunk (PS (ForeignPtr addr# final) off size) cs -> UnpackedLazyByteString 0 addr# final off size cs
             Lazy.Empty -> emptyUnpackedLazyByteString 0
-          box (# i#, addr#, final, off#, size#, cs #) = UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs
+          box !(# i#, addr#, final, off#, size#, cs #) = UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs
           unbox (UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs) = (# i#, addr#, final, off#, size#, cs #)
+          newCRef o = newSTRefU (toInt o)
+          readCRef ref = fmap emptyUnpackedLazyByteString (readSTRefU ref)
+          writeCRef ref o = writeSTRefU ref (toInt o) 
           toInt (UnpackedLazyByteString i _ _ _ _ _) = i
-      in PreparedInput next more same initial box unbox newSTRef readSTRef writeSTRef (<<) (>>) toInt
+      in PreparedInput next more same initial box unbox newCRef readCRef writeCRef (<<) (>>) toInt
     ||]
 
 {-instance Input Lazy.ByteString (OffWith Lazy.ByteString) where
@@ -244,7 +245,7 @@ instance Input Lazy.ByteString UnpackedLazyByteString where
           ow@(OffWith _ Lazy.Empty) >> _ = ow
           OffWith o (Lazy.Chunk (PS ptr off size) cs) >> i
             | i < size  = OffWith (o + i) (Lazy.Chunk (PS ptr (off + i) (size - i)) cs)
-            | otherwise = OffWith (o + i) cs >> (i - size)
+            | otherwise = OffWith (o + size) cs >> (i - size)
       in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newSTRef readSTRef writeSTRef (<<) (>>) offWithToInt
     ||]-}
 

@@ -36,9 +36,7 @@ import qualified Data.ByteString.Char8 (pack)
 import CommonFunctions
 
 main :: IO ()
-main = do input <- lazy_bytestring "inputs/as.txt"
-          let Just u = (as input)
-          print u {-rnf (regexP (Data.ByteString.Char8.pack (concat (replicate 100000_00 "ab")))) `seq` return ()-}{-
+--main = do input <- lazy_bytestring "inputs/as.txt"; let {Just u = (as input)}; print u {-rnf (regexP (Data.ByteString.Char8.pack (concat (replicate 100000_00 "ab")))) `seq` return ()-}{-
 main =
   defaultMain [ regex
               , brainfuck

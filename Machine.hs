@@ -408,7 +408,7 @@ instance JoinBuilder _o where                                                   
     {                                                                              \
       ctx <- ask;                                                                  \
       fmap (\mk γ -> [||                                                           \
-        let join x o# = $$(mk (γ {xs = pushX [||x||] (xs γ), o = [||$$box o#||]})) \
+        let join x !o# = $$(mk (γ {xs = pushX [||x||] (xs γ), o = [||$$box o#||]})) \
         in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))                          \
       ||]) k                                                                       \
     }                                                                              \
@@ -450,9 +450,10 @@ inputSizeCheck (Just n) p =
   do skip <- asks skipBounds
      mp <- local (addConstCount 1) p
      if skip then return $! mp
+     else if n == 1 then fmap (\ctx γ -> [|| if $$more $$(o γ) then $$(mp γ) else $$(raiseΓ γ) ||]) ask
      else fmap (\ctx γ -> [|| 
-       if $$more ($$shiftRight $$(o γ) (n - 1)) then $$(mp γ)
-       else $$(raiseΓ γ)
+        if $$more ($$shiftRight $$(o γ) (n - 1)) then $$(mp γ)
+        else $$(raiseΓ γ)
       ||]) ask
 
 raiseΓ :: (?ops :: InputOps s o, FailureOps o) => Γ s o xs r a -> QST s (Maybe a)

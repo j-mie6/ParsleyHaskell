@@ -16,7 +16,7 @@ import Utils                    (TExpQ)
 import Data.Array.Base          (UArray(..), listArray)
 import GHC.Prim                 (Int#, Addr#, ByteArray#, nullAddr#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#)
 import GHC.Exts                 (Int(..), Char(..), TYPE, RuntimeRep(..))
-import Data.Text.Array          (aBA)
+import Data.Text.Array          (aBA, empty)
 import Data.Text.Internal       (Text(..))
 import Data.Text.Unsafe         (iter, Iter(..), iter_, reverseIter_)
 import Data.ByteString.Internal (ByteString(..))
@@ -87,13 +87,12 @@ type family Rep rep where
   Rep (OffWith s) = 'TupleRep '[IntRep, LiftedRep]
   Rep (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
 
--- I think these can *all* be STRefU s Int... the chain handler only uses _same
 type family CRef s rep where
   CRef s Int = STRefU s Int
-  CRef s Text = STRef s Text
+  CRef s Text = STRefU s Int
   CRef s UnpackedLazyByteString = STRefU s Int
-  CRef s (OffWith ss) = STRef s (OffWith ss)
-  CRef s (Text, Stream) = STRef s (Text, Stream)
+  CRef s (OffWith ss) = STRefU s Int
+  CRef s (Text, Stream) = STRefU s Int
 
 type family Unboxed rep = (urep :: TYPE (Rep rep)) | urep -> rep where
   Unboxed Int = Int#
@@ -143,7 +142,10 @@ instance Input CharList (OffWith String) where
           next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
           more (OffWith i _) = i < size
           OffWith o cs >> i = OffWith (o + i) (drop i cs)
-      in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newSTRef readSTRef writeSTRef const (>>) offWithToInt
+          newCRef (OffWith i _) = newSTRefU i
+          readCRef ref = fmap (\i -> OffWith i []) (readSTRefU ref)
+          writeCRef ref (OffWith i _) = writeSTRefU ref i
+      in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newCRef readCRef writeCRef const (>>) offWithToInt
     ||]
 
 instance Input Text Text where
@@ -165,7 +167,10 @@ instance Input Text Text where
                 | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
                 | otherwise = Text arr off' unconsumed'
           toInt (Text arr off unconsumed) = div off 2
-      in PreparedInput next more same input id id newSTRef readSTRef writeSTRef (<<) (>>) toInt
+          newCRef (Text _ i _) = newSTRefU i
+          readCRef ref = fmap (\i -> Text empty i 0) (readSTRefU ref)
+          writeCRef ref (Text _ i _) = writeSTRefU ref i
+      in PreparedInput next more same input id id newCRef readCRef writeCRef (<<) (>>) toInt
     ||]
 
 {-instance Input CacheText (Text, Stream) where
@@ -189,9 +194,11 @@ instance Input Text Text where
           toInt (Text arr off unconsumed, _) = div off 2
           box (# text, cache #) = (text, cache)
           unbox (text, cache) = (# text, cache #)
-      in PreparedInput next more same (input, nomore) box unbox newSTRef readSTRef writeSTRef (<<) (>>) toInt
+          newCRef (Text _ i _, _) = newSTRefU i
+          readCRef ref = fmap (\i -> (Text empty i 0, nomore)) (readSTRefU ref)
+          writeCRef ref (Text _ i _, _) = writeSTRefU ref i
+      in PreparedInput next more same (input, nomore) box unbox newCRef readCRef writeCRef s(<<) (>>) toInt
     ||]-}
-
 
 instance Input Lazy.ByteString UnpackedLazyByteString where
   prepare qinput = [||
@@ -246,7 +253,10 @@ instance Input Lazy.ByteString UnpackedLazyByteString where
           OffWith o (Lazy.Chunk (PS ptr off size) cs) >> i
             | i < size  = OffWith (o + i) (Lazy.Chunk (PS ptr (off + i) (size - i)) cs)
             | otherwise = OffWith (o + size) cs >> (i - size)
-      in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newSTRef readSTRef writeSTRef (<<) (>>) offWithToInt
+          newCRef (OffWith i _) = newSTRefU i
+          readCRef ref = fmap (\i -> OffWith i Lazy.Empty) (readSTRefU ref)
+          writeCRef ref (OffWith i _) = writeSTRefU ref i
+      in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newCRef readCRef writeCRef (<<) (>>) offWithToInt
     ||]-}
 
 instance Input Stream (OffWith Stream) where
@@ -257,5 +267,8 @@ instance Input Stream (OffWith Stream) where
             where
               sdrop 0 cs = cs
               sdrop n (_ :> cs) = sdrop (n-1) cs
-      in PreparedInput next (const True) offWithSame (offWith input) offWithBox offWithUnbox newSTRef readSTRef writeSTRef const (>>) offWithToInt
+          newCRef (OffWith i _) = newSTRefU i
+          readCRef ref = fmap (\i -> OffWith i nomore) (readSTRefU ref)
+          writeCRef ref (OffWith i _) = writeSTRefU ref i
+      in PreparedInput next (const True) offWithSame (offWith input) offWithBox offWithUnbox newCRef readCRef writeCRef const (>>) offWithToInt
     ||]

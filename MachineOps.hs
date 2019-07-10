@@ -29,8 +29,7 @@ derivation((OffWith s))            \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
 
---data SList a = !a ::: SList a | SNil
-data QList xs where
+data QList as where
   QNil :: QList '[]
   QCons :: !(TExpQ a) -> QList as -> QList (a ': as)
 

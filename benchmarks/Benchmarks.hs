@@ -23,6 +23,7 @@ import qualified ParsecParsers
 import qualified MegaparsecParsers
 import qualified AttoparsecParsers
 import qualified NativeParsers
+import qualified HappyParsers
 import qualified Parsley
 import qualified Text.Yoda                  as Yoda
 import qualified Text.Parsec                as Parsec
@@ -41,7 +42,7 @@ main =
   defaultMain [ regex
               , brainfuck
               , tailTest 
-              ]--}
+              ]--} -}
 
 as :: Data.ByteString.Lazy.ByteString -> Maybe ()
 as = $$(Parsley.runParser (Parsley.skipMany (Parsley.char 'a') Parsley.<* Parsley.eof))
@@ -100,6 +101,7 @@ brainfuck =
       bfTest = benchmark ["inputs/helloworld.bf", "inputs/helloworld_golfed.bf", "inputs/compiler.bf"]
   in bgroup "Brainfuck"
        [ bfTest string          "Parsley (Stream)"          (brainfuckParsleySS . CharList)
+       , bfTest string          "Happy"                     HappyParsers.brainfuck
        , bfTest string          "Parsley (String)"          brainfuckParsleyS
        , bfTest text            "Parsley (Text)"            (brainfuckParsleyT . Text16)
        , bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB

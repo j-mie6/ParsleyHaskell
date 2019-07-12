@@ -79,12 +79,14 @@ direct !(p :<|>: q)         = CodeGen $ \(!m) ->
 direct !(Try n p)           = CodeGen $ \(!m) -> do fmap (Op3 . Attempt n) (runCodeGen p (deadCommitOptimisation (isJust n) m))
 direct !(LookAhead p)       = CodeGen $ \(!m) -> do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
 direct !(NotFollowedBy p)   = CodeGen $ \(!m) -> do liftA2 (\p q -> Op3 (NegLook p q)) (runCodeGen p (Op3 (Commit False (Op3 Empt)))) (return (Op3 (Push (lift' ()) m)))
-direct !(Branch b p q)      = CodeGen $ \(!m) -> do !pc <- runCodeGen p (Op3 (Lift2 (WQ (flip ($)) [||flip ($)||]) m))
-                                                    !qc <- runCodeGen q (Op3 (Lift2 (WQ (flip ($)) [||flip ($)||]) m))
-                                                    runCodeGen b (Op3 (Case pc qc))
-direct !(Match p fs qs def) = CodeGen $ \(!m) -> do !qcs <- traverse (flip runCodeGen m) qs
-                                                    !defc <- runCodeGen def m
-                                                    runCodeGen p (Op3 (Choices fs qcs defc))
+direct !(Branch b p q)      = CodeGen $ \(!m) -> do (decl, φ) <- makeΦ m
+                                                    !pc <- freshΦ (runCodeGen p (Op3 (Lift2 (WQ (flip ($)) [||flip ($)||]) φ)))
+                                                    !qc <- freshΦ (runCodeGen q (Op3 (Lift2 (WQ (flip ($)) [||flip ($)||]) φ)))
+                                                    runCodeGen b (Op3 (Case pc qc decl))
+direct !(Match p fs qs def) = CodeGen $ \(!m) -> do (decl, φ) <- makeΦ m
+                                                    !qcs <- traverse (freshΦ . flip runCodeGen φ) qs
+                                                    !defc <- freshΦ (runCodeGen def φ)
+                                                    runCodeGen p (Op3 (Choices fs qcs defc decl))
 direct !(Let _ !μ _)  = CodeGen $ \(!m) -> return $! tailCallOptimise μ m
 direct !(ChainPre op p) = CodeGen $ \(!m) ->
   do μ <- askM

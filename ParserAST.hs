@@ -12,6 +12,7 @@ import Indexed                    (IFunctor, Free(Op), Void1, Const1(..), imap, 
 import Machine                    (IMVar, MVar(..))
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
+import Data.List                  (intercalate)
 
 -- Parser wrapper type
 newtype Parser a = Parser {unParser :: Free ParserF Void1 a}
@@ -125,7 +126,7 @@ instance Show (Free ParserF f a) where
       alg (Let True v _)                         = concat ["(rec ", show v, ")"]
       alg (NotFollowedBy (Const1 p))              = concat ["(notFollowedBy ", p, ")"]
       alg (Branch (Const1 b) (Const1 p) (Const1 q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-      alg (Match (Const1 p) fs qs (Const1 def))    = concat ["(match ", p, " ", show (map getConst1 qs), " ", def, ")"]
+      alg (Match (Const1 p) fs qs (Const1 def))    = concat ["(match ", p, " [", intercalate ", " (map getConst1 qs), "] ", def, ")"]
       alg (ChainPre (Const1 op) (Const1 p))        = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))       = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                    = p

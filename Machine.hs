@@ -35,6 +35,7 @@ import Debug.Trace           (trace)
 import System.Console.Pretty (color, Color(Green, White, Red, Blue))
 import Data.Text             (Text)
 import Data.Void             (Void)
+import Data.List             (intercalate)
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty)
 
@@ -71,8 +72,8 @@ data M o k xs r a where
   Tell      :: !(k (o ': xs) r a) -> M o k xs r a
   Seek      :: !(k xs r a) -> M o k (o ': xs) r a
   NegLook   :: !(k xs r a) -> !(k xs r a) -> M o k xs r a
-  Case      :: !(k (x ': xs) r a) -> !(k (y ': xs) r a) -> M o k (Either x y ': xs) r a
-  Choices   :: ![WQ (x -> Bool)] -> ![k xs r a] -> k xs r a -> M o k (x ': xs) r a
+  Case      :: !(k (x ': xs) r a) -> !(k (y ': xs) r a) -> !(Maybe (ΦDecl k z xs r a)) -> M o k (Either x y ': xs) r a
+  Choices   :: ![WQ (x -> Bool)] -> ![k xs r a] -> k xs r a -> !(Maybe (ΦDecl k y xs r a)) -> M o k (x ': xs) r a
   ChainIter :: !(ΣVar x) -> !(MVar x) -> M o k ((x -> x) ': xs) x a
   ChainInit :: !(ΣVar x) -> !(k '[] x a) -> !(MVar x) -> !(k (x ': xs) r a) -> M o k (x ': xs) r a
   Swap      :: k (x ': y ': xs) r a -> M o k (y ': x ': xs) r a
@@ -166,30 +167,30 @@ readyExec :: (?ops :: InputOps s o, Ops o) => Free3 (M o) Void3 xs r a -> Exec s
 readyExec = fold3 absurd (Exec . alg)
   where
     alg :: (?ops :: InputOps s o, Ops o) => M o (Exec s o) xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-    alg Halt                = execHalt
-    alg Ret                 = execRet
-    alg (Call μ k)          = execCall μ k
-    alg (Jump μ)            = execJump μ
-    alg (Push x k)          = execPush x k
-    alg (Pop k)             = execPop k
-    alg (Lift2 f k)         = execLift2 f k
-    alg (Sat p k)           = execSat p k
-    alg Empt                = execEmpt
-    alg (Commit exit k)     = execCommit exit k
-    alg (HardFork p q φ)    = execHardFork p q φ
-    alg (SoftFork n p q φ)  = execSoftFork n p q φ
-    alg (Join φ)            = execJoin φ
-    alg (Attempt n k)       = execAttempt n k
-    alg (Tell k)            = execTell k
-    alg (NegLook m k)       = execNegLook m k
-    alg (Seek k)            = execSeek k
-    alg (Case p q)          = execCase p q
-    alg (Choices fs ks def) = execChoices fs ks def
-    alg (ChainIter σ μ)     = execChainIter σ μ
-    alg (ChainInit σ l μ k) = execChainInit σ l μ k
-    alg (Swap k)            = execSwap k
-    alg (LogEnter name k)   = execLogEnter name k
-    alg (LogExit name k)    = execLogExit name k
+    alg Halt                   = execHalt
+    alg Ret                    = execRet
+    alg (Call μ k)             = execCall μ k
+    alg (Jump μ)               = execJump μ
+    alg (Push x k)             = execPush x k
+    alg (Pop k)                = execPop k
+    alg (Lift2 f k)            = execLift2 f k
+    alg (Sat p k)              = execSat p k
+    alg Empt                   = execEmpt
+    alg (Commit exit k)        = execCommit exit k
+    alg (HardFork p q φ)       = execHardFork p q φ
+    alg (SoftFork n p q φ)     = execSoftFork n p q φ
+    alg (Join φ)               = execJoin φ
+    alg (Attempt n k)          = execAttempt n k
+    alg (Tell k)               = execTell k
+    alg (NegLook m k)          = execNegLook m k
+    alg (Seek k)               = execSeek k
+    alg (Case p q  φ)          = execCase p q  φ
+    alg (Choices fs ks def  φ) = execChoices fs ks def  φ
+    alg (ChainIter σ μ)        = execChainIter σ μ
+    alg (ChainInit σ l μ k)    = execChainInit σ l μ k
+    alg (Swap k)               = execSwap k
+    alg (LogEnter name k)      = execLogEnter name k
+    alg (LogExit name k)       = execLogExit name k
 
 execHalt :: Reader (Ctx s o a) (Γ s o '[a] r a -> QST s (Maybe a))
 execHalt = return $! \γ -> [|| return $! Just $! $$(peekX (xs γ)) ||]
@@ -230,7 +231,7 @@ execCommit exit (Exec k) = local (\ctx -> if exit then addConstCount (-1) ctx el
                                  (fmap (\m γ -> m (γ {hs = popH_ (hs γ)})) k)
 
 execHardFork :: (?ops :: InputOps s o, HardForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl $
+execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl id $
   do mp <- p
      mq <- q
      return $! \γ -> setupHandlerΓ γ (hardForkHandler mq γ) mp
@@ -247,7 +248,7 @@ instance HardForkHandler _o where                                  \
 inputInstances(deriveHardForkHandler)
 
 execSoftFork :: (?ops :: InputOps s o, SoftForkHandler o, JoinBuilder o) => Maybe Int -> Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl $
+execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl id $
   do mp <- inputSizeCheck constantInput p
      mq <- q
      return $! \γ -> setupHandlerΓ γ (softForkHandler mq γ) mp
@@ -288,8 +289,8 @@ instance NegLookHandler _o where                                              \
 };
 inputInstances(deriveNegLookHandler)
 
-execCase :: Exec s o (x ': xs) r a -> Exec s o (y ': xs) r a -> Reader (Ctx s o a) (Γ s o (Either x y ': xs) r a -> QST s (Maybe a))
-execCase (Exec p) (Exec q) =
+execCase :: (?ops :: InputOps s o, JoinBuilder o) => Exec s o (x ': xs) r a -> Exec s o (y ': xs) r a -> Maybe (ΦDecl (Exec s o) z xs r a) -> Reader (Ctx s o a) (Γ s o (Either x y ': xs) r a -> QST s (Maybe a))
+execCase (Exec p) (Exec q) decl = setupJoinPoint decl popX_ $
   do mp <- p
      mq <- q
      return $! \γ ->
@@ -298,8 +299,8 @@ execCase (Exec p) (Exec q) =
            Left x -> $$(mp (γ {xs = pushX [||x||] xs'}))
            Right y  -> $$(mq (γ {xs = pushX [||y||] xs'}))||]
 
-execChoices :: forall x xs r a s o. [WQ (x -> Bool)] -> [Exec s o xs r a] -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
-execChoices fs ks (Exec def) = 
+execChoices :: forall x y xs r a s o. (?ops :: InputOps s o, JoinBuilder o) => [WQ (x -> Bool)] -> [Exec s o xs r a] -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) y xs r a) -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
+execChoices fs ks (Exec def) decl = setupJoinPoint decl popX_ $
   do mdef <- def
      fmap (\mks γ -> let !(# x, xs' #) = popX (xs γ) in go x fs mks mdef (γ {xs = xs'})) (forM ks (\(Exec k) -> k))
   where
@@ -395,23 +396,24 @@ setupHandlerΓ :: (?ops :: InputOps s o, FailureOps o) => Γ s o xs r a -> TExpQ
 setupHandlerΓ γ !h !k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
 
 class JoinBuilder o where
-  setupJoinPoint :: (?ops :: InputOps s o) => Maybe (ΦDecl (Exec s o) x xs r a) 
+  setupJoinPoint :: (?ops :: InputOps s o) => Maybe (ΦDecl (Exec s o) y ys r a)
+                 -> (QList xs -> QList ys)
                  -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a)) 
                  -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
 
-#define deriveJoinBuilder(_o)                                                      \
-instance JoinBuilder _o where                                                      \
-{                                                                                  \
-  setupJoinPoint Nothing mx = mx;                                                  \
-  setupJoinPoint (Just (φ, (Exec k))) mx =                                         \
-    do                                                                             \
-    {                                                                              \
-      ctx <- ask;                                                                  \
-      fmap (\mk γ -> [||                                                           \
-        let join x !o# = $$(mk (γ {xs = pushX [||x||] (xs γ), o = [||$$box o#||]})) \
-        in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))                          \
-      ||]) k                                                                       \
-    }                                                                              \
+#define deriveJoinBuilder(_o)                                                               \
+instance JoinBuilder _o where                                                               \
+{                                                                                           \
+  setupJoinPoint Nothing adapt mx = mx;                                                     \
+  setupJoinPoint (Just (φ, (Exec k))) adapt mx =                                            \
+    do                                                                                      \
+    {                                                                                       \
+      ctx <- ask;                                                                           \
+      fmap (\mk γ -> [||                                                                    \
+        let join x !o# = $$(mk (γ {xs = pushX [||x||] (adapt (xs γ)), o = [||$$box o#||]})) \
+        in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))                                   \
+      ||]) k                                                                                \
+    }                                                                                       \
 };
 inputInstances(deriveJoinBuilder)
 
@@ -484,32 +486,34 @@ askSTC :: MonadReader (Ctx s o a) m => ΣVar x -> m (QCRef s o)
 askSTC (ΣVar v) = asks ((Map.! v) . stcs)
 
 instance IFunctor3 (M o) where
-  imap3 f Halt                           = Halt
-  imap3 f Ret                            = Ret
-  imap3 f (Push x k)                     = Push x (f k)
-  imap3 f (Pop k)                        = Pop (f k)
-  imap3 f (Lift2 g k)                    = Lift2 g (f k)
-  imap3 f (Sat g k)                      = Sat g (f k)
-  imap3 f (Call μ k)                     = Call μ (f k)
-  imap3 f (Jump μ)                       = Jump μ
-  imap3 f Empt                           = Empt
-  imap3 f (Commit exit k)                = Commit exit (f k)
-  imap3 f (SoftFork n p q (Just (φ, k))) = SoftFork n (f p) (f q) (Just (φ, f k))
-  imap3 f (SoftFork n p q Nothing)       = SoftFork n (f p) (f q) Nothing
-  imap3 f (HardFork p q (Just (φ, k)))   = HardFork (f p) (f q) (Just (φ, f k))
-  imap3 f (HardFork p q Nothing)         = HardFork (f p) (f q) Nothing
-  imap3 f (Join φ)                       = Join φ
-  imap3 f (Attempt n k)                  = Attempt n (f k)
-  imap3 f (Tell k)                       = Tell (f k)
-  imap3 f (Seek k)                       = Seek (f k)
-  imap3 f (NegLook m k)                  = NegLook (f m) (f k)
-  imap3 f (Case p q)                     = Case (f p) (f q)
-  imap3 f (Choices fs ks def)            = Choices fs (map f ks) (f def)
-  imap3 f (ChainIter σ μ)                = ChainIter σ μ
-  imap3 f (ChainInit σ l μ k)            = ChainInit σ (f l) μ (f k)
-  imap3 f (Swap k)                       = Swap (f k)
-  imap3 f (LogEnter name k)              = LogEnter name (f k)
-  imap3 f (LogExit name k)               = LogExit name (f k)
+  imap3 f Halt                              = Halt
+  imap3 f Ret                               = Ret
+  imap3 f (Push x k)                        = Push x (f k)
+  imap3 f (Pop k)                           = Pop (f k)
+  imap3 f (Lift2 g k)                       = Lift2 g (f k)
+  imap3 f (Sat g k)                         = Sat g (f k)
+  imap3 f (Call μ k)                        = Call μ (f k)
+  imap3 f (Jump μ)                          = Jump μ
+  imap3 f Empt                              = Empt
+  imap3 f (Commit exit k)                   = Commit exit (f k)
+  imap3 f (SoftFork n p q (Just (φ, k)))    = SoftFork n (f p) (f q) (Just (φ, f k))
+  imap3 f (SoftFork n p q Nothing)          = SoftFork n (f p) (f q) Nothing
+  imap3 f (HardFork p q (Just (φ, k)))      = HardFork (f p) (f q) (Just (φ, f k))
+  imap3 f (HardFork p q Nothing)            = HardFork (f p) (f q) Nothing
+  imap3 f (Join φ)                          = Join φ
+  imap3 f (Attempt n k)                     = Attempt n (f k)
+  imap3 f (Tell k)                          = Tell (f k)
+  imap3 f (Seek k)                          = Seek (f k)
+  imap3 f (NegLook m k)                     = NegLook (f m) (f k)
+  imap3 f (Case p q (Just (φ, k)))          = Case (f p) (f q) (Just (φ, f k))
+  imap3 f (Case p q Nothing)                = Case (f p) (f q) Nothing
+  imap3 f (Choices fs ks def (Just (φ, k))) = Choices fs (map f ks) (f def) (Just (φ, f k))
+  imap3 f (Choices fs ks def Nothing)       = Choices fs (map f ks) (f def) Nothing
+  imap3 f (ChainIter σ μ)                   = ChainIter σ μ
+  imap3 f (ChainInit σ l μ k)               = ChainInit σ (f l) μ (f k)
+  imap3 f (Swap k)                          = Swap (f k)
+  imap3 f (LogEnter name k)                 = LogEnter name (f k)
+  imap3 f (LogExit name k)                  = LogExit name (f k)
 
 instance Show (Machine o a) where show = show . getMachine
 instance Show (Free3 (M o) f xs ks a) where
@@ -538,8 +542,10 @@ instance Show (Free3 (M o) f xs ks a) where
     alg (Tell k)                              = "(Tell " ++ getConst3 k ++ ")"
     alg (Seek k)                              = "(Seek " ++ getConst3 k ++ ")"
     alg (NegLook m k)                         = "(NegLook " ++ getConst3 m ++ " " ++ getConst3 k ++ ")"
-    alg (Case m k)                            = "(Case " ++ getConst3 m ++ " " ++ getConst3 k ++ ")"
-    alg (Choices _ ks def)                    = "(Choices " ++ show (map getConst3 ks) ++ " " ++ getConst3 def ++ ")"
+    alg (Case p q Nothing)                    = "(Case " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
+    alg (Case p q (Just (φ, k)))              = "(Case " ++ getConst3 p ++ " " ++ getConst3 q ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
+    alg (Choices _ ks def Nothing)            = "(Choices [" ++ intercalate ", " (map getConst3 ks) ++ "] " ++ getConst3 def ++ ")"
+    alg (Choices _ ks def (Just (φ, k)))      = "(Choices [" ++ intercalate ", " (map getConst3 ks) ++ "] " ++ getConst3 def ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
     alg (ChainIter σ μ)                       = "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
     alg (ChainInit σ m μ k)                   = "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ getConst3 m ++ " " ++ getConst3 k ++ "}"
     alg (Swap k)                              = "(Swap " ++ getConst3 k ++ ")"

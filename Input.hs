@@ -57,16 +57,30 @@ offWith :: s -> OffWith s
 offWith s = OffWith 0 s
 
 offWithBox :: (# Int#, s #) -> OffWith s
-offWithBox (# i, s #) = OffWith (I# i) s
+offWithBox (# i#, s #) = OffWith (I# i#) s
 
 offWithUnbox :: OffWith s -> (# Int#, s #)
-offWithUnbox (OffWith (I# i) s) = (# i, s #)
+offWithUnbox (OffWith (I# i#) s) = (# i#, s #)
 
 offWithSame :: OffWith s -> OffWith s -> Bool
 offWithSame (OffWith i _) (OffWith j _) = i == j
 
 offWithToInt :: OffWith s -> Int
 offWithToInt (OffWith i _) = i
+
+data OffWithStreamAnd s = OffWithStreamAnd {-# UNPACK #-} !Int !Stream s
+
+offWithStreamAnd :: s -> OffWithStreamAnd s
+offWithStreamAnd s = OffWithStreamAnd 0 nomore s
+
+offWithStreamAndBox :: (# Int#, Stream, s #) -> OffWithStreamAnd s
+offWithStreamAndBox (# i#, ss, s #) = OffWithStreamAnd (I# i#) ss s
+
+offWithStreamAndUnbox :: OffWithStreamAnd s -> (# Int#, Stream, s #)
+offWithStreamAndUnbox (OffWithStreamAnd (I# i#) ss s) = (# i#, ss, s #)
+
+offWithStreamAndToInt :: OffWithStreamAnd s -> Int
+offWithStreamAndToInt (OffWithStreamAnd i _ _) = i
 
 data UnpackedLazyByteString = UnpackedLazyByteString 
   {-# UNPACK #-} !Int 
@@ -85,6 +99,7 @@ type family Rep rep where
   Rep Text = LiftedRep
   Rep UnpackedLazyByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
   Rep (OffWith s) = 'TupleRep '[IntRep, LiftedRep]
+  Rep (OffWithStreamAnd s) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
   Rep (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
 
 type family CRef s rep where
@@ -92,6 +107,7 @@ type family CRef s rep where
   CRef s Text = STRefU s Int
   CRef s UnpackedLazyByteString = STRefU s Int
   CRef s (OffWith ss) = STRefU s Int
+  CRef s (OffWithStreamAnd ss) = STRefU s Int
   CRef s (Text, Stream) = STRefU s Int
 
 type family Unboxed rep = (urep :: TYPE (Rep rep)) | urep -> rep where
@@ -99,6 +115,7 @@ type family Unboxed rep = (urep :: TYPE (Rep rep)) | urep -> rep where
   Unboxed Text = Text
   Unboxed UnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)
   Unboxed (OffWith s) = (# Int#, s #)
+  Unboxed (OffWithStreamAnd s) = (# Int#, Stream, s #)
   Unboxed (Text, Stream) = (# Text, Stream #)
   
 class Input input rep | input -> rep where

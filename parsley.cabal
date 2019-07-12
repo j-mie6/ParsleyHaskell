@@ -80,7 +80,8 @@ executable playground
                        pretty-terminal,
                        text,
                        mtl,
-                       bytestring
+                       bytestring,
+                       containers
   other-modules:       Parsers
   other-extensions:    TemplateHaskell
   hs-source-dirs:      ./playground

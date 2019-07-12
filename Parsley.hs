@@ -8,7 +8,7 @@ module Parsley ( Parser, runParser, parseFromFile
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
                -- Applicative
-               , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
+               , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2, liftA3
                -- Alternative
                , empty, (<|>), (<+>), optional, option, choice, oneOf, noneOf, maybeP
                -- Monoidal
@@ -73,6 +73,9 @@ x <$ p = p *> pure x
 
 liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
 liftA2 f p q = f <$> p <*> q
+
+liftA3 :: WQ (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
+liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
 many = pfoldr (lift' (:)) (WQ [] [||[]||])
@@ -149,7 +152,7 @@ string :: String -> Parser String
 string = traverse char
 
 oneOf :: [Char] -> Parser Char
-oneOf cs = match cs item (\c -> pure (WQ c [||c||])) empty --satisfy (WQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
+oneOf cs = satisfy (WQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
 
 noneOf :: [Char] -> Parser Char
 noneOf cs = satisfy (WQ (not . flip elem cs) [||\c -> not $$(ofChars cs [||c||])||])
@@ -221,7 +224,7 @@ fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
 fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
 
 maybeP :: Parser a -> Parser (Maybe a)
-maybeP p = lift' Just <$> p <|> pure (WQ Nothing [||Nothing||])
+maybeP p = option (WQ Nothing [||Nothing||]) (lift' Just <$> p)
 
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 p op = chainPost p (lift' flip <$> op <*> p)

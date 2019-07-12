@@ -49,15 +49,14 @@ brainfuck = whitespace *> bf <* eof
                     <|> (token "." $> lift' Output)
                     <|> (token "," $> lift' Input)
                     <|> (between (lexeme (token "[")) (token "]") (lift' Loop <$> bf))))-}
-    -- [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-    bf = many (lexeme (match "><+-.,[" item op empty))
-    op '>' = pure (lift' RightPointer)
-    op '<' = pure (lift' LeftPointer)
-    op '+' = pure (lift' Increment)
-    op '-' = pure (lift' Decrement)
-    op '.' = pure (lift' Output)
-    op ',' = pure (lift' Input)
-    op '[' = whitespace *> (lift' Loop <$> bf) <* char ']'
+    bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
+    op '>' = item $> lift' RightPointer
+    op '<' = item $> lift' LeftPointer
+    op '+' = item $> lift' Increment
+    op '-' = item $> lift' Decrement
+    op '.' = item $> lift' Output
+    op ',' = item $> lift' Input
+    op '[' = between (lexeme item) (try (char ']')) (lift' Loop <$> bf)
 
 -- Regex Benchmark
 regex :: Parser Bool

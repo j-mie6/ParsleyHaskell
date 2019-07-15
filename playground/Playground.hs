@@ -3,7 +3,7 @@
              StandaloneDeriving,
              DeriveAnyClass,
              DeriveGeneric,
-             DataKinds, 
+             DataKinds,
              TypeOperators,
              TypeFamilies,
              FlexibleContexts,
@@ -28,7 +28,7 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
     evalOp LeftPointer  tape =                      return (left tape)
     evalOp Increment    tape = let x = read tape in return (write (succ x) tape)
     evalOp Decrement    tape = let x = read tape in return (write (pred x) tape)
-    evalOp Output       tape = let x = read tape in do print (chr (fromEnum x)); return tape 
+    evalOp Output       tape = let x = read tape in do print (chr (fromEnum x)); return tape
     evalOp Input        tape =                      do x <- getChar; return (write (toEnum (ord x)) tape)
     evalOp (Loop p)     tape = let x = read tape in if x == 0 then return tape
                                                     else do tape' <- go tape p
@@ -48,8 +48,14 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
     write :: a -> Tape a -> Tape a
     write x (Tape ls _ rs) = Tape ls x rs
 
+--javascript :: String -> Maybe JSProgram
+--javascript = $$(Parsley.runParser Parsers.javascript)
+
+boom :: String -> Maybe ()
+boom = $$(Parsley.runParser Parsers.failure)
+
 main :: IO ()
-main = 
+main =
   do res <- parseBrainfuck "playground/testinput.bf"
      print res
      return ()

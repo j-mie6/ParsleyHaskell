@@ -7,6 +7,7 @@ import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
 import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper)
 import Data.Set (fromList, member)
+import Data.Maybe (catMaybes)
 
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show
 
@@ -38,7 +39,7 @@ type JSProgram = [JSElement]
 type JSCompoundStm = [JSStm]
 type JSExpr = [JSExpr']
 data JSElement = JSFunction String [String] JSCompoundStm | JSStm JSStm
-data JSStm = JSSemi 
+data JSStm = JSSemi
            | JSIf JSExpr JSStm (Maybe JSStm)
            | JSWhile JSExpr JSStm
            | JSFor (Maybe (Either [JSVar] JSExpr)) (Maybe JSExpr) (Maybe JSExpr) JSStm
@@ -131,6 +132,17 @@ jsUnreservedName = \s -> not (member s keys)
                      "function", "var", "new", "delete",
                      "this", "null", "return"]
 
+jsStringLetter :: Char -> Bool
+jsStringLetter c = (c /= '"') && (c /= '\\') && (c > '\026')
+
+failure :: Parser ()
+failure = expr
+  where
+    expr :: Parser ()
+    expr = char 'a' *> expr'
+    expr' :: Parser ()
+    expr' = expr *> expr'
+
 javascript :: Parser JSProgram
 javascript = whitespace *> many element <* eof
   where
@@ -168,7 +180,7 @@ javascript = whitespace *> many element <* eof
     condExpr :: Parser JSExpr'
     condExpr = liftA2 (lift' jsCondExprBuild) expr' (maybeP ((symbol '?' *> asgn) <~> (symbol ':' *> asgn)))
     expr' :: Parser JSExpr'
-    expr' = precedence 
+    expr' = precedence
       [ Prefix  [ operator "--" $> lift' jsDec, operator "++" $> lift' jsInc
                 , operator "-" $> lift' jsNeg, operator "+" $> lift' jsPlus
                 , operator "~" $> lift' jsBitNeg, operator "!" $> lift' jsNot ]
@@ -185,7 +197,7 @@ javascript = whitespace *> many element <* eof
       , InfixL  [ try (operator "|") $> lift' JSBitOr ]
       , InfixL  [ operator "&&" $> lift' JSAnd ]
       , InfixL  [ operator "||" $> lift' JSOr ]
-      ] 
+      ]
       (lift' JSUnary <$> memOrCon)
     memOrCon :: Parser JSUnary
     memOrCon = keyword "delete" *> (lift' JSDel <$> member)
@@ -219,7 +231,7 @@ javascript = whitespace *> many element <* eof
     space :: Parser ()
     space = void (satisfy (lift' isSpace))
     whitespace :: Parser ()
-    whitespace = undefined
+    whitespace = skipMany (spaces <|> oneLineComment <|> multiLineComment)
     keyword :: String -> Parser ()
     keyword s = try (string s *> notIdentLetter) *> whitespace
     operator :: String -> Parser ()
@@ -227,9 +239,9 @@ javascript = whitespace *> many element <* eof
     identifier :: Parser String
     identifier = try ((identStart <:> many identLetter) >?> lift' jsUnreservedName) <* whitespace
     naturalOrFloat :: Parser (Either Int Double)
-    naturalOrFloat = undefined
+    naturalOrFloat = lift' Left <$> (lift' read <$> some (oneOf "0123456789"))
     stringLiteral :: Parser String
-    stringLiteral = undefined
+    stringLiteral = lift' catMaybes <$> between (token "\"") (token "\"") (many stringChar)
     symbol :: Char -> Parser Char
     symbol c = try (char c) <* whitespace
     parens :: Parser a -> Parser a
@@ -250,6 +262,19 @@ javascript = whitespace *> many element <* eof
     commaSep1 p = sepBy1 p comma
 
     -- Let bindings
+    spaces :: Parser ()
+    spaces = skipSome space
+
+    oneLineComment :: Parser ()
+    oneLineComment = void (token "//" *> skipMany (satisfy (WQ (/= '\n') [||(/= '\n')||])))
+
+    multiLineComment :: Parser ()
+    multiLineComment =
+      let inComment = void (token "*/")
+                  <|> skipSome (noneOf "/*") *> inComment
+                  <|> oneOf "/*" *> inComment
+      in token "/*" *> inComment
+
     identStart = satisfy (lift' jsIdentStart)
     identLetter = satisfy (lift' jsIdentLetter)
     notIdentLetter = notFollowedBy identLetter
@@ -257,6 +282,14 @@ javascript = whitespace *> many element <* eof
 
     escChrs :: [Char]
     escChrs = "abfntv\\\"'0123456789xo^ABCDEFGHLNRSUV"
+
+    stringChar :: Parser (Maybe Char)
+    stringChar = lift' Just <$> satisfy (lift' jsStringLetter) <|> stringEscape
+
+    stringEscape :: Parser (Maybe Char)
+    stringEscape = token "\\" *> (token "&" $> lift' Nothing
+                              <|> spaces *> token "\\" $> lift' Nothing
+                              <|> lift' Just <$> escapeCode)
 
     escapeCode :: Parser Char
     escapeCode = match escChrs (oneOf escChrs) code empty
@@ -286,14 +319,19 @@ javascript = whitespace *> many element <* eof
                <|> token "SC" $> lift' ('\ESC')
                <|> token "OT" $> lift' ('\EOT')
                <|> token "NQ" $> lift' ('\ENQ')
-        code 'F' = undefined
+        code 'F' = token "F" $> lift' ('\FF') <|> token "S" $> lift' ('\FS')
         code 'G' = token "S" $> lift' ('\GS')
         code 'H' = token "T" $> lift' ('\HT')
         code 'L' = token "F" $> lift' ('\LF')
-        code 'N' = undefined
+        code 'N' = token "UL" $> lift' ('\NUL') <|> token "AK" $> lift' ('\NAK')
         code 'R' = token "S" $> lift' ('\RS')
-        code 'S' = undefined
+        code 'S' = token "O" *> option (lift' ('\SO')) (token "H" $> lift' ('\SOH'))
+               <|> token "I" $> lift' ('\SI')
+               <|> token "P" $> lift' ('\SP')
+               <|> token "TX" $> lift' ('\STX')
+               <|> token "YN" $> lift' ('\SYN')
+               <|> token "UB" $> lift' ('\SUB')
         code 'U' = token "S" $> lift' ('\US')
         code 'V' = token "T" $> lift' ('\VT')
         -- TODO numeric
-        code _ = empty
+        code _ = empty--error "numeric escape codes not supported"

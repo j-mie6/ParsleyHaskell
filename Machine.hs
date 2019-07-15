@@ -140,7 +140,7 @@ class FailureOps o => NegLookHandler o where
   negLookHandler1 :: (?ops :: InputOps s o) => (Γ s o xs ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
   negLookHandler2 :: (?ops :: InputOps s o) => TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => ChainHandler o where
-  chainHandler :: (?ops :: InputOps s o) => (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> TExpQ (STRef s x) -> TExpQ (CRef s o) 
+  chainHandler :: (?ops :: InputOps s o) => (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> TExpQ (STRef s x) -> TExpQ (CRef s o)
                -> Γ s o (x ': xs) ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => LogHandler o where
   logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
@@ -150,17 +150,17 @@ exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
   do ks <- makeK
      let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
      $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
-        in readyCalls topo ms (readyExec m) 
+        in readyCalls topo ms (readyExec m)
              (Γ makeX [||ks||] [||offset||] makeH)
              (Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0))
   ||]
 
 readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> QST s (Maybe a)
-readyCalls topo ms start γ = foldr readyFunc (run start γ) topo
+readyCalls topo ms start γ = foldr readyFunc (run start γ) (trace (show topo) topo)
   where
-    readyFunc v rest (ctx :: Ctx s o a) = 
+    readyFunc v rest (ctx :: Ctx s o a) =
       let μ = MVar v
-          LetBinding k = ms DMap.! μ
+          LetBinding k = ms DMap.! (trace ("executing let-binding " ++ show μ) μ)
       in buildRec ctx μ (run (readyExec k)) rest
 
 readyExec :: (?ops :: InputOps s o, Ops o) => Free3 (M o) Void3 xs r a -> Exec s o xs r a
@@ -258,7 +258,7 @@ instance SoftForkHandler _o where { softForkHandler mq γ = [||\h _ (!c#) -> $$(
 inputInstances(deriveSoftForkHandler)
 
 execJoin :: (?ops :: InputOps s o) => ΦVar x -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
-execJoin φ = 
+execJoin φ =
   do QJoin k <- asks ((DMap.! φ) . φs)
      return $! \γ -> [|| $$k $$(peekX (xs γ)) ($$unbox $$(o γ)) ||]
 
@@ -329,7 +329,7 @@ execChainInit σ l μ (Exec k) =
      asks $! \ctx γ@(Γ xs ks o _) -> [||
         do ref <- newΣ $$(peekX xs)
            cref <- $$newCRef $$o
-           $$(setupHandlerΓ γ (chainHandler mk [||ref||] [||cref||] γ) (\γ' -> 
+           $$(setupHandlerΓ γ (chainHandler mk [||ref||] [||cref||] γ) (\γ' ->
               buildIter ctx μ σ l [||ref||] [||cref||] (hs γ') o))
       ||]
 
@@ -398,7 +398,7 @@ setupHandlerΓ γ !h !k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs})
 class JoinBuilder o where
   setupJoinPoint :: (?ops :: InputOps s o) => Maybe (ΦDecl (Exec s o) y ys r a)
                  -> (QList xs -> QList ys)
-                 -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a)) 
+                 -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
                  -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
 
 #define deriveJoinBuilder(_o)                                                               \
@@ -418,12 +418,12 @@ instance JoinBuilder _o where                                                   
 inputInstances(deriveJoinBuilder)
 
 class RecBuilder o where
-  buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o '[] x a 
+  buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o '[] x a
             -> TExpQ (STRef s x) -> TExpQ (CRef s o)
             -> [QH s o a]  -> QO o -> QST s (Maybe a)
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
-            -> (Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a)) 
-            -> (Ctx s o a -> QST s (Maybe a)) 
+            -> (Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a))
+            -> (Ctx s o a -> QST s (Maybe a))
             -> QST s (Maybe a)
 
 #define deriveRecBuilder(_o)                                                                         \
@@ -453,7 +453,7 @@ inputSizeCheck (Just n) p =
      mp <- local (addConstCount 1) p
      if skip then return $! mp
      else if n == 1 then fmap (\ctx γ -> [|| if $$more $$(o γ) then $$(mp γ) else $$(raiseΓ γ) ||]) ask
-     else fmap (\ctx γ -> [|| 
+     else fmap (\ctx γ -> [||
         if $$more ($$shiftRight $$(o γ) (n - 1)) then $$(mp γ)
         else $$(raiseΓ γ)
       ||]) ask
@@ -474,13 +474,13 @@ instance KOps _o where                                                          
 inputInstances(deriveKOps)
 
 askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
-askM μ = {-trace ("fetching " ++ show μ) $ -}asks (((DMap.! μ) . μs))
+askM μ = trace ("fetching " ++ show μ) $ asks (((DMap.! μ) . μs))
 
 askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (QSTRef s x)
-askΣ σ = {-trace ("fetching " ++ show σ) $ -}asks ((DMap.! σ) . σs)
+askΣ σ = trace ("fetching " ++ show σ) $ asks ((DMap.! σ) . σs)
 
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin (Rep o) s (Unboxed o) a x)
-askΦ φ = {-trace ("fetching " ++ show φ) $ -}asks ((DMap.! φ) . φs)
+askΦ φ = trace ("fetching " ++ show φ) $ asks ((DMap.! φ) . φs)
 
 askSTC :: MonadReader (Ctx s o a) m => ΣVar x -> m (QCRef s o)
 askSTC (ΣVar v) = asks ((Map.! v) . stcs)

@@ -118,10 +118,11 @@ library
                        text,
                        bytestring
   build-tools: cpphs >= 1.19
-  
+
   -- Directories containing source files.
   -- hs-source-dirs:
 
   -- Base language which the package is written in.
   default-language:    Haskell2010
-  ghc-options:         -fplugin=LiftPlugin -fprint-explicit-kinds -fprint-explicit-runtime-reps -pgmP cpphs -optP --cpp
+  ghc-options:         -fplugin=LiftPlugin -pgmP cpphs -optP --cpp
+  ---fprint-explicit-kinds -fprint-explicit-runtime-reps

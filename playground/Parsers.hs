@@ -135,15 +135,23 @@ jsUnreservedName = \s -> not (member s keys)
 jsStringLetter :: Char -> Bool
 jsStringLetter c = (c /= '"') && (c /= '\\') && (c > '\026')
 
-failure :: Parser ()
+{-failure :: Parser ()
 failure = expr
   where
     expr :: Parser ()
-    expr = char 'a' *> expr'
+    expr = item *> expr'
     expr' :: Parser ()
-    expr' = expr *> expr'
+    expr' = expr *> expr'-}
 
-javascript :: Parser JSProgram
+failure :: Parser ()
+failure = x
+  where
+    x = z <* y <* y
+    y = try item
+    z = x *> z
+
+
+{-javascript :: Parser JSProgram
 javascript = whitespace *> many element <* eof
   where
     element :: Parser JSElement
@@ -334,4 +342,4 @@ javascript = whitespace *> many element <* eof
         code 'U' = token "S" $> lift' ('\US')
         code 'V' = token "T" $> lift' ('\VT')
         -- TODO numeric
-        code _ = empty--error "numeric escape codes not supported"
+        code _ = empty--error "numeric escape codes not supported"-}

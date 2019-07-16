@@ -26,6 +26,7 @@ import Data.Word             (Word64)
 import Control.Monad         (forM)
 import Control.Monad.ST      (ST)
 import Control.Monad.Reader  (ask, asks, local, Reader, runReader, MonadReader)
+import Control.Exception     (Exception, throw, catch, evaluate, SomeException)
 import Data.STRef            (STRef)
 import Data.Map.Strict       (Map)
 import Data.Dependent.Map    (DMap)
@@ -33,11 +34,12 @@ import Data.GADT.Compare     (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrderi
 import Safe.Coerce           (coerce)
 import Debug.Trace           (trace)
 import System.Console.Pretty (color, Color(Green, White, Red, Blue))
+import System.IO.Unsafe      (unsafePerformIO)
 import Data.Text             (Text)
 import Data.Void             (Void)
 import Data.List             (intercalate)
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
-import qualified Data.Dependent.Map as DMap ((!), insert, empty)
+import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map)
 
 #define inputInstances(derivation) \
 derivation(O)                      \
@@ -155,13 +157,24 @@ exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
              (Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0))
   ||]
 
+newtype MissingDependency = MissingDependency IMVar
+missingDependency :: MVar x -> MissingDependency
+missingDependency (MVar v) = MissingDependency v
+dependencyOf :: MissingDependency -> MVar x
+dependencyOf (MissingDependency v) = MVar v
+
+newtype PartialEval s o a x = PartialEval (Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a))
+partiallyEvaluateLets :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> DMap MVar (PartialEval s o a)
+partiallyEvaluateLets = DMap.map (\(LetBinding k) -> PartialEval (run (readyExec k)))
+
+getPartialEvaluation :: DMap MVar (PartialEval s o a) -> MVar x -> Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a)
+getPartialEvaluation ns μ = let !(PartialEval k) = ns DMap.! (trace ("executing let-binding " ++ show μ) μ) in k
+
 readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> QST s (Maybe a)
-readyCalls topo ms start γ = foldr readyFunc (run start γ) (trace (show topo) topo)
+readyCalls topo ms start γ ctx = foldr readyFunc (run start γ) (trace (show topo) topo) ctx
   where
-    readyFunc v rest (ctx :: Ctx s o a) =
-      let μ = MVar v
-          LetBinding k = ms DMap.! (trace ("executing let-binding " ++ show μ) μ)
-      in buildRec ctx μ (run (readyExec k)) rest
+    ns = partiallyEvaluateLets ms
+    readyFunc v rest ctx = buildRec ctx (MVar v) (getPartialEvaluation ns) rest
 
 readyExec :: (?ops :: InputOps s o, Ops o) => Free3 (M o) Void3 xs r a -> Exec s o xs r a
 readyExec = fold3 absurd (Exec . alg)
@@ -202,6 +215,7 @@ execCall :: (?ops :: InputOps s o, ConcreteExec o, KOps o) => MVar x -> Exec s o
 execCall μ (Exec k) =
   do !(QAbsExec m) <- askM μ
      mk <- k
+     --return $! unsafePerformIO (catch (evaluate m) (\(e :: SomeException) -> do putStrLn "caught!"; fail "oops"))
      return $ \γ@Γ{..} -> [|| $$(runConcrete hs) $$m $$(suspend mk γ) $$o ||]
 
 execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> Reader (Ctx s o a) (Γ s o xs x a -> QST s (Maybe a))
@@ -422,7 +436,7 @@ class RecBuilder o where
             -> TExpQ (STRef s x) -> TExpQ (CRef s o)
             -> [QH s o a]  -> QO o -> QST s (Maybe a)
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
-            -> (Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a))
+            -> (MVar x -> Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a))
             -> (Ctx s o a -> QST s (Maybe a))
             -> QST s (Maybe a)
 
@@ -437,14 +451,30 @@ instance RecBuilder _o where                                                    
                    (insertSTC σ cref (insertM μ [||\_ (!o#) _ -> loop o#||] (insertΣ σ ref ctx))))}; \
         loop ($$unbox $$o)                                                                           \
       } ||];                                                                                         \
-  buildRec ctx μ body k = let bx = box in [||                                                        \
-      let recu !ks !o# h =                                                                           \
-            $$(body (Γ QNil [||ks||] [||$$bx o#||] (pushH [||h||] makeH))                            \
-                    (insertM μ [||recu||] ctx))                                                      \
-      in $$(k (insertM μ [||recu||] ctx))                                                            \
-    ||]                                                                                              \
+  buildRec ctx μ partials k = trace ("building " ++ show μ) $                                        \
+    let bx = box                                                                                     \
+    in [||                                                                                           \
+        let recu !ks !o# h =                                                                         \
+              $$(let ctx' = insertM μ [||recu||] ctx;                                                \
+                     body = partials μ (Γ QNil [||ks||] [||$$bx o#||] (pushH [||h||] makeH));        \
+                     go ctx'' = catchPure (body ctx'') (emergencyBind ctx'' partials go)             \
+                 in go ctx')                                                                         \
+        in $$(k (insertM μ [||recu||] ctx))                                                          \
+      ||]                                                                                            \
 };
 inputInstances(deriveRecBuilder)
+
+catchPure :: Exception e => a -> (e -> a) -> a
+catchPure throwable handler = unsafePerformIO (catch (evaluate throwable) (return . handler))
+
+emergencyBind :: (?ops :: InputOps s o, RecBuilder o) => Ctx s o a
+              -> (MVar x -> Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a))
+              -> (Ctx s o a -> QST s (Maybe a))
+              -> MissingDependency
+              -> QST s (Maybe a)
+emergencyBind ctx partials k err =
+  let μ = dependencyOf err
+  in buildRec ctx (trace ("Emergency binding required for " ++ show μ) μ) partials k
 
 inputSizeCheck :: (?ops :: InputOps s o, FailureOps o) => Maybe Int -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a)) -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
 inputSizeCheck Nothing p = p
@@ -474,7 +504,11 @@ instance KOps _o where                                                          
 inputInstances(deriveKOps)
 
 askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
-askM μ = trace ("fetching " ++ show μ) $ asks (((DMap.! μ) . μs))
+askM μ = trace ("fetching " ++ show μ) $ do
+  mexec <- asks (((DMap.lookup μ) . μs))
+  case mexec of
+    Just exec -> return $! exec
+    Nothing   -> throw (missingDependency μ)
 
 askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (QSTRef s x)
 askΣ σ = trace ("fetching " ++ show σ) $ asks ((DMap.! σ) . σs)
@@ -555,6 +589,9 @@ instance Show (Free3 (M o) f xs ks a) where
 instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
 instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ
 instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
+
+instance Show MissingDependency where show (MissingDependency (IMVar μ)) = "Dependency μ" ++ show μ ++ " has not been compiled"
+instance Exception MissingDependency
 
 instance GEq ΣVar where
   geq (ΣVar u) (ΣVar v)

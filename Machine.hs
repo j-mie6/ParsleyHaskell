@@ -126,7 +126,8 @@ debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
 debugDown :: Ctx s o a -> Ctx s o a
 debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
-newtype Exec s o xs r a = Exec (Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a)))
+type ExecMonad s o xs r a = Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+newtype Exec s o xs r a = Exec (ExecMonad s o xs r a)
 run :: Exec s o xs r a -> Γ s o xs r a -> Ctx s o a -> QST s (Maybe a)
 run (Exec m) γ ctx = runReader m ctx γ
 
@@ -179,7 +180,7 @@ readyCalls topo ms start γ ctx = foldr readyFunc (run start γ) (trace (show to
 readyExec :: (?ops :: InputOps s o, Ops o) => Free3 (M o) Void3 xs r a -> Exec s o xs r a
 readyExec = fold3 absurd (Exec . alg)
   where
-    alg :: (?ops :: InputOps s o, Ops o) => M o (Exec s o) xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+    alg :: (?ops :: InputOps s o, Ops o) => M o (Exec s o) xs r a -> ExecMonad s o xs r a
     alg Halt                   = execHalt
     alg Ret                    = execRet
     alg (Call μ k)             = execCall μ k
@@ -205,46 +206,45 @@ readyExec = fold3 absurd (Exec . alg)
     alg (LogEnter name k)      = execLogEnter name k
     alg (LogExit name k)       = execLogExit name k
 
-execHalt :: Reader (Ctx s o a) (Γ s o '[a] r a -> QST s (Maybe a))
+execHalt :: ExecMonad s o '[a] r a
 execHalt = return $! \γ -> [|| return $! Just $! $$(peekX (xs γ)) ||]
 
-execRet :: (?ops :: InputOps s o, KOps o) => Reader (Ctx s o a) (Γ s o (x ': xs) x a -> QST s (Maybe a))
+execRet :: (?ops :: InputOps s o, KOps o) => ExecMonad s o (x ': xs) x a
 execRet = return $! resume
 
-execCall :: (?ops :: InputOps s o, ConcreteExec o, KOps o) => MVar x -> Exec s o (x ': xs) r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execCall :: (?ops :: InputOps s o, ConcreteExec o, KOps o) => MVar x -> Exec s o (x ': xs) r a -> ExecMonad s o xs r a
 execCall μ (Exec k) =
   do !(QAbsExec m) <- askM μ
      mk <- k
-     --return $! unsafePerformIO (catch (evaluate m) (\(e :: SomeException) -> do putStrLn "caught!"; fail "oops"))
      return $ \γ@Γ{..} -> [|| $$(runConcrete hs) $$m $$(suspend mk γ) $$o ||]
 
-execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> Reader (Ctx s o a) (Γ s o xs x a -> QST s (Maybe a))
+execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> ExecMonad s o xs x a
 execJump μ =
   do !(QAbsExec m) <- askM μ
      return $! \γ@Γ{..} -> [|| $$(runConcrete hs) $$m $$k $$o ||]
 
-execPush :: WQ x -> Exec s o (x ': xs) r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execPush :: WQ x -> Exec s o (x ': xs) r a -> ExecMonad s o xs r a
 execPush x (Exec k) = fmap (\m γ -> m (γ {xs = pushX (_code x) (xs γ)})) k
 
-execPop :: Exec s o xs r a -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
+execPop :: Exec s o xs r a -> ExecMonad s o (x ': xs) r a
 execPop (Exec k) = fmap (\m γ -> m (γ {xs = popX_ (xs γ)})) k
 
-execLift2 :: WQ (x -> y -> z) -> Exec s o (z ': xs) r a -> Reader (Ctx s o a) (Γ s o (y ': x ': xs) r a -> QST s (Maybe a))
+execLift2 :: WQ (x -> y -> z) -> Exec s o (z ': xs) r a -> ExecMonad s o (y ': x ': xs) r a
 execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = let (# y, xs' #) = popX (xs γ); (# x, xs'' #) = popX xs' in pushX [||$$(_code f) $$x $$y||] xs''})) k
 
-execSat :: (?ops :: InputOps s o, FailureOps o) => WQ (Char -> Bool) -> Exec s o (Char ': xs) r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execSat :: (?ops :: InputOps s o, FailureOps o) => WQ (Char -> Bool) -> Exec s o (Char ': xs) r a -> ExecMonad s o xs r a
 execSat p (Exec k) =
   do mk <- k
      asks $! \ctx γ -> nextSafe (skipBounds ctx) (o γ) (_code p) (\o c -> mk (γ {xs = pushX c (xs γ), o = o})) (raiseΓ γ)
 
-execEmpt :: (?ops :: InputOps s o, FailureOps o) => Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execEmpt :: (?ops :: InputOps s o, FailureOps o) => ExecMonad s o xs r a
 execEmpt = return $! raiseΓ
 
-execCommit :: Bool -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execCommit :: Bool -> Exec s o xs r a -> ExecMonad s o xs r a
 execCommit exit (Exec k) = local (\ctx -> if exit then addConstCount (-1) ctx else ctx)
                                  (fmap (\m γ -> m (γ {hs = popH_ (hs γ)})) k)
 
-execHardFork :: (?ops :: InputOps s o, HardForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execHardFork :: (?ops :: InputOps s o, HardForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> ExecMonad s o xs r a
 execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl id $
   do mp <- p
      mq <- q
@@ -261,7 +261,7 @@ instance HardForkHandler _o where                                  \
 };
 inputInstances(deriveHardForkHandler)
 
-execSoftFork :: (?ops :: InputOps s o, SoftForkHandler o, JoinBuilder o) => Maybe Int -> Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execSoftFork :: (?ops :: InputOps s o, SoftForkHandler o, JoinBuilder o) => Maybe Int -> Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> ExecMonad s o xs r a
 execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl id $
   do mp <- inputSizeCheck constantInput p
      mq <- q
@@ -271,25 +271,25 @@ execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl id $
 instance SoftForkHandler _o where { softForkHandler mq γ = [||\h _ (!c#) -> $$(mq (γ {o = [||$$box c#||], hs = pushH [||h||] (hs γ)}))||] };
 inputInstances(deriveSoftForkHandler)
 
-execJoin :: (?ops :: InputOps s o) => ΦVar x -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
+execJoin :: (?ops :: InputOps s o) => ΦVar x -> ExecMonad s o (x ': xs) r a
 execJoin φ =
   do QJoin k <- asks ((DMap.! φ) . φs)
      return $! \γ -> [|| $$k $$(peekX (xs γ)) ($$unbox $$(o γ)) ||]
 
-execAttempt :: (?ops :: InputOps s o, AttemptHandler o) => Maybe Int -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execAttempt :: (?ops :: InputOps s o, AttemptHandler o) => Maybe Int -> Exec s o xs r a -> ExecMonad s o xs r a
 execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; return $! \γ -> setupHandlerΓ γ attemptHandler mk
 
 #define deriveAttemptHandler(_o) \
 instance AttemptHandler _o where { attemptHandler = [||\h _ (!c#) -> h c#||] };
 inputInstances(deriveAttemptHandler)
 
-execTell :: Exec s o (o ': xs) r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execTell :: Exec s o (o ': xs) r a -> ExecMonad s o xs r a
 execTell (Exec k) = fmap (\mk γ -> mk (γ {xs = pushX (o γ) (xs γ)})) k
 
-execSeek :: Exec s o xs r a -> Reader (Ctx s o a) (Γ s o (o ': xs) r a -> QST s (Maybe a))
+execSeek :: Exec s o xs r a -> ExecMonad s o (o ': xs) r a
 execSeek (Exec k) = fmap (\mk γ -> let (# o, xs' #) = popX (xs γ) in mk (γ {xs = xs', o=o})) k
 
-execNegLook :: (?ops :: InputOps s o, NegLookHandler o) => Exec s o xs r a -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+execNegLook :: (?ops :: InputOps s o, NegLookHandler o) => Exec s o xs r a -> Exec s o xs r a -> ExecMonad s o xs r a
 execNegLook (Exec m) (Exec k) =
   do mm <- m
      mk <- k
@@ -303,7 +303,7 @@ instance NegLookHandler _o where                                              \
 };
 inputInstances(deriveNegLookHandler)
 
-execCase :: (?ops :: InputOps s o, JoinBuilder o) => Exec s o (x ': xs) r a -> Exec s o (y ': xs) r a -> Maybe (ΦDecl (Exec s o) z xs r a) -> Reader (Ctx s o a) (Γ s o (Either x y ': xs) r a -> QST s (Maybe a))
+execCase :: (?ops :: InputOps s o, JoinBuilder o) => Exec s o (x ': xs) r a -> Exec s o (y ': xs) r a -> Maybe (ΦDecl (Exec s o) z xs r a) -> ExecMonad s o (Either x y ': xs) r a
 execCase (Exec p) (Exec q) decl = setupJoinPoint decl popX_ $
   do mp <- p
      mq <- q
@@ -313,7 +313,7 @@ execCase (Exec p) (Exec q) decl = setupJoinPoint decl popX_ $
            Left x -> $$(mp (γ {xs = pushX [||x||] xs'}))
            Right y  -> $$(mq (γ {xs = pushX [||y||] xs'}))||]
 
-execChoices :: forall x y xs r a s o. (?ops :: InputOps s o, JoinBuilder o) => [WQ (x -> Bool)] -> [Exec s o xs r a] -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) y xs r a) -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
+execChoices :: forall x y xs r a s o. (?ops :: InputOps s o, JoinBuilder o) => [WQ (x -> Bool)] -> [Exec s o xs r a] -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) y xs r a) -> ExecMonad s o (x ': xs) r a
 execChoices fs ks (Exec def) decl = setupJoinPoint decl popX_ $
   do mdef <- def
      fmap (\mks γ -> let !(# x, xs' #) = popX (xs γ) in go x fs mks mdef (γ {xs = xs'})) (forM ks (\(Exec k) -> k))
@@ -325,7 +325,7 @@ execChoices fs ks (Exec def) decl = setupJoinPoint decl popX_ $
         else $$(go x fs mks def γ)
       ||]
 
-execChainIter :: (?ops :: InputOps s o, ConcreteExec o) => ΣVar x -> MVar x -> Reader (Ctx s o a) (Γ s o ((x -> x) ': xs) x a -> QST s (Maybe a))
+execChainIter :: (?ops :: InputOps s o, ConcreteExec o) => ΣVar x -> MVar x -> ExecMonad s o ((x -> x) ': xs) x a
 execChainIter σ μ =
   do !(QSTRef ref) <- askΣ σ
      !(QAbsExec l) <- askM μ
@@ -337,7 +337,7 @@ execChainIter σ μ =
        ||]
 
 execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x -> Exec s o '[] x a -> MVar x -> Exec s o (x ': xs) r a
-              -> Reader (Ctx s o a) (Γ s o (x ': xs) r a -> QST s (Maybe a))
+              -> ExecMonad s o (x ': xs) r a
 execChainInit σ l μ (Exec k) =
   do mk <- k
      asks $! \ctx γ@(Γ xs ks o _) -> [||
@@ -367,7 +367,7 @@ instance ChainHandler _o where                     \
 };
 inputInstances(deriveChainHandler)
 
-execSwap :: Exec s o (x ': y ': xs) r a -> Reader (Ctx s o a) (Γ s o (y ': x ': xs) r a -> QST s (Maybe a))
+execSwap :: Exec s o (x ': y ': xs) r a -> ExecMonad s o (y ': x ': xs) r a
 execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = let (# y, xs' #) = popX (xs γ); (# x, xs'' #) = popX xs' in pushX x (pushX y xs'')})) k
 
 preludeString :: (?ops :: InputOps s o) => String -> Char -> Γ s o xs r a -> Ctx s o a -> String -> TExpQ String
@@ -388,10 +388,11 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     prelude    = [|| concat [indent, dir : name, dir : " (", show ($$offToInt $$offset), "): "] ||]
     caretSpace = [|| replicate (length $$prelude + $$offToInt $$offset - $$offToInt $$start) ' ' ||]
 
-execLogEnter :: (?ops :: InputOps s o, LogHandler o) => String -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-execLogEnter name k =
-  do asks $! \ctx γ ->
-      (setupHandlerΓ γ (logHandler name ctx γ) (\γ' -> [|| trace $$(preludeString name '>' γ ctx "") $$(run k γ' (debugUp ctx))||]))
+execLogEnter :: (?ops :: InputOps s o, LogHandler o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
+execLogEnter name (Exec mk) =
+  do k <- local debugUp mk
+     asks $! \ctx γ ->
+      (setupHandlerΓ γ (logHandler name ctx γ) (\γ' -> [|| trace $$(preludeString name '>' γ ctx "") $$(k γ')||]))
 
 #define deriveLogHandler(_o)                                                                   \
 instance LogHandler _o where                                                                   \
@@ -402,8 +403,10 @@ instance LogHandler _o where                                                    
 };
 inputInstances(deriveLogHandler)
 
-execLogExit :: (?ops :: InputOps s o) => String -> Exec s o xs r a -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-execLogExit name k = asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(run k γ (debugDown ctx)) ||]
+execLogExit :: (?ops :: InputOps s o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
+execLogExit name (Exec mk) =
+  do k <- local debugDown mk
+     asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||]
 
 setupHandlerΓ :: (?ops :: InputOps s o, FailureOps o) => Γ s o xs r a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a)) ->
                                                                                (Γ s o xs r a -> QST s (Maybe a)) -> QST s (Maybe a)
@@ -412,8 +415,8 @@ setupHandlerΓ γ !h !k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs})
 class JoinBuilder o where
   setupJoinPoint :: (?ops :: InputOps s o) => Maybe (ΦDecl (Exec s o) y ys r a)
                  -> (QList xs -> QList ys)
-                 -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-                 -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+                 -> ExecMonad s o xs r a
+                 -> ExecMonad s o xs r a
 
 #define deriveJoinBuilder(_o)                                                               \
 instance JoinBuilder _o where                                                               \
@@ -476,7 +479,7 @@ emergencyBind ctx partials k err =
   let μ = dependencyOf err
   in buildRec ctx (trace ("Emergency binding required for " ++ show μ) μ) partials k
 
-inputSizeCheck :: (?ops :: InputOps s o, FailureOps o) => Maybe Int -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a)) -> Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
+inputSizeCheck :: (?ops :: InputOps s o, FailureOps o) => Maybe Int -> ExecMonad s o xs r a -> ExecMonad s o xs r a
 inputSizeCheck Nothing p = p
 inputSizeCheck (Just n) p =
   do skip <- asks skipBounds

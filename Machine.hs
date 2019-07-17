@@ -25,8 +25,9 @@ import Utils                 (WQ(..), lift', (>*<), TExpQ)
 import Data.Word             (Word64)
 import Control.Monad         (forM)
 import Control.Monad.ST      (ST)
-import Control.Monad.Reader  (ask, asks, local, Reader, runReader, MonadReader)
-import Control.Exception     (Exception, throw, catch, evaluate, SomeException)
+import Control.Monad.Reader  (ask, asks, local, ReaderT, runReaderT, MonadReader)
+import Control.Monad.Except  (throwError, catchError, Except, runExcept, MonadError)
+import Control.Exception     (Exception, throw{-, catch, evaluate, SomeException-})
 import Data.STRef            (STRef)
 import Data.Map.Strict       (Map)
 import Data.Dependent.Map    (DMap)
@@ -34,7 +35,7 @@ import Data.GADT.Compare     (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrderi
 import Safe.Coerce           (coerce)
 import Debug.Trace           (trace)
 import System.Console.Pretty (color, Color(Green, White, Red, Blue))
-import System.IO.Unsafe      (unsafePerformIO)
+--import System.IO.Unsafe      (unsafePerformIO)
 import Data.Text             (Text)
 import Data.Void             (Void)
 import Data.List             (intercalate)
@@ -126,10 +127,14 @@ debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
 debugDown :: Ctx s o a -> Ctx s o a
 debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
-type ExecMonad s o xs r a = Reader (Ctx s o a) (Γ s o xs r a -> QST s (Maybe a))
-newtype Exec s o xs r a = Exec (ExecMonad s o xs r a)
+newtype MissingDependency = MissingDependency IMVar
+type ExecMonad s o xs r a = ReaderT (Ctx s o a) (Except MissingDependency) (Γ s o xs r a -> QST s (Maybe a))
+newtype Exec s o xs r a = Exec { unExec :: ExecMonad s o xs r a }
 run :: Exec s o xs r a -> Γ s o xs r a -> Ctx s o a -> QST s (Maybe a)
-run (Exec m) γ ctx = runReader m ctx γ
+run (Exec m) γ ctx = either throw id (runExcept (runReaderT m ctx)) γ
+
+runOrThrow :: Exception e => Except e a -> a
+runOrThrow = either throw id . runExcept
 
 type Ops o = (Handlers o, KOps o, ConcreteExec o, JoinBuilder o, FailureOps o, RecBuilder o)
 type Handlers o = (HardForkHandler o, SoftForkHandler o, AttemptHandler o, NegLookHandler o, ChainHandler o, LogHandler o)
@@ -158,18 +163,17 @@ exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
              (Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0))
   ||]
 
-newtype MissingDependency = MissingDependency IMVar
 missingDependency :: MVar x -> MissingDependency
 missingDependency (MVar v) = MissingDependency v
 dependencyOf :: MissingDependency -> MVar x
 dependencyOf (MissingDependency v) = MVar v
 
-newtype PartialEval s o a x = PartialEval (Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a))
+newtype PartialEval s o a x = PartialEval (Ctx s o a -> Except MissingDependency (Γ s o '[] x a -> QST s (Maybe a)))
 partiallyEvaluateLets :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> DMap MVar (PartialEval s o a)
-partiallyEvaluateLets = DMap.map (\(LetBinding k) -> PartialEval (run (readyExec k)))
+partiallyEvaluateLets = DMap.map (\(LetBinding k) -> PartialEval (runReaderT (unExec (readyExec k))))
 
-getPartialEvaluation :: DMap MVar (PartialEval s o a) -> MVar x -> Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a)
-getPartialEvaluation ns μ = let !(PartialEval k) = ns DMap.! (trace ("executing let-binding " ++ show μ) μ) in k
+getPartialEvaluation :: DMap MVar (PartialEval s o a) -> MVar x -> Γ s o '[] x a -> Ctx s o a -> Except MissingDependency (QST s (Maybe a))
+getPartialEvaluation ns μ γ ctx = let !(PartialEval k) = ns DMap.! (trace ("executing let-binding " ++ show μ) μ) in k ctx <*> pure γ
 
 readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> QST s (Maybe a)
 readyCalls topo ms start γ ctx = foldr readyFunc (run start γ) (trace (show topo) topo) ctx
@@ -439,7 +443,7 @@ class RecBuilder o where
             -> TExpQ (STRef s x) -> TExpQ (CRef s o)
             -> [QH s o a]  -> QO o -> QST s (Maybe a)
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
-            -> (MVar x -> Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a))
+            -> (MVar x -> Γ s o '[] x a -> Ctx s o a -> Except MissingDependency (QST s (Maybe a)))
             -> (Ctx s o a -> QST s (Maybe a))
             -> QST s (Maybe a)
 
@@ -460,24 +464,21 @@ instance RecBuilder _o where                                                    
         let recu !ks !o# h =                                                                         \
               $$(let ctx' = insertM μ [||recu||] ctx;                                                \
                      body = partials μ (Γ QNil [||ks||] [||$$bx o#||] (pushH [||h||] makeH));        \
-                     go ctx'' = catchPure (body ctx'') (emergencyBind ctx'' partials go)             \
+                     go ctx' = runOrThrow (catchError (body ctx') (emergencyBind ctx' partials go))  \
                  in go ctx')                                                                         \
         in $$(k (insertM μ [||recu||] ctx))                                                          \
       ||]                                                                                            \
 };
 inputInstances(deriveRecBuilder)
 
-catchPure :: Exception e => a -> (e -> a) -> a
-catchPure throwable handler = unsafePerformIO (catch (evaluate throwable) (return . handler))
-
 emergencyBind :: (?ops :: InputOps s o, RecBuilder o) => Ctx s o a
-              -> (MVar x -> Γ s o '[] x a -> Ctx s o a -> QST s (Maybe a))
+              -> (MVar x -> Γ s o '[] x a -> Ctx s o a -> Except MissingDependency (QST s (Maybe a)))
               -> (Ctx s o a -> QST s (Maybe a))
               -> MissingDependency
-              -> QST s (Maybe a)
+              -> Except MissingDependency (QST s (Maybe a))
 emergencyBind ctx partials k err =
   let μ = dependencyOf err
-  in buildRec ctx (trace ("Emergency binding required for " ++ show μ) μ) partials k
+  in return $ buildRec ctx (trace ("Emergency binding required for " ++ show μ) μ) partials k
 
 inputSizeCheck :: (?ops :: InputOps s o, FailureOps o) => Maybe Int -> ExecMonad s o xs r a -> ExecMonad s o xs r a
 inputSizeCheck Nothing p = p
@@ -506,12 +507,12 @@ instance KOps _o where                                                          
 };
 inputInstances(deriveKOps)
 
-askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
+askM :: (MonadError MissingDependency m, MonadReader (Ctx s o a) m) => MVar x -> m (QAbsExec s o a x)
 askM μ = trace ("fetching " ++ show μ) $ do
   mexec <- asks (((DMap.lookup μ) . μs))
   case mexec of
     Just exec -> return $! exec
-    Nothing   -> throw (missingDependency μ)
+    Nothing   -> throwError (missingDependency μ)
 
 askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (QSTRef s x)
 askΣ σ = trace ("fetching " ++ show σ) $ asks ((DMap.! σ) . σs)

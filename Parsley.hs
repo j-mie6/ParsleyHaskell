@@ -32,6 +32,8 @@ module Parsley ( Parser, runParser, parseFromFile
                , between
                , (<?|>), (>?>), when, while, fromMaybeP
                , debug
+               -- Registers
+               , newRegister, get, put, Reg
                -- Expressions
                , Level(..), precedence
                -- Template Haskell Utils
@@ -43,7 +45,7 @@ module Parsley ( Parser, runParser, parseFromFile
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Input hiding               (PreparedInput(..))
-import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
+import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, newRegister, get, put, Reg)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
 import Utils                      (lift', (>*<), WQ(..), TExpQ)

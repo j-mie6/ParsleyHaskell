@@ -9,7 +9,7 @@
 module ParserAST where
 
 import Indexed                    (IFunctor, Free(Op), Void1, Const1(..), imap, fold)
-import Machine                    (IMVar, MVar(..))
+import Machine                    (IMVar, MVar(..), IΣVar)
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 import Data.List                  (intercalate)
@@ -63,6 +63,15 @@ chainPost (Parser p) (Parser op) = Parser (Op (ChainPost p op))
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (Op (Debug name p))
 
+newRegister :: WQ a -> (forall r. Reg r a -> Parser b) -> Parser b
+newRegister x f = Parser (Op (ScopeRegister x (unParser . f)))
+
+get :: Reg r a -> Parser a
+get reg = Parser (Op (GetRegister reg))
+
+put :: Reg r a -> Parser a -> Parser ()
+put reg (Parser p) = Parser (Op (PutRegister reg p))
+
 -- Fixities
 -- Applicative
 infixl 4 <*>
@@ -70,6 +79,9 @@ infixl 4 <*
 infixl 4 *>
 -- Alternative
 infixl 3 <|>
+
+-- Register datatype
+newtype Reg r a = Reg IΣVar
 
 -- Core datatype
 data ParserF (k :: * -> *) (a :: *) where
@@ -89,25 +101,33 @@ data ParserF (k :: * -> *) (a :: *) where
     ChainPre      :: k (a -> a) -> k a -> ParserF k a
     ChainPost     :: k a -> k (a -> a) -> ParserF k a
     Debug         :: String -> k a -> ParserF k a
+    ScopeRegister :: WQ a -> (forall r. Reg r a -> k b) -> ParserF k b
+    NewRegister   :: Reg r a -> WQ a -> k b -> ParserF k b
+    GetRegister   :: Reg r a -> ParserF k a
+    PutRegister   :: Reg r a -> k a -> ParserF k ()
 
 -- Instances
 instance IFunctor ParserF where
-  imap _ (Pure x)          = Pure x
-  imap _ (Satisfy p)       = Satisfy p
-  imap f (p :<*>: q)       = f p :<*>: f q
-  imap f (p :*>: q)        = f p :*>: f q
-  imap f (p :<*: q)        = f p :<*: f q
-  imap f (p :<|>: q)       = f p :<|>: f q
-  imap _ Empty             = Empty
-  imap f (Try n p)         = Try n (f p)
-  imap f (LookAhead p)     = LookAhead (f p)
-  imap f (Let r v p)       = Let r v (f p)
-  imap f (NotFollowedBy p) = NotFollowedBy (f p)
-  imap f (Branch b p q)    = Branch (f b) (f p) (f q)
-  imap f (Match p fs qs d) = Match (f p) fs (map f qs) (f d)
-  imap f (ChainPre op p)   = ChainPre (f op) (f p)
-  imap f (ChainPost p op)  = ChainPost (f p) (f op)
-  imap f (Debug name p)    = Debug name (f p)
+  imap _ (Pure x)            = Pure x
+  imap _ (Satisfy p)         = Satisfy p
+  imap f (p :<*>: q)         = f p :<*>: f q
+  imap f (p :*>: q)          = f p :*>: f q
+  imap f (p :<*: q)          = f p :<*: f q
+  imap f (p :<|>: q)         = f p :<|>: f q
+  imap _ Empty               = Empty
+  imap f (Try n p)           = Try n (f p)
+  imap f (LookAhead p)       = LookAhead (f p)
+  imap f (Let r v p)         = Let r v (f p)
+  imap f (NotFollowedBy p)   = NotFollowedBy (f p)
+  imap f (Branch b p q)      = Branch (f b) (f p) (f q)
+  imap f (Match p fs qs d)   = Match (f p) fs (map f qs) (f d)
+  imap f (ChainPre op p)     = ChainPre (f op) (f p)
+  imap f (ChainPost p op)    = ChainPost (f p) (f op)
+  imap f (Debug name p)      = Debug name (f p)
+  imap f (ScopeRegister x g) = ScopeRegister x (f . g)
+  imap f (NewRegister r x p) = NewRegister r x (f p)
+  imap f (GetRegister r)     = GetRegister r
+  imap f (PutRegister r p)   = PutRegister r (f p)
 
 instance Show (Free ParserF f a) where
   show = getConst1 . fold (const (Const1 "")) (Const1 . alg)
@@ -130,3 +150,7 @@ instance Show (Free ParserF f a) where
       alg (ChainPre (Const1 op) (Const1 p))        = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))       = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                    = p
+      alg (ScopeRegister x _)                     = "(newRegister x ?)"
+      alg (NewRegister (Reg r) x (Const1 p))      = concat ["newRegister r", show r, " x ", p, ")"]
+      alg (GetRegister (Reg r))                   = concat ["(get r", show r, ")"]
+      alg (PutRegister (Reg r) (Const1 p))        = concat ["(put r", show r, " ", p, ")"]

@@ -9,7 +9,7 @@
 module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..), Reg(..))
-import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, fmapInstr)
+import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, fmapInstr, modifyInstr)
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
@@ -91,14 +91,14 @@ direct !(Let _ !μ _)  = CodeGen $ \(!m) -> return $! tailCallOptimise μ m
 direct !(ChainPre op p) = CodeGen $ \(!m) ->
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (fmapInstr (lift' flip >*< lift' (.)) (Op3 (ChainIter σ μ))))
+     opc <- freshM (runCodeGen op (fmapInstr (lift' flip >*< lift' (.)) (modifyInstr σ (Op3 (ChainIter σ μ)))))
      pc <- freshM (runCodeGen p (Op3 (Lift2 (lift' ($)) m)))
-     return $! Op3 (Push (lift' id) (Op3 (ChainInit σ opc μ pc)))
+     return $! Op3 (Push (lift' id) (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ pc)))))))
 direct !(ChainPost p op) = CodeGen $ \(!m) ->
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (Op3 (ChainIter σ μ)))
-     freshM (runCodeGen p (Op3 (ChainInit σ opc μ m)))
+     opc <- freshM (runCodeGen op (modifyInstr σ (Op3 (ChainIter σ μ))))
+     freshM (runCodeGen p (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ m)))))))
 direct !(Debug name p) = CodeGen $ \(!m) -> do fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
 direct !(NewRegister (Reg r) p q) = CodeGen $ \(!m) -> do qc <- runCodeGen q m; runCodeGen p (Op3 (Make (ΣVar r) qc))
 direct !(GetRegister (Reg r))     = CodeGen $ \(!m) -> do return $! Op3 (Get (ΣVar r) m)

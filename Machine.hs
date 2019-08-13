@@ -65,7 +65,7 @@ data M o k xs r a where
   Lift2     :: !(WQ (x -> y -> z)) -> !(k (z ': xs) r a) -> M o k (y ': x ': xs) r a
   Sat       :: WQ (Char -> Bool) -> !(k (Char ': xs) r a) -> M o k xs r a
   Call      :: !(MVar x) -> !(k (x ': xs) r a) -> M o k xs r a
-  Jump      :: !(MVar x) -> M o k xs x a
+  Jump      :: !(MVar x) -> M o k '[] x a
   Empt      :: M o k xs r a
   Commit    :: !Bool -> !(k xs r a) -> M o k xs r a
   HardFork  :: !(k xs r a) -> !(k xs r a) -> !(Maybe (ΦDecl k x xs r a)) -> M o k xs r a
@@ -77,17 +77,20 @@ data M o k xs r a where
   NegLook   :: !(k xs r a) -> !(k xs r a) -> M o k xs r a
   Case      :: !(k (x ': xs) r a) -> !(k (y ': xs) r a) -> !(Maybe (ΦDecl k z xs r a)) -> M o k (Either x y ': xs) r a
   Choices   :: ![WQ (x -> Bool)] -> ![k xs r a] -> k xs r a -> !(Maybe (ΦDecl k y xs r a)) -> M o k (x ': xs) r a
-  ChainIter :: !(ΣVar x) -> !(MVar x) -> M o k ((x -> x) ': xs) x a
-  ChainInit :: !(ΣVar x) -> !(k '[] x a) -> !(MVar x) -> !(k (x ': xs) r a) -> M o k (x ': xs) r a
+  ChainIter :: !(ΣVar x) -> !(MVar x) -> M o k '[] x a
+  ChainInit :: !(ΣVar x) -> !(k '[] x a) -> !(MVar x) -> !(k xs r a) -> M o k xs r a
   Swap      :: k (x ': y ': xs) r a -> M o k (y ': x ': xs) r a
-  LogEnter  :: String -> !(k xs r a) -> M o k xs r a
-  LogExit   :: String -> !(k xs r a) -> M o k xs r a
   Make      :: !(ΣVar x) -> !(k xs r a) -> M o k (x ': xs) r a
   Get       :: !(ΣVar x) -> !(k (x ': xs) r a) -> M o k xs r a
   Put       :: !(ΣVar x) -> !(k xs r a) -> M o k (x ': xs) r a
+  LogEnter  :: String -> !(k xs r a) -> M o k xs r a
+  LogExit   :: String -> !(k xs r a) -> M o k xs r a
 
 fmapInstr :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> Free3 (M o) f (x ': xs) r a
 fmapInstr !f !m = Op3 (Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m)))
+
+modifyInstr :: ΣVar x -> Free3 (M o) f xs r a -> Free3 (M o) f ((x -> x) ': xs) r a
+modifyInstr !σ !m = Op3 (Get σ (Op3 (Lift2 (lift' ($)) (Op3 (Put σ m)))))
 
 data Γ s o xs r a = Γ { xs    :: QList xs
                       , k     :: QK s o r a
@@ -151,8 +154,8 @@ class FailureOps o => NegLookHandler o where
   negLookHandler1 :: (?ops :: InputOps s o) => (Γ s o xs ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
   negLookHandler2 :: (?ops :: InputOps s o) => TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => ChainHandler o where
-  chainHandler :: (?ops :: InputOps s o) => (Γ s o (x ': xs) ks a -> QST s (Maybe a)) -> TExpQ (STRef s x) -> TExpQ (CRef s o)
-               -> Γ s o (x ': xs) ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
+  chainHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> QST s (Maybe a)) -> TExpQ (CRef s o)
+               -> Γ s o xs ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => LogHandler o where
   logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 
@@ -228,7 +231,7 @@ execCall μ (Exec k) =
      mk <- k
      return $ \γ@Γ{..} -> [|| $$(runConcrete hs) $$m $$(suspend mk γ) $$o ||]
 
-execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> ExecMonad s o xs x a
+execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> ExecMonad s o '[] x a
 execJump μ =
   do !(QAbsExec m) <- askM μ
      return $! \γ@Γ{..} -> [|| $$(runConcrete hs) $$m $$k $$o ||]
@@ -335,45 +338,37 @@ execChoices fs ks (Exec def) decl = setupJoinPoint decl popX_ $
         else $$(go x fs mks def γ)
       ||]
 
-execChainIter :: (?ops :: InputOps s o, ConcreteExec o) => ΣVar x -> MVar x -> ExecMonad s o ((x -> x) ': xs) x a
+execChainIter :: (?ops :: InputOps s o, ConcreteExec o) => ΣVar x -> MVar x -> ExecMonad s o '[] x a
 execChainIter σ μ =
-  do !(QSTRef ref) <- askΣ σ
-     !(QAbsExec l) <- askM μ
+  do !(QAbsExec l) <- askM μ
      !(QCRef cref) <- askSTC σ
      return $! \γ@Γ{..} -> [||
-       do modifyΣ $$ref $$(peekX xs)
-          $$writeCRef $$cref $$o
+       do $$writeCRef $$cref $$o
           $$(runConcrete hs) $$l $$k $$o
        ||]
 
-execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x -> Exec s o '[] x a -> MVar x -> Exec s o (x ': xs) r a
-              -> ExecMonad s o (x ': xs) r a
+execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x -> Exec s o '[] x a -> MVar x -> Exec s o xs r a
+              -> ExecMonad s o xs r a
 execChainInit σ l μ (Exec k) =
   do mk <- k
      asks $! \ctx γ@(Γ xs ks o _) -> [||
-        do ref <- newΣ $$(peekX xs)
-           cref <- $$newCRef $$o
-           $$(setupHandlerΓ γ (chainHandler mk [||ref||] [||cref||] γ) (\γ' ->
-              buildIter ctx μ σ l [||ref||] [||cref||] (hs γ') o))
+        do cref <- $$newCRef $$o
+           $$(setupHandlerΓ γ (chainHandler mk [||cref||] γ) (\γ' ->
+              buildIter ctx μ σ l [||cref||] (hs γ') o))
       ||]
 
-#define deriveChainHandler(_o)                     \
-instance ChainHandler _o where                     \
-{                                                  \
-  chainHandler mk ref cref γ = [||\h (!o#) _ ->    \
-      do                                           \
-      {                                            \
-        c <- $$readCRef $$cref;                    \
-        if $$same c ($$box o#) then                \
-          do                                       \
-          {                                        \
-            y <- readΣ $$ref;                      \
-            $$(mk (γ {xs = pokeX [||y||] (xs γ),   \
-                      o = [|| $$box o# ||],        \
-                      hs = pushH [||h||] (hs γ)})) \
-          }                                        \
-        else h o#                                  \
-      } ||]                                        \
+#define deriveChainHandler(_o)                   \
+instance ChainHandler _o where                   \
+{                                                \
+  chainHandler mk cref γ = [||\h (!o#) _ ->      \
+      do                                         \
+      {                                          \
+        c <- $$readCRef $$cref;                  \
+        if $$same c ($$box o#) then              \
+          $$(mk (γ {o = [|| $$box o# ||],        \
+                    hs = pushH [||h||] (hs γ)})) \
+        else h o#                                \
+      } ||]                                      \
 };
 inputInstances(deriveChainHandler)
 
@@ -470,34 +465,34 @@ inputInstances(deriveJoinBuilder)
 
 class RecBuilder o where
   buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o '[] x a
-            -> TExpQ (STRef s x) -> TExpQ (CRef s o)
+            -> TExpQ (CRef s o)
             -> [QH s o a]  -> QO o -> QST s (Maybe a)
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
             -> (MVar x -> Γ s o '[] x a -> Ctx s o a -> Except MissingDependency (QST s (Maybe a)))
             -> (Ctx s o a -> QST s (Maybe a))
             -> QST s (Maybe a)
 
-#define deriveRecBuilder(_o)                                                                         \
-instance RecBuilder _o where                                                                         \
-{                                                                                                    \
-  buildIter ctx μ σ l ref cref hs o = let bx = box in [||                                            \
-      do                                                                                             \
-      {                                                                                              \
-        let {loop !o# =                                                                              \
-          $$(run l (Γ QNil [||noreturn||] [||$$bx o#||] hs)                                          \
-                   (insertSTC σ cref (insertM μ [||\_ (!o#) _ -> loop o#||] (insertΣ σ ref ctx))))}; \
-        loop ($$unbox $$o)                                                                           \
-      } ||];                                                                                         \
-  buildRec ctx μ partials k = trace ("building " ++ show μ) $                                        \
-    let bx = box                                                                                     \
-    in [||                                                                                           \
-        let recu !ks !o# h =                                                                         \
-              $$(let ctx' = insertM μ [||recu||] ctx;                                                \
-                     body = partials μ (Γ QNil [||ks||] [||$$bx o#||] (pushH [||h||] makeH));        \
-                     go ctx' = runOrThrow (catchError (body ctx') (emergencyBind ctx' partials go))  \
-                 in go ctx')                                                                         \
-        in $$(k (insertM μ [||recu||] ctx))                                                          \
-      ||]                                                                                            \
+#define deriveRecBuilder(_o)                                                                        \
+instance RecBuilder _o where                                                                        \
+{                                                                                                   \
+  buildIter ctx μ σ l cref hs o = let bx = box in [||                                               \
+      do                                                                                            \
+      {                                                                                             \
+        let {loop !o# =                                                                             \
+          $$(run l (Γ QNil [||noreturn||] [||$$bx o#||] hs)                                         \
+                   (insertSTC σ cref (insertM μ [||\_ (!o#) _ -> loop o#||] ctx)))};                \
+        loop ($$unbox $$o)                                                                          \
+      } ||];                                                                                        \
+  buildRec ctx μ partials k = trace ("building " ++ show μ) $                                       \
+    let bx = box                                                                                    \
+    in [||                                                                                          \
+        let recu !ks !o# h =                                                                        \
+              $$(let ctx' = insertM μ [||recu||] ctx;                                               \
+                     body = partials μ (Γ QNil [||ks||] [||$$bx o#||] (pushH [||h||] makeH));       \
+                     go ctx' = runOrThrow (catchError (body ctx') (emergencyBind ctx' partials go)) \
+                 in go ctx')                                                                        \
+        in $$(k (insertM μ [||recu||] ctx))                                                         \
+      ||]                                                                                           \
 };
 inputInstances(deriveRecBuilder)
 

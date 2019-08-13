@@ -100,7 +100,7 @@ direct !(ChainPost p op) = CodeGen $ \(!m) ->
      opc <- freshM (runCodeGen op (Op3 (ChainIter σ μ)))
      freshM (runCodeGen p (Op3 (ChainInit σ opc μ m)))
 direct !(Debug name p) = CodeGen $ \(!m) -> do fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
-direct !(NewRegister (Reg r) x p) = CodeGen $ \(!m) -> do fmap (Op3 . Make (ΣVar r) x) (runCodeGen p m)
+direct !(NewRegister (Reg r) p q) = CodeGen $ \(!m) -> do qc <- runCodeGen q m; runCodeGen p (Op3 (Make (ΣVar r) qc))
 direct !(GetRegister (Reg r))     = CodeGen $ \(!m) -> do return $! Op3 (Get (ΣVar r) m)
 direct !(PutRegister (Reg r) p)   = CodeGen $ \(!m) -> do runCodeGen p (Op3 (Put (ΣVar r) (Op3 (Push (lift' ()) m))))
 direct !(ScopeRegister _ _)       = error "There should be no scoped register construct at code generation"

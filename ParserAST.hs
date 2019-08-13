@@ -63,8 +63,8 @@ chainPost (Parser p) (Parser op) = Parser (Op (ChainPost p op))
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (Op (Debug name p))
 
-newRegister :: WQ a -> (forall r. Reg r a -> Parser b) -> Parser b
-newRegister x f = Parser (Op (ScopeRegister x (unParser . f)))
+newRegister :: Parser a -> (forall r. Reg r a -> Parser b) -> Parser b
+newRegister (Parser p) f = Parser (Op (ScopeRegister p (unParser . f)))
 
 get :: Reg r a -> Parser a
 get reg = Parser (Op (GetRegister reg))
@@ -101,8 +101,8 @@ data ParserF (k :: * -> *) (a :: *) where
     ChainPre      :: k (a -> a) -> k a -> ParserF k a
     ChainPost     :: k a -> k (a -> a) -> ParserF k a
     Debug         :: String -> k a -> ParserF k a
-    ScopeRegister :: WQ a -> (forall r. Reg r a -> k b) -> ParserF k b
-    NewRegister   :: Reg r a -> WQ a -> k b -> ParserF k b
+    ScopeRegister :: k a -> (forall r. Reg r a -> k b) -> ParserF k b
+    NewRegister   :: Reg r a -> k a -> k b -> ParserF k b
     GetRegister   :: Reg r a -> ParserF k a
     PutRegister   :: Reg r a -> k a -> ParserF k ()
 
@@ -124,8 +124,8 @@ instance IFunctor ParserF where
   imap f (ChainPre op p)     = ChainPre (f op) (f p)
   imap f (ChainPost p op)    = ChainPost (f p) (f op)
   imap f (Debug name p)      = Debug name (f p)
-  imap f (ScopeRegister x g) = ScopeRegister x (f . g)
-  imap f (NewRegister r x p) = NewRegister r x (f p)
+  imap f (ScopeRegister p g) = ScopeRegister (f p) (f . g)
+  imap f (NewRegister r p q) = NewRegister r (f p) (f q)
   imap f (GetRegister r)     = GetRegister r
   imap f (PutRegister r p)   = PutRegister r (f p)
 
@@ -150,7 +150,7 @@ instance Show (Free ParserF f a) where
       alg (ChainPre (Const1 op) (Const1 p))        = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))       = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                    = p
-      alg (ScopeRegister x _)                     = "(newRegister x ?)"
-      alg (NewRegister (Reg r) x (Const1 p))      = concat ["newRegister r", show r, " x ", p, ")"]
+      alg (ScopeRegister (Const1 p) _)            = concat ["(newRegister ", p, " ?)"]
+      alg (NewRegister (Reg r) (Const1 p) (Const1 q)) = concat ["newRegister r", show r, " ", p, " ", q, ")"]
       alg (GetRegister (Reg r))                   = concat ["(get r", show r, ")"]
       alg (PutRegister (Reg r) (Const1 p))        = concat ["(put r", show r, " ", p, ")"]

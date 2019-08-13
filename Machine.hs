@@ -82,7 +82,7 @@ data M o k xs r a where
   Swap      :: k (x ': y ': xs) r a -> M o k (y ': x ': xs) r a
   LogEnter  :: String -> !(k xs r a) -> M o k xs r a
   LogExit   :: String -> !(k xs r a) -> M o k xs r a
-  Make      :: !(ΣVar x) -> WQ x -> !(k xs r a) -> M o k xs r a
+  Make      :: !(ΣVar x) -> !(k xs r a) -> M o k (x ': xs) r a
   Get       :: !(ΣVar x) -> !(k (x ': xs) r a) -> M o k xs r a
   Put       :: !(ΣVar x) -> !(k xs r a) -> M o k (x ': xs) r a
 
@@ -210,7 +210,7 @@ readyExec = fold3 absurd (Exec . alg)
     alg (ChainIter σ μ)        = execChainIter σ μ
     alg (ChainInit σ l μ k)    = execChainInit σ l μ k
     alg (Swap k)               = execSwap k
-    alg (Make σ x k)           = execMake σ x k
+    alg (Make σ k)             = execMake σ k
     alg (Get σ k)              = execGet σ k
     alg (Put σ k)              = execPut σ k
     alg (LogEnter name k)      = execLogEnter name k
@@ -380,11 +380,11 @@ inputInstances(deriveChainHandler)
 execSwap :: Exec s o (x ': y ': xs) r a -> ExecMonad s o (y ': x ': xs) r a
 execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = let (# y, xs' #) = popX (xs γ); (# x, xs'' #) = popX xs' in pushX x (pushX y xs'')})) k
 
-execMake :: ΣVar x -> WQ x -> Exec s o xs r a -> ExecMonad s o xs r a
-execMake σ x k = asks $! \ctx γ -> [||
-                    do ref <- newΣ $$(_code x)
-                       $$(run k γ (insertΣ σ [||ref||] ctx))
-                  ||]
+execMake :: ΣVar x -> Exec s o xs r a -> ExecMonad s o (x ': xs) r a
+execMake σ k = asks $! \ctx γ -> let (# x, xs' #) = popX (xs γ) in [||
+                  do ref <- newΣ $$x
+                     $$(run k (γ {xs = xs'}) (insertΣ σ [||ref||] ctx))
+                ||]
 
 execGet :: ΣVar x -> Exec s o (x ': xs) r a -> ExecMonad s o xs r a
 execGet σ (Exec k) =
@@ -580,6 +580,9 @@ instance IFunctor3 (M o) where
   imap3 f (ChainIter σ μ)                   = ChainIter σ μ
   imap3 f (ChainInit σ l μ k)               = ChainInit σ (f l) μ (f k)
   imap3 f (Swap k)                          = Swap (f k)
+  imap3 f (Make σ k)                        = Make σ (f k)
+  imap3 f (Get σ k)                         = Get σ (f k)
+  imap3 f (Put σ k)                         = Put σ (f k)
   imap3 f (LogEnter name k)                 = LogEnter name (f k)
   imap3 f (LogExit name k)                  = LogExit name (f k)
 
@@ -617,6 +620,9 @@ instance Show (Free3 (M o) f xs ks a) where
     alg (ChainIter σ μ)                       = "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
     alg (ChainInit σ m μ k)                   = "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ getConst3 m ++ " " ++ getConst3 k ++ "}"
     alg (Swap k)                              = "(Swap " ++ getConst3 k ++ ")"
+    alg (Make σ k)                            = "(Make " ++ show σ ++ " " ++ getConst3 k ++ ")"
+    alg (Get σ k)                             = "(Get " ++ show σ ++ " " ++ getConst3 k ++ ")"
+    alg (Put σ k)                             = "(Put " ++ show σ ++ " " ++ getConst3 k ++ ")"
     alg (LogEnter _ k)                        = getConst3 k
     alg (LogExit _ k)                         = getConst3 k
 

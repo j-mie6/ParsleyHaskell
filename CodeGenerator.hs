@@ -9,7 +9,7 @@
 module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..), Reg(..))
-import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), RVar(..), ΦDecl, fmapInstr)
+import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, fmapInstr)
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
 import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
@@ -100,9 +100,9 @@ direct !(ChainPost p op) = CodeGen $ \(!m) ->
      opc <- freshM (runCodeGen op (Op3 (ChainIter σ μ)))
      freshM (runCodeGen p (Op3 (ChainInit σ opc μ m)))
 direct !(Debug name p) = CodeGen $ \(!m) -> do fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
-direct !(NewRegister (Reg r) x p) = CodeGen $ \(!m) -> do fmap (Op3 . Make (RVar r) x) (runCodeGen p m)
-direct !(GetRegister (Reg r))     = CodeGen $ \(!m) -> do return $! Op3 (Get (RVar r) m)
-direct !(PutRegister (Reg r) p)   = CodeGen $ \(!m) -> do runCodeGen p (Op3 (Put (RVar r) (Op3 (Push (lift' ()) m))))
+direct !(NewRegister (Reg r) x p) = CodeGen $ \(!m) -> do fmap (Op3 . Make (ΣVar r) x) (runCodeGen p m)
+direct !(GetRegister (Reg r))     = CodeGen $ \(!m) -> do return $! Op3 (Get (ΣVar r) m)
+direct !(PutRegister (Reg r) p)   = CodeGen $ \(!m) -> do runCodeGen p (Op3 (Put (ΣVar r) (Op3 (Push (lift' ()) m))))
 direct !(ScopeRegister _ _)       = error "There should be no scoped register construct at code generation"
 
 tailCallOptimise :: MVar x -> Free3 (M o) Void3 (x ': xs) r a -> Free3 (M o) Void3 xs r a

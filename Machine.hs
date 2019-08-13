@@ -52,7 +52,6 @@ newtype Machine o a = Machine { getMachine :: Free3 (M o) Void3 '[] Void a }
 newtype ΣVar a = ΣVar IΣVar
 newtype MVar a = MVar IMVar
 newtype ΦVar a = ΦVar IΦVar
-newtype RVar a = RVar IΣVar
 type ΦDecl k x xs r a = (ΦVar x, k (x ': xs) r a)
 newtype LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a)
 
@@ -83,9 +82,9 @@ data M o k xs r a where
   Swap      :: k (x ': y ': xs) r a -> M o k (y ': x ': xs) r a
   LogEnter  :: String -> !(k xs r a) -> M o k xs r a
   LogExit   :: String -> !(k xs r a) -> M o k xs r a
-  Make      :: RVar x -> WQ x -> !(k xs r a) -> M o k xs r a
-  Get       :: RVar x -> !(k (x ': xs) r a) -> M o k xs r a
-  Put       :: RVar x -> !(k xs r a) -> M o k (x ': xs) r a
+  Make      :: !(ΣVar x) -> WQ x -> !(k xs r a) -> M o k xs r a
+  Get       :: !(ΣVar x) -> !(k (x ': xs) r a) -> M o k xs r a
+  Put       :: !(ΣVar x) -> !(k xs r a) -> M o k (x ': xs) r a
 
 fmapInstr :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> Free3 (M o) f (x ': xs) r a
 fmapInstr !f !m = Op3 (Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m)))
@@ -211,6 +210,9 @@ readyExec = fold3 absurd (Exec . alg)
     alg (ChainIter σ μ)        = execChainIter σ μ
     alg (ChainInit σ l μ k)    = execChainInit σ l μ k
     alg (Swap k)               = execSwap k
+    alg (Make σ x k)           = execMake σ x k
+    alg (Get σ k)              = execGet σ k
+    alg (Put σ k)              = execPut σ k
     alg (LogEnter name k)      = execLogEnter name k
     alg (LogExit name k)       = execLogExit name k
 
@@ -377,6 +379,30 @@ inputInstances(deriveChainHandler)
 
 execSwap :: Exec s o (x ': y ': xs) r a -> ExecMonad s o (y ': x ': xs) r a
 execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = let (# y, xs' #) = popX (xs γ); (# x, xs'' #) = popX xs' in pushX x (pushX y xs'')})) k
+
+execMake :: ΣVar x -> WQ x -> Exec s o xs r a -> ExecMonad s o xs r a
+execMake σ x k = asks $! \ctx γ -> [||
+                    do ref <- newΣ $$(_code x)
+                       $$(run k γ (insertΣ σ [||ref||] ctx))
+                  ||]
+
+execGet :: ΣVar x -> Exec s o (x ': xs) r a -> ExecMonad s o xs r a
+execGet σ (Exec k) =
+  do !(QSTRef ref) <- askΣ σ
+     mk <- k
+     return $! \γ -> [|| 
+       do x <- readΣ $$ref
+          $$(mk (γ {xs = pushX [||x||] (xs γ)}))
+       ||]
+
+execPut :: ΣVar x -> Exec s o xs r a -> ExecMonad s o (x ': xs) r a
+execPut σ (Exec k) =
+  do !(QSTRef ref) <- askΣ σ
+     mk <- k
+     return $! \γ -> let (# x, xs' #) = popX (xs γ) in [||
+       do writeΣ $$ref $$x
+          $$(mk (γ {xs = xs'}))
+       ||]
 
 preludeString :: (?ops :: InputOps s o) => String -> Char -> Γ s o xs r a -> Ctx s o a -> String -> TExpQ String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]

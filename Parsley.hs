@@ -33,7 +33,7 @@ module Parsley ( Parser, runParser, parseFromFile
                , (<?|>), (>?>), when, while, fromMaybeP
                , debug
                -- Registers
-               , newRegister, get, put, Reg
+               , newRegister, get, put, modify, local, swap, Reg
                -- Expressions
                , Level(..), precedence
                -- Template Haskell Utils
@@ -81,6 +81,10 @@ liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
 many = pfoldr (lift' (:)) (WQ [] [||[]||])
+{-many p = newRegister (pure (lift' id)) (\r -> 
+    let go = modify r (lift' flip >*< lift' (.) <$> (lift' (:) <$> p)) *> go
+         <|> (WQ ($ []) [||\f -> f []||] <$> get r)
+    in go)-}
 
 manyN :: Int -> Parser a -> Parser [a]
 manyN n p = foldr (const (p <:>)) (many p) [1..n]
@@ -228,6 +232,20 @@ fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||
 maybeP :: Parser a -> Parser (Maybe a)
 maybeP p = option (WQ Nothing [||Nothing||]) (lift' Just <$> p)
 
+-- Stateful Parsers
+modify :: Reg r a -> Parser (a -> a) -> Parser ()
+modify r p = put r (p <*> get r)
+
+local :: Reg r a -> Parser a -> Parser b -> Parser b
+local r p q = newRegister (get r) (\tmp -> put r p
+                                        *> q
+                                        <* put r (get tmp))
+
+swap :: Reg r a -> Reg r a -> Parser ()
+swap r1 r2 = newRegister (get r1) (\tmp -> put r1 (get r2)
+                                        *> put r2 (get tmp))
+
+-- Iterative Parsers
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 p op = chainPost p (lift' flip <$> op <*> p)
 

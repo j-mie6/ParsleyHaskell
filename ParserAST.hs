@@ -9,7 +9,7 @@
 module ParserAST where
 
 import Indexed                    (IFunctor, Free(Op), Void1, Const1(..), imap, fold)
-import Machine                    (IMVar, MVar(..), IΣVar)
+import Machine                    (IMVar, MVar(..), IΣVar(..))
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 import Data.List                  (intercalate)
@@ -81,7 +81,9 @@ infixl 4 *>
 infixl 3 <|>
 
 -- Register datatype
-newtype Reg r a = Reg IΣVar
+newtype Reg (r :: *) a = Reg IΣVar
+instance Show (Reg r a) where
+  show (Reg (IΣVar x)) = "r" ++ show x
 
 -- Core datatype
 data ParserF (k :: * -> *) (a :: *) where
@@ -151,6 +153,6 @@ instance Show (Free ParserF f a) where
       alg (ChainPost (Const1 p) (Const1 op))       = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                    = p
       alg (ScopeRegister (Const1 p) _)            = concat ["(newRegister ", p, " ?)"]
-      alg (NewRegister (Reg r) (Const1 p) (Const1 q)) = concat ["newRegister r", show r, " ", p, " ", q, ")"]
-      alg (GetRegister (Reg r))                   = concat ["(get r", show r, ")"]
-      alg (PutRegister (Reg r) (Const1 p))        = concat ["(put r", show r, " ", p, ")"]
+      alg (NewRegister r (Const1 p) (Const1 q)) = concat ["newRegister ", show r, " ", p, " ", q, ")"]
+      alg (GetRegister r)                   = concat ["(get ", show r, ")"]
+      alg (PutRegister r (Const1 p))        = concat ["(put ", show r, " ", p, ")"]

@@ -9,24 +9,25 @@
              FlexibleInstances, 
              MultiParamTypeClasses, 
              UndecidableInstances, 
-             AllowAmbiguousTypes #-}
+             AllowAmbiguousTypes,
+             ScopedTypeVariables #-}
 module Compiler(compile) where
 
 import Prelude hiding (pred)
-import ParserAST                  (ParserF(..), Parser(..))
+import ParserAST                  (ParserF(..), Parser(..), Reg(..))
 import Optimiser                  (optimise)
 import Analyser                   (terminationAnalysis)
 import CodeGenerator              (codeGen, halt, ret)
 import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
-import Indexed                    (Free(Op), Void1, fold', absurd, Tag(..))
+import Indexed                    (Free(Op), Void1, fold, fold', absurd, Tag(..))
 import Control.Applicative        (liftA, liftA2, liftA3)
 import Control.Monad              (forM, forM_)
-import Control.Monad.Reader       (ReaderT, runReaderT, local, ask, asks, MonadReader)
-import Control.Monad.State.Strict (StateT, get, gets, put, runStateT, execStateT, modify', MonadState)
+import Control.Monad.Reader       (Reader, runReader, local, ask, asks, MonadReader)
+import Control.Monad.State.Strict (State, StateT, get, gets, put, runState, execStateT, modify', MonadState)
 import Data.List                  (foldl')
 import Fresh                      (HFreshT, newVar, newScope, runFreshT)
-import Control.Monad.Trans        (liftIO, MonadIO)
 import System.IO.Unsafe           (unsafePerformIO)
+import Data.IORef                 (IORef, newIORef, readIORef, writeIORef)
 import GHC.StableName             (StableName(..), makeStableName, hashStableName, eqStableName)
 import Data.Hashable              (Hashable, hashWithSalt, hash)
 import Data.HashMap.Strict        (HashMap)
@@ -55,97 +56,105 @@ compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.em
       in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
 
 preprocess :: Free ParserF Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
-preprocess p = unsafePerformIO $
-  do tagged <- tagParser p
-     (lets, recs, topo) <- findLets p 
-     letInsertion lets recs topo p
+preprocess p =
+  let q = tagParser p
+      (lets, recs, topo) = findLets q
+  in letInsertion lets recs topo q
 
 data ParserName = forall a. ParserName (StableName# (Free ParserF Void1 a))
+newtype Tagger a = Tagger { runTagger :: Free (Tag ParserName ParserF) Void1 a }
 
-newtype Namer a = Namer { runNamer :: Free (Tag ParserName ParserF) Void1 a }
-
-tagParser :: Free ParserF Void1 a -> IO (Free (Tag ParserName ParserF) Void1 a)
-tagParser = return . runNamer . fold' absurd tagAlg
-
-tagAlg :: Free ParserF Void1 a -> ParserF Namer a -> Namer a
-tagAlg p q = Namer $ unsafePerformIO $ do
-  name <- makeParserName p
-  let mkTag = Op . Tag name
-  return $ case q of
-    pf :<*>: px     -> mkTag (runNamer pf :<*>: runNamer px)
-    p :*>: q        -> mkTag (runNamer p :*>: runNamer q)
-    p :<*: q        -> mkTag (runNamer p :<*: runNamer q)
-    p :<|>: q       -> mkTag (runNamer p :<|>: runNamer q)
-    Try n p         -> mkTag (Try n (runNamer p))
-    LookAhead p     -> mkTag (LookAhead (runNamer p))
-    NotFollowedBy p -> mkTag (NotFollowedBy (runNamer p))
-    Branch b p q    -> mkTag (Branch (runNamer b) (runNamer p) (runNamer q))
-    Match p fs qs d -> mkTag (Match (runNamer p) fs (map runNamer qs) (runNamer d))
-    ChainPre op p   -> mkTag (ChainPre (runNamer op) (runNamer p))
-    ChainPost p op  -> mkTag (ChainPost (runNamer p) (runNamer op))
-    Debug name p    -> mkTag (Debug name (runNamer p))
-    Pure x          -> mkTag (Pure x)
-    Empty           -> mkTag Empty
-    _               -> undefined
+tagParser :: Free ParserF Void1 a -> Free (Tag ParserName ParserF) Void1 a
+tagParser = runTagger . fold' absurd alg
+  where
+    regMaker = newRegMaker
+    concretiseRegister :: forall a b. Tagger a -> (forall r. Reg r a -> Tagger b) 
+                                               -> (forall r. Reg r a -> ParserF (Free (Tag ParserName ParserF) Void1) b)
+    concretiseRegister p g reg = let q = g reg in NewRegister reg (runTagger p) (runTagger q)
+    alg p q = Tagger $
+      let mkTag = Op . Tag (makeParserName p)
+      in case q of
+        pf :<*>: px       -> mkTag (runTagger pf :<*>: runTagger px)
+        p :*>: q          -> mkTag (runTagger p :*>: runTagger q)
+        p :<*: q          -> mkTag (runTagger p :<*: runTagger q)
+        p :<|>: q         -> mkTag (runTagger p :<|>: runTagger q)
+        Try n p           -> mkTag (Try n (runTagger p))
+        LookAhead p       -> mkTag (LookAhead (runTagger p))
+        NotFollowedBy p   -> mkTag (NotFollowedBy (runTagger p))
+        Branch b p q      -> mkTag (Branch (runTagger b) (runTagger p) (runTagger q))
+        Match p fs qs d   -> mkTag (Match (runTagger p) fs (map runTagger qs) (runTagger d))
+        ChainPre op p     -> mkTag (ChainPre (runTagger op) (runTagger p))
+        ChainPost p op    -> mkTag (ChainPost (runTagger p) (runTagger op))
+        Debug name p      -> mkTag (Debug name (runTagger p))
+        Pure x            -> mkTag (Pure x)
+        Empty             -> mkTag Empty
+        Satisfy f         -> mkTag (Satisfy f)
+        GetRegister r     -> mkTag (GetRegister r)
+        PutRegister r p   -> mkTag (PutRegister r (runTagger p))
+        ScopeRegister p g -> mkTag (freshReg regMaker (concretiseRegister p g))
 
 data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
                                      , recs   :: HashSet ParserName
                                      , before :: HashSet ParserName
                                      , topo   :: [ParserName] }
 type LetFinderCtx   = HashSet ParserName
-newtype LetFinder a = LetFinder { runLetFinder :: StateT LetFinderState (ReaderT LetFinderCtx IO) () }
+newtype LetFinder a = LetFinder { runLetFinder :: StateT LetFinderState (Reader LetFinderCtx) () }
 
 reverseFilter :: (a -> Bool) -> [a] -> [a]
 reverseFilter p = foldl' (\xs x -> if p x then x : xs else xs) []
 
-findLets :: Free ParserF Void1 a -> IO (HashSet ParserName, HashSet ParserName, [ParserName])
-findLets p = return (lets, recs, reverseFilter letBound topo) 
+findLets :: Free (Tag ParserName ParserF) Void1 a -> (HashSet ParserName, HashSet ParserName, [ParserName])
+findLets p = (lets, recs, reverseFilter letBound topo)
   where
     letBound = flip HashSet.member (HashSet.union lets recs)
     state = LetFinderState HashMap.empty HashSet.empty HashSet.empty []
     ctx = HashSet.empty
-    LetFinderState preds recs _ topo = unsafePerformIO (runReaderT (execStateT (runLetFinder (fold' absurd findLetsAlg p)) state) ctx)
+    LetFinderState preds recs _ topo = runReader (execStateT (runLetFinder (fold absurd findLetsAlg p)) state) ctx
     lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
 
-findLetsAlg :: Free ParserF Void1 a -> ParserF LetFinder a -> LetFinder a
-findLetsAlg p q = LetFinder $ do 
-  name <- makeParserName p
+findLetsAlg :: Tag ParserName ParserF LetFinder a -> LetFinder a
+findLetsAlg p = LetFinder $ do 
+  let name = tag p
+  let q = tagged p
   addPred name
   ifSeen name 
     (do addRec name)
     (ifNotProcessedBefore name
       (do addName name (case q of
-            pf :<*>: px     -> do runLetFinder pf; runLetFinder px
-            p :*>: q        -> do runLetFinder p;  runLetFinder q
-            p :<*: q        -> do runLetFinder p;  runLetFinder q
-            p :<|>: q       -> do runLetFinder p;  runLetFinder q
-            Try n p         -> do runLetFinder p
-            LookAhead p     -> do runLetFinder p
-            NotFollowedBy p -> do runLetFinder p
-            Branch b p q    -> do runLetFinder b;  runLetFinder p; runLetFinder q
-            Match p _ qs d  -> do runLetFinder p;  forM_ qs runLetFinder; runLetFinder d
-            ChainPre op p   -> do runLetFinder op; runLetFinder p
-            ChainPost p op  -> do runLetFinder p;  runLetFinder op
-            Debug _ p       -> do runLetFinder p
-            _               -> do return ())
+            pf :<*>: px       -> do runLetFinder pf; runLetFinder px
+            p :*>: q          -> do runLetFinder p;  runLetFinder q
+            p :<*: q          -> do runLetFinder p;  runLetFinder q
+            p :<|>: q         -> do runLetFinder p;  runLetFinder q
+            Try n p           -> do runLetFinder p
+            LookAhead p       -> do runLetFinder p
+            NotFollowedBy p   -> do runLetFinder p
+            Branch b p q      -> do runLetFinder b;  runLetFinder p; runLetFinder q
+            Match p _ qs d    -> do runLetFinder p;  forM_ qs runLetFinder; runLetFinder d
+            ChainPre op p     -> do runLetFinder op; runLetFinder p
+            ChainPost p op    -> do runLetFinder p;  runLetFinder op
+            Debug _ p         -> do runLetFinder p
+            PutRegister _ p   -> do runLetFinder p
+            NewRegister _ p q -> do runLetFinder p; runLetFinder q
+            _                 -> do return ())
           doNotProcessAgain name
           addToTopology name))
 
 newtype LetInserter a =
   LetInserter {
       runLetInserter :: HFreshT IMVar 
-                        (StateT ( HashMap ParserName IMVar
-                                , DMap MVar (Free ParserF Void1)) IO) 
+                        (State ( HashMap ParserName IMVar
+                               , DMap MVar (Free ParserF Void1))) 
                         (Free ParserF Void1 a)
     }
-letInsertion :: HashSet ParserName -> HashSet ParserName -> [ParserName] -> Free ParserF Void1 a -> IO (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
-letInsertion lets recs topo p = return (p', μs, μMax, map (vs HashMap.!) topo)
+letInsertion :: HashSet ParserName -> HashSet ParserName -> [ParserName] -> Free (Tag ParserName ParserF) Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
+letInsertion lets recs topo p = (p', μs, μMax, map (vs HashMap.!) topo)
   where
-    m = fold' absurd alg p
-    ((p', μMax), (vs, μs)) = unsafePerformIO (runStateT (runFreshT (runLetInserter m) 0) (HashMap.empty, DMap.empty))
-    alg :: Free ParserF Void1 a -> ParserF LetInserter a -> LetInserter a
-    alg p q = LetInserter $ do
-      name <- makeParserName p
+    m = fold absurd alg p
+    ((p', μMax), (vs, μs)) = runState (runFreshT (runLetInserter m) 0) (HashMap.empty, DMap.empty)
+    alg :: Tag ParserName ParserF LetInserter a -> LetInserter a
+    alg p = LetInserter $ do
+      let name = tag p
+      let q = tagged p
       (vs, μs) <- get
       if | HashSet.member name recs ->
              case HashMap.lookup name vs of
@@ -168,21 +177,24 @@ letInsertion lets recs topo p = return (p', μs, μMax, map (vs HashMap.!) topo)
          | otherwise -> do runLetInserter (postprocess q)
 
 postprocess :: ParserF LetInserter a -> LetInserter a
-postprocess (pf :<*>: px)     = LetInserter (fmap optimise (liftA2 (:<*>:) (runLetInserter pf) (runLetInserter px)))
-postprocess (p :*>: q)        = LetInserter (fmap optimise (liftA2 (:*>:)  (runLetInserter p)  (runLetInserter q)))
-postprocess (p :<*: q)        = LetInserter (fmap optimise (liftA2 (:<*:)  (runLetInserter p)  (runLetInserter q)))
-postprocess (p :<|>: q)       = LetInserter (fmap optimise (liftA2 (:<|>:) (runLetInserter p)  (runLetInserter q)))
-postprocess Empty             = LetInserter (return        (Op Empty))
-postprocess (Try n p)         = LetInserter (fmap optimise (fmap (Try n) (runLetInserter p)))
-postprocess (LookAhead p)     = LetInserter (fmap optimise (fmap LookAhead (runLetInserter p)))
-postprocess (NotFollowedBy p) = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
-postprocess (Branch b p q)    = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
-postprocess (Match p fs qs d) = LetInserter (fmap optimise (liftA4 Match (runLetInserter p) (return fs) (traverse runLetInserter qs) (runLetInserter d)))
-postprocess (ChainPre op p)   = LetInserter (fmap Op       (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
-postprocess (ChainPost p op)  = LetInserter (fmap Op       (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
-postprocess (Debug name p)    = LetInserter (fmap Op       (fmap (Debug name) (runLetInserter p)))
-postprocess (Pure x)          = LetInserter (return        (Op (Pure x)))
-postprocess (Satisfy f)       = LetInserter (return        (Op (Satisfy f)))
+postprocess (pf :<*>: px)       = LetInserter (fmap optimise (liftA2 (:<*>:) (runLetInserter pf) (runLetInserter px)))
+postprocess (p :*>: q)          = LetInserter (fmap optimise (liftA2 (:*>:)  (runLetInserter p)  (runLetInserter q)))
+postprocess (p :<*: q)          = LetInserter (fmap optimise (liftA2 (:<*:)  (runLetInserter p)  (runLetInserter q)))
+postprocess (p :<|>: q)         = LetInserter (fmap optimise (liftA2 (:<|>:) (runLetInserter p)  (runLetInserter q)))
+postprocess Empty               = LetInserter (return        (Op Empty))
+postprocess (Try n p)           = LetInserter (fmap optimise (fmap (Try n) (runLetInserter p)))
+postprocess (LookAhead p)       = LetInserter (fmap optimise (fmap LookAhead (runLetInserter p)))
+postprocess (NotFollowedBy p)   = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
+postprocess (Branch b p q)      = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
+postprocess (Match p fs qs d)   = LetInserter (fmap optimise (liftA4 Match (runLetInserter p) (return fs) (traverse runLetInserter qs) (runLetInserter d)))
+postprocess (ChainPre op p)     = LetInserter (fmap Op       (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
+postprocess (ChainPost p op)    = LetInserter (fmap Op       (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
+postprocess (Debug name p)      = LetInserter (fmap Op       (fmap (Debug name) (runLetInserter p)))
+postprocess (Pure x)            = LetInserter (return        (Op (Pure x)))
+postprocess (Satisfy f)         = LetInserter (return        (Op (Satisfy f)))
+postprocess (GetRegister r)     = LetInserter (return        (Op (GetRegister r)))
+postprocess (PutRegister r p)   = LetInserter (fmap optimise (fmap (PutRegister r) (runLetInserter p)))
+postprocess (NewRegister r p q) = LetInserter (fmap optimise (liftA2 (NewRegister r) (runLetInserter p) (runLetInserter q)))
 
 getPreds :: MonadState LetFinderState m => m (HashMap ParserName Int)
 getPreds = gets preds
@@ -226,11 +238,29 @@ addToTopology x = modifyTopo (x:)
 addName :: MonadReader LetFinderCtx m => ParserName -> m b -> m b
 addName x = local (HashSet.insert x)
 
-makeParserName :: MonadIO m => Free ParserF Void1 a -> m ParserName
+makeParserName :: Free ParserF Void1 a -> ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
-makeParserName !p =
-  do !(StableName name) <- liftIO (makeStableName p)
-     return $! ParserName name
+makeParserName !p = unsafePerformIO (fmap (\(StableName name) -> ParserName name) (makeStableName p))
+
+
+-- RegMaker is used to generate new register scopes during tagging
+-- It _is_ safe to use this! Each fresh operation is atomic, and
+-- the order of which new registers are allocated is not important
+type RegMaker = IORef IΣVar
+{-# NOINLINE newRegMaker #-}
+newRegMaker :: RegMaker
+newRegMaker = unsafePerformIO (newIORef 0)
+
+{-# NOINLINE freshReg #-}
+freshReg :: RegMaker -> (forall r. Reg r a -> ParserF k b) -> ParserF k b
+freshReg maker scope = scope (unsafePerformIO $ do
+  x <- readIORef maker
+  writeIORef maker (x + 1)
+  return $! (Reg x))
+
+{-# NOINLINE numRegisters #-}
+numRegisters :: RegMaker -> IΣVar 
+numRegisters = unsafePerformIO . readIORef
 
 showM :: Parser a -> String
 showM = show . (\(x, _, _) -> x) . compile

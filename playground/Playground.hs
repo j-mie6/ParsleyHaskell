@@ -54,6 +54,9 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
 boom :: String -> Maybe ()
 boom = $$(Parsley.runParser Parsers.failure)
 
+regs :: String -> Maybe (Char, Char)
+regs = $$(Parsley.runParser Parsers.regTest)
+
 main :: IO ()
 main =
   do res <- parseBrainfuck "playground/testinput.bf"

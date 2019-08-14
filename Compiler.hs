@@ -67,7 +67,7 @@ newtype Tagger a = Tagger { runTagger :: Free (Tag ParserName ParserF) Void1 a }
 {-  TODO
     Need to preserve the numRegister count to prevent interference with registers created in CodeGen
     Need to create a FreeVariableAnalysis which tells you which, if any, registers are unbound in parser
-    For all register closues, ensure that the binding is not pre-compiled and is demanded by emergency binding
+    For all register closures, ensure that the binding is not pre-compiled and is demanded by emergency binding
 -}
 
 tagParser :: Free ParserF Void1 a -> Free (Tag ParserName ParserF) Void1 a

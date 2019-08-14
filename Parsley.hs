@@ -236,14 +236,20 @@ maybeP p = option (WQ Nothing [||Nothing||]) (lift' Just <$> p)
 modify :: Reg r a -> Parser (a -> a) -> Parser ()
 modify r p = put r (p <*> get r)
 
+move :: Reg r1 a -> Reg r2 a -> Parser ()
+move dst src = put dst (get src)
+
 local :: Reg r a -> Parser a -> Parser b -> Parser b
 local r p q = newRegister (get r) (\tmp -> put r p
                                         *> q
-                                        <* put r (get tmp))
+                                        <* move r tmp)
 
-swap :: Reg r a -> Reg r a -> Parser ()
-swap r1 r2 = newRegister (get r1) (\tmp -> put r1 (get r2)
-                                        *> put r2 (get tmp))
+swap :: Reg r1 a -> Reg r2 a -> Parser ()
+swap r1 r2 = newRegister (get r1) (\tmp -> move r1 r2
+                                        *> move r2 tmp)
+
+rollback :: Reg r a -> Parser b -> Parser b
+rollback r p = newRegister (get r) (\save -> p <|> move r save *> empty)
 
 -- Iterative Parsers
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a

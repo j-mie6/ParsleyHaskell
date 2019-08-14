@@ -18,9 +18,9 @@ import Optimiser                  (optimise)
 import Analyser                   (terminationAnalysis)
 import CodeGenerator              (codeGen, halt, ret)
 import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
-import Indexed                    (Free(Op), Void1, fold', absurd)
-import Control.Applicative        (liftA2, liftA3)
-import Control.Monad              (forM_)
+import Indexed                    (Free(Op), Void1, fold', absurd, Tag(..))
+import Control.Applicative        (liftA, liftA2, liftA3)
+import Control.Monad              (forM, forM_)
 import Control.Monad.Reader       (ReaderT, runReaderT, local, ask, asks, MonadReader)
 import Control.Monad.State.Strict (StateT, get, gets, put, runStateT, execStateT, modify', MonadState)
 import Data.List                  (foldl')
@@ -55,21 +55,51 @@ compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.em
       in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
 
 preprocess :: Free ParserF Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
-preprocess p = let (lets, recs, topo) = findLets p in letInsertion lets recs topo p
+preprocess p = unsafePerformIO $
+  do tagged <- tagParser p
+     (lets, recs, topo) <- findLets p 
+     letInsertion lets recs topo p
 
-data StableParserName = forall a. StableParserName (StableName# (Free ParserF Void1 a))
-data LetFinderState = LetFinderState { preds  :: HashMap StableParserName Int
-                                     , recs   :: HashSet StableParserName
-                                     , before :: HashSet StableParserName
-                                     , topo   :: [StableParserName] }
-type LetFinderCtx   = HashSet StableParserName
+data ParserName = forall a. ParserName (StableName# (Free ParserF Void1 a))
+
+newtype Namer a = Namer { runNamer :: Free (Tag ParserName ParserF) Void1 a }
+
+tagParser :: Free ParserF Void1 a -> IO (Free (Tag ParserName ParserF) Void1 a)
+tagParser = return . runNamer . fold' absurd tagAlg
+
+tagAlg :: Free ParserF Void1 a -> ParserF Namer a -> Namer a
+tagAlg p q = Namer $ unsafePerformIO $ do
+  name <- makeParserName p
+  let mkTag = Op . Tag name
+  return $ case q of
+    pf :<*>: px     -> mkTag (runNamer pf :<*>: runNamer px)
+    p :*>: q        -> mkTag (runNamer p :*>: runNamer q)
+    p :<*: q        -> mkTag (runNamer p :<*: runNamer q)
+    p :<|>: q       -> mkTag (runNamer p :<|>: runNamer q)
+    Try n p         -> mkTag (Try n (runNamer p))
+    LookAhead p     -> mkTag (LookAhead (runNamer p))
+    NotFollowedBy p -> mkTag (NotFollowedBy (runNamer p))
+    Branch b p q    -> mkTag (Branch (runNamer b) (runNamer p) (runNamer q))
+    Match p fs qs d -> mkTag (Match (runNamer p) fs (map runNamer qs) (runNamer d))
+    ChainPre op p   -> mkTag (ChainPre (runNamer op) (runNamer p))
+    ChainPost p op  -> mkTag (ChainPost (runNamer p) (runNamer op))
+    Debug name p    -> mkTag (Debug name (runNamer p))
+    Pure x          -> mkTag (Pure x)
+    Empty           -> mkTag Empty
+    _               -> undefined
+
+data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
+                                     , recs   :: HashSet ParserName
+                                     , before :: HashSet ParserName
+                                     , topo   :: [ParserName] }
+type LetFinderCtx   = HashSet ParserName
 newtype LetFinder a = LetFinder { runLetFinder :: StateT LetFinderState (ReaderT LetFinderCtx IO) () }
 
 reverseFilter :: (a -> Bool) -> [a] -> [a]
 reverseFilter p = foldl' (\xs x -> if p x then x : xs else xs) []
 
-findLets :: Free ParserF Void1 a -> (HashSet StableParserName, HashSet StableParserName, [StableParserName])
-findLets p = (lets, recs, reverseFilter letBound topo) 
+findLets :: Free ParserF Void1 a -> IO (HashSet ParserName, HashSet ParserName, [ParserName])
+findLets p = return (lets, recs, reverseFilter letBound topo) 
   where
     letBound = flip HashSet.member (HashSet.union lets recs)
     state = LetFinderState HashMap.empty HashSet.empty HashSet.empty []
@@ -79,7 +109,7 @@ findLets p = (lets, recs, reverseFilter letBound topo)
 
 findLetsAlg :: Free ParserF Void1 a -> ParserF LetFinder a -> LetFinder a
 findLetsAlg p q = LetFinder $ do 
-  name <- makeStableParserName p
+  name <- makeParserName p
   addPred name
   ifSeen name 
     (do addRec name)
@@ -104,18 +134,18 @@ findLetsAlg p q = LetFinder $ do
 newtype LetInserter a =
   LetInserter {
       runLetInserter :: HFreshT IMVar 
-                        (StateT ( HashMap StableParserName IMVar
+                        (StateT ( HashMap ParserName IMVar
                                 , DMap MVar (Free ParserF Void1)) IO) 
                         (Free ParserF Void1 a)
     }
-letInsertion :: HashSet StableParserName -> HashSet StableParserName -> [StableParserName] -> Free ParserF Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
-letInsertion lets recs topo p = (p', μs, μMax, map (vs HashMap.!) topo)
+letInsertion :: HashSet ParserName -> HashSet ParserName -> [ParserName] -> Free ParserF Void1 a -> IO (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
+letInsertion lets recs topo p = return (p', μs, μMax, map (vs HashMap.!) topo)
   where
     m = fold' absurd alg p
     ((p', μMax), (vs, μs)) = unsafePerformIO (runStateT (runFreshT (runLetInserter m) 0) (HashMap.empty, DMap.empty))
     alg :: Free ParserF Void1 a -> ParserF LetInserter a -> LetInserter a
     alg p q = LetInserter $ do
-      name <- makeStableParserName p
+      name <- makeParserName p
       (vs, μs) <- get
       if | HashSet.member name recs ->
              case HashMap.lookup name vs of
@@ -154,53 +184,53 @@ postprocess (Debug name p)    = LetInserter (fmap Op       (fmap (Debug name) (r
 postprocess (Pure x)          = LetInserter (return        (Op (Pure x)))
 postprocess (Satisfy f)       = LetInserter (return        (Op (Satisfy f)))
 
-getPreds :: MonadState LetFinderState m => m (HashMap StableParserName Int)
+getPreds :: MonadState LetFinderState m => m (HashMap ParserName Int)
 getPreds = gets preds
 
-getRecs :: MonadState LetFinderState m => m (HashSet StableParserName)
+getRecs :: MonadState LetFinderState m => m (HashSet ParserName)
 getRecs = gets recs
 
-getBefore :: MonadState LetFinderState m => m (HashSet StableParserName)
+getBefore :: MonadState LetFinderState m => m (HashSet ParserName)
 getBefore = gets before
 
-modifyPreds :: MonadState LetFinderState m => (HashMap StableParserName Int -> HashMap StableParserName Int) -> m ()
+modifyPreds :: MonadState LetFinderState m => (HashMap ParserName Int -> HashMap ParserName Int) -> m ()
 modifyPreds f = modify' (\st -> st {preds = f (preds st)})
 
-modifyRecs :: MonadState LetFinderState m => (HashSet StableParserName -> HashSet StableParserName) -> m ()
+modifyRecs :: MonadState LetFinderState m => (HashSet ParserName -> HashSet ParserName) -> m ()
 modifyRecs f = modify' (\st -> st {recs = f (recs st)})
 
-modifyBefore :: MonadState LetFinderState m => (HashSet StableParserName -> HashSet StableParserName) -> m ()
+modifyBefore :: MonadState LetFinderState m => (HashSet ParserName -> HashSet ParserName) -> m ()
 modifyBefore f = modify' (\st -> st {before = f (before st)})
 
-modifyTopo :: MonadState LetFinderState m => ([StableParserName] -> [StableParserName]) -> m ()
+modifyTopo :: MonadState LetFinderState m => ([ParserName] -> [ParserName]) -> m ()
 modifyTopo f = modify' (\st -> st {topo = f (topo st)})
 
-addPred :: MonadState LetFinderState m => StableParserName -> m ()
+addPred :: MonadState LetFinderState m => ParserName -> m ()
 addPred k = modifyPreds (HashMap.insertWith (+) k 1)
 
-addRec :: MonadState LetFinderState m => StableParserName -> m ()
+addRec :: MonadState LetFinderState m => ParserName -> m ()
 addRec = modifyRecs . HashSet.insert
 
-ifSeen :: MonadReader LetFinderCtx m => StableParserName -> m a -> m a -> m a
+ifSeen :: MonadReader LetFinderCtx m => ParserName -> m a -> m a -> m a
 ifSeen x yes no = do !seen <- ask; if HashSet.member x seen then yes else no
 
-ifNotProcessedBefore :: MonadState LetFinderState m => StableParserName -> m () -> m ()
+ifNotProcessedBefore :: MonadState LetFinderState m => ParserName -> m () -> m ()
 ifNotProcessedBefore x m = do !before <- getBefore; if HashSet.member x before then return () else m
 
-doNotProcessAgain :: MonadState LetFinderState m => StableParserName -> m ()
+doNotProcessAgain :: MonadState LetFinderState m => ParserName -> m ()
 doNotProcessAgain x = modifyBefore (HashSet.insert x)
 
-addToTopology :: MonadState LetFinderState m => StableParserName -> m ()
+addToTopology :: MonadState LetFinderState m => ParserName -> m ()
 addToTopology x = modifyTopo (x:)
 
-addName :: MonadReader LetFinderCtx m => StableParserName -> m b -> m b
+addName :: MonadReader LetFinderCtx m => ParserName -> m b -> m b
 addName x = local (HashSet.insert x)
 
-makeStableParserName :: MonadIO m => Free ParserF Void1 a -> m StableParserName
+makeParserName :: MonadIO m => Free ParserF Void1 a -> m ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
-makeStableParserName !p =
+makeParserName !p =
   do !(StableName name) <- liftIO (makeStableName p)
-     return $! StableParserName name
+     return $! ParserName name
 
 showM :: Parser a -> String
 showM = show . (\(x, _, _) -> x) . compile
@@ -208,11 +238,11 @@ showM = show . (\(x, _, _) -> x) . compile
 liftA4 :: Applicative f => (a -> b -> c -> d -> e) -> f a -> f b -> f c -> f d -> f e
 liftA4 f u v w x = liftA3 f u v w <*> x
 
-instance Eq StableParserName where 
-  (StableParserName n) == (StableParserName m) = eqStableName (StableName n) (StableName m)
-instance Hashable StableParserName where
-  hash (StableParserName n) = hashStableName (StableName n)
-  hashWithSalt salt (StableParserName n) = hashWithSalt salt (StableName n)
+instance Eq ParserName where 
+  (ParserName n) == (ParserName m) = eqStableName (StableName n) (StableName m)
+instance Hashable ParserName where
+  hash (ParserName n) = hashStableName (StableName n)
+  hashWithSalt salt (ParserName n) = hashWithSalt salt (StableName n)
 
 -- There is great evil in this world, and I'm probably responsible for half of it
-instance Show StableParserName where show (StableParserName n) = show (I# (unsafeCoerce# n))
+instance Show ParserName where show (ParserName n) = show (I# (unsafeCoerce# n))

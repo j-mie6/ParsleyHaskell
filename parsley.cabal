@@ -126,3 +126,4 @@ library
   default-language:    Haskell2010
   ghc-options:         -fplugin=LiftPlugin -pgmP cpphs -optP --cpp
   ---fprint-explicit-kinds -fprint-explicit-runtime-reps
+  ---freverse-errors (or backwards?)

@@ -14,6 +14,12 @@ regTest =
   newRegister (char 'a') (\r1 ->
   newRegister (char 'b') (\r2 -> 
     repeat 9 (swap r1 r2) *> (get r1 <~> get r2)))
+    {-}   swap r1 r2
+    *> swap r1 r2
+    *> swap r1 r2
+    *> swap r1 r2
+    *> swap r1 r2
+    *> (get r1 <~> get r2)))-}
 
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show
 

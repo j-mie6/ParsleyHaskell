@@ -152,7 +152,6 @@ instance Show (Free ParserF f a) where
       alg (ChainPre (Const1 op) (Const1 p))        = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))       = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                    = p
-      alg (ScopeRegister (Const1 p) _)            = concat ["(newRegister ", p, " ?)"]
-      alg (NewRegister r (Const1 p) (Const1 q)) = concat ["newRegister ", show r, " ", p, " ", q, ")"]
+      alg (NewRegister r (Const1 p) (Const1 q)) = concat ["(newRegister ", show r, " ", p, " ", q, ")"]
       alg (GetRegister r)                   = concat ["(get ", show r, ")"]
       alg (PutRegister r (Const1 p))        = concat ["(put ", show r, " ", p, ")"]

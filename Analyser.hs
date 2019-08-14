@@ -5,14 +5,15 @@
 {-# LANGUAGE PolyKinds #-}
 module Analyser (constantInput, terminationAnalysis) where
 
-import ParserAST                  (ParserF(..))
-import Machine                    (IMVar, MVar(..))
+import ParserAST                  (ParserF(..), Reg(..))
+import Machine                    (IMVar, MVar(..), IΣVar)
 import Indexed                    (Free, History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
 import Control.Monad.State.Strict (State, get, put, evalState)
 import Data.Map.Strict            (Map)
 import Data.Set                   (Set)
+import Data.Monoid                ((<>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
@@ -24,20 +25,42 @@ constantInput = getConst1 . histo (const (Const1 Nothing)) (alg1 |> (Const1 . al
     alg1 (Era (Const1 n) (Try _ _) :<|>: Era (Const1 q) _) = Just (Const1 (n <==> q))
     alg1 _ = Nothing
     alg2 :: ParserF (Const1 (Maybe Int)) a -> Maybe Int
-    alg2 (Pure _)                               = Just 0
-    alg2 (Satisfy _)                            = Just 1
-    alg2 (Const1 p :<*>: Const1 q)                = p <+> q
-    alg2 (Const1 p :*>: Const1 q)                 = p <+> q
-    alg2 (Const1 p :<*: Const1 q)                 = p <+> q
-    alg2 Empty                                  = Just 0
-    alg2 (Try n _)                              = n
-    alg2 (LookAhead (Const1 p))                  = p
-    alg2 (NotFollowedBy (Const1 p))              = p
+    alg2 (Pure _)                                  = Just 0
+    alg2 (Satisfy _)                               = Just 1
+    alg2 (Const1 p :<*>: Const1 q)                 = p <+> q
+    alg2 (Const1 p :*>: Const1 q)                  = p <+> q
+    alg2 (Const1 p :<*: Const1 q)                  = p <+> q
+    alg2 Empty                                     = Just 0
+    alg2 (Try n _)                                 = n
+    alg2 (LookAhead (Const1 p))                    = p
+    alg2 (NotFollowedBy (Const1 p))                = p
     alg2 (Branch (Const1 b) (Const1 p) (Const1 q)) = b <+> (p <==> q)
-    alg2 (Match (Const1 p) _ qs (Const1 def))     = p <+> (foldr (<==>) def (map getConst1 qs))
-    alg2 (Debug _ (Const1 p))                    = p
-    alg2 (Let False _ (Const1 p))                = p
-    alg2 _                                      = Nothing
+    alg2 (Match (Const1 p) _ qs (Const1 def))      = p <+> (foldr (<==>) def (map getConst1 qs))
+    alg2 (Debug _ (Const1 p))                      = p
+    alg2 (Let False _ (Const1 p))                  = p
+    -- TODO Add registers stuff here!
+    alg2 _                                         = Nothing
+
+-- Free Registers Analysis
+freeRegisters :: Free ParserF f a -> Set IΣVar
+freeRegisters = getConst1 . fold (const (Const1 Set.empty)) (Const1 . alg)
+  where
+    alg :: ParserF (Const1 (Set IΣVar)) a -> Set IΣVar
+    alg (GetRegister (Reg r)) = Set.singleton r
+    alg (PutRegister (Reg r) (Const1 rs)) = Set.insert r rs
+    alg (NewRegister (Reg r) (Const1 rs) (Const1 rs')) = rs <> (Set.delete r rs')
+    alg (Const1 rs :<*>: Const1 rs') = rs <> rs'
+    alg (Const1 rs :*>: Const1 rs') = rs <> rs'
+    alg (Const1 rs :<*: Const1 rs') = rs <> rs'
+    alg (Const1 rs :<|>: Const1 rs') = rs <> rs'
+    alg (Try _ (Const1 rs)) = rs
+    alg (LookAhead (Const1 rs)) = rs
+    alg (NotFollowedBy (Const1 rs)) = rs
+    alg (Branch (Const1 rs) (Const1 rs') (Const1 rs'')) = mconcat [rs, rs', rs'']
+    alg (Match (Const1 rs) _ qs (Const1 rs')) = mconcat [rs, rs', foldMap getConst1 qs]
+    alg (Debug _ (Const1 rs)) = rs
+    alg (Let False _ (Const1 rs)) = rs
+    alg _ = Set.empty
 
 -- Termination Analysis (Generalised left-recursion checker)
 (<+>) :: (Num a, Monad m) => m a -> m a -> m a

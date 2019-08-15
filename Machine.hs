@@ -40,7 +40,7 @@ import Data.Text             (Text)
 import Data.Void             (Void)
 import Data.List             (intercalate)
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
-import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map)
+import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, foldrWithKey)
 
 #define inputInstances(derivation) \
 derivation(O)                      \
@@ -53,9 +53,11 @@ newtype ΣVar a = ΣVar IΣVar
 newtype MVar a = MVar IMVar
 newtype ΦVar a = ΦVar IΦVar
 type ΦDecl k x xs r a = (ΦVar x, k (x ': xs) r a)
-newtype LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a)
+data LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a) Bool
 
-instance Show (LetBinding o a x) where show (LetBinding m) = show m
+instance Show (LetBinding o a x) where 
+  show (LetBinding m False) = show m
+  show (LetBinding m True) = show m ++ " (open)"
 
 data M o k xs r a where
   Halt      :: M o k '[a] Void a
@@ -134,6 +136,7 @@ debugDown :: Ctx s o a -> Ctx s o a
 debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
 newtype MissingDependency = MissingDependency IMVar
+newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
 type ExecMonad s o xs r a = ReaderT (Ctx s o a) (Except MissingDependency) (Γ s o xs r a -> QST s (Maybe a))
 newtype Exec s o xs r a = Exec { unExec :: ExecMonad s o xs r a }
 run :: Exec s o xs r a -> Γ s o xs r a -> Ctx s o a -> QST s (Maybe a)
@@ -173,18 +176,24 @@ missingDependency :: MVar x -> MissingDependency
 missingDependency (MVar v) = MissingDependency v
 dependencyOf :: MissingDependency -> MVar x
 dependencyOf (MissingDependency v) = MVar v
+outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
+outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 
 newtype PartialEval s o a x = PartialEval (Ctx s o a -> Except MissingDependency (Γ s o '[] x a -> QST s (Maybe a)))
 partiallyEvaluateLets :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> DMap MVar (PartialEval s o a)
-partiallyEvaluateLets = DMap.map (\(LetBinding k) -> PartialEval (runReaderT (unExec (readyExec k))))
+partiallyEvaluateLets = DMap.map (\(LetBinding k _) -> PartialEval (runReaderT (unExec (readyExec k))))
 
 getPartialEvaluation :: DMap MVar (PartialEval s o a) -> MVar x -> Γ s o '[] x a -> Ctx s o a -> Except MissingDependency (QST s (Maybe a))
 getPartialEvaluation ns μ γ ctx = let !(PartialEval k) = ns DMap.! (trace ("executing let-binding " ++ show μ) μ) in k ctx <*> pure γ
 
+hasFreeVars :: DMap MVar (LetBinding o a) -> Map IMVar Bool
+hasFreeVars = DMap.foldrWithKey (\(MVar v) (LetBinding _ b) m -> Map.insert v b m) Map.empty
+
 readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> QST s (Maybe a)
-readyCalls topo ms start γ ctx = foldr readyFunc (run start γ) (trace (show topo) topo) ctx
+readyCalls topo ms start γ ctx = foldr readyFunc (run start γ) (trace (show topo) (filter (not . (bs Map.!)) topo)) ctx
   where
     ns = partiallyEvaluateLets ms
+    bs = hasFreeVars ms
     readyFunc v rest ctx = buildRec ctx (MVar v) (getPartialEvaluation ns) rest
 
 readyExec :: (?ops :: InputOps s o, Ops o) => Free3 (M o) Void3 xs r a -> Exec s o xs r a
@@ -540,7 +549,11 @@ askM μ = trace ("fetching " ++ show μ) $ do
     Nothing   -> throwError (missingDependency μ)
 
 askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (QSTRef s x)
-askΣ σ = trace ("fetching " ++ show σ) $ asks ((DMap.! σ) . σs)
+askΣ σ = trace ("fetching " ++ show σ) $ do
+  mref <- asks ((DMap.lookup σ) . σs)
+  case mref of
+    Just ref -> return $! ref
+    Nothing  -> throw (outOfScopeRegister σ)
 
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin (Rep o) s (Unboxed o) a x)
 askΦ φ = trace ("fetching " ++ show φ) $ asks ((DMap.! φ) . φs)
@@ -627,6 +640,9 @@ instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
 
 instance Show MissingDependency where show (MissingDependency (IMVar μ)) = "Dependency μ" ++ show μ ++ " has not been compiled"
 instance Exception MissingDependency
+
+instance Show OutOfScopeRegister where show (OutOfScopeRegister (IΣVar σ)) = "Register r" ++ show σ ++ " is out of scope"
+instance Exception OutOfScopeRegister
 
 instance GEq ΣVar where
   geq (ΣVar u) (ΣVar v)

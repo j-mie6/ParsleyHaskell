@@ -16,7 +16,7 @@ module Compiler(compile) where
 import Prelude hiding (pred)
 import ParserAST                  (ParserF(..), Parser(..), Reg(..))
 import Optimiser                  (optimise)
-import Analyser                   (terminationAnalysis)
+import Analyser                   (terminationAnalysis, freeRegisters)
 import CodeGenerator              (codeGen, halt, ret)
 import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
 import Indexed                    (Free(Op), Void1, fold, fold', absurd, Tag(..))
@@ -39,6 +39,7 @@ import Debug.Trace                (trace)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey, size)
+import qualified Data.Set            as Set     (null)
 
 compile :: Parser a -> (Machine o a, DMap MVar (LetBinding o a), [IMVar])
 compile (Parser p) = 
@@ -53,7 +54,7 @@ compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.em
     compileLet :: MVar x -> Free ParserF Void1 x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
     compileLet (MVar μ) p (ms, maxΣ) =
       let (m, maxΣ') = codeGen p ret maxV (maxΣ + 1)
-      in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
+      in (DMap.insert (MVar μ) (LetBinding m (not (Set.null (freeRegisters p)))) ms, maxΣ')
 
 preprocess :: Free ParserF Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar, [IMVar])
 preprocess p =
@@ -66,8 +67,7 @@ newtype Tagger a = Tagger { runTagger :: Free (Tag ParserName ParserF) Void1 a }
 
 {-  TODO
     Need to preserve the numRegister count to prevent interference with registers created in CodeGen
-    Need to create a FreeVariableAnalysis which tells you which, if any, registers are unbound in parser
-    For all register closures, ensure that the binding is not pre-compiled and is demanded by emergency binding
+    Ensure that top-level parser can still demand emergency binding
 -}
 
 tagParser :: Free ParserF Void1 a -> Free (Tag ParserName ParserF) Void1 a

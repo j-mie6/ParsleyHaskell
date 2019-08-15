@@ -3,7 +3,7 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
-module Analyser (constantInput, terminationAnalysis) where
+module Analyser (constantInput, terminationAnalysis, freeRegisters) where
 
 import ParserAST                  (ParserF(..), Reg(..))
 import Machine                    (IMVar, MVar(..), IΣVar)
@@ -46,21 +46,22 @@ freeRegisters :: Free ParserF f a -> Set IΣVar
 freeRegisters = getConst1 . fold (const (Const1 Set.empty)) (Const1 . alg)
   where
     alg :: ParserF (Const1 (Set IΣVar)) a -> Set IΣVar
-    alg (GetRegister (Reg r)) = Set.singleton r
-    alg (PutRegister (Reg r) (Const1 rs)) = Set.insert r rs
-    alg (NewRegister (Reg r) (Const1 rs) (Const1 rs')) = rs <> (Set.delete r rs')
-    alg (Const1 rs :<*>: Const1 rs') = rs <> rs'
-    alg (Const1 rs :*>: Const1 rs') = rs <> rs'
-    alg (Const1 rs :<*: Const1 rs') = rs <> rs'
-    alg (Const1 rs :<|>: Const1 rs') = rs <> rs'
-    alg (Try _ (Const1 rs)) = rs
-    alg (LookAhead (Const1 rs)) = rs
-    alg (NotFollowedBy (Const1 rs)) = rs
+    alg (GetRegister (Reg r))                           = Set.singleton r
+    alg (PutRegister (Reg r) (Const1 rs))               = Set.insert r rs
+    alg (NewRegister (Reg r) (Const1 rs) (Const1 rs'))  = rs <> (Set.delete r rs')
+    alg (Const1 rs :<*>: Const1 rs')                    = rs <> rs'
+    alg (Const1 rs :*>: Const1 rs')                     = rs <> rs'
+    alg (Const1 rs :<*: Const1 rs')                     = rs <> rs'
+    alg (Const1 rs :<|>: Const1 rs')                    = rs <> rs'
+    alg (Try _ (Const1 rs))                             = rs
+    alg (LookAhead (Const1 rs))                         = rs
+    alg (NotFollowedBy (Const1 rs))                     = rs
     alg (Branch (Const1 rs) (Const1 rs') (Const1 rs'')) = mconcat [rs, rs', rs'']
-    alg (Match (Const1 rs) _ qs (Const1 rs')) = mconcat [rs, rs', foldMap getConst1 qs]
-    alg (Debug _ (Const1 rs)) = rs
-    alg (Let False _ (Const1 rs)) = rs
-    alg _ = Set.empty
+    alg (Match (Const1 rs) _ qs (Const1 rs'))           = mconcat [rs, rs', foldMap getConst1 qs]
+    alg (Debug _ (Const1 rs))                           = rs
+    alg (Let False _ (Const1 rs))                       = rs
+    alg (Let True _ _)                                  = Set.empty -- TODO this is false! Do it by knot tying?
+    alg _                                               = Set.empty
 
 -- Termination Analysis (Generalised left-recursion checker)
 (<+>) :: (Num a, Monad m) => m a -> m a -> m a

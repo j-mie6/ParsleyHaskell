@@ -15,7 +15,8 @@
              RecordWildCards,
              ConstraintKinds,
              CPP,
-             ImplicitParams #-}
+             ImplicitParams,
+             TypeFamilies #-}
 module Machine where
 
 import MachineOps
@@ -55,7 +56,7 @@ newtype ΦVar a = ΦVar IΦVar
 type ΦDecl k x xs r a = (ΦVar x, k (x ': xs) r a)
 data LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a) Bool
 
-instance Show (LetBinding o a x) where 
+instance Show (LetBinding o a x) where
   show (LetBinding m False) = show m
   show (LetBinding m True) = show m ++ " (open)"
 
@@ -394,7 +395,7 @@ execGet :: ΣVar x -> Exec s o (x ': xs) r a -> ExecMonad s o xs r a
 execGet σ (Exec k) =
   do !(QSTRef ref) <- askΣ σ
      mk <- k
-     return $! \γ -> [|| 
+     return $! \γ -> [||
        do x <- readΣ $$ref
           $$(mk (γ {xs = pushX [||x||] (xs γ)}))
        ||]
@@ -560,6 +561,18 @@ askΦ φ = trace ("fetching " ++ show φ) $ asks ((DMap.! φ) . φs)
 
 askSTC :: MonadReader (Ctx s o a) m => ΣVar x -> m (QCRef s o)
 askSTC (ΣVar v) = asks ((Map.! v) . stcs)
+
+data RegList rs where
+  NoRegs :: RegList '[]
+  FreeReg :: ΣVar r -> RegList rs -> RegList (r ': rs)
+
+type family Func (rs :: [*]) s a where
+  Func '[] s a       = ST s (Maybe a)
+  Func (r ': rs) s a = STRef s r -> Func rs s a
+
+takeFreeRegisters :: RegList rs -> Ctx s o a -> (Ctx s o a -> QST s (Maybe a)) -> TExpQ (Func rs s a)
+takeFreeRegisters NoRegs ctx body = body ctx
+takeFreeRegisters (FreeReg σ σs) ctx body = [||\reg -> $$(takeFreeRegisters σs (insertΣ σ [||reg||] ctx) body)||]
 
 instance IFunctor3 (M o) where
   imap3 f Halt                              = Halt

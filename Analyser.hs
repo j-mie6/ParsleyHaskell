@@ -150,5 +150,6 @@ terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold ab
                          let prop' = if looping prop then Prop Never Never True else prop
                          put (Map.insert v prop' props)
                          return $! prop'
+    alg (Let False _ p)                      = runTerm p
     alg (Debug _ p)                          = runTerm p
     --alg _                                    = return $! Unknown

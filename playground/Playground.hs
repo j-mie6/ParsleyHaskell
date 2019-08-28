@@ -51,8 +51,8 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
 --javascript :: String -> Maybe JSProgram
 --javascript = $$(Parsley.runParser Parsers.javascript)
 
-boom :: String -> Maybe ()
-boom = $$(Parsley.runParser Parsers.failure)
+--boom :: String -> Maybe ()
+--boom = $$(Parsley.runParser Parsers.failure)
 
 main :: IO ()
 main =

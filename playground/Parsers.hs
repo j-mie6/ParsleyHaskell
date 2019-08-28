@@ -143,15 +143,14 @@ failure = expr
     expr' :: Parser ()
     expr' = expr *> expr'-}
 
-failure :: Parser ()
+{-failure :: Parser ()
 failure = x
   where
     x = z <* y <* y
     y = try item
-    z = x *> z
+    z = x *> z-}
 
-
-{-javascript :: Parser JSProgram
+javascript :: Parser JSProgram
 javascript = whitespace *> many element <* eof
   where
     element :: Parser JSElement
@@ -162,7 +161,7 @@ javascript = whitespace *> many element <* eof
     stmt :: Parser JSStm
     stmt = semi $> lift' JSSemi
        <|> keyword "if" *> liftA3 (lift' JSIf) parensExpr stmt (maybeP (keyword "else" *> stmt))
-       <|> keyword "while" *> liftA2 (lift' JSWhile) parensExpr stmt
+       {-<|> keyword "while" *> liftA2 (lift' JSWhile) parensExpr stmt
        <|> (keyword "for" *> parens
                (try (liftA2 (lift' JSForIn) varsOrExprs (keyword "in" *> expr))
             <|> liftA3 (lift' JSFor) (maybeP varsOrExprs <* semi) (optExpr <* semi) optExpr)
@@ -172,7 +171,7 @@ javascript = whitespace *> many element <* eof
        <|> keyword "with" *> liftA2 (lift' JSWith) parensExpr stmt
        <|> keyword "return" *> (lift' JSReturn <$> optExpr)
        <|> lift' JSBlock <$> compound
-       <|> lift' JSNaked <$> varsOrExprs
+       <|> lift' JSNaked <$> varsOrExprs-}
     varsOrExprs :: Parser (Either [JSVar] JSExpr)
     varsOrExprs = keyword "var" *> commaSep1 variable <+> expr
     variable :: Parser JSVar
@@ -195,7 +194,7 @@ javascript = whitespace *> many element <* eof
       , Postfix [ operator "--" $> lift' jsDec, operator "++" $> lift' jsInc ]
       , InfixL  [ operator "*" $> lift' JSMul, operator "/" $> lift' JSDiv
                 , operator "%" $> lift' JSMod ]
-      , InfixL  [ operator "+" $> lift' JSAdd, operator "-" $> lift' JSSub ]
+      {-, InfixL  [ operator "+" $> lift' JSAdd, operator "-" $> lift' JSSub ]
       , InfixL  [ operator "<<" $> lift' JSShl, operator ">>" $> lift' JSShr ]
       , InfixL  [ operator "<=" $> lift' JSLe, operator "<" $> lift' JSLt
                 , operator ">=" $> lift' JSGe, operator ">" $> lift' JSGt ]
@@ -204,7 +203,7 @@ javascript = whitespace *> many element <* eof
       , InfixL  [ operator "^" $> lift' JSBitXor ]
       , InfixL  [ try (operator "|") $> lift' JSBitOr ]
       , InfixL  [ operator "&&" $> lift' JSAnd ]
-      , InfixL  [ operator "||" $> lift' JSOr ]
+      , InfixL  [ operator "||" $> lift' JSOr ]-}
       ]
       (lift' JSUnary <$> memOrCon)
     memOrCon :: Parser JSUnary
@@ -227,13 +226,13 @@ javascript = whitespace *> many element <* eof
     primaryExpr :: Parser JSAtom
     primaryExpr = lift' JSParens <$> parens expr
               <|> lift' JSArray <$> brackets (commaSep asgn)
-              <|> lift' JSId <$> identifier
+              {-<|> lift' JSId <$> identifier
               <|> lift' either >*< lift' JSInt >*< lift' JSFloat <$> naturalOrFloat
               <|> lift' JSString <$> stringLiteral
               <|> lift' JSTrue <$ keyword "true"
               <|> lift' JSFalse <$ keyword "false"
               <|> lift' JSNull <$ keyword "null"
-              <|> lift' JSThis <$ keyword "this"
+              <|> lift' JSThis <$ keyword "this"-}
 
     -- Token Parsers
     space :: Parser ()
@@ -296,10 +295,10 @@ javascript = whitespace *> many element <* eof
 
     stringEscape :: Parser (Maybe Char)
     stringEscape = token "\\" *> (token "&" $> lift' Nothing
-                              <|> spaces *> token "\\" $> lift' Nothing
-                              <|> lift' Just <$> escapeCode)
+                              <|> spaces *> token "\\" $> lift' Nothing)
+                              -- <|> lift' Just <$> escapeCode)
 
-    escapeCode :: Parser Char
+    {-escapeCode :: Parser Char
     escapeCode = match escChrs (oneOf escChrs) code empty
       where
         code 'a' = pure (lift' ('\a'))

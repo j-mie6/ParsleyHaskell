@@ -13,54 +13,56 @@ import Machine                    (IMVar, MVar(..))
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 import Data.List                  (intercalate)
+import Data.Char                  (isAlphaNum)
+import GHC.Stack
 
 -- Parser wrapper type
 newtype Parser a = Parser {unParser :: Free ParserF Void1 a}
 
 -- Core smart constructors
-pure :: WQ a -> Parser a
+pure :: HasCallStack => WQ a -> Parser a
 pure = Parser . Op . Pure
 
-(<*>) :: Parser (a -> b) -> Parser a -> Parser b
+(<*>) :: HasCallStack => Parser (a -> b) -> Parser a -> Parser b
 Parser p <*> Parser q = Parser (Op (p :<*>: q))
 
-(<*) :: Parser a -> Parser b -> Parser a
+(<*) :: HasCallStack => Parser a -> Parser b -> Parser a
 Parser p <* Parser q = Parser (Op (p :<*: q))
 
-(*>) :: Parser a -> Parser b -> Parser b
+(*>) :: HasCallStack => Parser a -> Parser b -> Parser b
 Parser p *> Parser q = Parser (Op (p :*>: q))
 
-empty :: Parser a
+empty :: HasCallStack => Parser a
 empty = Parser (Op Empty)
 
-(<|>) :: Parser a -> Parser a -> Parser a
+(<|>) :: HasCallStack => Parser a -> Parser a -> Parser a
 Parser p <|> Parser q = Parser (Op (p :<|>: q))
 
-satisfy :: WQ (Char -> Bool) -> Parser Char
+satisfy :: HasCallStack => WQ (Char -> Bool) -> Parser Char
 satisfy = Parser . Op . Satisfy
 
-lookAhead :: Parser a -> Parser a
+lookAhead :: HasCallStack => Parser a -> Parser a
 lookAhead = Parser . Op . LookAhead . unParser
 
-notFollowedBy :: Parser a -> Parser ()
+notFollowedBy :: HasCallStack => Parser a -> Parser ()
 notFollowedBy = Parser . Op . NotFollowedBy . unParser
 
-try :: Parser a -> Parser a
+try :: HasCallStack => Parser a -> Parser a
 try = Parser . Op . Try Nothing . unParser
 
-match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
+match :: (HasCallStack, Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
 match vs (Parser p) f (Parser def) = Parser (Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs) def))
 
-branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
+branch :: HasCallStack => Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (Op (Branch c p q))
 
-chainPre :: Parser (a -> a) -> Parser a -> Parser a
+chainPre :: HasCallStack => Parser (a -> a) -> Parser a -> Parser a
 chainPre (Parser op) (Parser p) = Parser (Op (ChainPre op p))
 
-chainPost :: Parser a -> Parser (a -> a) -> Parser a
+chainPost :: HasCallStack => Parser a -> Parser (a -> a) -> Parser a
 chainPost (Parser p) (Parser op) = Parser (Op (ChainPost p op))
 
-debug :: String -> Parser a -> Parser a
+debug :: HasCallStack => String -> Parser a -> Parser a
 debug name (Parser p) = Parser (Op (Debug name p))
 
 -- Fixities
@@ -72,23 +74,61 @@ infixl 4 *>
 infixl 3 <|>
 
 -- Core datatype
+-- http://hackage.haskell.org/package/base-4.12.0.0/docs/GHC-Stack.html
+-- Adding this allows us to track the origins of each AST node
 data ParserF (k :: * -> *) (a :: *) where
-    Pure          :: WQ a -> ParserF k a
-    Satisfy       :: WQ (Char -> Bool) -> ParserF k Char
-    (:<*>:)       :: k (a -> b) -> k a -> ParserF k b
-    (:*>:)        :: k a -> k b -> ParserF k b
-    (:<*:)        :: k a -> k b -> ParserF k a
-    (:<|>:)       :: k a -> k a -> ParserF k a
-    Empty         :: ParserF k a
-    Try           :: Maybe Int -> k a -> ParserF k a
-    LookAhead     :: k a -> ParserF k a
-    Let           :: Bool -> MVar a -> k a -> ParserF k a
-    NotFollowedBy :: k a -> ParserF k ()
-    Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF k c
-    Match         :: k a -> [WQ (a -> Bool)] -> [k b] -> k b -> ParserF k b
-    ChainPre      :: k (a -> a) -> k a -> ParserF k a
-    ChainPost     :: k a -> k (a -> a) -> ParserF k a
-    Debug         :: String -> k a -> ParserF k a
+    Pure          :: HasCallStack => WQ a -> ParserF k a
+    Satisfy       :: HasCallStack => WQ (Char -> Bool) -> ParserF k Char
+    (:<*>:)       :: HasCallStack => k (a -> b) -> k a -> ParserF k b
+    (:*>:)        :: HasCallStack => k a -> k b -> ParserF k b
+    (:<*:)        :: HasCallStack => k a -> k b -> ParserF k a
+    (:<|>:)       :: HasCallStack => k a -> k a -> ParserF k a
+    Empty         :: HasCallStack => ParserF k a
+    Try           :: HasCallStack => Maybe Int -> k a -> ParserF k a
+    LookAhead     :: HasCallStack => k a -> ParserF k a
+    Let           :: HasCallStack => Bool -> MVar a -> k a -> ParserF k a
+    NotFollowedBy :: HasCallStack => k a -> ParserF k ()
+    Branch        :: HasCallStack => k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF k c
+    Match         :: HasCallStack => k a -> [WQ (a -> Bool)] -> [k b] -> k b -> ParserF k b
+    ChainPre      :: HasCallStack => k (a -> a) -> k a -> ParserF k a
+    ChainPost     :: HasCallStack => k a -> k (a -> a) -> ParserF k a
+    Debug         :: HasCallStack => String -> k a -> ParserF k a
+
+callStackForParser :: ParserF f a -> CallStack
+callStackForParser (Pure _)          = callStack
+callStackForParser (Satisfy _)       = callStack
+callStackForParser (_ :<*>: _)       = callStack
+callStackForParser (_ :*>: _)        = callStack
+callStackForParser (_ :<*: _)        = callStack
+callStackForParser (_ :<|>: _)       = callStack
+callStackForParser Empty             = callStack
+callStackForParser (Try _ _)         = callStack
+callStackForParser (LookAhead _)     = callStack
+callStackForParser (Let _ _ _)       = callStack
+callStackForParser (NotFollowedBy _) = callStack
+callStackForParser (Branch _ _ _)    = callStack
+callStackForParser (Match _ _ _ _)   = callStack
+callStackForParser (ChainPre _ _)    = callStack
+callStackForParser (ChainPost _ _)   = callStack
+callStackForParser (Debug _ _)       = callStack
+
+parserOrigin :: ParserF f a -> (String, SrcLoc)
+parserOrigin = last . getCallStack . callStackForParser
+
+prettyParserOrigin :: ParserF f a -> String
+prettyParserOrigin p =
+  let (name, loc) = parserOrigin p
+  in if isAlphaNum (head name) then name ++ ", called at " ++ prettySrcLoc loc
+     else
+      let SrcLoc pkg mod file sl sc el ec = loc
+          multi x y name
+            | x == y  = concat [" ", name, " ", show x]
+            | otherwise = concat [" ", name, "s " , show x, "-", show y]
+      in concat [ "(", name, "), called at "
+                , file, multi sl el "line"
+                , " and"
+                , multi sc ec "column"
+                , " in ", pkg, ":", mod]
 
 -- Instances
 instance IFunctor ParserF where

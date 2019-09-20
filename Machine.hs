@@ -570,6 +570,33 @@ type family Func (rs :: [*]) s a where
   Func '[] s a       = ST s (Maybe a)
   Func (r ': rs) s a = STRef s r -> Func rs s a
 
+type family Insert (b :: Bool) (r :: *) (rs :: [*]) where
+  Insert 'False r rs = r ': rs
+  Insert 'True r rs = rs
+
+data SBool :: Bool -> * where
+  STrue :: SBool 'True
+  SFalse :: SBool 'False
+
+{-isThere :: ΣVar r -> RegList rs -> SBool b
+isThere σ NoRegs = SFalse
+isThere σ@(ΣVar u) (FreeReg (ΣVar v) rs)
+  | u == v    = STrue
+  | otherwise = isThere σ rs-}
+
+--insert :: forall (r :: *) (rs :: [*]) (rs' :: [*]). ΣVar r -> RegList rs -> RegList rs'
+--insert σ rs = insert' (isThere σ rs) σ rs
+
+isThere :: ΣVar r -> RegList rs -> SBool b
+isThere = undefined
+
+insert :: forall a (r :: *) (rs :: [*]) (rs' :: [*]). ΣVar r -> RegList rs -> (forall rs'. RegList rs' -> a) -> a
+insert σ rs k = k (insert' (isThere σ rs) σ rs)
+
+insert' :: SBool b -> ΣVar r -> RegList rs -> RegList (Insert b r rs)
+insert' SFalse σ rs = FreeReg σ rs
+insert' STrue σ rs = rs
+
 takeFreeRegisters :: RegList rs -> Ctx s o a -> (Ctx s o a -> QST s (Maybe a)) -> TExpQ (Func rs s a)
 takeFreeRegisters NoRegs ctx body = body ctx
 takeFreeRegisters (FreeReg σ σs) ctx body = [||\reg -> $$(takeFreeRegisters σs (insertΣ σ [||reg||] ctx) body)||]

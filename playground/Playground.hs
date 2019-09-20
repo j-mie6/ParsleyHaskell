@@ -54,8 +54,11 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
 boom :: String -> Maybe ()
 boom = $$(Parsley.runParser Parsers.failure)
 
-regs :: String -> Maybe (Char, Char)
-regs = $$(Parsley.runParser Parsers.regTest)
+--regs :: String -> Maybe (Char, Char)
+--regs = $$(Parsley.runParser Parsers.regTest)
+
+context :: String -> Maybe [Asgn]
+context = $$(Parsley.runParser Parsers.context)
 
 main :: IO ()
 main =

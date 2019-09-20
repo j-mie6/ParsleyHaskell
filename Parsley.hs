@@ -30,10 +30,10 @@ module Parsley ( Parser, runParser, parseFromFile
                , char, eof, more
                , traverse, sequence, string, token, repeat
                , between
-               , (<?|>), (>?>), when, while, fromMaybeP
+               , (<?|>), (>?>), (>??>), when, while, fromMaybeP
                , debug
                -- Registers
-               , newRegister, get, put, modify, local, swap, Reg
+               , newRegister, get, put, modify, local, gets, swap, for, newRegister_, put_, modify_, gets_, Reg
                -- Expressions
                , Level(..), precedence
                -- Template Haskell Utils
@@ -81,7 +81,7 @@ liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
 many = pfoldr (lift' (:)) (WQ [] [||[]||])
-{-many p = newRegister (pure (lift' id)) (\r -> 
+{-many p = newRegister (pure (lift' id)) (\r ->
     let go = modify r (lift' flip >*< lift' (.) <$> (lift' (:) <$> p)) *> go
          <|> (WQ ($ []) [||\f -> f []||] <$> get r)
     in go)-}
@@ -209,10 +209,13 @@ constp = (lift' const <$>)
 cond <?|> (p, q) = branch (WQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
 
 (>?>) :: Parser a -> WQ (a -> Bool) -> Parser a
-p >?> (WQ f qf) = select (WQ g qg <$> p) empty
+p >?> f = p >??> pure f
+
+(>??>) :: Parser a -> Parser (a -> Bool) -> Parser a
+px >??> pf = select (liftA2 (WQ g qg) pf px) empty
   where
-    g x = if f x then Right x else Left ()
-    qg = [||\x -> if $$qf x then Right x else Left ()||]
+    g f x = if f x then Right x else Left ()
+    qg = [||\f x -> if f x then Right x else Left ()||]
 
 (||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
 p ||= f = match [minBound..maxBound] p f empty
@@ -233,8 +236,23 @@ maybeP :: Parser a -> Parser (Maybe a)
 maybeP p = option (WQ Nothing [||Nothing||]) (lift' Just <$> p)
 
 -- Stateful Parsers
+newRegister_ :: WQ a -> (forall r. Reg r a -> Parser b) -> Parser b
+newRegister_ x gen = newRegister (pure x) gen
+
+put_ :: Reg r a -> WQ a -> Parser ()
+put_ r x = put r (pure x)
+
+gets_ :: Reg r a -> WQ (a -> b) -> Parser b
+gets_ r f = gets r (pure f)
+
+gets :: Reg r a -> Parser (a -> b) -> Parser b
+gets r p = get r <**> p -- Which way round should p evaluate?
+
+modify_ :: Reg r a -> WQ (a -> a) -> Parser ()
+modify_ r f = modify r (pure f)
+
 modify :: Reg r a -> Parser (a -> a) -> Parser ()
-modify r p = put r (p <*> get r)
+modify r p = put r (get r <**> p) -- Which way round should p evaluate?
 
 move :: Reg r1 a -> Reg r2 a -> Parser ()
 move dst src = put dst (get src)
@@ -250,6 +268,13 @@ swap r1 r2 = newRegister (get r1) (\tmp -> move r1 r2
 
 rollback :: Reg r a -> Parser b -> Parser b
 rollback r p = newRegister (get r) (\save -> p <|> move r save *> empty)
+
+for :: Parser a -> Parser (a -> Bool) -> Parser (a -> a) -> Parser () -> Parser ()
+for init cond step body =
+  newRegister init (\i ->
+    let cond' :: Parser Bool
+        cond' = gets i cond
+    in when cond' (while (body *> modify i step *> cond')))
 
 -- Iterative Parsers
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a

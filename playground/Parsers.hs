@@ -5,14 +5,14 @@ module Parsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred, repeat)
 import Parsley
-import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper)
+import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper, isDigit, digitToInt)
 import Data.Set (fromList, member)
 import Data.Maybe (catMaybes)
 
 regTest :: Parser (Char, Char)
 regTest =
   newRegister (char 'a') (\r1 ->
-  newRegister (char 'b') (\r2 -> 
+  newRegister (char 'b') (\r2 ->
     repeat 9 (swap r1 r2) *> (get r1 <~> get r2)))
     {-}   swap r1 r2
     *> swap r1 r2
@@ -20,6 +20,33 @@ regTest =
     *> swap r1 r2
     *> swap r1 r2
     *> (get r1 <~> get r2)))-}
+
+data Expr = Var String | Num Int | Add Expr Expr deriving Show
+data Asgn = Asgn String Expr deriving Show
+
+context :: Parser [Asgn]
+context = newRegister_ (lift' []) (\ids ->
+  let declaredId :: Parser String
+      declaredId = identifier >??> (lift' flip >*< lift' elem <$> get ids)
+
+      decl :: Parser String
+      decl = string "var" *> newRegister identifier (\v ->
+                modify ids (lift' (:) <$> get v)
+             *> char '='
+             *> get v)
+
+      expr :: Parser Expr
+      expr = chainl1 (lift' Var <$> declaredId <|> lift' Num <$> number) (lift' Add <$ char '+')
+
+      asgn :: Parser Asgn
+      asgn = lift' Asgn <$> decl <*> expr <* char ';'
+
+      identifier :: Parser String
+      identifier = satisfy (lift' isAlpha) <:> many (satisfy (lift' isAlphaNum))
+
+      number :: Parser Int
+      number = pfoldl (WQ (\x d -> x * 10 + digitToInt d) [||\x d -> x * 10 + digitToInt d||]) (lift' 0) (satisfy (lift' isDigit))
+  in many asgn)
 
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show
 

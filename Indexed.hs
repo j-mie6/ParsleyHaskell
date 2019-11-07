@@ -65,11 +65,7 @@ present (Era x _)   = x
 histo :: forall f a b i. IFunctor f => (forall j. a j -> b j)
                                     -> (forall j. f (History f b) j -> b j)
                                     -> Free f a i -> b i
-histo gen alg tree = present (go tree)
-  where
-    go :: forall j. Free f a j -> History f b j
-    go (Var x) = Genesis (gen x)
-    go (Op x)  = uncurry Era ((alg /\ id) (imap go x))
+histo gen alg = present . fold (Genesis . gen) (alg >>= Era)
 
 {-newtype Prod f g i j k l = Prod {getProd :: (f i j k l, g i j k l)}
 para :: IFunctor f => (forall i' j' k'. a i' j' k' -> b i' j' k')

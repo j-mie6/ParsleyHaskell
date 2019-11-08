@@ -54,9 +54,6 @@ fold3' :: IFunctor3 f => (forall i' j' k'. a i' j' k' -> b i' j' k')
 fold3' gen alg (Var3 x)   = gen x
 fold3' gen alg op@(Op3 x) = alg op (imap3 (fold3' gen alg) x)
 
-(/\) :: (a -> b) -> (a -> c) -> a -> (b, c)
-(f /\ g) x = (f x, g x)
-
 data History f a i = Genesis (a i) | Era (a i) (f (History f a) i)
 present :: History f a i -> a i
 present (Genesis x) = x
@@ -66,22 +63,6 @@ histo :: forall f a b i. IFunctor f => (forall j. a j -> b j)
                                     -> (forall j. f (History f b) j -> b j)
                                     -> Free f a i -> b i
 histo gen alg = present . fold (Genesis . gen) (alg >>= Era)
-
-{-newtype Prod f g i j k l = Prod {getProd :: (f i j k l, g i j k l)}
-para :: IFunctor f => (forall i' j' k'. a i' j' k' -> b i' j' k')
-                        -> (forall i' j' k'. f (Prod (Free f a) b) i' j' k' -> b i' j' k')
-                        -> Free f a i j k l -> b i j k l
-para gen alg (Var x) = gen x
-para gen alg (Op x)  = alg (imap (Prod . (id /\ (para gen alg))) x)
-
-parahisto :: forall f a b i j k l. IFunctor f => (forall i' j' k'. a i' j' k' -> b i' j' k')
-                                              -> (forall i' j' k'. f (Prod (Free f a) (History f b)) i' j' k' -> b i' j' k')
-                                              -> Free f a i j k l -> b i j k l
-parahisto gen alg tree = present (go tree)
-  where
-    go :: forall i' j' k'. Free f a i' j' k' -> History f b i' j' k'
-    go (Var x) = Genesis (gen x)
-    go (Op x)  = uncurry Era ((alg /\ imap (snd . getProd)) (imap (Prod . (id /\ go)) x))-}
 
 extract :: IFunctor f => (forall j. f a j -> a j) -> Free f a i -> a i
 extract = fold id

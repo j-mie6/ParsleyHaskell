@@ -19,7 +19,7 @@ import Optimiser                  (optimise)
 import Analyser                   (terminationAnalysis, freeRegisters)
 import CodeGenerator              (codeGen, halt, ret)
 import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
-import Indexed                    (Free(Op), Void1, fold, fold', absurd, Tag(..))
+import Indexed                    (Free(Op), Void1, fold, fold', absurd, Tag(..), imap)
 import Control.Applicative        (liftA, liftA2, liftA3)
 import Control.Monad              (forM, forM_)
 import Control.Monad.Reader       (Reader, runReader, local, ask, asks, MonadReader)
@@ -77,27 +77,9 @@ tagParser = runTagger . fold' absurd alg
     concretiseRegister :: forall a b. Tagger a -> (forall r. Reg r a -> Tagger b) 
                                                -> (forall r. Reg r a -> ParserF (Free (Tag ParserName ParserF) Void1) b)
     concretiseRegister p g reg = let q = g reg in NewRegister reg (runTagger p) (runTagger q)
-    alg p q = Tagger $
-      let mkTag = Op . Tag (makeParserName p)
-      in case q of
-        pf :<*>: px       -> mkTag (runTagger pf :<*>: runTagger px)
-        p :*>: q          -> mkTag (runTagger p :*>: runTagger q)
-        p :<*: q          -> mkTag (runTagger p :<*: runTagger q)
-        p :<|>: q         -> mkTag (runTagger p :<|>: runTagger q)
-        Try n p           -> mkTag (Try n (runTagger p))
-        LookAhead p       -> mkTag (LookAhead (runTagger p))
-        NotFollowedBy p   -> mkTag (NotFollowedBy (runTagger p))
-        Branch b p q      -> mkTag (Branch (runTagger b) (runTagger p) (runTagger q))
-        Match p fs qs d   -> mkTag (Match (runTagger p) fs (map runTagger qs) (runTagger d))
-        ChainPre op p     -> mkTag (ChainPre (runTagger op) (runTagger p))
-        ChainPost p op    -> mkTag (ChainPost (runTagger p) (runTagger op))
-        Debug name p      -> mkTag (Debug name (runTagger p))
-        Pure x            -> mkTag (Pure x)
-        Empty             -> mkTag Empty
-        Satisfy f         -> mkTag (Satisfy f)
-        GetRegister r     -> mkTag (GetRegister r)
-        PutRegister r p   -> mkTag (PutRegister r (runTagger p))
-        ScopeRegister p g -> mkTag (freshReg regMaker (concretiseRegister p g))
+    alg p q = Tagger (Op (Tag (makeParserName p) (case q of
+        ScopeRegister p g -> freshReg regMaker (concretiseRegister p g)
+        ast               -> imap runTagger ast)))
 
 data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
                                      , recs   :: HashSet ParserName
@@ -247,7 +229,6 @@ addName x = local (HashSet.insert x)
 makeParserName :: Free ParserF Void1 a -> ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
 makeParserName !p = unsafePerformIO (fmap (\(StableName name) -> ParserName name) (makeStableName p))
-
 
 -- RegMaker is used to generate new register scopes during tagging
 -- It _is_ safe to use this! Each fresh operation is atomic, and

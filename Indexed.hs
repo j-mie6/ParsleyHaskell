@@ -83,8 +83,10 @@ data Unit3 i j k = Unit3
 data Void3 i j k
 data Const3 a i j k = Const3 {getConst3 :: a}
 
-class Absurd v where absurd :: v -> a
-instance Absurd (Void1 k) where absurd = \case
-instance Absurd (Void3 i j k) where absurd = \case
+class Absurd v where 
+  absurd :: v -> a
+  absurd = \case
+instance Absurd (Void1 k)
+instance Absurd (Void3 i j k)
 
 

@@ -1,15 +1,17 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
 
-module Fresh ( VFreshT, HFreshT, runFreshT, evalFreshT, execFreshT, MonadFresh(..), construct, mapVFreshT ) where
-import Control.Applicative  (liftA2)
-import Control.Monad.Fix    (MonadFix(..))
-import Control.Monad.Trans  (MonadTrans(..), MonadIO(..))
-import Control.Monad.Reader (MonadReader(..))
-import Control.Monad.State  (MonadState(..))
+module Fresh ( VFreshT, HFreshT, VFresh, HFresh, runFreshT, runFresh, evalFreshT, execFreshT, MonadFresh(..), construct, mapVFreshT ) where
+import Control.Applicative    (liftA2)
+import Control.Monad.Identity (Identity, runIdentity)
+import Control.Monad.Fix      (MonadFix(..))
+import Control.Monad.Trans    (MonadTrans(..), MonadIO(..))
+import Control.Monad.Reader   (MonadReader(..))
+import Control.Monad.State    (MonadState(..))
 
 -- Fresh operations
 class Monad m => MonadFresh x m | m -> x where
@@ -32,6 +34,8 @@ execFreshT :: RunFreshT x n m => m a -> x -> n x
 execFreshT m init = snd <$> runFreshT m init
 
 -- Fresh type
+type HFresh x = HFreshT x Identity
+type VFresh x = VFreshT x Identity
 newtype VFreshT x m a = VFreshT (FreshT x m a) deriving (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m) 
 newtype HFreshT x m a = HFreshT (FreshT x m a) deriving (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m) 
 newtype FreshT x m a = FreshT {unFreshT :: x -> x -> m (a, x, x)}
@@ -40,6 +44,9 @@ instance Monad n => RunFreshT x n (FreshT x n) where
   runFreshT k init = 
     do (x, cur, max) <- unFreshT k init init
        return $! (x, max) 
+
+runFresh :: (Monad m, RunFreshT x Identity m) => m a -> x -> (a, x)
+runFresh mx = runIdentity . runFreshT mx
 
 vFreshT :: (x -> x -> m (a, x, x)) -> VFreshT x m a
 vFreshT = VFreshT . FreshT

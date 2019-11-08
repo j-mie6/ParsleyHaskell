@@ -16,7 +16,7 @@ import Utils                      (TExpQ, lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict (State, get, modify', runState, MonadState)
-import Fresh                      (VFreshT, HFreshT, runFreshT, evalFreshT, construct, MonadFresh(..), mapVFreshT)
+import Fresh                      (VFreshT, HFresh, runFreshT, runFresh, evalFreshT, construct, MonadFresh(..), mapVFreshT)
 import Control.Monad.Trans        (lift)
 import Data.Set                   (Set)
 import Data.Maybe                 (isJust)
@@ -24,11 +24,10 @@ import Debug.Trace                (traceShow, trace)
 import Data.Void                  (Void)
 import qualified Data.Set as Set
 
-type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFreshT IΣVar (Reader (Set IMVar)))) a
-runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> Set IMVar -> (a, IΣVar)
-runCodeGenStack m μ0 φ0 σ0 seen0 = 
-  (flip runReader seen0 . 
-   flip runFreshT σ0 . 
+type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a
+runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> (a, IΣVar)
+runCodeGenStack m μ0 φ0 σ0 = 
+  (flip runFresh σ0 . 
    flip evalFreshT μ0 . 
    flip evalFreshT φ0) m
 
@@ -44,7 +43,7 @@ ret = Op3 Ret
 codeGen :: Free ParserF Void1 a -> Free3 (M o) Void3 (a ': xs) r b -> IMVar -> IΣVar -> (Free3 (M o) Void3 xs r b, IΣVar)
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
-    (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0 Set.empty
+    (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0
     alg = peephole |> (direct . imap present)
 
 pattern f :<$>: p <- Era _ (Pure f) :<*>: Era p _
@@ -135,15 +134,6 @@ freshM = mapVFreshT newScope
 
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
-
-ifSeenM :: MonadReader (Set IMVar) m => MVar x -> m a -> m a -> m a
-ifSeenM (MVar v) seen unseen = 
-  do isSeen <- asks (Set.member v)
-     if isSeen then do seen 
-     else do unseen
-
-addM :: MonadReader (Set IMVar) m => MVar x -> m a -> m a
-addM (MVar v) = local (Set.insert v)
 
 makeΦ :: Free3 (M o) Void3 (x ': xs) r a -> CodeGenStack (Maybe (ΦDecl (Free3 (M o) Void3) x xs r a), Free3 (M o) Void3 (x ': xs) r a)
 makeΦ m | elidable m = return $! (Nothing, m)

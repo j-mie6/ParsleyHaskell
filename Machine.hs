@@ -89,11 +89,14 @@ data M o k xs r a where
   LogEnter  :: String -> !(k xs r a) -> M o k xs r a
   LogExit   :: String -> !(k xs r a) -> M o k xs r a
 
-fmapInstr :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> Free3 (M o) f (x ': xs) r a
-fmapInstr !f !m = Op3 (Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m)))
+_App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs) r a
+_App !m = Lift2 (lift' ($)) m
 
-modifyInstr :: ΣVar x -> Free3 (M o) f xs r a -> Free3 (M o) f ((x -> x) ': xs) r a
-modifyInstr !σ !m = Op3 (Get σ (Op3 (Lift2 (lift' ($)) (Op3 (Put σ m)))))
+_Fmap :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': xs) r a
+_Fmap !f !m = Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m))
+
+_Modify :: ΣVar x -> Free3 (M o) f xs r a -> M o (Free3 (M o) f) ((x -> x) ': xs) r a
+_Modify !σ !m = Get σ (Op3 (_App (Op3 (Put σ m))))
 
 data Γ s o xs r a = Γ { xs    :: QList xs
                       , k     :: QK s o r a

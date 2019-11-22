@@ -9,11 +9,14 @@ import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper)
 import Data.Set (fromList, member)
 import Data.Maybe (catMaybes)
 
-regTest :: Parser (Char, Char)
-regTest =
-  newRegister (char 'a') (\r1 ->
-  newRegister (char 'b') (\r2 -> 
-    repeat 9 (swap r1 r2) *> (get r1 <~> get r2)))
+ruleTest :: Parser (a -> a)
+ruleTest = pure (WQ id [||id||])
+
+--regTest :: Parser (Char, Char)
+--regTest =
+--  newRegister (char 'a') (\r1 ->
+--  newRegister (char 'b') (\r2 -> 
+--    repeat 9 (swap r1 r2) *> (get r1 <~> get r2)))
     {-}   swap r1 r2
     *> swap r1 r2
     *> swap r1 r2
@@ -25,11 +28,11 @@ data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output |
 
 deriving instance Lift BrainFuckOp
 
-brainfuck :: Parser [BrainFuckOp]
-brainfuck = whitespace *> bf <* eof
-  where
-    whitespace = skipMany (noneOf "<>+-[],.")
-    lexeme p = p <* whitespace
+--brainfuck :: Parser [BrainFuckOp]
+--brainfuck = whitespace *> bf <* eof
+--  where
+--    whitespace = skipMany (noneOf "<>+-[],.")
+--    lexeme p = p <* whitespace
     {-bf = many ( lexeme ((token ">" $> lift' RightPointer)
                     <|> (token "<" $> lift' LeftPointer)
                     <|> (token "+" $> lift' Increment)
@@ -38,16 +41,16 @@ brainfuck = whitespace *> bf <* eof
                     <|> (token "," $> lift' Input)
                     <|> (between (lexeme (token "[")) (token "]") (lift' Loop <$> bf))))-}
     -- [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-    bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
-    op '>' = item $> lift' RightPointer
-    op '<' = item $> lift' LeftPointer
-    op '+' = item $> lift' Increment
-    op '-' = item $> lift' Decrement
-    op '.' = item $> lift' Output
-    op ',' = item $> lift' Input
-    op '[' = between (lexeme item) (try (char ']')) (lift' Loop <$> bf)
+--    bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
+--    op '>' = item $> lift' RightPointer
+--    op '<' = item $> lift' LeftPointer
+--    op '+' = item $> lift' Increment
+--    op '-' = item $> lift' Decrement
+--    op '.' = item $> lift' Output
+--    op ',' = item $> lift' Input
+--    op '[' = between (lexeme item) (try (char ']')) (lift' Loop <$> bf)
 
-type JSProgram = [JSElement]
+{-type JSProgram = [JSElement]
 type JSCompoundStm = [JSStm]
 type JSExpr = [JSExpr']
 data JSElement = JSFunction String [String] JSCompoundStm | JSStm JSStm
@@ -354,4 +357,4 @@ javascript = whitespace *> many element <* eof
         code 'U' = token "S" $> lift' ('\US')
         code 'V' = token "T" $> lift' ('\VT')
         -- TODO numeric
-        code _ = empty--error "numeric escape codes not supported"-}
+        code _ = empty--error "numeric escape codes not supported"-}-}

@@ -87,7 +87,8 @@ executable playground
   hs-source-dirs:      ./playground
   main-is:             Playground.hs
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=LiftPlugin -fplugin=DumpCore -ddump-ds-preopt -ddump-to-file
+  ghc-options:         -rtsopts -fplugin=LiftPlugin -fplugin=DumpCore -ddump-ds -ddump-simpl -ddump-to-file 
+  ---dverbose-core2core -drule-check =defunctionalised
 
 library
   -- Modules exported by the library.

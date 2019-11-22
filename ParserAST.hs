@@ -10,7 +10,7 @@ module ParserAST where
 
 import Indexed                    (IFunctor, Free(Op), Void1, Const1(..), imap, fold)
 import Machine                    (IMVar, MVar(..), IΣVar(..))
-import Utils                      (WQ(..))
+import Utils                      (WQ(..), TExpQ)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.List                  (intercalate)
 
@@ -18,6 +18,13 @@ import Data.List                  (intercalate)
 newtype Parser a = Parser {unParser :: Free ParserF Void1 a}
 
 -- Core smart constructors
+{-# RULES
+"defunctionalised (:)" forall (q :: forall a. TExpQ (a -> [a] -> [a])). ParserAST.pure (WQ (:) q) = Parser (Op (Pure_ CONS))
+"defunctionalised []" forall (q :: forall a. TExpQ [a]). ParserAST.pure (WQ [] q) = Parser (Op (Pure_ NIL))
+"defunctionalised id" forall (q :: forall a. TExpQ (a -> a)). ParserAST.pure (WQ (\x -> x) q) = Parser (Op (Pure_ ID))
+  #-}
+
+{-# NOINLINE[0] pure #-}
 pure :: WQ a -> Parser a
 pure = Parser . Op . Pure
 
@@ -85,8 +92,20 @@ newtype Reg (r :: *) a = Reg IΣVar
 instance Show (Reg r a) where
   show (Reg (IΣVar x)) = "r" ++ show x
 
+data Defunc a where
+  CONS  :: Defunc (a -> [a] -> [a])
+  NIL   :: Defunc [a]
+  ID    :: Defunc (a -> a)
+  APP   :: Defunc ((a -> b) -> a -> b)
+  RAPP  :: Defunc (a -> (a -> b) -> b)
+  TUP   :: Defunc (a -> b -> (a, b))
+  UNIT  :: Defunc ()
+  LUNIT :: Defunc (Either () a)
+  RUNIT :: Defunc (Either a ())
+
 -- Core datatype
 data ParserF (k :: * -> *) (a :: *) where
+    Pure_         :: Defunc a -> ParserF k a
     Pure          :: WQ a -> ParserF k a
     Satisfy       :: WQ (Char -> Bool) -> ParserF k Char
     (:<*>:)       :: k (a -> b) -> k a -> ParserF k b

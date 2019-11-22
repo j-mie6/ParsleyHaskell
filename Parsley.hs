@@ -55,6 +55,7 @@ import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
 
+{-# INLINE fmap #-}
 fmap :: WQ (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
 
@@ -73,6 +74,7 @@ x <$ p = p *> pure x
 (<&>) :: Parser a -> WQ (a -> b) -> Parser b
 (<&>) = flip fmap
 
+{-# INLINE liftA2 #-}
 liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
 liftA2 f p q = f <$> p <*> q
 
@@ -126,6 +128,7 @@ someTill :: Parser a -> Parser b -> Parser [a]
 someTill p end = notFollowedBy end *> (p <:> manyTill p end)
 
 -- Additional Combinators
+{-# INLINE (<:>) #-}
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
 (<:>) = liftA2 (lift' (:))
 

@@ -15,8 +15,8 @@ import qualified Parsley
 import Data.Int
 import Data.Char (ord, chr)
 
-parseBrainfuck :: String -> IO (Maybe [BrainFuckOp])
-parseBrainfuck = $$(Parsley.parseFromFile brainfuck)
+--parseBrainfuck :: String -> IO (Maybe [BrainFuckOp])
+--parseBrainfuck = $$(Parsley.parseFromFile brainfuck)
 
 data Tape a = Tape [a] a [a]
 
@@ -51,14 +51,17 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
 --javascript :: String -> Maybe JSProgram
 --javascript = $$(Parsley.runParser Parsers.javascript)
 
-boom :: String -> Maybe ()
-boom = $$(Parsley.runParser Parsers.failure)
+--boom :: String -> Maybe ()
+--boom = $$(Parsley.runParser Parsers.failure)
 
-regs :: String -> Maybe (Char, Char)
-regs = $$(Parsley.runParser Parsers.regTest)
+--regs :: String -> Maybe (Char, Char)
+--regs = $$(Parsley.runParser Parsers.regTest)
+
+rewrite :: String -> Maybe (a -> a)
+rewrite = $$(Parsley.runParser Parsers.ruleTest)
 
 main :: IO ()
 main =
-  do res <- parseBrainfuck "playground/testinput.bf"
-     print res
+--  do res <- parseBrainfuck "playground/testinput.bf"
+--     print res
      return ()

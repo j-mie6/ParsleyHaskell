@@ -10,7 +10,7 @@ module ParserAST where
 
 import Indexed                    (IFunctor, Free(Op), Void1, Const1(..), imap, fold)
 import Machine                    (IMVar, MVar(..), IΣVar(..))
-import Utils                      (WQ(..), TExpQ)
+import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 import Data.List                  (intercalate)
 

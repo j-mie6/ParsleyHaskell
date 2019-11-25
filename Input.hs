@@ -12,7 +12,7 @@
              TypeFamilyDependencies #-}
 module Input where
 
-import Utils                    (TExpQ)
+import Utils                    (Code)
 import Data.Array.Base          (UArray(..), listArray)
 import GHC.Prim                 (Int#, Addr#, ByteArray#, nullAddr#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#)
 import GHC.Exts                 (Int(..), Char(..), TYPE, RuntimeRep(..))
@@ -119,7 +119,7 @@ type family Unboxed rep = (urep :: TYPE (Rep rep)) | urep -> rep where
   Unboxed (Text, Stream) = (# Text, Stream #)
   
 class Input input rep | input -> rep where
-  prepare :: TExpQ input -> TExpQ (PreparedInput (Rep rep) s rep (Unboxed rep))
+  prepare :: Code input -> Code (PreparedInput (Rep rep) s rep (Unboxed rep))
 
 instance Input [Char] Int where
   prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]

@@ -46,7 +46,7 @@ import Input hiding               (PreparedInput(..))
 import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
-import Utils                      (lift', (>*<), WQ(..), TExpQ)
+import Utils                      (lift', (>*<), WQ(..), Code)
 import Data.Function              (fix)
 import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
@@ -164,7 +164,7 @@ oneOf cs = satisfy (WQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
 noneOf :: [Char] -> Parser Char
 noneOf cs = satisfy (WQ (not . flip elem cs) [||\c -> not $$(ofChars cs [||c||])||])
 
-ofChars :: [Char] -> TExpQ Char -> TExpQ Bool
+ofChars :: [Char] -> Code Char -> Code Bool
 ofChars = foldr (\c rest qc -> [|| c == $$qc || $$(rest qc) ||]) (const [||False||])
 
 token :: String -> Parser String
@@ -268,10 +268,10 @@ precedence levels atom = foldl' convert atom levels
     convert x (Prefix ops)  = chainPre (choice ops) x
     convert x (Postfix ops) = chainPost x (choice ops)
 
-runParser :: forall input a rep. (Input input rep, Ops rep) => Parser a -> TExpQ (input -> Maybe a)
+runParser :: forall input a rep. (Input input rep, Ops rep) => Parser a -> Code (input -> Maybe a)
 runParser p = [||\input -> runST $$(exec (prepare @input @rep [||input||]) (compile p))||]
 
-parseFromFile :: Parser a -> TExpQ (FilePath -> IO (Maybe a))
+parseFromFile :: Parser a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]
 
 -- Fixities

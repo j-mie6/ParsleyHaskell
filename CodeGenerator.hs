@@ -12,7 +12,7 @@ module CodeGenerator (codeGen, halt, ret) where
 import ParserAST                  (ParserF(..))
 import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, _Fmap, _App, _Modify)
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
-import Utils                      (TExpQ, lift', (>*<), WQ(..))
+import Utils                      (lift', (>*<), WQ(..))
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict (State, get, modify', runState, MonadState)

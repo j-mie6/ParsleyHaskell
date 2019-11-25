@@ -1,16 +1,15 @@
 packages:.
-	 ../lift-plugin/lift-plugin
-     ./extra-worker-wrapper
+--	 ../lift-plugin/lift-plugin
 --profiling:true
 optimization:2
 allow-newer:yoda:all
 profiling-detail:none
 
---source-repository-package
---    type: git
---    location: https://github.com/J-mie6/lift-plugin/
---    subdir: lift-plugin
---    tag: 50006b7e101a37169d0c0ffe8f77fac208fd0e39
+source-repository-package
+    type: git
+    location: https://github.com/J-mie6/lift-plugin/
+    subdir: lift-plugin
+    tag: 27b310e243bc0dc90aa2b24c2bec38dc08ce5f7d
 
 source-repository-package
     type: git

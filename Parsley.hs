@@ -8,7 +8,7 @@ module Parsley ( Parser, runParser, parseFromFile
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
                -- Applicative
-               , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2
+               , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2, liftA3
                -- Alternative
                , empty, (<|>), (<+>), optional, option, choice, oneOf, noneOf, maybeP
                -- Monoidal
@@ -30,7 +30,7 @@ module Parsley ( Parser, runParser, parseFromFile
                , char, eof, more
                , traverse, sequence, string, token, repeat
                , between
-               , (<?|>), (>?>), when, while, fromMaybeP
+               , (<?|>), (>?>), (>??>), when, while, fromMaybeP
                , debug
                -- Expressions
                , Level(..), precedence
@@ -45,7 +45,7 @@ import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (
 import Input hiding               (PreparedInput(..))
 import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
 import Compiler                   (compile)
-import Machine                    (exec)
+import Machine                    (exec, Ops)
 import Utils                      (lift', (>*<), WQ(..), TExpQ)
 import Data.Function              (fix)
 import Data.List                  (foldl')
@@ -53,6 +53,7 @@ import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
 
+{-# INLINE fmap #-}
 fmap :: WQ (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
 
@@ -71,11 +72,19 @@ x <$ p = p *> pure x
 (<&>) :: Parser a -> WQ (a -> b) -> Parser b
 (<&>) = flip fmap
 
+{-# INLINE liftA2 #-}
 liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
 liftA2 f p q = f <$> p <*> q
 
+liftA3 :: WQ (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
+liftA3 f p q r = f <$> p <*> q <*> r
+
 many :: Parser a -> Parser [a]
 many = pfoldr (lift' (:)) (WQ [] [||[]||])
+{-many p = newRegister (pure (lift' id)) (\r ->
+    let go = modify r (lift' flip >*< lift' (.) <$> (lift' (:) <$> p)) *> go
+         <|> (WQ ($ []) [||\f -> f []||] <$> get r)
+    in go)-}
 
 manyN :: Int -> Parser a -> Parser [a]
 manyN n p = foldr (const (p <:>)) (many p) [1..n]
@@ -117,6 +126,7 @@ someTill :: Parser a -> Parser b -> Parser [a]
 someTill p end = notFollowedBy end *> (p <:> manyTill p end)
 
 -- Additional Combinators
+{-# INLINE (<:>) #-}
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
 (<:>) = liftA2 (lift' (:))
 
@@ -149,7 +159,7 @@ string :: String -> Parser String
 string = traverse char
 
 oneOf :: [Char] -> Parser Char
-oneOf cs = match cs item (\c -> pure (WQ c [||c||])) empty --satisfy (WQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
+oneOf cs = satisfy (WQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
 
 noneOf :: [Char] -> Parser Char
 noneOf cs = satisfy (WQ (not . flip elem cs) [||\c -> not $$(ofChars cs [||c||])||])
@@ -200,10 +210,13 @@ constp = (lift' const <$>)
 cond <?|> (p, q) = branch (WQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
 
 (>?>) :: Parser a -> WQ (a -> Bool) -> Parser a
-p >?> (WQ f qf) = select (WQ g qg <$> p) empty
+p >?> f = p >??> pure f
+
+(>??>) :: Parser a -> Parser (a -> Bool) -> Parser a
+px >??> pf = select (liftA2 (WQ g qg) pf px) empty
   where
-    g x = if f x then Right x else Left ()
-    qg = [||\x -> if $$qf x then Right x else Left ()||]
+    g f x = if f x then Right x else Left ()
+    qg = [||\f x -> if f x then Right x else Left ()||]
 
 (||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
 p ||= f = match [minBound..maxBound] p f empty
@@ -221,8 +234,9 @@ fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
 fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
 
 maybeP :: Parser a -> Parser (Maybe a)
-maybeP p = lift' Just <$> p <|> pure (WQ Nothing [||Nothing||])
+maybeP p = option (WQ Nothing [||Nothing||]) (lift' Just <$> p)
 
+-- Iterative Parsers
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 p op = chainPost p (lift' flip <$> op <*> p)
 
@@ -254,8 +268,8 @@ precedence levels atom = foldl' convert atom levels
     convert x (Prefix ops)  = chainPre (choice ops) x
     convert x (Postfix ops) = chainPost x (choice ops)
 
-runParser :: forall input a. Input input Int => Parser a -> TExpQ (input -> Maybe a)
-runParser p = [||\input -> runST $$(exec (prepare @input [||input||]) (compile p))||]
+runParser :: forall input a rep. (Input input rep, Ops rep) => Parser a -> TExpQ (input -> Maybe a)
+runParser p = [||\input -> runST $$(exec (prepare @input @rep [||input||]) (compile p))||]
 
 parseFromFile :: Parser a -> TExpQ (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

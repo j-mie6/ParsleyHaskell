@@ -47,6 +47,7 @@ cabal-version:       >=1.10
 
 
 executable benchmarks
+  build-tools:         happy
   build-depends:       base >=4.10 && <5,
                        parsley,
                        criterion >=1.5 && <1.6,
@@ -61,13 +62,33 @@ executable benchmarks
                        megaparsec,
                        text,
                        mtl,
-                       bytestring
-  other-modules:       ParsleyParsers, YodaParsers, ParsecParsers, MegaparsecParsers, AttoparsecParsers, NativeParsers, CommonFunctions
+                       bytestring,
+                       array
+  other-modules:       ParsleyParsers, YodaParsers, ParsecParsers, MegaparsecParsers, AttoparsecParsers, NativeParsers, HappyParsers, CommonFunctions
   other-extensions:    TemplateHaskell
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=LiftPlugin -fplugin=DumpCore
+  ghc-options:         -rtsopts -fplugin=LiftPlugin -fprint-explicit-kinds -fprint-explicit-runtime-reps -fplugin=DumpCore -fno-spec-constr
+
+executable playground
+  build-depends:       base >=4.10 && <5,
+                       parsley,
+                       dump-core,
+                       lift-plugin,
+                       template-haskell,
+                       pretty-terminal,
+                       text,
+                       mtl,
+                       bytestring,
+                       containers
+  other-modules:       Parsers
+  other-extensions:    TemplateHaskell
+  hs-source-dirs:      ./playground
+  main-is:             Playground.hs
+  default-language:    Haskell2010
+  ghc-options:         -rtsopts -fplugin=LiftPlugin -fplugin=DumpCore -ddump-ds -ddump-simpl -ddump-to-file 
+  ---dverbose-core2core -drule-check =defunctionalised
 
 library
   -- Modules exported by the library.
@@ -85,7 +106,9 @@ library
                        hashable >=1.2 && <1.3,
                        unordered-containers >=0.2 && <0.3,
                        array >=0.5 && <0.6,
+                       dump-core,
                        ghc-prim,
+                       unboxed-ref,
                        safe-coerce,
                        template-haskell,
                        containers,
@@ -95,7 +118,13 @@ library
                        pretty-terminal,
                        text,
                        bytestring
+  build-tools: cpphs >= 1.19
+
+  -- Directories containing source files.
+  -- hs-source-dirs:
 
   -- Base language which the package is written in.
   default-language:    Haskell2010
-  ghc-options:         -fplugin=LiftPlugin
+  ghc-options:         -fplugin=LiftPlugin -pgmP cpphs -optP --cpp
+  ---fprint-explicit-kinds -fprint-explicit-runtime-reps
+  ---freverse-errors (or backwards?)

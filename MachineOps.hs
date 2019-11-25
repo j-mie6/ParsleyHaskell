@@ -16,10 +16,10 @@ module MachineOps where
 import Utils              (Code)
 import Control.Monad.ST   (ST)
 import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
-import GHC.Prim           (Int#)
-import GHC.Exts           (Int(..), TYPE, RuntimeRep(..))
+import Data.STRef.Unboxed (STRefU)
+import GHC.Exts           (TYPE)
 import Safe.Coerce        (coerce)
-import Input              (Rep, CRef, Unboxed, OffWith, UnpackedLazyByteString)
+import Input              (Rep, Unboxed, OffWith, UnpackedLazyByteString)
 import Data.Text          (Text)
 import Data.Void          (Void)
 
@@ -31,7 +31,7 @@ derivation(Text)
 
 data QList xs where
   QNil :: QList '[]
-  QCons :: !(Code x) -> QList xs -> QList (x ': xs)
+  QCons :: Code x -> QList xs -> QList (x ': xs)
 
 type H s o a = Unboxed o -> ST s (Maybe a)
 data InputOps s o = InputOps { _more       :: Code (o -> Bool)
@@ -39,9 +39,9 @@ data InputOps s o = InputOps { _more       :: Code (o -> Bool)
                              , _same       :: Code (o -> o -> Bool)
                              , _box        :: Code (Unboxed o -> o)
                              , _unbox      :: Code (o -> Unboxed o)
-                             , _newCRef    :: Code (o -> ST s (CRef s o))
-                             , _readCRef   :: Code (CRef s o -> ST s o)
-                             , _writeCRef  :: Code (CRef s o -> o -> ST s ())
+                             , _newCRef    :: Code (o -> ST s (STRefU s Int))
+                             , _readCRef   :: Code (STRefU s Int -> ST s o)
+                             , _writeCRef  :: Code (STRefU s Int -> o -> ST s ())
                              , _shiftLeft  :: Code (o -> Int -> o)
                              , _shiftRight :: Code (o -> Int -> o)
                              , _offToInt   :: Code (o -> Int) }
@@ -56,11 +56,11 @@ unbox      :: (?ops :: InputOps s o) => Code (o -> Unboxed o)
 unbox      = _unbox      ?ops
 box        :: (?ops :: InputOps s o) => Code (Unboxed o -> o)
 box        = _box        ?ops
-newCRef    :: (?ops :: InputOps s o) => Code (o -> ST s (CRef s o))
+newCRef    :: (?ops :: InputOps s o) => Code (o -> ST s (STRefU s Int))
 newCRef    = _newCRef    ?ops
-readCRef   :: (?ops :: InputOps s o) => Code (CRef s o -> ST s o) 
+readCRef   :: (?ops :: InputOps s o) => Code (STRefU s Int -> ST s o) 
 readCRef   = _readCRef   ?ops
-writeCRef  :: (?ops :: InputOps s o) => Code (CRef s o -> o -> ST s ())
+writeCRef  :: (?ops :: InputOps s o) => Code (STRefU s Int -> o -> ST s ())
 writeCRef  = _writeCRef  ?ops
 shiftLeft  :: (?ops :: InputOps s o) => Code (o -> Int -> o)
 shiftLeft  = _shiftLeft  ?ops

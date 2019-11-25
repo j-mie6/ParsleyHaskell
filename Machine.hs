@@ -20,7 +20,7 @@
 module Machine where
 
 import MachineOps
-import Input                 (PreparedInput(..), Rep, CRef, Unboxed, OffWith, UnpackedLazyByteString)
+import Input                 (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString)
 import Indexed               (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
 import Utils                 (WQ(..), lift', (>*<), Code)
 import Data.Word             (Word64)
@@ -30,6 +30,7 @@ import Control.Monad.Reader  (ask, asks, local, ReaderT, runReaderT, MonadReader
 import Control.Monad.Except  (throwError, catchError, Except, runExcept, MonadError)
 import Control.Exception     (Exception, throw{-, catch, evaluate, SomeException-})
 import Data.STRef            (STRef)
+import Data.STRef.Unboxed    (STRefU)
 import Data.Map.Strict       (Map)
 import Data.Dependent.Map    (DMap)
 import Data.GADT.Compare     (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
@@ -113,11 +114,11 @@ newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype QSTRef s x = QSTRef (Code (STRef s x))
-newtype QCRef s x = QCRef (Code (CRef s x))
+newtype QORef s = QORef (Code (STRefU s Int))
 data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
-                     , stcs       :: Map IΣVar (QCRef s o)
+                     , stcs       :: Map IΣVar (QORef s)
                      , constCount :: Int
                      , debugLevel :: Int }
 
@@ -130,8 +131,8 @@ insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 insertΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
 insertΣ σ qref ctx = ctx {σs = DMap.insert σ (QSTRef qref) (σs ctx)}
 
-insertSTC :: ΣVar x -> Code (CRef s o) -> Ctx s o a -> Ctx s o a
-insertSTC (ΣVar v) qref ctx = ctx {stcs = Map.insert v (QCRef qref) (stcs ctx)}
+insertSTC :: ΣVar x -> Code (STRefU s Int) -> Ctx s o a -> Ctx s o a
+insertSTC (ΣVar v) qref ctx = ctx {stcs = Map.insert v (QORef qref) (stcs ctx)}
 
 addConstCount :: Int -> Ctx s o a -> Ctx s o a
 addConstCount x ctx = ctx {constCount = constCount ctx + x}
@@ -164,7 +165,7 @@ class FailureOps o => SoftForkHandler o where
 class FailureOps o => AttemptHandler o where
   attemptHandler :: (?ops :: InputOps s o) => Code (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => ChainHandler o where
-  chainHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> Code (ST s (Maybe a))) -> Code (CRef s o)
+  chainHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> Code (ST s (Maybe a))) -> Code (STRefU s Int)
                -> Γ s o xs ks a -> Code (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => LogHandler o where
   logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> Code (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
@@ -337,7 +338,7 @@ execChoices fs ks (Exec def) decl = setupJoinPoint decl tailQ $
 execChainIter :: (?ops :: InputOps s o, ConcreteExec o) => ΣVar x -> MVar x -> ExecMonad s o '[] x a
 execChainIter σ μ =
   do !(QAbsExec l) <- askM μ
-     !(QCRef cref) <- askSTC σ
+     !(QORef cref) <- askSTC σ
      return $! \γ@Γ{..} -> [||
        do $$writeCRef $$cref $$o
           $$(runConcrete hs) $$l $$ret $$o
@@ -461,7 +462,7 @@ inputInstances(deriveJoinBuilder)
 
 class RecBuilder o where
   buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o '[] x a
-            -> Code (CRef s o)
+            -> Code (STRefU s Int)
             -> [Code (H s o a)]  -> Code o -> Code (ST s (Maybe a))
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
             -> (MVar x -> Γ s o '[] x a -> Ctx s o a -> Except MissingDependency (Code (ST s (Maybe a))))
@@ -545,7 +546,7 @@ askΣ σ = trace ("fetching " ++ show σ) $ do
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin s o a x)
 askΦ φ = trace ("fetching " ++ show φ) $ asks ((DMap.! φ) . φs)
 
-askSTC :: MonadReader (Ctx s o a) m => ΣVar x -> m (QCRef s o)
+askSTC :: MonadReader (Ctx s o a) m => ΣVar x -> m (QORef s)
 askSTC (ΣVar v) = asks ((Map.! v) . stcs)
 
 instance IFunctor3 (M o) where

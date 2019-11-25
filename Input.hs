@@ -34,9 +34,9 @@ data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}       (rep 
                                                             {-init-}       rep 
                                                             {-box-}        (urep -> rep)
                                                             {-unbox-}      (rep -> urep)
-                                                            {-newCRef-}    (rep -> ST s (CRef s rep))
-                                                            {-readCRef-}   (CRef s rep -> ST s rep)
-                                                            {-writeCRef-}  (CRef s rep -> rep -> ST s ())
+                                                            {-newCRef-}    (rep -> ST s (STRefU s Int))
+                                                            {-readCRef-}   (STRefU s Int -> ST s rep)
+                                                            {-writeCRef-}  (STRefU s Int -> rep -> ST s ())
                                                             {-shiftLeft-}  (rep -> Int -> rep)
                                                             {-shiftRight-} (rep -> Int -> rep)
                                                             {-offToInt-}   (rep -> Int)
@@ -101,14 +101,6 @@ type family Rep rep where
   Rep (OffWith s) = 'TupleRep '[IntRep, LiftedRep]
   Rep (OffWithStreamAnd s) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
   Rep (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
-
-type family CRef s rep where
-  CRef s Int = STRefU s Int
-  CRef s Text = STRefU s Int
-  CRef s UnpackedLazyByteString = STRefU s Int
-  CRef s (OffWith ss) = STRefU s Int
-  CRef s (OffWithStreamAnd ss) = STRefU s Int
-  CRef s (Text, Stream) = STRefU s Int
 
 type family Unboxed rep = (urep :: TYPE (Rep rep)) | urep -> rep where
   Unboxed Int = Int#

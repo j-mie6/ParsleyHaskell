@@ -44,7 +44,7 @@ codeGen :: Free ParserF Void1 a -> Free3 (M o) Void3 (a ': xs) r b -> IMVar -> I
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0
-    alg = peephole |> (direct . imap present)
+    alg = peephole |> (\x -> CodeGen (direct (imap present x)))
 
 pattern f :<$>: p <- Era _ (Pure f) :<*>: Era p _
 pattern p :$>: x <- Era _ p :*>: Era _ (Pure x)
@@ -52,16 +52,16 @@ pattern LiftA2 f p q <- Era _ (Era _ (Pure f) :<*>: Era p _) :<*>: Era q _
 pattern TryOrElse n p q <- Era _ (Try n (Era p _)) :<|>: Era q _
 
 peephole :: ParserF (History ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
-peephole !(f :<$>: p) = Just $ CodeGen $ \(!m) -> runCodeGen p (Op3 (_Fmap f m))
-peephole !(LiftA2 f p q) = Just $ CodeGen $ \(!m) ->
+peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (Op3 (_Fmap f m))
+peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (Op3 (Lift2 f m))
      runCodeGen p qc
-peephole !(TryOrElse n p q) = Just $ CodeGen $ \(!m) ->
+peephole (TryOrElse n p q) = Just $ CodeGen $ \m ->
   do (decl, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (isJust n) φ))
      qc <- freshΦ (runCodeGen q φ)
      return $! Op3 (SoftFork n pc qc decl)
-peephole !(Era _ ((Try n (Era p _)) :$>: x) :<|>: Era q _) = Just $ CodeGen $ \(!m) ->
+peephole (Era _ ((Try n (Era p _)) :$>: x) :<|>: Era q _) = Just $ CodeGen $ \m ->
   do (decl, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (isJust n) (Op3 (Pop (Op3 (Push x φ))))))
      qc <- freshΦ (runCodeGen q φ)
@@ -69,43 +69,43 @@ peephole !(Era _ ((Try n (Era p _)) :$>: x) :<|>: Era q _) = Just $ CodeGen $ \(
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
-direct :: ParserF (CodeGen o b) a -> CodeGen o b a
-direct !(Pure x)            = CodeGen $ \(!m) -> do return $! (Op3 (Push x m))
-direct !(Satisfy p)         = CodeGen $ \(!m) -> do return $! (Op3 (Sat p m))
-direct !(pf :<*>: px)       = CodeGen $ \(!m) -> do !pxc <- runCodeGen px (Op3 (_App m)); runCodeGen pf pxc
-direct !(p :*>: q)          = CodeGen $ \(!m) -> do !qc <- runCodeGen q m; runCodeGen p (Op3 (Pop qc))
-direct !(p :<*: q)          = CodeGen $ \(!m) -> do !qc <- runCodeGen q (Op3 (Pop m)); runCodeGen p qc
-direct !Empty               = CodeGen $ \(!m) -> do return $! Op3 Empt
-direct !(p :<|>: q)         = CodeGen $ \(!m) ->
+direct :: ParserF (CodeGen o b) a -> Free3 (M o) Void3 (a ': xs) r b -> CodeGenStack (Free3 (M o) Void3 xs r b)
+direct (Pure x)      m = do return $! (Op3 (Push x m))
+direct (Satisfy p)   m = do return $! (Op3 (Sat p m))
+direct (pf :<*>: px) m = do pxc <- runCodeGen px (Op3 (_App m)); runCodeGen pf pxc
+direct (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (Op3 (Pop qc))
+direct (p :<*: q)    m = do qc <- runCodeGen q (Op3 (Pop m)); runCodeGen p qc
+direct Empty         m = do return $! Op3 Empt
+direct (p :<|>: q)   m =
   do (decl, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation False φ))
      qc <- freshΦ (runCodeGen q φ)
      return $! Op3 (HardFork pc qc decl)
-direct !(Try n p)           = CodeGen $ \(!m) -> do fmap (Op3 . Attempt n) (runCodeGen p (deadCommitOptimisation (isJust n) m))
-direct !(LookAhead p)       = CodeGen $ \(!m) -> do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
-direct !(NotFollowedBy p)   = CodeGen $ \(!m) -> do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit False (Op3 Empt)))))))
-                                                    return $! Op3 (SoftFork Nothing (Op3 (Tell pc)) (Op3 (Push (lift' ()) m)) Nothing)
-direct !(Branch b p q)      = CodeGen $ \(!m) -> do (decl, φ) <- makeΦ m
-                                                    !pc <- freshΦ (runCodeGen p (Op3 (Swap (Op3 (_App φ)))))
-                                                    !qc <- freshΦ (runCodeGen q (Op3 (Swap (Op3 (_App φ)))))
-                                                    runCodeGen b (Op3 (Case pc qc decl))
-direct !(Match p fs qs def) = CodeGen $ \(!m) -> do (decl, φ) <- makeΦ m
-                                                    !qcs <- traverse (freshΦ . flip runCodeGen φ) qs
-                                                    !defc <- freshΦ (runCodeGen def φ)
-                                                    runCodeGen p (Op3 (Choices fs qcs defc decl))
-direct !(Let _ !μ _)  = CodeGen $ \(!m) -> return $! tailCallOptimise μ m
-direct !(ChainPre op p) = CodeGen $ \(!m) ->
+direct (Try n p)         m = do fmap (Op3 . Attempt n) (runCodeGen p (deadCommitOptimisation (isJust n) m))
+direct (LookAhead p)     m = do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
+direct (NotFollowedBy p) m = do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit False (Op3 Empt)))))))
+                                return $! Op3 (SoftFork Nothing (Op3 (Tell pc)) (Op3 (Push (lift' ()) m)) Nothing)
+direct (Branch b p q)    m = do (decl, φ) <- makeΦ m
+                                pc <- freshΦ (runCodeGen p (Op3 (Swap (Op3 (_App φ)))))
+                                qc <- freshΦ (runCodeGen q (Op3 (Swap (Op3 (_App φ)))))
+                                runCodeGen b (Op3 (Case pc qc decl))
+direct (Match p fs qs def) m = do (decl, φ) <- makeΦ m
+                                  qcs <- traverse (freshΦ . flip runCodeGen φ) qs
+                                  defc <- freshΦ (runCodeGen def φ)
+                                  runCodeGen p (Op3 (Choices fs qcs defc decl))
+direct (Let _ !μ _) m = return $! tailCallOptimise μ m
+direct (ChainPre op p) m =
   do μ <- askM
      σ <- freshΣ
      opc <- freshM (runCodeGen op (Op3 (_Fmap (lift' flip >*< lift' (.)) (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))))
      pc <- freshM (runCodeGen p (Op3 (_App m)))
      return $! Op3 (Push (lift' id) (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ pc)))))))
-direct !(ChainPost p op) = CodeGen $ \(!m) ->
+direct (ChainPost p op) m =
   do μ <- askM
      σ <- freshΣ
      opc <- freshM (runCodeGen op (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))
      freshM (runCodeGen p (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ m)))))))
-direct !(Debug name p) = CodeGen $ \(!m) -> do fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
+direct (Debug name p) m = do fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
 
 tailCallOptimise :: MVar x -> Free3 (M o) Void3 (x ': xs) r a -> Free3 (M o) Void3 xs r a
 tailCallOptimise μ (Op3 Ret) = Op3 (Jump μ)
@@ -143,8 +143,8 @@ makeΦ m | elidable m = return $! (Nothing, m)
     elidable _              = False
 makeΦ m =
   do φ <- askΦ
-     let !decl = Just (φ, m)
-     let !join = Op3 (Join φ)
+     let decl = Just (φ, m)
+     let join = Op3 (Join φ)
      return $! (decl, join)
 
 freshΣ :: CodeGenStack (ΣVar a)

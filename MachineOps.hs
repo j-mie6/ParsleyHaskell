@@ -24,7 +24,7 @@ import Data.Text          (Text)
 import Data.Void          (Void)
 
 #define inputInstances(derivation) \
-derivation(Int)                      \
+derivation(Int)                    \
 derivation((OffWith s))            \
 derivation(UnpackedLazyByteString) \
 derivation(Text)

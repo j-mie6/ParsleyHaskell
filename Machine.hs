@@ -44,7 +44,7 @@ import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, foldrWithKey)
 
 #define inputInstances(derivation) \
-derivation(Int)                      \
+derivation(Int)                    \
 derivation((OffWith s))            \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
@@ -60,30 +60,30 @@ instance Show (LetBinding o a x) where show (LetBinding m) = show m
 data M o k xs r a where
   Halt      :: M o k '[a] Void a
   Ret       :: M o k '[x] x a
-  Push      :: WQ x -> !(k (x ': xs) r a) -> M o k xs r a
-  Pop       :: !(k xs r a) -> M o k (x ': xs) r a
-  Lift2     :: !(WQ (x -> y -> z)) -> !(k (z ': xs) r a) -> M o k (y ': x ': xs) r a
-  Sat       :: WQ (Char -> Bool) -> !(k (Char ': xs) r a) -> M o k xs r a
-  Call      :: !(MVar x) -> !(k (x ': xs) r a) -> M o k xs r a
-  Jump      :: !(MVar x) -> M o k '[] x a
+  Push      :: WQ x -> k (x ': xs) r a -> M o k xs r a
+  Pop       :: k xs r a -> M o k (x ': xs) r a
+  Lift2     :: WQ (x -> y -> z) -> k (z ': xs) r a -> M o k (y ': x ': xs) r a
+  Sat       :: WQ (Char -> Bool) -> k (Char ': xs) r a -> M o k xs r a
+  Call      :: MVar x -> k (x ': xs) r a -> M o k xs r a
+  Jump      :: MVar x -> M o k '[] x a
   Empt      :: M o k xs r a
-  Commit    :: !Bool -> !(k xs r a) -> M o k xs r a
-  HardFork  :: !(k xs r a) -> !(k xs r a) -> !(Maybe (ΦDecl k x xs r a)) -> M o k xs r a
-  SoftFork  :: !(Maybe Int) -> !(k xs r a) -> !(k xs r a) -> !(Maybe (ΦDecl k x xs r a)) -> M o k xs r a
-  Join      :: !(ΦVar x) -> M o k (x ': xs) r a
-  Attempt   :: !(Maybe Int) -> !(k xs r a) -> M o k xs r a
-  Tell      :: !(k (o ': xs) r a) -> M o k xs r a
-  Seek      :: !(k xs r a) -> M o k (o ': xs) r a
-  Case      :: !(k (x ': xs) r a) -> !(k (y ': xs) r a) -> !(Maybe (ΦDecl k z xs r a)) -> M o k (Either x y ': xs) r a
-  Choices   :: ![WQ (x -> Bool)] -> ![k xs r a] -> k xs r a -> !(Maybe (ΦDecl k y xs r a)) -> M o k (x ': xs) r a
-  ChainIter :: !(ΣVar x) -> !(MVar x) -> M o k '[] x a
-  ChainInit :: !(ΣVar x) -> !(k '[] x a) -> !(MVar x) -> !(k xs r a) -> M o k xs r a
+  Commit    :: Bool -> k xs r a -> M o k xs r a
+  HardFork  :: k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a
+  SoftFork  :: Maybe Int -> k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a
+  Join      :: ΦVar x -> M o k (x ': xs) r a
+  Attempt   :: Maybe Int -> k xs r a -> M o k xs r a
+  Tell      :: k (o ': xs) r a -> M o k xs r a
+  Seek      :: k xs r a -> M o k (o ': xs) r a
+  Case      :: k (x ': xs) r a -> k (y ': xs) r a -> Maybe (ΦDecl k z xs r a) -> M o k (Either x y ': xs) r a
+  Choices   :: [WQ (x -> Bool)] -> [k xs r a] -> k xs r a -> Maybe (ΦDecl k y xs r a) -> M o k (x ': xs) r a
+  ChainIter :: ΣVar x -> MVar x -> M o k '[] x a
+  ChainInit :: ΣVar x -> k '[] x a -> MVar x -> k xs r a -> M o k xs r a
   Swap      :: k (x ': y ': xs) r a -> M o k (y ': x ': xs) r a
-  Make      :: !(ΣVar x) -> !(k xs r a) -> M o k (x ': xs) r a
-  Get       :: !(ΣVar x) -> !(k (x ': xs) r a) -> M o k xs r a
-  Put       :: !(ΣVar x) -> !(k xs r a) -> M o k (x ': xs) r a
-  LogEnter  :: String -> !(k xs r a) -> M o k xs r a
-  LogExit   :: String -> !(k xs r a) -> M o k xs r a
+  Make      :: ΣVar x -> k xs r a -> M o k (x ': xs) r a
+  Get       :: ΣVar x -> k (x ': xs) r a -> M o k xs r a
+  Put       :: ΣVar x -> k xs r a -> M o k (x ': xs) r a
+  LogEnter  :: String -> k xs r a -> M o k xs r a
+  LogExit   :: String -> k xs r a -> M o k xs r a
 
 _App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs) r a
 _App !m = Lift2 (lift' ($)) m

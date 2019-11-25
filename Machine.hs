@@ -94,10 +94,20 @@ _Fmap !f !m = Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m))
 _Modify :: ΣVar x -> Free3 (M o) f xs r a -> M o (Free3 (M o) f) ((x -> x) ': xs) r a
 _Modify !σ !m = Get σ (Op3 (_App (Op3 (Put σ m))))
 
+{- A key property of the pure semantics of the machine states that
+    at the end of the execution of a machine, all the stacks shall
+    be empty. This also holds true of any recursive machines, for
+    obvious reasons. In the concrete machine, however, it is not
+    entirely necessary for this invariant to be obeyed: indeed the
+    stacks that would have otherwise been passed to the continuation
+    in the pure semantics were available to the caller in the
+    concrete machine. As such, continuations are only required to
+    demand the values of X and o, with all other values closed over
+    during suspension. -}
 data Γ s o xs r a = Γ { xs    :: QList xs
-                      , k     :: Code (K s o r a)
+                      , ret   :: Code (r -> Unboxed o -> ST s (Maybe a))
                       , o     :: Code o
-                      , hs    :: [Code (H s o a)] }
+                      , hs    :: [Code (Unboxed o -> ST s (Maybe a))] }
 
 newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum, Show)
@@ -105,13 +115,13 @@ newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype QSTRef s x = QSTRef (Code (STRef s x))
 newtype QCRef s x = QCRef (Code (CRef s x))
 data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
-                     , φs         :: DMap ΦVar (QJoin (Rep o) s (Unboxed o) a)
+                     , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
                      , stcs       :: Map IΣVar (QCRef s o)
                      , constCount :: Int
                      , debugLevel :: Int }
 
-insertM :: MVar x -> Code (AbsExec (Rep o) s (Unboxed o) a x) -> Ctx s o a -> Ctx s o a
+insertM :: MVar x -> Code (AbsExec s o a x) -> Ctx s o a -> Ctx s o a
 insertM μ q ctx = ctx {μs = DMap.insert μ (QAbsExec q) (μs ctx)}
 
 insertΦ :: ΦVar x -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Ctx s o a -> Ctx s o a
@@ -234,7 +244,7 @@ execCall μ (Exec k) =
 execJump :: (?ops :: InputOps s o, ConcreteExec o) => MVar x -> ExecMonad s o '[] x a
 execJump μ =
   do !(QAbsExec m) <- askM μ
-     return $! \γ@Γ{..} -> [|| $$(runConcrete hs) $$m $$k $$o ||]
+     return $! \γ@Γ{..} -> [|| $$(runConcrete hs) $$m $$ret $$o ||]
 
 execPush :: WQ x -> Exec s o (x ': xs) r a -> ExecMonad s o xs r a
 execPush x (Exec k) = fmap (\m γ -> m (γ {xs = QCons (_code x) (xs γ)})) k
@@ -330,7 +340,7 @@ execChainIter σ μ =
      !(QCRef cref) <- askSTC σ
      return $! \γ@Γ{..} -> [||
        do $$writeCRef $$cref $$o
-          $$(runConcrete hs) $$l $$k $$o
+          $$(runConcrete hs) $$l $$ret $$o
        ||]
 
 execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o) => ΣVar x -> Exec s o '[] x a -> MVar x -> Exec s o xs r a
@@ -472,9 +482,9 @@ instance RecBuilder _o where                                                    
   buildRec ctx μ partials k = trace ("building " ++ show μ) $                                       \
     let bx = box                                                                                    \
     in [||                                                                                          \
-        let recu !ks !o# h =                                                                        \
+        let recu !ret !o# h =                                                                        \
               $$(let ctx' = insertM μ [||recu||] ctx;                                               \
-                     body = partials μ (Γ QNil [||ks||] [||$$bx o#||] [[||h||]]);       \
+                     body = partials μ (Γ QNil [||ret||] [||$$bx o#||] [[||h||]]);       \
                      go ctx' = runOrThrow (catchError (body ctx') (emergencyBind ctx' partials go)) \
                  in go ctx')                                                                        \
         in $$(k (insertM μ [||recu||] ctx))                                                         \
@@ -507,14 +517,14 @@ raiseΓ :: (?ops :: InputOps s o, FailureOps o) => Γ s o xs r a -> Code (ST s (
 raiseΓ γ = [|| $$(raise(hs γ)) $$(o γ) ||]
 
 class KOps o where
-  suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) r a -> Code (ST s (Maybe a))) -> Γ s o xs r a -> Code (K s o x a)
+  suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) r a -> Code (ST s (Maybe a))) -> Γ s o xs r a -> Code (x -> Unboxed o -> ST s (Maybe a))
   resume :: (?ops :: InputOps s o) => Γ s o (x ': xs) x a -> Code (ST s (Maybe a))
 
 #define deriveKOps(_o)                                                                         \
 instance KOps _o where                                                                         \
 {                                                                                              \
   suspend m γ = [|| \x (!o#) -> $$(m (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) ||]; \
-  resume γ = [|| $$(k γ) $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]                                \
+  resume γ = [|| $$(ret γ) $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]                                \
 };
 inputInstances(deriveKOps)
 
@@ -532,7 +542,7 @@ askΣ σ = trace ("fetching " ++ show σ) $ do
     Just ref -> return $! ref
     Nothing  -> throw (outOfScopeRegister σ)
 
-askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin (Rep o) s (Unboxed o) a x)
+askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin s o a x)
 askΦ φ = trace ("fetching " ++ show φ) $ asks ((DMap.! φ) . φs)
 
 askSTC :: MonadReader (Ctx s o a) m => ΣVar x -> m (QCRef s o)

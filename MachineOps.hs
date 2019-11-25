@@ -33,20 +33,7 @@ data QList xs where
   QNil :: QList '[]
   QCons :: !(Code x) -> QList xs -> QList (x ': xs)
 
-type H s o a = H_ (Rep o) s (Unboxed o) a
-type H_ r s (o# :: TYPE r) a = o# -> ST s (Maybe a)
-{- A key property of the pure semantics of the machine states that
-    at the end of the execution of a machine, all the stacks shall
-    be empty. This also holds true of any recursive machines, for
-    obvious reasons. In the concrete machine, however, it is not
-    entirely necessary for this invariant to be obeyed: indeed the
-    stacks that would have otherwise been passed to the continuation
-    in the pure semantics were available to the caller in the
-    concrete machine. As such, continuations are only required to
-    demand the values of X and o, with all other values closed over
-    during suspension. -}
-type K s o x a = K_ (Rep o) s (Unboxed o) x a
-type K_ r s (o# :: TYPE r) x a = x -> o# -> ST s (Maybe a)
+type H s o a = Unboxed o -> ST s (Maybe a)
 data InputOps s o = InputOps { _more       :: Code (o -> Bool)
                              , _next       :: Code (o -> (# Char, o #))
                              , _same       :: Code (o -> o -> Bool)
@@ -82,9 +69,9 @@ shiftRight = _shiftRight ?ops
 offToInt   :: (?ops :: InputOps s o) => Code (o -> Int)
 offToInt   = _offToInt   ?ops
 
-type AbsExec r s (o# :: TYPE r) a x = K_ r s o# x a -> o# -> H_ r s o# a -> ST s (Maybe a)
-newtype QAbsExec s o a x = QAbsExec (Code (AbsExec (Rep o) s (Unboxed o) a x))
-newtype QJoin r s (o# :: TYPE r) a x = QJoin (Code (x -> o# -> ST s (Maybe a)))
+type AbsExec s o a x = (x -> Unboxed o -> ST s (Maybe a)) -> Unboxed o -> (Unboxed o -> ST s (Maybe a)) -> ST s (Maybe a)
+newtype QAbsExec s o a x = QAbsExec (Code (AbsExec s o a x))
+newtype QJoin s o a x = QJoin (Code (x -> Unboxed o -> ST s (Maybe a)))
 
 tailQ :: QList (x ': xs) -> QList xs
 tailQ (QCons x xs) = xs
@@ -92,7 +79,7 @@ tailQ (QCons x xs) = xs
 headQ :: QList (x ': xs) -> Code x
 headQ (QCons x xs) = x
 
-noreturn :: K_ k s o x a
+noreturn :: forall s r x (o# :: TYPE r) a. x -> o# -> ST s (Maybe a)
 noreturn x = error "Machine is only permitted return-by-failure"
 
 {-# INLINE newΣ #-}
@@ -142,13 +129,13 @@ inputInstances(deriveFailureOps)
         |] in traverse derive inputTypes)-}
 
 class ConcreteExec o where
-  runConcrete :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code (AbsExec (Rep o) s (Unboxed o) a x -> K s o x a -> o -> ST s (Maybe a))
+  runConcrete :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code (AbsExec s o a x -> (x -> Unboxed o -> ST s (Maybe a)) -> o -> ST s (Maybe a))
 
 #define deriveConcreteExec(_o)                                                    \
 instance ConcreteExec _o where                                                    \
 {                                                                                 \
-  runConcrete []    = [||\m ks o -> m ks ($$unbox o) $! \o# -> return Nothing||]; \
-  runConcrete (h:_) = [||\m ks o -> m ks ($$unbox o) $! $$h||]                    \
+  runConcrete []    = [||\m ret o -> m ret ($$unbox o) $! \o# -> return Nothing||]; \
+  runConcrete (h:_) = [||\m ret o -> m ret ($$unbox o) $! $$h||]                    \
 };
 inputInstances(deriveConcreteExec)
 

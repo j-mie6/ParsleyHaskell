@@ -10,13 +10,14 @@
              NumericUnderscores,
              UnboxedTuples #-}
 module Main where
-import Parsers
+import Parsers (BrainFuckOp(..))
+import qualified Parsers
 import qualified Parsley
 import Data.Int
 import Data.Char (ord, chr)
 
 parseBrainfuck :: String -> IO (Maybe [BrainFuckOp])
-parseBrainfuck = $$(Parsley.parseFromFile brainfuck)
+parseBrainfuck = $$(Parsley.parseFromFile Parsers.brainfuck)
 
 data Tape a = Tape [a] a [a]
 
@@ -54,8 +55,14 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
 boom :: String -> Maybe ()
 boom = $$(Parsley.runParser Parsers.failure)
 
+nfb :: String -> Maybe ()
+nfb = $$(Parsley.runParser Parsers.nfb)
+
 main :: IO ()
 main =
-  do res <- parseBrainfuck "playground/testinput.bf"
-     print res
+  do --res <- parseBrainfuck "playground/testinput.bf"
+     --print res
+     print (nfb "a")
+     print (nfb "ab")
+     print (nfb "c")
      return ()

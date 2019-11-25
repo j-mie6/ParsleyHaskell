@@ -83,7 +83,8 @@ direct !(p :<|>: q)         = CodeGen $ \(!m) ->
      return $! Op3 (HardFork pc qc decl)
 direct !(Try n p)           = CodeGen $ \(!m) -> do fmap (Op3 . Attempt n) (runCodeGen p (deadCommitOptimisation (isJust n) m))
 direct !(LookAhead p)       = CodeGen $ \(!m) -> do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
-direct !(NotFollowedBy p)   = CodeGen $ \(!m) -> do liftA2 (\p q -> Op3 (NegLook p q)) (runCodeGen p (Op3 (Commit False (Op3 Empt)))) (return (Op3 (Push (lift' ()) m)))
+direct !(NotFollowedBy p)   = CodeGen $ \(!m) -> do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit False (Op3 Empt)))))))
+                                                    return $! Op3 (SoftFork Nothing (Op3 (Tell pc)) (Op3 (Push (lift' ()) m)) Nothing)
 direct !(Branch b p q)      = CodeGen $ \(!m) -> do (decl, φ) <- makeΦ m
                                                     !pc <- freshΦ (runCodeGen p (Op3 (Swap (Op3 (_App φ)))))
                                                     !qc <- freshΦ (runCodeGen q (Op3 (Swap (Op3 (_App φ)))))

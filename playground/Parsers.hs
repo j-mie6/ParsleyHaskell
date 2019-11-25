@@ -13,8 +13,10 @@ data Expr = Var String | Num Int | Add Expr Expr deriving Show
 data Asgn = Asgn String Expr deriving Show
 
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show
-
 deriving instance Lift BrainFuckOp
+
+nfb :: Parser ()
+nfb = notFollowedBy (char 'a') <|> void (string "ab")
 
 brainfuck :: Parser [BrainFuckOp]
 brainfuck = whitespace *> bf <* eof

@@ -74,7 +74,6 @@ data M o k xs r a where
   Attempt   :: !(Maybe Int) -> !(k xs r a) -> M o k xs r a
   Tell      :: !(k (o ': xs) r a) -> M o k xs r a
   Seek      :: !(k xs r a) -> M o k (o ': xs) r a
-  NegLook   :: !(k xs r a) -> !(k xs r a) -> M o k xs r a
   Case      :: !(k (x ': xs) r a) -> !(k (y ': xs) r a) -> !(Maybe (ΦDecl k z xs r a)) -> M o k (Either x y ': xs) r a
   Choices   :: ![WQ (x -> Bool)] -> ![k xs r a] -> k xs r a -> !(Maybe (ΦDecl k y xs r a)) -> M o k (x ': xs) r a
   ChainIter :: !(ΣVar x) -> !(MVar x) -> M o k '[] x a
@@ -147,16 +146,13 @@ runOrThrow :: Exception e => Except e a -> a
 runOrThrow = either throw id . runExcept
 
 type Ops o = (Handlers o, KOps o, ConcreteExec o, JoinBuilder o, FailureOps o, RecBuilder o)
-type Handlers o = (HardForkHandler o, SoftForkHandler o, AttemptHandler o, NegLookHandler o, ChainHandler o, LogHandler o)
+type Handlers o = (HardForkHandler o, SoftForkHandler o, AttemptHandler o, ChainHandler o, LogHandler o)
 class FailureOps o => HardForkHandler o where
   hardForkHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> TExpQ (H s o a -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => SoftForkHandler o where
   softForkHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => AttemptHandler o where
   attemptHandler :: (?ops :: InputOps s o) => TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
-class FailureOps o => NegLookHandler o where
-  negLookHandler1 :: (?ops :: InputOps s o) => (Γ s o xs ks a -> QST s (Maybe a)) -> Γ s o xs ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
-  negLookHandler2 :: (?ops :: InputOps s o) => TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 class FailureOps o => ChainHandler o where
   chainHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> QST s (Maybe a)) -> TExpQ (CRef s o)
                -> Γ s o xs ks a -> TExpQ (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
@@ -212,7 +208,6 @@ readyExec = fold3 absurd (Exec . alg)
     alg (Join φ)               = execJoin φ
     alg (Attempt n k)          = execAttempt n k
     alg (Tell k)               = execTell k
-    alg (NegLook m k)          = execNegLook m k
     alg (Seek k)               = execSeek k
     alg (Case p q  φ)          = execCase p q  φ
     alg (Choices fs ks def  φ) = execChoices fs ks def  φ
@@ -307,20 +302,6 @@ execTell (Exec k) = fmap (\mk γ -> mk (γ {xs = pushX (o γ) (xs γ)})) k
 
 execSeek :: Exec s o xs r a -> ExecMonad s o (o ': xs) r a
 execSeek (Exec k) = fmap (\mk γ -> let (# o, xs' #) = popX (xs γ) in mk (γ {xs = xs', o=o})) k
-
-execNegLook :: (?ops :: InputOps s o, NegLookHandler o) => Exec s o xs r a -> Exec s o xs r a -> ExecMonad s o xs r a
-execNegLook (Exec m) (Exec k) =
-  do mm <- m
-     mk <- k
-     return $! \γ -> setupHandlerΓ γ negLookHandler2 (\γ' -> setupHandlerΓ γ' (negLookHandler1 mk γ) mm)
-
-#define deriveNegLookHandler(_o)                                              \
-instance NegLookHandler _o where                                              \
-{                                                                             \
-  negLookHandler1 mk γ = [||\_ _ (!c#) -> $$(mk (γ {o = [||$$box c#||]}))||]; \
-  negLookHandler2 = [||\h _ (!c#) -> h c#||]                                  \
-};
-inputInstances(deriveNegLookHandler)
 
 execCase :: (?ops :: InputOps s o, JoinBuilder o) => Exec s o (x ': xs) r a -> Exec s o (y ': xs) r a -> Maybe (ΦDecl (Exec s o) z xs r a) -> ExecMonad s o (Either x y ': xs) r a
 execCase (Exec p) (Exec q) decl = setupJoinPoint decl popX_ $
@@ -577,7 +558,6 @@ instance IFunctor3 (M o) where
   imap3 f (Attempt n k)                     = Attempt n (f k)
   imap3 f (Tell k)                          = Tell (f k)
   imap3 f (Seek k)                          = Seek (f k)
-  imap3 f (NegLook m k)                     = NegLook (f m) (f k)
   imap3 f (Case p q (Just (φ, k)))          = Case (f p) (f q) (Just (φ, f k))
   imap3 f (Case p q Nothing)                = Case (f p) (f q) Nothing
   imap3 f (Choices fs ks def (Just (φ, k))) = Choices fs (map f ks) (f def) (Just (φ, f k))
@@ -617,7 +597,6 @@ instance Show (Free3 (M o) f xs ks a) where
     alg (Attempt (Just n) k)                  = "(Try " ++ show n ++ " " ++ getConst3 k ++ ")"
     alg (Tell k)                              = "(Tell " ++ getConst3 k ++ ")"
     alg (Seek k)                              = "(Seek " ++ getConst3 k ++ ")"
-    alg (NegLook m k)                         = "(NegLook " ++ getConst3 m ++ " " ++ getConst3 k ++ ")"
     alg (Case p q Nothing)                    = "(Case " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
     alg (Case p q (Just (φ, k)))              = "(Case " ++ getConst3 p ++ " " ++ getConst3 q ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
     alg (Choices _ ks def Nothing)            = "(Choices [" ++ intercalate ", " (map getConst3 ks) ++ "] " ++ getConst3 def ++ ")"

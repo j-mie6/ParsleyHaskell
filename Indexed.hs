@@ -17,15 +17,15 @@ class IFunctor (f :: (* -> *) -> * -> *) where
 
 class IFunctor3 (f :: ([*] -> * -> * -> *) -> [*] -> * -> * -> *) where
   imap3 :: (forall i' j' k'. a i' j' k' -> b i' j' k') -> f a i j k -> f b i j k
-    
-data Free (f :: (* -> *) -> * -> *) (a :: * -> *) (k :: *) where
+
+data Free (f :: (* -> *) -> * -> *) (a :: * -> *) (i :: *) where
   Var :: a i -> Free f a i
   Op :: f (Free f a) i -> Free f a i
 
 data Free3 (f :: ([*] -> * -> * -> *) -> [*] -> * -> * -> *) (a :: [*] -> * -> * -> *) (i :: [*]) (j :: *) (k :: *) where
   Var3 :: a i j k -> Free3 f a i j k
   Op3 :: f (Free3 f a) i j k -> Free3 f a i j k
-    
+
 unOp :: Free f a i -> f (Free f a) i
 unOp (Op op) = op
 

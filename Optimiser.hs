@@ -158,6 +158,8 @@ optimise (Let False _ p@(Op (Op (Satisfy _) :$>: x))) = p
 --optimise (Let _ p@(Op ()))
 optimise p                                               = Op p
 
+-- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p
+
 (>?>) :: Free ParserF f a -> WQ (a -> Bool) -> Free ParserF f a
 p >?> (WQ f qf) = Op (Branch (Op (WQ g qg :<$>: p)) (Op Empty) (Op (Pure (lift' id))))
   where

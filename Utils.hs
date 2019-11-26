@@ -1,11 +1,11 @@
 {-# LANGUAGE TemplateHaskell #-}
-module Utils (lift', (>*<), WQ(..), Code) where
+module Utils (code, (>*<), WQ(..), Code) where
 
-import LiftPlugin (Pure, lift')
+import LiftPlugin (LiftTo, code)
 import Language.Haskell.TH (TExpQ)
 
 data WQ a = WQ { _val :: a, _code :: TExpQ a }
-instance Pure WQ where lift' x = WQ x [||x||]
+instance LiftTo WQ where code x = WQ x [||x||]
 
 type Code a = TExpQ a
 

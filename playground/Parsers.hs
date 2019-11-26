@@ -23,21 +23,21 @@ brainfuck = whitespace *> bf <* eof
   where
     whitespace = skipMany (noneOf "<>+-[],.")
     lexeme p = p <* whitespace
-    {-bf = many ( lexeme ((token ">" $> lift' RightPointer)
-                    <|> (token "<" $> lift' LeftPointer)
-                    <|> (token "+" $> lift' Increment)
-                    <|> (token "-" $> lift' Decrement)
-                    <|> (token "." $> lift' Output)
-                    <|> (token "," $> lift' Input)
-                    <|> (between (lexeme (token "[")) (token "]") (lift' Loop <$> bf))))-}
+    {-bf = many ( lexeme ((token ">" $> code RightPointer)
+                    <|> (token "<" $> code LeftPointer)
+                    <|> (token "+" $> code Increment)
+                    <|> (token "-" $> code Decrement)
+                    <|> (token "." $> code Output)
+                    <|> (token "," $> code Input)
+                    <|> (between (lexeme (token "[")) (token "]") (code Loop <$> bf))))-}
     bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
-    op '>' = item $> lift' RightPointer
-    op '<' = item $> lift' LeftPointer
-    op '+' = item $> lift' Increment
-    op '-' = item $> lift' Decrement
-    op '.' = item $> lift' Output
-    op ',' = item $> lift' Input
-    op '[' = between (lexeme item) (try (char ']')) (lift' Loop <$> bf)
+    op '>' = item $> code RightPointer
+    op '<' = item $> code LeftPointer
+    op '+' = item $> code Increment
+    op '-' = item $> code Decrement
+    op '.' = item $> code Output
+    op ',' = item $> code Input
+    op '[' = between (lexeme item) (try (char ']')) (code Loop <$> bf)
 
 type JSProgram = [JSElement]
 type JSCompoundStm = [JSStm]
@@ -159,28 +159,28 @@ failure = x
 javascript = whitespace *> many element <* eof
   where
     element :: Parser JSElement
-    element = keyword "function" *> liftA3 (lift' JSFunction) identifier (parens (commaSep identifier)) compound
-          <|> lift' JSStm <$> stmt
+    element = keyword "function" *> liftA3 (code JSFunction) identifier (parens (commaSep identifier)) compound
+          <|> code JSStm <$> stmt
     compound :: Parser JSCompoundStm
     compound = braces (many stmt)
     stmt :: Parser JSStm
-    stmt = semi $> lift' JSSemi
-       <|> keyword "if" *> liftA3 (lift' JSIf) parensExpr stmt (maybeP (keyword "else" *> stmt))
-       <|> keyword "while" *> liftA2 (lift' JSWhile) parensExpr stmt
+    stmt = semi $> code JSSemi
+       <|> keyword "if" *> liftA3 (code JSIf) parensExpr stmt (maybeP (keyword "else" *> stmt))
+       <|> keyword "while" *> liftA2 (code JSWhile) parensExpr stmt
        <|> (keyword "for" *> parens
-               (try (liftA2 (lift' JSForIn) varsOrExprs (keyword "in" *> expr))
-            <|> liftA3 (lift' JSFor) (maybeP varsOrExprs <* semi) (optExpr <* semi) optExpr)
+               (try (liftA2 (code JSForIn) varsOrExprs (keyword "in" *> expr))
+            <|> liftA3 (code JSFor) (maybeP varsOrExprs <* semi) (optExpr <* semi) optExpr)
            <*> stmt)
-       <|> keyword "break" $> lift' JSBreak
-       <|> keyword "continue" $> lift' JSContinue
-       <|> keyword "with" *> liftA2 (lift' JSWith) parensExpr stmt
-       <|> keyword "return" *> (lift' JSReturn <$> optExpr)
-       <|> lift' JSBlock <$> compound
-       <|> lift' JSNaked <$> varsOrExprs
+       <|> keyword "break" $> code JSBreak
+       <|> keyword "continue" $> code JSContinue
+       <|> keyword "with" *> liftA2 (code JSWith) parensExpr stmt
+       <|> keyword "return" *> (code JSReturn <$> optExpr)
+       <|> code JSBlock <$> compound
+       <|> code JSNaked <$> varsOrExprs
     varsOrExprs :: Parser (Either [JSVar] JSExpr)
     varsOrExprs = keyword "var" *> commaSep1 variable <+> expr
     variable :: Parser JSVar
-    variable = liftA2 (lift' JSVar) identifier (maybeP (symbol '=' *> asgn))
+    variable = liftA2 (code JSVar) identifier (maybeP (symbol '=' *> asgn))
     parensExpr :: Parser JSExpr
     parensExpr = parens expr
     optExpr :: Parser (Maybe JSExpr)
@@ -188,60 +188,60 @@ javascript = whitespace *> many element <* eof
     expr :: Parser JSExpr
     expr = commaSep1 asgn
     asgn :: Parser JSExpr'
-    asgn = chainl1 condExpr (symbol '=' $> lift' JSAsgn)
+    asgn = chainl1 condExpr (symbol '=' $> code JSAsgn)
     condExpr :: Parser JSExpr'
-    condExpr = liftA2 (lift' jsCondExprBuild) expr' (maybeP ((symbol '?' *> asgn) <~> (symbol ':' *> asgn)))
+    condExpr = liftA2 (code jsCondExprBuild) expr' (maybeP ((symbol '?' *> asgn) <~> (symbol ':' *> asgn)))
     expr' :: Parser JSExpr'
     expr' = precedence
-      [ Prefix  [ operator "--" $> lift' jsDec, operator "++" $> lift' jsInc
-                , operator "-" $> lift' jsNeg, operator "+" $> lift' jsPlus
-                , operator "~" $> lift' jsBitNeg, operator "!" $> lift' jsNot ]
-      , Postfix [ operator "--" $> lift' jsDec, operator "++" $> lift' jsInc ]
-      , InfixL  [ operator "*" $> lift' JSMul, operator "/" $> lift' JSDiv
-                , operator "%" $> lift' JSMod ]
-      , InfixL  [ operator "+" $> lift' JSAdd, operator "-" $> lift' JSSub ]
-      , InfixL  [ operator "<<" $> lift' JSShl, operator ">>" $> lift' JSShr ]
-      , InfixL  [ operator "<=" $> lift' JSLe, operator "<" $> lift' JSLt
-                , operator ">=" $> lift' JSGe, operator ">" $> lift' JSGt ]
-      , InfixL  [ operator "==" $> lift' JSEq, operator "!=" $> lift' JSNe ]
-      , InfixL  [ try (operator "&") $> lift' JSBitAnd ]
-      , InfixL  [ operator "^" $> lift' JSBitXor ]
-      , InfixL  [ try (operator "|") $> lift' JSBitOr ]
-      , InfixL  [ operator "&&" $> lift' JSAnd ]
-      , InfixL  [ operator "||" $> lift' JSOr ]
+      [ Prefix  [ operator "--" $> code jsDec, operator "++" $> code jsInc
+                , operator "-" $> code jsNeg, operator "+" $> code jsPlus
+                , operator "~" $> code jsBitNeg, operator "!" $> code jsNot ]
+      , Postfix [ operator "--" $> code jsDec, operator "++" $> code jsInc ]
+      , InfixL  [ operator "*" $> code JSMul, operator "/" $> code JSDiv
+                , operator "%" $> code JSMod ]
+      , InfixL  [ operator "+" $> code JSAdd, operator "-" $> code JSSub ]
+      , InfixL  [ operator "<<" $> code JSShl, operator ">>" $> code JSShr ]
+      , InfixL  [ operator "<=" $> code JSLe, operator "<" $> code JSLt
+                , operator ">=" $> code JSGe, operator ">" $> code JSGt ]
+      , InfixL  [ operator "==" $> code JSEq, operator "!=" $> code JSNe ]
+      , InfixL  [ try (operator "&") $> code JSBitAnd ]
+      , InfixL  [ operator "^" $> code JSBitXor ]
+      , InfixL  [ try (operator "|") $> code JSBitOr ]
+      , InfixL  [ operator "&&" $> code JSAnd ]
+      , InfixL  [ operator "||" $> code JSOr ]
       ]
-      (lift' JSUnary <$> memOrCon)
+      (code JSUnary <$> memOrCon)
     memOrCon :: Parser JSUnary
-    memOrCon = keyword "delete" *> (lift' JSDel <$> member)
-           <|> keyword "new" *> (lift' JSCons <$> con)
-           <|> lift' JSMember <$> member
+    memOrCon = keyword "delete" *> (code JSDel <$> member)
+           <|> keyword "new" *> (code JSCons <$> con)
+           <|> code JSMember <$> member
     con :: Parser JSCons
-    con = liftA2 (lift' JSQual) (keyword "this" $> lift' "this") (dot *> conCall) <|> conCall
+    con = liftA2 (code JSQual) (keyword "this" $> code "this") (dot *> conCall) <|> conCall
     conCall :: Parser JSCons
     conCall = identifier <**>
-                (dot *> (lift' flip >*< lift' JSQual <$> conCall)
-             <|> lift' flip >*< lift' JSConCall <$> parens (commaSep asgn)
+                (dot *> (code flip >*< code JSQual <$> conCall)
+             <|> code flip >*< code JSConCall <$> parens (commaSep asgn)
              <|> pure (WQ (\name -> JSConCall name []) [||\name -> JSConCall name []||]))
     member :: Parser JSMember
     member = primaryExpr <**>
-                (lift' flip >*< lift' JSCall <$> parens (commaSep asgn)
-             <|> lift' flip >*< lift' JSIndex <$> brackets expr
-             <|> dot *> (lift' flip >*< lift' JSAccess <$> member)
-             <|> pure (lift' JSPrimExp))
+                (code flip >*< code JSCall <$> parens (commaSep asgn)
+             <|> code flip >*< code JSIndex <$> brackets expr
+             <|> dot *> (code flip >*< code JSAccess <$> member)
+             <|> pure (code JSPrimExp))
     primaryExpr :: Parser JSAtom
-    primaryExpr = lift' JSParens <$> parens expr
-              <|> lift' JSArray <$> brackets (commaSep asgn)
-              <|> lift' JSId <$> identifier
-              <|> lift' either >*< lift' JSInt >*< lift' JSFloat <$> naturalOrFloat
-              <|> lift' JSString <$> stringLiteral
-              <|> lift' JSTrue <$ keyword "true"
-              <|> lift' JSFalse <$ keyword "false"
-              <|> lift' JSNull <$ keyword "null"
-              <|> lift' JSThis <$ keyword "this"
+    primaryExpr = code JSParens <$> parens expr
+              <|> code JSArray <$> brackets (commaSep asgn)
+              <|> code JSId <$> identifier
+              <|> code either >*< code JSInt >*< code JSFloat <$> naturalOrFloat
+              <|> code JSString <$> stringLiteral
+              <|> code JSTrue <$ keyword "true"
+              <|> code JSFalse <$ keyword "false"
+              <|> code JSNull <$ keyword "null"
+              <|> code JSThis <$ keyword "this"
 
     -- Token Parsers
     space :: Parser ()
-    space = void (satisfy (lift' isSpace))
+    space = void (satisfy (code isSpace))
     whitespace :: Parser ()
     whitespace = skipMany (spaces <|> oneLineComment <|> multiLineComment)
     keyword :: String -> Parser ()
@@ -249,11 +249,11 @@ javascript = whitespace *> many element <* eof
     operator :: String -> Parser ()
     operator op = try (string op *> notOpLetter) *> whitespace
     identifier :: Parser String
-    identifier = try ((identStart <:> many identLetter) >?> lift' jsUnreservedName) <* whitespace
+    identifier = try ((identStart <:> many identLetter) >?> code jsUnreservedName) <* whitespace
     naturalOrFloat :: Parser (Either Int Double)
-    naturalOrFloat = lift' Left <$> (lift' read <$> some (oneOf "0123456789"))
+    naturalOrFloat = code Left <$> (code read <$> some (oneOf "0123456789"))
     stringLiteral :: Parser String
-    stringLiteral = lift' catMaybes <$> between (token "\"") (token "\"") (many stringChar)
+    stringLiteral = code catMaybes <$> between (token "\"") (token "\"") (many stringChar)
     symbol :: Char -> Parser Char
     symbol c = try (char c) <* whitespace
     parens :: Parser a -> Parser a
@@ -287,8 +287,8 @@ javascript = whitespace *> many element <* eof
                   <|> oneOf "/*" *> inComment
       in token "/*" *> inComment
 
-    identStart = satisfy (lift' jsIdentStart)
-    identLetter = satisfy (lift' jsIdentLetter)
+    identStart = satisfy (code jsIdentStart)
+    identLetter = satisfy (code jsIdentLetter)
     notIdentLetter = notFollowedBy identLetter
     notOpLetter = notFollowedBy (oneOf "+-*/=<>!~&|.%^")
 
@@ -296,54 +296,54 @@ javascript = whitespace *> many element <* eof
     escChrs = "abfntv\\\"'0123456789xo^ABCDEFGHLNRSUV"
 
     stringChar :: Parser (Maybe Char)
-    stringChar = lift' Just <$> satisfy (lift' jsStringLetter) <|> stringEscape
+    stringChar = code Just <$> satisfy (code jsStringLetter) <|> stringEscape
 
     stringEscape :: Parser (Maybe Char)
-    stringEscape = token "\\" *> (token "&" $> lift' Nothing
-                              <|> spaces *> token "\\" $> lift' Nothing
-                              <|> lift' Just <$> escapeCode)
+    stringEscape = token "\\" *> (token "&" $> code Nothing
+                              <|> spaces *> token "\\" $> code Nothing
+                              <|> code Just <$> escapeCode)
 
     escapeCode :: Parser Char
     escapeCode = match escChrs (oneOf escChrs) code empty
       where
-        code 'a' = pure (lift' ('\a'))
-        code 'b' = pure (lift' ('\b'))
-        code 'f' = pure (lift' ('\f'))
-        code 'n' = pure (lift' ('\n'))
-        code 't' = pure (lift' ('\t'))
-        code 'v' = pure (lift' ('\v'))
-        code '\\' = pure (lift' ('\\'))
-        code '"' = pure (lift' ('"'))
-        code '\'' = pure (lift' ('\''))
-        code '^' = WQ (\c -> toEnum (fromEnum c - fromEnum 'A' + 1)) [||\c -> toEnum (fromEnum c - fromEnum 'A' + 1)||] <$> satisfy (lift' isUpper)
-        code 'A' = token "CK" $> lift' ('\ACK')
-        code 'B' = token "S" $> lift' ('\BS') <|> token "EL" $> lift' ('\BEL')
-        code 'C' = token "R" $> lift' ('\CR') <|> token "AN" $> lift' ('\CAN')
-        code 'D' = token "C" *> (token "1" $> lift' ('\DC1')
-                             <|> token "2" $> lift' ('\DC2')
-                             <|> token "3" $> lift' ('\DC3')
-                             <|> token "4" $> lift' ('\DC4'))
-               <|> token "EL" $> lift' ('\DEL')
-               <|> token "LE" $> lift' ('\DLE')
-        code 'E' = token "M" $> lift' ('\EM')
-               <|> token "T" *> (token "X" $> lift' ('\ETX')
-                             <|> token "B" $> lift' ('\ETB'))
-               <|> token "SC" $> lift' ('\ESC')
-               <|> token "OT" $> lift' ('\EOT')
-               <|> token "NQ" $> lift' ('\ENQ')
-        code 'F' = token "F" $> lift' ('\FF') <|> token "S" $> lift' ('\FS')
-        code 'G' = token "S" $> lift' ('\GS')
-        code 'H' = token "T" $> lift' ('\HT')
-        code 'L' = token "F" $> lift' ('\LF')
-        code 'N' = token "UL" $> lift' ('\NUL') <|> token "AK" $> lift' ('\NAK')
-        code 'R' = token "S" $> lift' ('\RS')
-        code 'S' = token "O" *> option (lift' ('\SO')) (token "H" $> lift' ('\SOH'))
-               <|> token "I" $> lift' ('\SI')
-               <|> token "P" $> lift' ('\SP')
-               <|> token "TX" $> lift' ('\STX')
-               <|> token "YN" $> lift' ('\SYN')
-               <|> token "UB" $> lift' ('\SUB')
-        code 'U' = token "S" $> lift' ('\US')
-        code 'V' = token "T" $> lift' ('\VT')
+        code 'a' = pure (code ('\a'))
+        code 'b' = pure (code ('\b'))
+        code 'f' = pure (code ('\f'))
+        code 'n' = pure (code ('\n'))
+        code 't' = pure (code ('\t'))
+        code 'v' = pure (code ('\v'))
+        code '\\' = pure (code ('\\'))
+        code '"' = pure (code ('"'))
+        code '\'' = pure (code ('\''))
+        code '^' = WQ (\c -> toEnum (fromEnum c - fromEnum 'A' + 1)) [||\c -> toEnum (fromEnum c - fromEnum 'A' + 1)||] <$> satisfy (code isUpper)
+        code 'A' = token "CK" $> code ('\ACK')
+        code 'B' = token "S" $> code ('\BS') <|> token "EL" $> code ('\BEL')
+        code 'C' = token "R" $> code ('\CR') <|> token "AN" $> code ('\CAN')
+        code 'D' = token "C" *> (token "1" $> code ('\DC1')
+                             <|> token "2" $> code ('\DC2')
+                             <|> token "3" $> code ('\DC3')
+                             <|> token "4" $> code ('\DC4'))
+               <|> token "EL" $> code ('\DEL')
+               <|> token "LE" $> code ('\DLE')
+        code 'E' = token "M" $> code ('\EM')
+               <|> token "T" *> (token "X" $> code ('\ETX')
+                             <|> token "B" $> code ('\ETB'))
+               <|> token "SC" $> code ('\ESC')
+               <|> token "OT" $> code ('\EOT')
+               <|> token "NQ" $> code ('\ENQ')
+        code 'F' = token "F" $> code ('\FF') <|> token "S" $> code ('\FS')
+        code 'G' = token "S" $> code ('\GS')
+        code 'H' = token "T" $> code ('\HT')
+        code 'L' = token "F" $> code ('\LF')
+        code 'N' = token "UL" $> code ('\NUL') <|> token "AK" $> code ('\NAK')
+        code 'R' = token "S" $> code ('\RS')
+        code 'S' = token "O" *> option (code ('\SO')) (token "H" $> code ('\SOH'))
+               <|> token "I" $> code ('\SI')
+               <|> token "P" $> code ('\SP')
+               <|> token "TX" $> code ('\STX')
+               <|> token "YN" $> code ('\SYN')
+               <|> token "UB" $> code ('\SUB')
+        code 'U' = token "S" $> code ('\US')
+        code 'V' = token "T" $> code ('\VT')
         -- TODO numeric
         code _ = empty--error "numeric escape codes not supported"-}

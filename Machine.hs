@@ -22,7 +22,7 @@ module Machine where
 import MachineOps
 import Input                 (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString)
 import Indexed               (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
-import Utils                 (WQ(..), lift', (>*<), Code)
+import Utils                 (WQ(..), code, (>*<), Code)
 import Data.Word             (Word64)
 import Control.Monad         (forM)
 import Control.Monad.ST      (ST)
@@ -87,10 +87,10 @@ data M o k xs r a where
   LogExit   :: String -> k xs r a -> M o k xs r a
 
 _App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs) r a
-_App !m = Lift2 (lift' ($)) m
+_App !m = Lift2 (code ($)) m
 
 _Fmap :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': xs) r a
-_Fmap !f !m = Push f (Op3 (Lift2 (lift' flip >*< lift' ($)) m))
+_Fmap !f !m = Push f (Op3 (Lift2 (code flip >*< code ($)) m))
 
 _Modify :: ΣVar x -> Free3 (M o) f xs r a -> M o (Free3 (M o) f) ((x -> x) ': xs) r a
 _Modify !σ !m = Get σ (Op3 (_App (Op3 (Put σ m))))

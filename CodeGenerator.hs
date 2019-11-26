@@ -12,7 +12,7 @@ module CodeGenerator (codeGen, halt, ret) where
 import ParserAST                  (ParserF(..))
 import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, _Fmap, _App, _Modify)
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
-import Utils                      (lift', (>*<), WQ(..))
+import Utils                      (code, (>*<), WQ(..))
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict (State, get, modify', runState, MonadState)
@@ -84,7 +84,7 @@ direct (p :<|>: q)   m =
 direct (Try n p)         m = do fmap (Op3 . Attempt n) (runCodeGen p (deadCommitOptimisation (isJust n) m))
 direct (LookAhead p)     m = do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
 direct (NotFollowedBy p) m = do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit False (Op3 Empt)))))))
-                                return $! Op3 (SoftFork Nothing (Op3 (Tell pc)) (Op3 (Push (lift' ()) m)) Nothing)
+                                return $! Op3 (SoftFork Nothing (Op3 (Tell pc)) (Op3 (Push (code ()) m)) Nothing)
 direct (Branch b p q)    m = do (decl, φ) <- makeΦ m
                                 pc <- freshΦ (runCodeGen p (Op3 (Swap (Op3 (_App φ)))))
                                 qc <- freshΦ (runCodeGen q (Op3 (Swap (Op3 (_App φ)))))
@@ -97,9 +97,9 @@ direct (Let _ !μ _) m = return $! tailCallOptimise μ m
 direct (ChainPre op p) m =
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (Op3 (_Fmap (lift' flip >*< lift' (.)) (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))))
+     opc <- freshM (runCodeGen op (Op3 (_Fmap (code flip >*< code (.)) (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))))
      pc <- freshM (runCodeGen p (Op3 (_App m)))
-     return $! Op3 (Push (lift' id) (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ pc)))))))
+     return $! Op3 (Push (code id) (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ pc)))))))
 direct (ChainPost p op) m =
   do μ <- askM
      σ <- freshΣ

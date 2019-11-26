@@ -35,7 +35,7 @@ module Parsley ( Parser, runParser, parseFromFile
                -- Expressions
                , Level(..), precedence
                -- Template Haskell Utils
-               , lift', (>*<), WQ(..), Lift
+               , code, (>*<), WQ(..), Lift
                -- Template Haskell Crap
                , bool
                , module Input
@@ -46,7 +46,7 @@ import Input hiding               (PreparedInput(..))
 import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
-import Utils                      (lift', (>*<), WQ(..), Code)
+import Utils                      (code, (>*<), WQ(..), Code)
 import Data.Function              (fix)
 import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
@@ -80,9 +80,9 @@ liftA3 :: WQ (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
 liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
-many = pfoldr (lift' (:)) (WQ [] [||[]||])
-{-many p = newRegister (pure (lift' id)) (\r ->
-    let go = modify r (lift' flip >*< lift' (.) <$> (lift' (:) <$> p)) *> go
+many = pfoldr (code (:)) (WQ [] [||[]||])
+{-many p = newRegister (pure (code id)) (\r ->
+    let go = modify r (code flip >*< code (.) <$> (code (:) <$> p)) *> go
          <|> (WQ ($ []) [||\f -> f []||] <$> get r)
     in go)-}
 
@@ -93,8 +93,8 @@ some :: Parser a -> Parser [a]
 some = manyN 1
 
 skipMany :: Parser a -> Parser ()
---skipMany = pfoldr (lift' const >*< lift' id) (lift' ())
---skipMany = pfoldl (lift' const) (lift' ())
+--skipMany = pfoldr (code const >*< code id) (code ())
+--skipMany = pfoldl (code const) (code ())
 -- New implementation is stateless, so should work better!
 skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
 
@@ -105,7 +105,7 @@ skipSome :: Parser a -> Parser ()
 skipSome = skipManyN 1
 
 (<+>) :: Parser a -> Parser b -> Parser (Either a b)
-p <+> q = lift' Left <$> p <|> lift' Right <$> q
+p <+> q = code Left <$> p <|> code Right <$> q
 
 sepBy :: Parser a -> Parser b -> Parser [a]
 sepBy p sep = sepBy1 p sep <|> pure (WQ [] [||[]||])
@@ -128,16 +128,16 @@ someTill p end = notFollowedBy end *> (p <:> manyTill p end)
 -- Additional Combinators
 {-# INLINE (<:>) #-}
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
-(<:>) = liftA2 (lift' (:))
+(<:>) = liftA2 (code (:))
 
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
 (<**>) = liftA2 (WQ (flip ($)) [|| (flip ($)) ||])
 
 unit :: Parser ()
-unit = pure (lift' ())
+unit = pure (code ())
 
 (<~>) :: Parser a -> Parser b -> Parser (a, b)
-(<~>) = liftA2 (lift' (,))
+(<~>) = liftA2 (code (,))
 
 (<~) :: Parser a -> Parser b -> Parser a
 (<~) = (<*)
@@ -184,7 +184,7 @@ between open close p = open *> p <* close
 
 -- Parsing Primitives
 char :: Char -> Parser Char
-char c = lift' c <$ satisfy (WQ (== c) [||(== c)||])
+char c = code c <$ satisfy (WQ (== c) [||(== c)||])
 
 item :: Parser Char
 item = satisfy (WQ (const True) [|| const True ||])
@@ -204,7 +204,7 @@ bool x y True  = x
 bool x y False = y
 
 constp :: Parser a -> Parser (b -> a)
-constp = (lift' const <$>)
+constp = (code const <$>)
 
 (<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
 cond <?|> (p, q) = branch (WQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
@@ -228,20 +228,20 @@ while :: Parser Bool -> Parser ()
 while x = fix (when x)
 
 select :: Parser (Either a b) -> Parser (a -> b) -> Parser b
-select p q = branch p q (pure (lift' id))
+select p q = branch p q (pure (code id))
 
 fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
 fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
 
 maybeP :: Parser a -> Parser (Maybe a)
-maybeP p = option (WQ Nothing [||Nothing||]) (lift' Just <$> p)
+maybeP p = option (WQ Nothing [||Nothing||]) (code Just <$> p)
 
 -- Iterative Parsers
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
-chainl1 p op = chainPost p (lift' flip <$> op <*> p)
+chainl1 p op = chainPost p (code flip <$> op <*> p)
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
-chainr1 p op = let go = p <**> ((lift' flip <$> op <*> go) <|> pure (lift' id)) in go
+chainr1 p op = let go = p <**> ((code flip <$> op <*> go) <|> pure (code id)) in go
 
 chainr :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
 chainr p op x = chainr1 p op <|> pure x
@@ -253,7 +253,7 @@ pfoldr :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
 pfoldr f k p = chainPre (f <$> p) (pure k)
 
 pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
-pfoldl f k p = chainPost (pure k) (lift' flip >*< f <$> p)
+pfoldl f k p = chainPost (pure k) (code flip >*< f <$> p)
 
 data Level a = InfixL  [Parser (a -> a -> a)]
              | InfixR  [Parser (a -> a -> a)]

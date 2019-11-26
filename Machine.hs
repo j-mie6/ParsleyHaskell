@@ -178,8 +178,8 @@ class FailureOps o => LogHandler o where
 
 exec :: Ops o => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding o a), [IMVar]) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
-  let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
-  in $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
+  do let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
+     $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
         in readyCalls topo ms (readyExec m)
              (Γ QNil [||noreturn||] [||offset||] [])
              (Ctx DMap.empty DMap.empty DMap.empty Map.empty (partiallyEvaluateLets ms) 0 0))

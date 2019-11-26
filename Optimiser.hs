@@ -20,13 +20,22 @@ optimise :: ParserF (Free ParserF f) a -> Free ParserF f a
 -- Right Absorption Law: empty <*> u                    = empty
 optimise (Op Empty :<*>: _)                             = Op Empty
 -- Failure Weakening Law: u <*> empty                   = u *> empty
-optimise (u :<*>: Op Empty)                             = Op (u :*>: Op Empty)
+optimise (u :<*>: Op Empty)                             = optimise (u :*>: Op Empty)
 -- Right Absorption Law: empty *> u                     = empty
 optimise (Op Empty :*>: _)                              = Op Empty
 -- Right Absorption Law: empty <* u                     = empty
 optimise (Op Empty :<*: _)                              = Op Empty
 -- Failure Weakening Law: u <* empty                    = u *> empty
-optimise (u :<*: Op Empty)                              = Op (u :*>: Op Empty)
+optimise (u :<*: Op Empty)                              = optimise (u :*>: Op Empty)
+-- Branch Absorption Law: branch empty p q              = empty
+optimise (Branch (Op Empty) _ _)                        = Op Empty
+-- Branch Weakening Law: branch b empty empty           = b *> empty
+optimise (Branch b (Op Empty) (Op Empty))               = optimise (b :*>: Op Empty)
+-- Match Absorption Law: match _ empty _ def            = def
+optimise (Match (Op Empty) _ _ def)                     = def
+-- Match Weakening Law: match _ p (const empty) empty   = p *> empty
+optimise (Match p _ qs (Op Empty))
+  | all (\case {Op Empty -> True; _ -> False}) qs = optimise (p :*>: Op Empty)
 -- APPLICATIVE OPTIMISATION
 -- Homomorphism Law: pure f <*> pure x                  = pure (f x)
 optimise (Op (Pure f) :<*>: Op (Pure x))                = Op (Pure (f >*< x))

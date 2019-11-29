@@ -71,10 +71,10 @@ data M o k xs r a where
   Jump      :: MVar x -> M o k '[] x a
   Empt      :: M o k xs r a
   Commit    :: Bool -> k xs r a -> M o k xs r a
-  HardFork  :: k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a
-  SoftFork  :: Maybe Int -> k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a
+  HardFork  :: k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a              --TODO: Deprecate
+  SoftFork  :: Maybe Int -> k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a --TODO: Deprecate
   Join      :: ΦVar x -> M o k (x ': xs) r a
-  Attempt   :: Maybe Int -> k xs r a -> M o k xs r a
+  Attempt   :: Maybe Int -> k xs r a -> M o k xs r a                                         --TODO: Deprecate
   Tell      :: k (o ': xs) r a -> M o k xs r a
   Seek      :: k xs r a -> M o k (o ': xs) r a
   Case      :: k (x ': xs) r a -> k (y ': xs) r a -> Maybe (ΦDecl k z xs r a) -> M o k (Either x y ': xs) r a
@@ -92,7 +92,7 @@ _App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs)
 _App !m = Lift2 (code ($)) m
 
 _Fmap :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': xs) r a
-_Fmap !f !m = Push f (Op3 (Lift2 (code flip >*< code ($)) m))
+_Fmap !f !m = Push f (Op3 (Lift2 ([flip (code ($))]) m))  -- FIXME
 
 _Modify :: ΣVar x -> Free3 (M o) f xs r a -> M o (Free3 (M o) f) ((x -> x) ': xs) r a
 _Modify !σ !m = Get σ (Op3 (_App (Op3 (Put σ m))))
@@ -366,7 +366,7 @@ instance ChainHandler _o where                   \
         c <- $$readCRef $$cref;                  \
         if $$same c ($$box o#) then              \
           $$(mk (γ {o = [|| $$box o# ||],        \
-                    hs = [||h||] : hs γ})) \
+                    hs = [||h||] : hs γ}))       \
         else h o#                                \
       } ||]                                      \
 };

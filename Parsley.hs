@@ -253,7 +253,7 @@ pfoldr :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
 pfoldr f k p = chainPre (f <$> p) (pure k)
 
 pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
-pfoldl f k p = chainPost (pure k) (code flip >*< f <$> p)
+pfoldl f k p = chainPost (pure k) (([flip f]) <$> p)
 
 data Level a = InfixL  [Parser (a -> a -> a)]
              | InfixR  [Parser (a -> a -> a)]

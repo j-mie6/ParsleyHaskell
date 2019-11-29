@@ -38,16 +38,16 @@ optimise (Match p _ qs (Op Empty))
   | all (\case {Op Empty -> True; _ -> False}) qs = optimise (p :*>: Op Empty)
 -- APPLICATIVE OPTIMISATION
 -- Homomorphism Law: pure f <*> pure x                  = pure (f x)
-optimise (Op (Pure f) :<*>: Op (Pure x))                = Op (Pure (f >*< x))
+optimise (Op (Pure f) :<*>: Op (Pure x))                = Op (Pure ([f $ x])) -- FIXME
 -- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law
 -- Functor Composition Law: f <$> (g <$> p)             = (f . g) <$> p
-optimise (f :<$>: Op (g :<$>: p))                       = optimise (code (.) >*< f >*< g :<$>: p)
+optimise (f :<$>: Op (g :<$>: p))                       = optimise (([f . g]) :<$>: p)
 -- Composition Law: u <*> (v <*> w)                     = (.) <$> u <*> v <*> w
 optimise (u :<*>: Op (v :<*>: w))                       = optimise (optimise (optimise (code (.) :<$>: u) :<*>: v) :<*>: w)
 -- Reassociation Law 1: (u *> v) <*> w                  = u *> (v <*> w)
 optimise (Op (u :*>: v) :<*>: w)                        = optimise (u :*>: (optimise (v :<*>: w)))
 -- Interchange Law: u <*> pure x                        = pure ($ x) <*> u
-optimise (u :<*>: Op (Pure x))                          = optimise (code flip >*< code ($) >*< x :<$>: u)
+optimise (u :<*>: Op (Pure x))                          = optimise (([flip (code ($)) x]) :<$>: u)  -- FIXME
 -- Right Absorption Law: (f <$> p) *> q                 = p *> q
 optimise (Op (f :<$>: p) :*>: q)                        = Op (p :*>: q)
 -- Left Absorption Law: p <* (f <$> q)                  = p <* q
@@ -129,11 +129,11 @@ optimise (Branch (Op (Pure (WQ (Left x) ql))) p _)      = optimise (p :<*>: Op (
 -- pure Right law: branch (pure (Right x)) p q          = q <*> pure x
 optimise (Branch (Op (Pure (WQ (Right x) ql))) _ q)     = optimise (q :<*>: Op (Pure (WQ x qx))) where qx = [||case $$ql of Right x -> x||]
 -- Generalised Identity law: branch b (pure f) (pure g) = either f g <$> b
-optimise (Branch b (Op (Pure f)) (Op (Pure g)))         = optimise (code either >*< f >*< g :<$>: b)
+optimise (Branch b (Op (Pure f)) (Op (Pure g)))         = optimise (([either f g]) :<$>: b)
 -- Interchange law: branch (x *> y) p q                 = x *> branch y p q
 optimise (Branch (Op (x :*>: y)) p q)                   = optimise (x :*>: optimise (Branch y p q))
 -- Negated Branch law: branch b p empty                 = branch (swapEither <$> b) empty p
-optimise (Branch b p (Op Empty))                        = Op (Branch (Op (Op (Pure (WQ (either Right Left) [||either Right Left||])) :<*>: b)) (Op Empty) p)
+optimise (Branch b p (Op Empty))                        = Op (Branch (Op (Op (Pure ([either (code Right) (code Left)])) :<*>: b)) (Op Empty) p)  -- FIXME
 -- Branch Fusion law: branch (branch b empty (pure f)) empty k                  = branch (g <$> b) empty k where g is a monad transforming (>>= f)
 optimise (Branch (Op (Branch b (Op Empty) (Op (Pure (WQ f qf))))) (Op Empty) k) = optimise (Branch (optimise (Op (Pure (WQ g qg)) :<*>: b)) (Op Empty) k)
   where
@@ -146,7 +146,7 @@ optimise (Branch (Op (Branch b (Op Empty) (Op (Pure (WQ f qf))))) (Op Empty) k) 
                                Left _ -> Left ()
                                Right y -> Right y||]
 -- Distributivity Law: f <$> branch b p q                = branch b ((f .) <$> p) ((f .) <$> q)
-optimise (f :<$>: Op (Branch b p q))                     = optimise (Branch b (optimise (code (.) >*< f :<$>: p)) (optimise (code (.) >*< f :<$>: q)))
+optimise (f :<$>: Op (Branch b p q))                     = optimise (Branch b (optimise (([(.) f]) :<$>: p)) (optimise (([(.) f]) :<$>: q)))  -- FIXME?
 -- pure Match law: match vs (pure x) f def               = if elem x vs then f x else def
 optimise (Match (Op (Pure (WQ x _))) fs qs def)          = foldr (\(f, q) k -> if _val f x then q else k) def (zip fs qs)
 -- Generalised Identity Match law: match vs p (pure . f) def = f <$> (p >?> flip elem vs) <|> def

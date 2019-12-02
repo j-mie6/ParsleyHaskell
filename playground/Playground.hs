@@ -60,8 +60,8 @@ nfb = $$(Parsley.runParser Parsers.nfb)
 
 main :: IO ()
 main =
-  do --res <- parseBrainfuck "playground/testinput.bf"
-     --print res
+  do res <- parseBrainfuck "inputs/helloworld.bf"
+     print res
      print (nfb "a")
      print (nfb "ab")
      print (nfb "c")

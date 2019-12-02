@@ -20,29 +20,28 @@
 module Machine where
 
 import MachineOps
-import Input                 (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString)
-import Indexed               (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
-import Utils                 (WQ(..), code, (>*<), Code)
-import Data.Word             (Word64)
-import Control.Monad         (forM, join)
-import Control.Monad.ST      (ST)
-import Control.Monad.Reader  (ask, asks, local, ReaderT, runReaderT, MonadReader)
-import Control.Monad.Except  (throwError, catchError, Except, runExcept, MonadError)
-import Control.Monad.Trans   (liftIO)
-import Control.Exception     (Exception, throw, throwIO, catch)
-import Data.STRef            (STRef)
-import Data.STRef.Unboxed    (STRefU)
-import Data.Map.Strict       (Map)
-import Data.Dependent.Map    (DMap)
-import Data.GADT.Compare     (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
-import Safe.Coerce           (coerce)
-import Debug.Trace           (trace)
-import System.Console.Pretty (color, Color(Green, White, Red, Blue))
---import System.IO.Unsafe      (unsafePerformIO)
-import Data.Text             (Text)
-import Data.Void             (Void)
-import Data.List             (intercalate)
-import Language.Haskell.TH   (runQ)
+import Input                      (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString)
+import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
+import Utils                      (WQ(..), code, (>*<), Code)
+import Data.Word                  (Word64)
+import Control.Monad              (forM, join)
+import Control.Monad.ST           (ST)
+import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadReader)
+import Control.Monad.Trans        (liftIO)
+import Control.Exception          (Exception, throw, throwIO, catch)
+import Data.STRef                 (STRef)
+import Data.STRef.Unboxed         (STRefU)
+import Data.Map.Strict            (Map)
+import Data.Dependent.Map         (DMap)
+import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
+import Safe.Coerce                (coerce)
+import Debug.Trace                (trace)
+import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
+import Data.Text                  (Text)
+import Data.Void                  (Void)
+import Data.List                  (intercalate)
+import Language.Haskell.TH        (runQ, Q, newName)
+import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, foldrWithKey)
 
@@ -149,18 +148,15 @@ debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
 debugDown :: Ctx s o a -> Ctx s o a
 debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
-partials :: MVar x -> Γ s o '[] x a -> Ctx s o a -> Except MissingDependency (Code (ST s (Maybe a)))
-partials μ γ ctx = let !(PartialEval k) = (_partials ctx) DMap.! (trace ("executing let-binding " ++ show μ) μ) in k ctx <*> pure γ
+partials :: MVar x -> Γ s o '[] x a -> Ctx s o a -> Code (ST s (Maybe a))
+partials μ γ ctx = let !(PartialEval k) = (_partials ctx) DMap.! (trace ("executing let-binding " ++ show μ) μ) in k ctx γ
 
 newtype MissingDependency = MissingDependency IMVar
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
-type ExecMonad s o xs r a = ReaderT (Ctx s o a) (Except MissingDependency) (Γ s o xs r a -> Code (ST s (Maybe a)))
+type ExecMonad s o xs r a = Reader (Ctx s o a) (Γ s o xs r a -> Code (ST s (Maybe a)))
 newtype Exec s o xs r a = Exec { unExec :: ExecMonad s o xs r a }
 run :: Exec s o xs r a -> Γ s o xs r a -> Ctx s o a -> Code (ST s (Maybe a))
-run (Exec m) γ ctx = runOrThrow (runReaderT m ctx <*> pure γ)
-
-runOrThrow :: Exception e => Except e (Code a) -> Code a
-runOrThrow = either (liftIO . throwIO) id . runExcept
+run (Exec m) γ ctx = runReader m ctx γ
 
 type Ops o = (Handlers o, KOps o, ConcreteExec o, JoinBuilder o, FailureOps o, RecBuilder o)
 type Handlers o = (HardForkHandler o, SoftForkHandler o, AttemptHandler o, ChainHandler o, LogHandler o)
@@ -180,9 +176,11 @@ exec :: Ops o => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, D
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
   do let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
      $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
-        in readyCalls topo ms (readyExec m)
+        {-in readyCalls topo (readyExec m)
              (Γ QNil [||noreturn||] [||offset||] [])
-             (Ctx DMap.empty DMap.empty DMap.empty Map.empty (partiallyEvaluateLets ms) 0 0))
+             (Ctx DMap.empty DMap.empty DMap.empty Map.empty (partiallyEvaluateLets ms) 0 0))-}
+        in topLevel ms (Ctx DMap.empty DMap.empty DMap.empty Map.empty (partiallyEvaluateLets ms) 0 0) topo (readyExec m)
+             (Γ QNil [||noreturn||] [||offset||] []))
   ||]
 
 missingDependency :: MVar x -> MissingDependency
@@ -192,15 +190,47 @@ dependencyOf (MissingDependency v) = MVar v
 outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
 outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 
-newtype PartialEval s o a x = PartialEval (Ctx s o a -> Except MissingDependency (Γ s o '[] x a -> Code (ST s (Maybe a))))
+newtype PartialEval s o a x = PartialEval (Ctx s o a -> Γ s o '[] x a -> Code (ST s (Maybe a)))
 partiallyEvaluateLets :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> DMap MVar (PartialEval s o a)
-partiallyEvaluateLets = DMap.map (\(LetBinding k) -> PartialEval (runReaderT (unExec (readyExec k))))
+partiallyEvaluateLets = DMap.map (\(LetBinding k) -> PartialEval (runReader (unExec (readyExec k))))
 
-
-readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> DMap MVar (LetBinding o a) -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> Code (ST s (Maybe a))
-readyCalls topo ms start γ ctx = foldr readyFunc (run start γ) (trace (show topo) topo) ctx
+readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> Code (ST s (Maybe a))
+readyCalls topo start γ ctx = foldr readyFunc (run start γ) (trace (show topo) topo) ctx
   where
     readyFunc v rest ctx = buildRec ctx (MVar v) rest
+
+-- BEGIN NEW CODE
+
+nameLet :: LetBinding o a x -> String
+nameLet _ = "rec"
+
+mapNames :: DMap MVar (LetBinding o a) -> Q (DMap MVar (QAbsExec s o a))
+mapNames = DMap.foldrWithKey generate (return DMap.empty)
+  where
+    generate μ binding qvs = 
+      do v <- newName (nameLet binding)
+         DMap.insert μ (QAbsExec (unsafeTExpCoerce (return (VarE v)))) <$> qvs
+
+generateBindings :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> DMap MVar (QAbsExec s o a) -> Ctx s o a -> [IMVar] -> Q [Dec]
+generateBindings bindings names ctx = traverse makeDecl
+  where
+    makeDecl :: IMVar -> Q Dec
+    makeDecl v = 
+      do let LetBinding k = bindings DMap.! MVar v
+         let QAbsExec qname = names DMap.! MVar v
+         body <- unTypeQ [|| \(!ret) (!o#) h -> $$(run (readyExec k) (Γ QNil [||ret||] [||$$box o#||] [[||h||]]) ctx) ||]
+         VarE name <- unTypeQ qname
+         return (FunD name [Clause [] (NormalB body) []])
+
+topLevel :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> Ctx s o a -> [IMVar] -> Exec s o '[] Void a -> Γ s o '[] Void a -> Code (ST s (Maybe a))
+topLevel bindings ctx topo start γ = unsafeTExpCoerce $
+  do names <- mapNames bindings
+     let ctx' = ctx {μs = names}
+     decls <- generateBindings bindings names ctx' topo
+     exp   <- unTypeQ (run start γ ctx')
+     return (LetE decls exp)
+
+-- END NEW CODE
 
 readyExec :: (?ops :: InputOps s o, Ops o) => Free3 (M o) Void3 xs r a -> Exec s o xs r a
 readyExec = fold3 absurd (Exec . alg)
@@ -496,10 +526,10 @@ instance RecBuilder _o where                                                    
 inputInstances(deriveRecBuilder)
 
 correctAnyMissingDependencies :: (?ops :: InputOps s o, RecBuilder o)
-                              => (Ctx s o a -> Except MissingDependency (Code (ST s (Maybe a))))
+                              => (Ctx s o a -> Code (ST s (Maybe a)))
                               -> Ctx s o a -> Code (ST s (Maybe a))
 correctAnyMissingDependencies body ctx =
-  let repair ctx = liftIO $ catch (runQ $ runOrThrow (body ctx)) (runQ . emergencyBind ctx repair)
+  let repair ctx = liftIO $ catch (runQ $ body ctx) (runQ . emergencyBind ctx repair)
   in repair ctx
 
 emergencyBind :: (?ops :: InputOps s o, RecBuilder o) => Ctx s o a
@@ -537,12 +567,12 @@ instance KOps _o where                                                          
 };
 inputInstances(deriveKOps)
 
-askM :: (MonadError MissingDependency m, MonadReader (Ctx s o a) m) => MVar x -> m (QAbsExec s o a x)
+askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
 askM μ = trace ("fetching " ++ show μ) $ do
   mexec <- asks (((DMap.lookup μ) . μs))
   case mexec of
     Just exec -> return $! exec
-    Nothing   -> throwError (missingDependency μ)
+    Nothing   -> throw (missingDependency μ)
 
 askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (QSTRef s x)
 askΣ σ = trace ("fetching " ++ show σ) $ do

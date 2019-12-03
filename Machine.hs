@@ -60,6 +60,13 @@ type ΦDecl k x xs r a = (ΦVar x, k (x ': xs) r a)
 newtype LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a)
 instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
+data Defunc a where
+  APP     :: Defunc ((a -> b) -> a -> b)
+  RAPP    :: Defunc (a -> (a -> b) -> b)
+  ID      :: Defunc (a -> a)
+  FLIP_H  :: Defunc (a -> b -> c) -> Defunc (b -> a -> c)
+  COMPOSE :: Defunc ((b -> c) -> (a -> b) -> (a -> c))
+
 data M o k xs r a where
   Halt      :: M o k '[a] Void a
   Ret       :: M o k '[x] x a

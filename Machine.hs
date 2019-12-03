@@ -172,15 +172,21 @@ class FailureOps o => ChainHandler o where
 class FailureOps o => LogHandler o where
   logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> Code (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 
+#define NO_EMERGENCY_BINDINGS 
+
 exec :: Ops o => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding o a), [IMVar]) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
   do let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
      $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
-        {-in readyCalls topo (readyExec m)
+        in 
+#ifdef NO_EMERGENCY_BINDINGS
+           topLevel ms
+#else
+           readyCalls
+#endif
+             topo (readyExec m)
              (Γ QNil [||noreturn||] [||offset||] [])
-             (Ctx DMap.empty DMap.empty DMap.empty Map.empty (partiallyEvaluateLets ms) 0 0))-}
-        in topLevel ms (Ctx DMap.empty DMap.empty DMap.empty Map.empty (partiallyEvaluateLets ms) 0 0) topo (readyExec m)
-             (Γ QNil [||noreturn||] [||offset||] []))
+             (Ctx DMap.empty DMap.empty DMap.empty Map.empty (partiallyEvaluateLets ms) 0 0))
   ||]
 
 missingDependency :: MVar x -> MissingDependency
@@ -208,8 +214,8 @@ mapNames :: DMap MVar (LetBinding o a) -> Q (DMap MVar (QAbsExec s o a))
 mapNames = DMap.foldrWithKey generate (return DMap.empty)
   where
     generate μ binding qvs = 
-      do v <- newName (nameLet binding)
-         DMap.insert μ (QAbsExec (unsafeTExpCoerce (return (VarE v)))) <$> qvs
+      do v <- VarE <$> newName (nameLet binding)
+         DMap.insert μ (QAbsExec (unsafeTExpCoerce (return v))) <$> qvs
 
 generateBindings :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> DMap MVar (QAbsExec s o a) -> Ctx s o a -> [IMVar] -> Q [Dec]
 generateBindings bindings names ctx = traverse makeDecl
@@ -222,13 +228,11 @@ generateBindings bindings names ctx = traverse makeDecl
          VarE name <- unTypeQ qname
          return (FunD name [Clause [] (NormalB body) []])
 
-topLevel :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> Ctx s o a -> [IMVar] -> Exec s o '[] Void a -> Γ s o '[] Void a -> Code (ST s (Maybe a))
-topLevel bindings ctx topo start γ = unsafeTExpCoerce $
+topLevel :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> [IMVar] -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> Code (ST s (Maybe a))
+topLevel bindings topo start γ ctx = unsafeTExpCoerce $
   do names <- mapNames bindings
      let ctx' = ctx {μs = names}
-     decls <- generateBindings bindings names ctx' topo
-     exp   <- unTypeQ (run start γ ctx')
-     return (LetE decls exp)
+     LetE <$> generateBindings bindings names ctx' topo <*> unTypeQ (run start γ ctx')
 
 -- END NEW CODE
 

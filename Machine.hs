@@ -16,13 +16,15 @@
              ConstraintKinds,
              CPP,
              ImplicitParams,
-             TypeFamilies #-}
+             TypeFamilies,
+             PatternSynonyms #-}
 module Machine where
 
 import MachineOps
 import Input                 (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString)
 import Indexed               (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
-import Utils                 (WQ(..), code, (>*<), Code)
+import Utils                 (WQ(..), Code)
+import Defunc                (Defunc(APP), genDefunc2, genDefunc, pattern FLIP_H)
 import Data.Word             (Word64)
 import Control.Monad         (forM, join)
 import Control.Monad.ST      (ST)
@@ -60,19 +62,12 @@ type ΦDecl k x xs r a = (ΦVar x, k (x ': xs) r a)
 newtype LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a)
 instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
-data Defunc a where
-  APP     :: Defunc ((a -> b) -> a -> b)
-  RAPP    :: Defunc (a -> (a -> b) -> b)
-  ID      :: Defunc (a -> a)
-  FLIP_H  :: Defunc (a -> b -> c) -> Defunc (b -> a -> c)
-  COMPOSE :: Defunc ((b -> c) -> (a -> b) -> (a -> c))
-
 data M o k xs r a where
   Halt      :: M o k '[a] Void a
   Ret       :: M o k '[x] x a
   Push      :: WQ x -> k (x ': xs) r a -> M o k xs r a
   Pop       :: k xs r a -> M o k (x ': xs) r a
-  Lift2     :: WQ (x -> y -> z) -> k (z ': xs) r a -> M o k (y ': x ': xs) r a
+  Lift2     :: Defunc (x -> y -> z) -> k (z ': xs) r a -> M o k (y ': x ': xs) r a
   Sat       :: WQ (Char -> Bool) -> k (Char ': xs) r a -> M o k xs r a
   Call      :: MVar x -> k (x ': xs) r a -> M o k xs r a
   Jump      :: MVar x -> M o k '[] x a
@@ -96,10 +91,10 @@ data M o k xs r a where
   LogExit   :: String -> k xs r a -> M o k xs r a
 
 _App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs) r a
-_App !m = Lift2 (code ($)) m
+_App !m = Lift2 APP m
 
 _Fmap :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': xs) r a
-_Fmap !f !m = Push f (Op3 (Lift2 ([flip (code ($))]) m))  -- FIXME
+_Fmap !f !m = Push f (Op3 (Lift2 (FLIP_H APP) m))  -- FIXME
 
 _Modify :: ΣVar x -> Free3 (M o) f xs r a -> M o (Free3 (M o) f) ((x -> x) ': xs) r a
 _Modify !σ !m = Get σ (Op3 (_App (Op3 (Put σ m))))
@@ -263,8 +258,8 @@ execPush x (Exec k) = fmap (\m γ -> m (γ {xs = QCons (_code x) (xs γ)})) k
 execPop :: Exec s o xs r a -> ExecMonad s o (x ': xs) r a
 execPop (Exec k) = fmap (\m γ -> m (γ {xs = tailQ (xs γ)})) k
 
-execLift2 :: WQ (x -> y -> z) -> Exec s o (z ': xs) r a -> ExecMonad s o (y ': x ': xs) r a
-execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons [||$$(_code f) $$x $$y||] xs'})) k
+execLift2 :: Defunc (x -> y -> z) -> Exec s o (z ': xs) r a -> ExecMonad s o (y ': x ': xs) r a
+execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefunc2 f x y) xs'})) k
 
 execSat :: (?ops :: InputOps s o, FailureOps o) => WQ (Char -> Bool) -> Exec s o (Char ': xs) r a -> ExecMonad s o xs r a
 execSat p (Exec k) =
@@ -606,7 +601,7 @@ instance Show (Free3 (M o) f xs ks a) where
     alg (Jump μ)                              = "(Jump " ++ show μ ++ ")"
     alg (Push _ k)                            = "(Push x " ++ getConst3 k ++ ")"
     alg (Pop k)                               = "(Pop " ++ getConst3 k ++ ")"
-    alg (Lift2 _ k)                           = "(Lift2 f " ++ getConst3 k ++ ")"
+    alg (Lift2 f k)                           = "(Lift2 " ++ show f ++ " " ++ getConst3 k ++ ")"
     alg (Sat _ k)                             = "(Sat f " ++ getConst3 k ++ ")"
     alg Empt                                  = "Empt"
     alg (Commit True k)                       = "(Commit end " ++ getConst3 k ++ ")"

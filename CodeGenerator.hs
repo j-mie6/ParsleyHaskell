@@ -13,6 +13,7 @@ import ParserAST                  (ParserF(..))
 import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, _Fmap, _App, _Modify)
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
 import Utils                      (code, (>*<), WQ(..))
+import Defunc                     (Defunc(BLACK))
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict (State, get, modify', runState, MonadState)
@@ -54,7 +55,7 @@ pattern TryOrElse n p q <- Era _ (Try n (Era p _)) :<|>: Era q _
 peephole :: ParserF (History ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (Op3 (_Fmap f m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
-  do qc <- runCodeGen q (Op3 (Lift2 f m))
+  do qc <- runCodeGen q (Op3 (Lift2 (BLACK f) m))
      runCodeGen p qc
 peephole (TryOrElse n p q) = Just $ CodeGen $ \m ->
   do (decl, φ) <- makeΦ m

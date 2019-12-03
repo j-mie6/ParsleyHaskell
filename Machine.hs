@@ -172,7 +172,7 @@ class FailureOps o => ChainHandler o where
 class FailureOps o => LogHandler o where
   logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> Code (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 
-#define NO_EMERGENCY_BINDINGS 
+-- #define NO_EMERGENCY_BINDINGS 
 
 exec :: Ops o => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding o a), [IMVar]) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||

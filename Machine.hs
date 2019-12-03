@@ -91,7 +91,7 @@ _App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs)
 _App !m = Lift2 (code ($)) m
 
 _Fmap :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': xs) r a
-_Fmap !f !m = Push f (Op3 (Lift2 ([flip (code ($))]) m))  -- FIXME
+_Fmap !f !m = Push f (Op3 (Lift2 ([flip (code ($))]) m))
 
 _Modify :: ΣVar x -> Free3 (M o) f xs r a -> M o (Free3 (M o) f) ((x -> x) ': xs) r a
 _Modify !σ !m = Get σ (Op3 (_App (Op3 (Put σ m))))

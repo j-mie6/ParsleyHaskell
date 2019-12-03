@@ -97,7 +97,7 @@ direct (Let _ !μ _) m = return $! tailCallOptimise μ m
 direct (ChainPre op p) m =
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (Op3 (_Fmap (code flip >*< code (.)) (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))))
+     opc <- freshM (runCodeGen op (Op3 (_Fmap ([flip (code (.))]) (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))))
      pc <- freshM (runCodeGen p (Op3 (_App m)))
      return $! Op3 (Push (code id) (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ pc)))))))
 direct (ChainPost p op) m =

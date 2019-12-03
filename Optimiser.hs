@@ -38,7 +38,7 @@ optimise (Match p _ qs (Op Empty))
   | all (\case {Op Empty -> True; _ -> False}) qs = optimise (p :*>: Op Empty)
 -- APPLICATIVE OPTIMISATION
 -- Homomorphism Law: pure f <*> pure x                  = pure (f x)
-optimise (Op (Pure f) :<*>: Op (Pure x))                = Op (Pure ([f $ x])) -- FIXME
+optimise (Op (Pure f) :<*>: Op (Pure x))                = Op (Pure ([f $ x]))
 -- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law
 -- Functor Composition Law: f <$> (g <$> p)             = (f . g) <$> p
 optimise (f :<$>: Op (g :<$>: p))                       = optimise (([f . g]) :<$>: p)
@@ -47,7 +47,7 @@ optimise (u :<*>: Op (v :<*>: w))                       = optimise (optimise (op
 -- Reassociation Law 1: (u *> v) <*> w                  = u *> (v <*> w)
 optimise (Op (u :*>: v) :<*>: w)                        = optimise (u :*>: (optimise (v :<*>: w)))
 -- Interchange Law: u <*> pure x                        = pure ($ x) <*> u
-optimise (u :<*>: Op (Pure x))                          = optimise (([flip (code ($)) x]) :<$>: u)  -- FIXME
+optimise (u :<*>: Op (Pure x))                          = optimise (([flip (code ($)) x]) :<$>: u)
 -- Right Absorption Law: (f <$> p) *> q                 = p *> q
 optimise (Op (f :<$>: p) :*>: q)                        = Op (p :*>: q)
 -- Left Absorption Law: p <* (f <$> q)                  = p <* q
@@ -133,7 +133,7 @@ optimise (Branch b (Op (Pure f)) (Op (Pure g)))         = optimise (([either f g
 -- Interchange law: branch (x *> y) p q                 = x *> branch y p q
 optimise (Branch (Op (x :*>: y)) p q)                   = optimise (x :*>: optimise (Branch y p q))
 -- Negated Branch law: branch b p empty                 = branch (swapEither <$> b) empty p
-optimise (Branch b p (Op Empty))                        = Op (Branch (Op (Op (Pure ([either (code Right) (code Left)])) :<*>: b)) (Op Empty) p)  -- FIXME
+optimise (Branch b p (Op Empty))                        = Op (Branch (Op (Op (Pure ([either (code Right) (code Left)])) :<*>: b)) (Op Empty) p)
 -- Branch Fusion law: branch (branch b empty (pure f)) empty k                  = branch (g <$> b) empty k where g is a monad transforming (>>= f)
 optimise (Branch (Op (Branch b (Op Empty) (Op (Pure (WQ f qf))))) (Op Empty) k) = optimise (Branch (optimise (Op (Pure (WQ g qg)) :<*>: b)) (Op Empty) k)
   where

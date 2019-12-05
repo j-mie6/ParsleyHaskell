@@ -17,20 +17,28 @@ pattern FLIP_H :: () => ((x -> y) ~ ((a -> b -> c) -> b -> a -> c)) => Defunc x 
 pattern FLIP_H f      = APP_H FLIP f
 
 genDefunc :: Defunc a -> Code a
-genDefunc APP             = [|| ($) ||]
-genDefunc COMPOSE         = [|| (.) ||]
-genDefunc FLIP            = [|| flip ||]
-genDefunc (COMPOSE_H f g) = genDefunc2 COMPOSE (genDefunc f) (genDefunc g)
-genDefunc (FLIP_H f)      = [|| \x y -> $$(genDefunc f) y x ||]
+genDefunc APP             = [|| \f x -> f x ||]
+genDefunc COMPOSE         = [|| \f g x -> f (g x) ||]
+genDefunc FLIP            = [|| \f x y -> f y x ||]
+genDefunc (COMPOSE_H f g) = [|| \x -> $$(genDefunc1 (COMPOSE_H f g) [||x||]) ||]
+genDefunc (FLIP_H f)      = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
 genDefunc (APP_H f x)     = genDefunc2 APP (genDefunc f) (genDefunc x)
 genDefunc (BLACK f)       = _code f
 
-genDefunc2 :: Defunc (x -> y -> z) -> Code x -> Code y -> Code z
-genDefunc2 APP qf qx        = [|| $$qf $$qx ||]
-genDefunc2 COMPOSE qf qg    = [|| \x -> $$qf ($$qg x) ||]
-genDefunc2 FLIP qf qx       = [|| \y -> $$qf y $$qx ||]
+genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
+genDefunc1 APP             qf = [|| \x -> $$qf x ||]
+genDefunc1 COMPOSE         qf = [|| \g x -> $$qf (g x) ||]
+genDefunc1 FLIP            qf = [|| \x y -> $$qf y x ||]
+genDefunc1 (COMPOSE_H f g) qx = [|| $$(genDefunc1 f (genDefunc1 g qx)) ||]
+genDefunc1 (FLIP_H f)      qx = [|| \y -> $$(genDefunc2 (FLIP_H f) qx [||y||]) ||]
+genDefunc1 f               qx = [|| $$(genDefunc f) $$qx ||]
+
+genDefunc2 :: Defunc (a -> b -> c) -> Code a -> Code b -> Code c
+genDefunc2 APP        qf qx = [|| $$qf $$qx ||]
+genDefunc2 COMPOSE    qf qg = [|| \x -> $$qf ($$qg x) ||]
+genDefunc2 FLIP       qf qx = [|| \y -> $$qf y $$qx ||]
 genDefunc2 (FLIP_H f) qx qy = genDefunc2 f qy qx
-genDefunc2 f qx qy          = [|| $$(genDefunc f) $$qx $$qy ||]
+genDefunc2 f          qx qy = [|| $$(genDefunc f) $$qx $$qy ||]
 
 instance Show (Defunc a) where
   show APP = "($)"

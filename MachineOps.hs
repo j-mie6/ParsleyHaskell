@@ -101,20 +101,14 @@ class FailureOps o where
   setupHandler :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code o
                -> Code (H s o a -> Unboxed o -> Unboxed o -> ST s (Maybe a)) 
                -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
-  raise :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code (o -> ST s (Maybe a))
+  raise :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code (Unboxed o -> ST s (Maybe a))
 
-#define deriveFailureOps(_o)                                   \
-instance FailureOps _o where                                   \
-{                                                              \
-  setupHandler hs !o !h !k =                                   \
-    let h' = case hs of                                        \
-    {                                                          \
-      h':_ -> h';                                              \
-      [] -> [||\o# -> return Nothing :: ST s (Maybe a)||]      \
-    }                                                          \
-    in k ([||\(!o#) -> $$h $$h' o# ($$unbox $$o)||]:hs); \
-  raise [] = [||\(!o) -> return Nothing||];                    \
-  raise (h:_) = [||\(!o) -> $$h ($$unbox o)||];                \
+#define deriveFailureOps(_o)                                           \
+instance FailureOps _o where                                           \
+{                                                                      \
+  setupHandler hs o h k = k ([||$$h $$(raise hs) ($$unbox $$o)||]:hs); \
+  raise [] = [||\(!o#) -> return Nothing :: ST s (Maybe a)||];         \
+  raise (h:_) = h;                                                     \
 };
 inputInstances(deriveFailureOps)
 
@@ -128,16 +122,8 @@ inputInstances(deriveFailureOps)
             ||]
         |] in traverse derive inputTypes)-}
 
-class ConcreteExec o where
-  runConcrete :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code (AbsExec s o a x -> (x -> Unboxed o -> ST s (Maybe a)) -> o -> ST s (Maybe a))
-
-#define deriveConcreteExec(_o)                                                    \
-instance ConcreteExec _o where                                                    \
-{                                                                                 \
-  runConcrete []    = [||\m ret o -> m ret ($$unbox o) $! \o# -> return Nothing||]; \
-  runConcrete (h:_) = [||\m ret o -> m ret ($$unbox o) $! $$h||]                    \
-};
-inputInstances(deriveConcreteExec)
+runConcrete :: (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
+runConcrete hs m ret o = [||$$m $$ret ($$unbox $$o) $! $$(raise hs)||]
 
 nextSafe :: (?ops :: InputOps s o) => Bool -> Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
 nextSafe True o p good bad = [|| let !(# c, o' #) = $$next $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]

@@ -97,18 +97,19 @@ modifyΣ σ f =
   do !x <- readΣ σ
      writeΣ σ (f $! x)
 
+setupHandler :: (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code o
+             -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
+             -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+setupHandler hs o h k = k ((h (raise hs) o):hs)
+
 class FailureOps o where
-  setupHandler :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code o
-               -> Code (H s o a -> Unboxed o -> Unboxed o -> ST s (Maybe a)) 
-               -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
   raise :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code (Unboxed o -> ST s (Maybe a))
 
-#define deriveFailureOps(_o)                                           \
-instance FailureOps _o where                                           \
-{                                                                      \
-  setupHandler hs o h k = k ([||$$h $$(raise hs) ($$unbox $$o)||]:hs); \
-  raise [] = [||\(!o#) -> return Nothing :: ST s (Maybe a)||];         \
-  raise (h:_) = h;                                                     \
+#define deriveFailureOps(_o)                                       \
+instance FailureOps _o where                                       \
+{                                                                  \
+  raise [] = [||\(!o#) -> return Nothing :: ST s (Maybe a)||];     \
+  raise (h:_) = h;                                                 \
 };
 inputInstances(deriveFailureOps)
 

@@ -17,7 +17,7 @@ import Utils              (Code)
 import Control.Monad.ST   (ST)
 import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.STRef.Unboxed (STRefU)
-import GHC.Exts           (TYPE)
+import GHC.Exts           (TYPE, type (~~))
 import Safe.Coerce        (coerce)
 import Input              (Rep, Unboxed, OffWith, UnpackedLazyByteString)
 import Data.Text          (Text)
@@ -100,6 +100,7 @@ modifyΣ σ f =
 setupHandler :: (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code o
              -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
              -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+--setupHandler hs o h k = [|| let handler = $$(h (raise hs) o) in $$(k ([||handler||]:hs)) ||]
 setupHandler hs o h k = k ((h (raise hs) o):hs)
 
 class FailureOps o where

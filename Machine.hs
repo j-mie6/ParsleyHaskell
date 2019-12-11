@@ -20,7 +20,7 @@
 module Machine where
 
 import MachineOps
-import Input                 (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString)
+import Input                 (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Indexed               (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
 import Utils                 (WQ(..), code, (>*<), Code)
 import Data.Word             (Word64)
@@ -48,7 +48,8 @@ import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, fo
 
 #define inputInstances(derivation) \
 derivation(Int)                    \
-derivation((OffWith s))            \
+derivation((OffWith [Char]))       \
+derivation((OffWith Stream))       \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
 

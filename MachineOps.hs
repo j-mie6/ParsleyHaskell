@@ -10,7 +10,9 @@
              TypeSynonymInstances,
              RankNTypes,
              CPP,
-             ImplicitParams #-}
+             ImplicitParams,
+             ScopedTypeVariables,
+             FlexibleInstances #-}
 module MachineOps where
 
 import Utils              (Code)
@@ -19,13 +21,14 @@ import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.STRef.Unboxed (STRefU)
 import GHC.Exts           (TYPE, type (~~))
 import Safe.Coerce        (coerce)
-import Input              (Rep, Unboxed, OffWith, UnpackedLazyByteString)
+import Input              (Rep, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Data.Text          (Text)
 import Data.Void          (Void)
 
 #define inputInstances(derivation) \
 derivation(Int)                    \
-derivation((OffWith s))            \
+derivation((OffWith [Char]))       \
+derivation((OffWith Stream))       \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
 
@@ -97,20 +100,27 @@ modifyΣ σ f =
   do !x <- readΣ σ
      writeΣ σ (f $! x)
 
-setupHandler :: (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code o
+{-setupHandler :: (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code o
              -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
              -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
---setupHandler hs o h k = [|| let handler = $$(h (raise hs) o) in $$(k ([||handler||]:hs)) ||]
-setupHandler hs o h k = k ((h (raise hs) o):hs)
+setupHandler hs o h k = [|| let handler = $$(h (raise hs) o) in $$(k ([||handler||]:hs)) ||]-}
+--setupHandler hs o h k = k ((h (raise hs) o):hs)
 
 class FailureOps o where
+  setupHandler :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code o
+               -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
+               -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
   raise :: (?ops :: InputOps s o) => [Code (H s o a)] -> Code (Unboxed o -> ST s (Maybe a))
 
-#define deriveFailureOps(_o)                                       \
-instance FailureOps _o where                                       \
-{                                                                  \
-  raise [] = [||\(!o#) -> return Nothing :: ST s (Maybe a)||];     \
-  raise (h:_) = h;                                                 \
+#define deriveFailureOps(_o)                                   \
+instance FailureOps _o where                                   \
+{                                                              \
+  setupHandler [] o h k = k [h (raise []) o];                  \
+  setupHandler hs o h k = [||                                  \
+    let handler ((!o#) :: Unboxed _o) = $$(h (raise hs) o) o#  \
+    in $$(k ([||handler||]:hs)) ||];                           \
+  raise [] = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]; \
+  raise (h:_) = h;                                             \
 };
 inputInstances(deriveFailureOps)
 

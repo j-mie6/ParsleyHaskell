@@ -49,7 +49,7 @@ main =
 as :: Data.ByteString.Lazy.ByteString -> Maybe ()
 as = $$(Parsley.runParser (Parsley.skipMany (Parsley.char 'a') Parsley.<* Parsley.eof))
 
-streams :: Data.ByteString.Lazy.ByteString -> Maybe String
+streams :: String -> Maybe String
 streams = $$(Parsley.runParser (Parsley.token "abc" Parsley.<* Parsley.eof))
 
 -- Tail Recursion Benchmark

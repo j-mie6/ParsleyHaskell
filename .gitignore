@@ -11,3 +11,4 @@ log
 .ghc.environment*
 benchmarks/Benchmarks
 hie.*
+sync.py

@@ -170,13 +170,13 @@ class FailureOps o => ChainHandler o where
 class FailureOps o => LogHandler o where
   logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> Code (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 
-exec :: Ops o => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding o a), [IMVar]) -> Code (ST s (Maybe a))
-exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
+exec :: Ops o => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding o a)) -> Code (ST s (Maybe a))
+exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
   do let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
      $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||] 
         in scopeBindings ms
              nameLet
-             (QAbsExec . unsafeTExpCoerce)
+             QAbsExec
              (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyExec k))
              (\names -> run (readyExec m) (Γ QNil [||noreturn||] [||offset||] []) (emptyCtx {μs = names})))
   ||]
@@ -188,37 +188,27 @@ dependencyOf (MissingDependency v) = MVar v
 outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
 outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 
--- BEGIN NEW CODE
-
 nameLet :: LetBinding o a x -> String
 nameLet _ = "rec"
 
-scopeBindings :: forall s o a b key named. GCompare key => DMap key named
-                                          -> (forall a. named a -> String)
-                                          -> (forall x. Q Exp -> QAbsExec s o a x)
-                                          -> (forall x. named x -> DMap key (QAbsExec s o a) -> Code ((x -> Unboxed o -> ST s (Maybe a))
-                                                                         -> Unboxed o -> (Unboxed o -> ST s (Maybe a)) -> ST s (Maybe a)))
-                                          -> (DMap key (QAbsExec s o a) -> Code b)
-                                          -> Code b
+scopeBindings :: GCompare key => DMap key named
+                              -> (forall a. named a -> String)
+                              -> (forall x. Code ((x -> y) -> z) -> q x)
+                              -> (forall x. named x -> DMap key q -> Code ((x -> y) -> z))
+                              -> (DMap key q -> Code a)
+                              -> Code a
 scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
   do names <- makeNames bindings
      LetE <$> generateBindings names bindings <*> unTypeQ (scoped (package names))
   where
-    package = DMap.map (wrap . return . VarE . getConst)
-
-    makeNames :: DMap key named -> Q (DMap key (Const Name))
+    package = DMap.map (wrap . unsafeTExpCoerce . return . VarE . getConst)
     makeNames = DMap.traverseWithKey (\_ v -> Const <$> newName (nameOf v))
-
-    generateBindings :: DMap key (Const Name) -> DMap key named -> Q [Dec]
     generateBindings names = traverse makeDecl . DMap.toList
       where
-        makeDecl :: DSum key named -> Q Dec
         makeDecl (k :=> v) = 
           do let Const name = names DMap.! k
              body <- unTypeQ (letBuilder v (package names))
              return (FunD name [Clause [] (NormalB body) []])
-
--- END NEW CODE
 
 readyExec :: (?ops :: InputOps s o, Ops o) => Free3 (M o) Void3 xs r a -> Exec s o xs r a
 readyExec = fold3 absurd (Exec . alg)

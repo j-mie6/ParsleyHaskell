@@ -125,25 +125,17 @@ letInsertion lets recs p = (p', μs, μMax)
       let name = tag p
       let q = tagged p
       (vs, μs) <- get
-      if | HashSet.member name recs ->
-             case HashMap.lookup name vs of
-               Just v  -> let μ = MVar v in return $! Op (Let True μ (μs DMap.! μ))
-               Nothing -> mdo
-                 v <- newVar
-                 let μ = MVar v
-                 put (HashMap.insert name v vs, DMap.insert μ q' μs)
-                 q' <- runLetInserter (postprocess q)
-                 return $! Op (Let True μ q')
-         | HashSet.member name lets ->
-             case HashMap.lookup name vs of
-               Just v  -> let μ = MVar v in return $! optimise (Let False μ (μs DMap.! μ))
-               Nothing -> mdo -- no mdo here, let bindings are not recursive! (well, actually, I want to do the put before the recursion soooo....)
-                 v <- newVar
-                 let μ = MVar v
-                 put (HashMap.insert name v vs, DMap.insert μ q' μs)
-                 q' <- runLetInserter (postprocess q)
-                 return $! optimise (Let False μ q')
-         | otherwise -> do runLetInserter (postprocess q)
+      let bound = HashSet.member name lets
+      let recu = HashSet.member name recs
+      if bound || recu then case HashMap.lookup name vs of
+        Just v  -> let μ = MVar v in return $! Op (Let recu μ (μs DMap.! μ))
+        Nothing -> mdo
+          v <- newVar
+          let μ = MVar v
+          put (HashMap.insert name v vs, DMap.insert μ q' μs)
+          q' <- runLetInserter (postprocess q)
+          return $! Op (Let recu μ q')
+      else do runLetInserter (postprocess q)
 
 postprocess :: ParserF LetInserter a -> LetInserter a
 postprocess (pf :<*>: px)       = LetInserter (fmap optimise (liftA2 (:<*>:) (runLetInserter pf) (runLetInserter px)))

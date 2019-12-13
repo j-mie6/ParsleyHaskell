@@ -24,26 +24,26 @@ import Input                      (PreparedInput(..), Rep, Unboxed, OffWith, Unp
 import Indexed                    (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, absurd, fold3)
 import Utils                      (WQ(..), code, (>*<), Code)
 import Data.Word                  (Word64)
-import Control.Monad              (forM, join)
+import Control.Monad              (forM, join, liftM2)
 import Control.Monad.ST           (ST)
 import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadReader)
-import Control.Monad.Trans        (liftIO)
-import Control.Exception          (Exception, throw, throwIO, catch)
+import Control.Exception          (Exception, throw)
 import Data.STRef                 (STRef)
 import Data.STRef.Unboxed         (STRefU)
 import Data.Map.Strict            (Map)
-import Data.Dependent.Map         (DMap)
+import Data.Dependent.Map         (DMap, DSum(..))
 import Data.GADT.Compare          (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 import Safe.Coerce                (coerce)
 import Debug.Trace                (trace)
 import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
 import Data.Text                  (Text)
 import Data.Void                  (Void)
+import Data.Functor.Const         (Const(..), getConst)
 import Data.List                  (intercalate)
-import Language.Haskell.TH        (runQ, Q, newName)
+import Language.Haskell.TH        (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
-import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, foldrWithKey)
+import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, toList, traverseWithKey)
 
 #define inputInstances(derivation) \
 derivation(Int)                    \
@@ -120,9 +120,10 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
                      , stcs       :: Map IΣVar (QORef s)
-                     , _partials  :: DMap MVar (PartialEval s o a)
                      , constCount :: Int
                      , debugLevel :: Int }
+emptyCtx :: Ctx s o a
+emptyCtx = Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0
 
 insertM :: MVar x -> Code (AbsExec s o a x) -> Ctx s o a -> Ctx s o a
 insertM μ q ctx = ctx {μs = DMap.insert μ (QAbsExec q) (μs ctx)}
@@ -148,9 +149,6 @@ debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
 debugDown :: Ctx s o a -> Ctx s o a
 debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
-partials :: MVar x -> Γ s o '[] x a -> Ctx s o a -> Code (ST s (Maybe a))
-partials μ γ ctx = let !(PartialEval k) = (_partials ctx) DMap.! (trace ("executing let-binding " ++ show μ) μ) in k ctx γ
-
 newtype MissingDependency = MissingDependency IMVar
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
 type ExecMonad s o xs r a = Reader (Ctx s o a) (Γ s o xs r a -> Code (ST s (Maybe a)))
@@ -172,21 +170,15 @@ class FailureOps o => ChainHandler o where
 class FailureOps o => LogHandler o where
   logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> Code (H s o a  -> Unboxed o -> Unboxed o -> ST s (Maybe a))
 
--- #define NO_EMERGENCY_BINDINGS 
-
 exec :: Ops o => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding o a), [IMVar]) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms, topo) = trace ("EXECUTING: " ++ show m) [||
   do let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
-     $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
-        in 
-#ifdef NO_EMERGENCY_BINDINGS
-           topLevel ms
-#else
-           readyCalls
-#endif
-             topo (readyExec m)
-             (Γ QNil [||noreturn||] [||offset||] [])
-             (Ctx DMap.empty DMap.empty DMap.empty Map.empty (partiallyEvaluateLets ms) 0 0))
+     $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||] 
+        in scopeBindings ms
+             nameLet
+             (QAbsExec . unsafeTExpCoerce)
+             (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyExec k))
+             (\names -> run (readyExec m) (Γ QNil [||noreturn||] [||offset||] []) (emptyCtx {μs = names})))
   ||]
 
 missingDependency :: MVar x -> MissingDependency
@@ -196,43 +188,35 @@ dependencyOf (MissingDependency v) = MVar v
 outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
 outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 
-newtype PartialEval s o a x = PartialEval (Ctx s o a -> Γ s o '[] x a -> Code (ST s (Maybe a)))
-partiallyEvaluateLets :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> DMap MVar (PartialEval s o a)
-partiallyEvaluateLets = DMap.map (\(LetBinding k) -> PartialEval (runReader (unExec (readyExec k))))
-
-readyCalls :: (?ops :: InputOps s o, Ops o) => [IMVar] -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> Code (ST s (Maybe a))
-readyCalls topo start γ ctx = foldr readyFunc (run start γ) (trace (show topo) topo) ctx
-  where
-    readyFunc v rest ctx = buildRec ctx (MVar v) rest
-
 -- BEGIN NEW CODE
 
 nameLet :: LetBinding o a x -> String
 nameLet _ = "rec"
 
-mapNames :: DMap MVar (LetBinding o a) -> Q (DMap MVar (QAbsExec s o a))
-mapNames = DMap.foldrWithKey generate (return DMap.empty)
+scopeBindings :: forall s o a b key named. GCompare key => DMap key named
+                                          -> (forall a. named a -> String)
+                                          -> (forall x. Q Exp -> QAbsExec s o a x)
+                                          -> (forall x. named x -> DMap key (QAbsExec s o a) -> Code ((x -> Unboxed o -> ST s (Maybe a))
+                                                                         -> Unboxed o -> (Unboxed o -> ST s (Maybe a)) -> ST s (Maybe a)))
+                                          -> (DMap key (QAbsExec s o a) -> Code b)
+                                          -> Code b
+scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
+  do names <- makeNames bindings
+     LetE <$> generateBindings names bindings <*> unTypeQ (scoped (package names))
   where
-    generate μ binding qvs = 
-      do v <- VarE <$> newName (nameLet binding)
-         DMap.insert μ (QAbsExec (unsafeTExpCoerce (return v))) <$> qvs
+    package = DMap.map (wrap . return . VarE . getConst)
 
-generateBindings :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> DMap MVar (QAbsExec s o a) -> Ctx s o a -> [IMVar] -> Q [Dec]
-generateBindings bindings names ctx = traverse makeDecl
-  where
-    makeDecl :: IMVar -> Q Dec
-    makeDecl v = 
-      do let LetBinding k = bindings DMap.! MVar v
-         let QAbsExec qname = names DMap.! MVar v
-         body <- unTypeQ [|| \(!ret) (!o#) h -> $$(run (readyExec k) (Γ QNil [||ret||] [||$$box o#||] [[||h||]]) ctx) ||]
-         VarE name <- unTypeQ qname
-         return (FunD name [Clause [] (NormalB body) []])
+    makeNames :: DMap key named -> Q (DMap key (Const Name))
+    makeNames = DMap.traverseWithKey (\_ v -> Const <$> newName (nameOf v))
 
-topLevel :: (?ops :: InputOps s o, Ops o) => DMap MVar (LetBinding o a) -> [IMVar] -> Exec s o '[] Void a -> Γ s o '[] Void a -> Ctx s o a -> Code (ST s (Maybe a))
-topLevel bindings topo start γ ctx = unsafeTExpCoerce $
-  do names <- mapNames bindings
-     let ctx' = ctx {μs = names}
-     LetE <$> generateBindings bindings names ctx' topo <*> unTypeQ (run start γ ctx')
+    generateBindings :: DMap key (Const Name) -> DMap key named -> Q [Dec]
+    generateBindings names = traverse makeDecl . DMap.toList
+      where
+        makeDecl :: DSum key named -> Q Dec
+        makeDecl (k :=> v) = 
+          do let Const name = names DMap.! k
+             body <- unTypeQ (letBuilder v (package names))
+             return (FunD name [Clause [] (NormalB body) []])
 
 -- END NEW CODE
 
@@ -501,48 +485,28 @@ class RecBuilder o where
   buildIter :: (?ops :: InputOps s o) => Ctx s o a -> MVar x -> ΣVar x -> Exec s o '[] x a
             -> Code (STRefU s Int)
             -> [Code (H s o a)] -> Code o -> Code (ST s (Maybe a))
-  buildRec  :: (?ops :: InputOps s o) => Ctx s o a -> MVar x
-            -> (Ctx s o a -> Code (ST s (Maybe a)))
-            -> Code (ST s (Maybe a))
+  buildRec  :: (?ops :: InputOps s o) => Ctx s o a
+            -> Exec s o '[] r a
+            -> Code ((r -> Unboxed o -> ST s (Maybe a)) -> Unboxed o 
+                                                        -> (Unboxed o -> ST s (Maybe a)) 
+                                                        -> ST s (Maybe a))
 
 #define deriveRecBuilder(_o)                                                          \
 instance RecBuilder _o where                                                          \
 {                                                                                     \
-  buildIter ctx μ σ (Exec l) cref hs o = let bx = box in [||                          \
+  buildIter ctx μ σ l cref hs o = let bx = box in [||                                 \
       do                                                                              \
       {                                                                               \
         let {loop !o# =                                                               \
           $$(let ctx' = insertSTC σ cref (insertM μ [||\_ (!o#) _ -> loop o#||] ctx); \
                  γ = Γ QNil [||noreturn||] [||$$bx o#||] hs                           \
-             in run (Exec l) γ ctx')};                                                \
+             in run l γ ctx')};                                                       \
         loop ($$unbox $$o)                                                            \
       } ||];                                                                          \
-  buildRec ctx μ k = trace ("building " ++ show μ) $                                  \
-    let bx = box                                                                      \
-    in [||                                                                            \
-        let recu !ret !o# h =                                                         \
-              $$(let ctx' = insertM μ [||recu||] ctx;                                 \
-                     body = partials μ (Γ QNil [||ret||] [||$$bx o#||] [[||h||]]);    \
-                 in correctAnyMissingDependencies body ctx')                          \
-        in $$(k (insertM μ [||recu||] ctx))                                           \
-      ||]                                                                             \
+  buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                             \
+    $$(run k (Γ QNil [||ret||] [||$$bx o#||] [[||h||]]) ctx) ||]                      \
 };
 inputInstances(deriveRecBuilder)
-
-correctAnyMissingDependencies :: (?ops :: InputOps s o, RecBuilder o)
-                              => (Ctx s o a -> Code (ST s (Maybe a)))
-                              -> Ctx s o a -> Code (ST s (Maybe a))
-correctAnyMissingDependencies body ctx =
-  let repair ctx = liftIO $ catch (runQ $ body ctx) (runQ . emergencyBind ctx repair)
-  in repair ctx
-
-emergencyBind :: (?ops :: InputOps s o, RecBuilder o) => Ctx s o a
-              -> (Ctx s o a -> Code (ST s (Maybe a)))
-              -> MissingDependency
-              -> Code (ST s (Maybe a))
-emergencyBind ctx k err =
-  let μ = dependencyOf err
-  in buildRec ctx (trace ("Emergency binding required for " ++ show μ) μ) k
 
 inputSizeCheck :: (?ops :: InputOps s o, FailureOps o) => Maybe Int -> ExecMonad s o xs r a -> ExecMonad s o xs r a
 inputSizeCheck Nothing p = p

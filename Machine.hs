@@ -16,7 +16,8 @@
              ConstraintKinds,
              CPP,
              ImplicitParams,
-             TypeFamilies #-}
+             TypeFamilies,
+             TypeApplications #-}
 module Machine where
 
 import MachineOps
@@ -38,7 +39,6 @@ import Data.GADT.Compare     (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrderi
 import Safe.Coerce           (coerce)
 import Debug.Trace           (trace)
 import System.Console.Pretty (color, Color(Green, White, Red, Blue))
---import System.IO.Unsafe      (unsafePerformIO)
 import Data.Text             (Text)
 import Data.Void             (Void)
 import Data.List             (intercalate)
@@ -437,13 +437,13 @@ execLogExit name (Exec mk) =
   do k <- local debugDown mk
      asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||]
 
-setupHandlerΓ :: (?ops :: InputOps s o, FailureOps o) => Γ s o xs r a 
+setupHandlerΓ :: FailureOps o => Γ s o xs r a 
               -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
               -> (Γ s o xs r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
 setupHandlerΓ γ h k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
 
-raiseΓ :: (?ops :: InputOps s o, FailureOps o) => Γ s o xs r a -> Code (ST s (Maybe a))
-raiseΓ γ = [|| $$(raise (hs γ)) ($$unbox $$(o γ)) ||]
+raiseΓ :: forall s o xs r a. (?ops :: InputOps s o, FailureOps o) => Γ s o xs r a -> Code (ST s (Maybe a))
+raiseΓ γ = [|| $$(raise @o (hs γ)) ($$unbox $$(o γ)) ||]
 
 class RecBuilder o => JoinBuilder o where
   setupJoinPoint :: (?ops :: InputOps s o) => Maybe (ΦDecl (Exec s o) y ys r a)

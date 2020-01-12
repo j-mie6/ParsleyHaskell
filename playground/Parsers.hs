@@ -15,6 +15,9 @@ data Asgn = Asgn String Expr deriving Show
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show
 deriving instance Lift BrainFuckOp
 
+cinput :: Parser ()
+cinput = void $ string "abcd"
+
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")
 

@@ -73,22 +73,26 @@ infixl 3 <|>
 
 -- Core datatype
 data ParserF (k :: * -> *) (a :: *) where
-    Pure          :: WQ a -> ParserF k a
-    Satisfy       :: WQ (Char -> Bool) -> ParserF k Char
-    (:<*>:)       :: k (a -> b) -> k a -> ParserF k b
-    (:*>:)        :: k a -> k b -> ParserF k b
-    (:<*:)        :: k a -> k b -> ParserF k a
-    (:<|>:)       :: k a -> k a -> ParserF k a
-    Empty         :: ParserF k a
-    Try           :: Maybe Int -> k a -> ParserF k a
-    LookAhead     :: k a -> ParserF k a
-    Let           :: Bool -> MVar a -> k a -> ParserF k a
-    NotFollowedBy :: k a -> ParserF k ()
-    Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF k c
-    Match         :: k a -> [WQ (a -> Bool)] -> [k b] -> k b -> ParserF k b
-    ChainPre      :: k (a -> a) -> k a -> ParserF k a
-    ChainPost     :: k a -> k (a -> a) -> ParserF k a
-    Debug         :: String -> k a -> ParserF k a
+  Pure          :: WQ a -> ParserF k a
+  Satisfy       :: WQ (Char -> Bool) -> ParserF k Char
+  (:<*>:)       :: k (a -> b) -> k a -> ParserF k b
+  (:*>:)        :: k a -> k b -> ParserF k b
+  (:<*:)        :: k a -> k b -> ParserF k a
+  (:<|>:)       :: k a -> k a -> ParserF k a
+  Empty         :: ParserF k a
+  Try           :: Maybe Int -> k a -> ParserF k a
+  LookAhead     :: k a -> ParserF k a
+  Let           :: Bool -> MVar a -> k a -> ParserF k a
+  NotFollowedBy :: k a -> ParserF k ()
+  Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF k c
+  Match         :: k a -> [WQ (a -> Bool)] -> [k b] -> k b -> ParserF k b
+  ChainPre      :: k (a -> a) -> k a -> ParserF k a
+  ChainPost     :: k a -> k (a -> a) -> ParserF k a
+  Debug         :: String -> k a -> ParserF k a
+  Meta          :: Meta -> k a -> ParserF k a
+
+data Meta where
+  ConstInput :: Int -> Meta
 
 -- Instances
 instance IFunctor ParserF where
@@ -108,25 +112,30 @@ instance IFunctor ParserF where
   imap f (ChainPre op p)     = ChainPre (f op) (f p)
   imap f (ChainPost p op)    = ChainPost (f p) (f op)
   imap f (Debug name p)      = Debug name (f p)
+  imap f (Meta m p)          = Meta m (f p)
 
 instance Show (Free ParserF f a) where
   show = getConst1 . fold (const (Const1 "")) (Const1 . alg)
     where
-      alg (Pure x)                               = "(pure x)"
-      alg (Satisfy _)                            = "(satisfy f)"
-      alg (Const1 pf :<*>: Const1 px)              = concat ["(", pf, " <*> ",  px, ")"]
-      alg (Const1 p :*>: Const1 q)                 = concat ["(", p, " *> ", q, ")"]
-      alg (Const1 p :<*: Const1 q)                 = concat ["(", p, " <* ", q, ")"]
-      alg (Const1 p :<|>: Const1 q)                = concat ["(", p, " <|> ", q, ")"]
-      alg Empty                                  = "empty"
-      alg (Try Nothing (Const1 p))                = concat ["(try ? ", p, ")"]
-      alg (Try (Just n) (Const1 p))               = concat ["(try ", show n, " ", p, ")"]
-      alg (LookAhead (Const1 p))                  = concat ["(lookAhead ", p, ")"]
-      alg (Let False v _)                        = concat ["(let-bound ", show v, ")"]
-      alg (Let True v _)                         = concat ["(rec ", show v, ")"]
-      alg (NotFollowedBy (Const1 p))              = concat ["(notFollowedBy ", p, ")"]
+      alg (Pure x)                                  = "(pure x)"
+      alg (Satisfy _)                               = "(satisfy f)"
+      alg (Const1 pf :<*>: Const1 px)               = concat ["(", pf, " <*> ",  px, ")"]
+      alg (Const1 p :*>: Const1 q)                  = concat ["(", p, " *> ", q, ")"]
+      alg (Const1 p :<*: Const1 q)                  = concat ["(", p, " <* ", q, ")"]
+      alg (Const1 p :<|>: Const1 q)                 = concat ["(", p, " <|> ", q, ")"]
+      alg Empty                                     = "empty"
+      alg (Try Nothing (Const1 p))                  = concat ["(try ? ", p, ")"]
+      alg (Try (Just n) (Const1 p))                 = concat ["(try ", show n, " ", p, ")"]
+      alg (LookAhead (Const1 p))                    = concat ["(lookAhead ", p, ")"]
+      alg (Let False v _)                           = concat ["(let-bound ", show v, ")"]
+      alg (Let True v _)                            = concat ["(rec ", show v, ")"]
+      alg (NotFollowedBy (Const1 p))                = concat ["(notFollowedBy ", p, ")"]
       alg (Branch (Const1 b) (Const1 p) (Const1 q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-      alg (Match (Const1 p) fs qs (Const1 def))    = concat ["(match ", p, " [", intercalate ", " (map getConst1 qs), "] ", def, ")"]
-      alg (ChainPre (Const1 op) (Const1 p))        = concat ["(chainPre ", op, " ", p, ")"]
-      alg (ChainPost (Const1 p) (Const1 op))       = concat ["(chainPost ", p, " ", op, ")"]
-      alg (Debug _ (Const1 p))                    = p
+      alg (Match (Const1 p) fs qs (Const1 def))     = concat ["(match ", p, " [", intercalate ", " (map getConst1 qs), "] ", def, ")"]
+      alg (ChainPre (Const1 op) (Const1 p))         = concat ["(chainPre ", op, " ", p, ")"]
+      alg (ChainPost (Const1 p) (Const1 op))        = concat ["(chainPost ", p, " ", op, ")"]
+      alg (Debug _ (Const1 p))                      = p
+      alg (Meta m (Const1 p))                       = concat [p, "[", show m, "]"]
+
+instance Show Meta where
+  show (ConstInput n) = concat ["consumes ", show n, " tokens"]

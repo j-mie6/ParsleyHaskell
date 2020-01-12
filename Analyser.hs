@@ -3,11 +3,12 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
-module Analyser (constantInput, terminationAnalysis) where
+{-# LANGUAGE PatternSynonyms #-}
+module Analyser (constantInput, terminationAnalysis, constantInput') where
 
-import ParserAST                  (ParserF(..))
+import ParserAST                  (ParserF(..), Meta(..))
 import Machine                    (IMVar, MVar(..), IΣVar)
-import Indexed                    (Free, History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd)
+import Indexed                    (Free(..), History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
 import Control.Monad.State.Strict (State, get, put, evalState)
@@ -40,7 +41,6 @@ constantInput = getConst1 . histo (const (Const1 Nothing)) (alg1 |> (Const1 . al
     alg2 (Let False _ (Const1 p))                  = p
     alg2 _                                         = Nothing
 
--- Termination Analysis (Generalised left-recursion checker)
 (<+>) :: (Num a, Monad m) => m a -> m a -> m a
 (<+>) = liftA2 (+)
 (<==>) :: Eq a => Maybe a -> Maybe a -> Maybe a
@@ -49,6 +49,33 @@ constantInput = getConst1 . histo (const (Const1 Nothing)) (alg1 |> (Const1 . al
   | otherwise = Nothing
 _ <==> _ = Nothing
 
+constantInput' :: Free ParserF f a -> Free ParserF f a
+constantInput' = untag . fold Var (Op . alg)
+  where
+    tag n = Meta (ConstInput n) . Op
+    untag (TaggedInput 0 p) = p
+    untag (TaggedInput 1 p) = p
+    untag p = p
+    alg :: ParserF (Free ParserF f) a -> ParserF (Free ParserF f) a
+    alg p@(Pure _) = tag 0 p
+    alg p@(Satisfy _) = tag 1 p
+    alg (TaggedInput n p :<*>: TaggedInput m q) = tag (n + m) (p :<*>: q)
+    alg (TaggedInput n p :*>: TaggedInput m q) = tag (n + m) (p :*>: q)
+    alg (TaggedInput n p :<*: TaggedInput m q) = tag (n + m) (p :<*: q)
+    alg (TaggedInput n p :<|>: TaggedInput m q) 
+      | n > m  = tag m (TaggedInput (n - m) p :<|>: q)
+      | m > n  = tag n (p :<|>: TaggedInput (m - n) q)
+      | n == m = tag n (p :<|>: q)
+    alg p@Empty = tag 0 p
+    alg (Try _ (TaggedInput n p)) = tag n (Try (Just n) p)
+    --alg (LookAhead (TaggedInput n p)) = tag n (LookAhead p) -- it is not safe to commute this... yet
+    --alg (NotFollowedBy (TaggedInput n p)) = tag n (NotFollowedBy p) -- it is not safe to commute this... yet
+    alg (Debug name (TaggedInput n p)) = tag n (Debug name p)
+    alg p = imap untag p
+
+pattern TaggedInput n p = Op (Meta (ConstInput n) p)
+
+-- Termination Analysis (Generalised left-recursion checker)
 data Consumption = Some | None | Never
 data Prop = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool} | Unknown
 

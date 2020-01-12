@@ -56,20 +56,29 @@ constantInput' = untag . fold Var (Op . alg)
     untag (TaggedInput 0 p) = p
     untag (TaggedInput 1 p) = p
     untag p = p
+    get (TaggedInput n p) = (n, p)
+    get p = (0, p)
     alg :: ParserF (Free ParserF f) a -> ParserF (Free ParserF f) a
     alg p@(Pure _) = tag 0 p
     alg p@(Satisfy _) = tag 1 p
-    alg (TaggedInput n p :<*>: TaggedInput m q) = tag (n + m) (p :<*>: q)
-    alg (TaggedInput n p :*>: TaggedInput m q) = tag (n + m) (p :*>: q)
-    alg (TaggedInput n p :<*: TaggedInput m q) = tag (n + m) (p :<*: q)
+    alg (TaggedInput n p :<*>: q) = let (m, q') = get q in tag (n + m) (p :<*>: q')
+    alg (TaggedInput n p :*>: q) = let (m, q') = get q in tag (n + m) (p :*>: q')
+    alg (TaggedInput n p :<*: q) = let (m, q') = get q in tag (n + m) (p :<*: q')
     alg (TaggedInput n p :<|>: TaggedInput m q) 
       | n > m  = tag m (TaggedInput (n - m) p :<|>: q)
       | m > n  = tag n (p :<|>: TaggedInput (m - n) q)
       | n == m = tag n (p :<|>: q)
     alg p@Empty = tag 0 p
     alg (Try _ (TaggedInput n p)) = tag n (Try (Just n) p)
-    --alg (LookAhead (TaggedInput n p)) = tag n (LookAhead p) -- it is not safe to commute this... yet
-    --alg (NotFollowedBy (TaggedInput n p)) = tag n (NotFollowedBy p) -- it is not safe to commute this... yet
+    --alg (LookAhead (TaggedInput n p)) = tag n (LookAhead p) -- it is not safe to commute this... yet: coins need merging
+    --alg (NotFollowedBy (TaggedInput n p)) = tag n (NotFollowedBy p) -- it is not safe to commute this... yet: coins need merging
+    alg (Branch (TaggedInput n b) p q)
+      | m1 > m2  = tag (n + m2) (Branch b (TaggedInput (m1 - m2) p') q')
+      | m2 > m1  = tag (n + m1) (Branch b p' (TaggedInput (m2 - m1) q'))
+      | m1 == m2 = tag (n + m1) (Branch b p' q')
+      where (m1, p') = get p
+            (m2, q') = get q
+    -- How to do match?
     alg (Debug name (TaggedInput n p)) = tag n (Debug name p)
     alg p = imap untag p
 

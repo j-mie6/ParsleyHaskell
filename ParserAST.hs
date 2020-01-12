@@ -135,7 +135,7 @@ instance Show (Free ParserF f a) where
       alg (ChainPre (Const1 op) (Const1 p))         = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))        = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                      = p
-      alg (Meta m (Const1 p))                       = concat [p, "[", show m, "]"]
+      alg (Meta m (Const1 p))                       = concat [p, " [", show m, "]"]
 
 instance Show Meta where
   show (ConstInput n) = concat ["consumes ", show n, " tokens"]

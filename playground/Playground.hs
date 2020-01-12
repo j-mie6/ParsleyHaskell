@@ -58,7 +58,7 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
 --nfb :: String -> Maybe ()
 --nfb = $$(Parsley.runParser Parsers.nfb)
 
-cinput :: String -> Maybe ()
+cinput :: String -> Maybe String
 cinput = $$(Parsley.runParser Parsers.cinput)
 
 main :: IO ()
@@ -68,4 +68,5 @@ main =
      print (nfb "a")
      print (nfb "ab")
      print (nfb "c")-}
+     print (cinput ("abcd")) >>
      return ()

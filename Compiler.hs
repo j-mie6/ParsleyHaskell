@@ -42,7 +42,7 @@ import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKe
 import qualified Data.Set            as Set     (null)
 
 compile :: Parser a -> (Machine o a, DMap MVar (LetBinding o a))
-compile (Parser p) = 
+compile (Parser p) =
   let !(p', μs, maxV) = preprocess p
       !(m, maxΣ) = codeGen ({-terminationAnalysis -}p') halt (maxV + 1) 0
       !ms = compileLets μs (maxV + 1) maxΣ
@@ -128,13 +128,13 @@ letInsertion lets recs p = (p', μs, μMax)
       let bound = HashSet.member name lets
       let recu = HashSet.member name recs
       if bound || recu then case HashMap.lookup name vs of
-        Just v  -> let μ = MVar v in return $! Op (Let recu μ (μs DMap.! μ))
+        Just v  -> let μ = MVar v in return $! optimise (Let recu μ (μs DMap.! μ))
         Nothing -> mdo
           v <- newVar
           let μ = MVar v
           put (HashMap.insert name v vs, DMap.insert μ q' μs)
           q' <- runLetInserter (postprocess q)
-          return $! Op (Let recu μ q')
+          return $! optimise (Let recu μ q')
       else do runLetInserter (postprocess q)
 
 postprocess :: ParserF LetInserter a -> LetInserter a

@@ -43,7 +43,7 @@ ret :: Free3 (M o) Void3 '[x] x a
 ret = Op3 Ret
 
 codeGen :: Free ParserF Void1 a -> Free3 (M o) Void3 (a ': xs) r b -> IMVar -> IΣVar -> (Free3 (M o) Void3 xs r b, IΣVar)
-codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show (constantInput' p) ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
+codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0
     alg = peephole |> (\x -> CodeGen (direct (imap present x)))

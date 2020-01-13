@@ -16,7 +16,11 @@ data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output |
 deriving instance Lift BrainFuckOp
 
 cinput :: Parser String
-cinput = string "abcd" <|> string "abcde"
+cinput = match "ax1" item op empty --string "abcd" <|> string "abcde"
+  where
+    op 'a' = string "bc"
+    op 'x' = string "yz"
+    op '1' = string "23"
 
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")

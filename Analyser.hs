@@ -56,7 +56,7 @@ constantInput' = untag . fold Var (Op . alg)
     untag (TaggedInput 0 p) = p
     untag (TaggedInput 1 p) = p
     untag p = p
-    retag f n p = untag (TaggedInput (f n) p)
+    retag f n p = untag (TaggedInput (max (f n) 0) p)
     get (TaggedInput n p) = (n, p)
     get p = (0, p)
     alg :: ParserF (Free ParserF f) a -> ParserF (Free ParserF f) a

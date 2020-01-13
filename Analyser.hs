@@ -59,9 +59,11 @@ constantInput' = untag . fold Var (Op . alg)
     retag f n p = untag (TaggedInput (max (f n) 0) p)
     get (TaggedInput n p) = (n, p)
     get p = (0, p)
+
     alg :: ParserF (Free ParserF f) a -> ParserF (Free ParserF f) a
     alg p@(Pure _) = tag 0 p
     alg p@(Satisfy _) = tag 1 p
+    -- TODO lookAhead and notFollowedBy interact differently with sequencing of any kind (including Branch and Match)
     alg (TaggedInput n p :<*>: q) = let (m, q') = get q in tag (n + m) (p :<*>: q')
     alg (TaggedInput n p :*>: q) = let (m, q') = get q in tag (n + m) (p :*>: q')
     alg (TaggedInput n p :<*: q) = let (m, q') = get q in tag (n + m) (p :<*: q')

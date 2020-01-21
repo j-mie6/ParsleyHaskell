@@ -6,7 +6,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 module Analyser (constantInput, terminationAnalysis, constantInput') where
 
-import ParserAST                  (ParserF(..), Meta(..))
+import ParserAST                  (ParserF(..), Meta(..), CoinType(..))
 import Machine                    (IMVar, MVar(..), IΣVar)
 import Indexed                    (Free(..), History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd)
 import Control.Applicative        (liftA2)
@@ -52,7 +52,8 @@ _ <==> _ = Nothing
 constantInput' :: Free ParserF f a -> Free ParserF f a
 constantInput' = untag . fold Var (Op . alg)
   where
-    tag n = Meta (ConstInput n) . Op
+    tag n = Meta (ConstInput Topup n) . Op
+    refund n = Meta (ConstInput Refund n) . Op
     untag (TaggedInput 0 p) = p
     untag (TaggedInput 1 p) = p
     untag p = p
@@ -64,8 +65,12 @@ constantInput' = untag . fold Var (Op . alg)
     alg p@(Pure _) = tag 0 p
     alg p@(Satisfy _) = tag 1 p
     -- TODO lookAhead and notFollowedBy interact differently with sequencing of any kind (including Branch and Match)
+    -- This doesn't quite work out, it's like you need to be able to give refunds on coins
     alg (TaggedInput n p :<*>: q) = let (m, q') = get q in tag (n + m) (p :<*>: q')
+    -- FIXME: What the hell?
+    --alg (Op (LookAhead (TaggedInput n p)) :<*>: q) = let (m, Op q') = get q in tag (max n m) (Op (LookAhead p) :<*>: Op (refund n q'))
     alg (TaggedInput n p :*>: q) = let (m, q') = get q in tag (n + m) (p :*>: q')
+    --alg (Op (LookAhead (TaggedInput n p)) :*>: q) = let (m, Op q') = get q in tag (max n m) (Op (LookAhead p) :*>: Op (refund n q'))
     alg (TaggedInput n p :<*: q) = let (m, q') = get q in tag (n + m) (p :<*: q')
     alg (TaggedInput n p :<|>: TaggedInput m q) 
       | n > m  = tag m (retag (subtract m) n p :<|>: q)
@@ -90,7 +95,7 @@ constantInput' = untag . fold Var (Op . alg)
     alg (Debug name (TaggedInput n p)) = tag n (Debug name p)
     alg p = imap untag p
 
-pattern TaggedInput n p = Op (Meta (ConstInput n) p)
+pattern TaggedInput n p = Op (Meta (ConstInput Topup n) p)
 
 -- Termination Analysis (Generalised left-recursion checker)
 data Consumption = Some | None | Never

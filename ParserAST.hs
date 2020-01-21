@@ -91,8 +91,9 @@ data ParserF (k :: * -> *) (a :: *) where
   Debug         :: String -> k a -> ParserF k a
   Meta          :: Meta -> k a -> ParserF k a
 
+data CoinType = Topup | Refund deriving Show
 data Meta where
-  ConstInput :: Int -> Meta
+  ConstInput :: CoinType -> Int -> Meta
 
 -- Instances
 instance IFunctor ParserF where
@@ -138,4 +139,5 @@ instance Show (Free ParserF f a) where
       alg (Meta m (Const1 p))                       = concat [p, " [", show m, "]"]
 
 instance Show Meta where
-  show (ConstInput n) = concat ["consumes ", show n, " tokens"]
+  show (ConstInput Refund n) = concat ["refunds ", show n, " tokens"]
+  show (ConstInput Topup n) = concat ["consumes ", show n, " tokens"]

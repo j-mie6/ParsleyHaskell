@@ -52,8 +52,9 @@ _ <==> _ = Nothing
 constantInput' :: Free ParserF f a -> Free ParserF f a
 constantInput' = untag . fold Var (Op . alg)
   where
-    tag n = Meta (ConstInput Costs n) . Op
-    refund n = Meta (ConstInput Refunded n) . Op
+    tyTag ty n = Meta (ConstInput ty n) . Op
+    tag = tyTag Costs
+    refunds = tyTag Refunded
     free n  = Op . Meta (ConstInput Free n)
     untag (TaggedInput _ 0 p) = p
     untag (TaggedInput _ 1 p) = p
@@ -77,23 +78,20 @@ constantInput' = untag . fold Var (Op . alg)
       | m > n  = tag n (p :<|>: retag (subtract n) m q)
       | n == m = tag n (p :<|>: q)
     alg p@Empty = tag 0 p
-    -- TODO: Try needs to properly commute the type of the tag
-    alg (Try _ (CostsInput n p)) = tag n (Try (Just n) p)
-    -- TODO: Handle lookAhead
-    alg (Branch (CostsInput n b) p q)
-      | m1 > m2  = tag (n + m2) (Branch b (retag (subtract m2) m1 p') q')
-      | m2 > m1  = tag (n + m1) (Branch b p' (retag (subtract m1) m2 q'))
-      | m1 == m2 = tag (n + m1) (Branch b p' q')
+    alg (Try _ (TaggedInput ty n p)) = tyTag ty n (Try (Just n) p)
+    alg (Branch (TaggedInput ty n b) p q)
+      | m1 > m2  = tag (seqCost ty n m2) (Branch b (retag (subtract m2) m1 p') q')
+      | m2 > m1  = tag (seqCost ty n m1) (Branch b p' (retag (subtract m1) m2 q'))
+      | m1 == m2 = tag (seqCost ty n m1) (Branch b p' q')
       where (m1, p') = get p
             (m2, q') = get q
-    -- TODO: Handle lookAhead
-    alg (Match (CostsInput n p) fs qs d) =
+    alg (Match (TaggedInput ty n p) fs qs d) =
       let mdqs = map get (d : qs)
           m = maximum (map fst mdqs)
           d' : qs' = map (uncurry (retag (subtract m))) mdqs
-      in tag (n + m) (Match p fs qs' d')
-    alg (LookAhead (CostsInput n p)) = refund n (LookAhead (free n p))
-    alg (NotFollowedBy (CostsInput n p)) = refund n (NotFollowedBy (free n p))
+      in tag (seqCost ty n m) (Match p fs qs' d')
+    alg (LookAhead (CostsInput n p)) = refunds n (LookAhead (free n p))
+    alg (NotFollowedBy (CostsInput n p)) = refunds n (NotFollowedBy (free n p))
     alg (Debug name (CostsInput n p)) = tag n (Debug name p)
     alg p = imap untag p
 

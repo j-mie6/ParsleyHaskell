@@ -52,50 +52,53 @@ _ <==> _ = Nothing
 constantInput' :: Free ParserF f a -> Free ParserF f a
 constantInput' = untag . fold Var (Op . alg)
   where
-    tag n = Meta (ConstInput Topup n) . Op
-    refund n = Meta (ConstInput Refund n) . Op
-    untag (TaggedInput 0 p) = p
-    untag (TaggedInput 1 p) = p
+    tag n = Meta (ConstInput Costs n) . Op
+    refund n = Meta (ConstInput Refunded n) . Op
+    free n  = Op . Meta (ConstInput Free n)
+    untag (TaggedInput _ 0 p) = p
+    untag (TaggedInput _ 1 p) = p
     untag p = p
-    retag f n p = untag (TaggedInput (max (f n) 0) p)
-    get (TaggedInput n p) = (n, p)
+    retag f n p = untag (CostsInput (max (f n) 0) p)
+    get (TaggedInput _ n p) = (n, p)
     get p = (0, p)
+
+    -- This should be sufficient? Worse case we add more length checks than necessary
+    seqCost Costs n m = n + m
+    seqCost Refunded n m = max n m
 
     alg :: ParserF (Free ParserF f) a -> ParserF (Free ParserF f) a
     alg p@(Pure _) = tag 0 p
     alg p@(Satisfy _) = tag 1 p
-    -- TODO lookAhead and notFollowedBy interact differently with sequencing of any kind (including Branch and Match)
-    -- This doesn't quite work out, it's like you need to be able to give refunds on coins
-    alg (TaggedInput n p :<*>: q) = let (m, q') = get q in tag (n + m) (p :<*>: q')
-    -- FIXME: What the hell?
-    --alg (Op (LookAhead (TaggedInput n p)) :<*>: q) = let (m, Op q') = get q in tag (max n m) (Op (LookAhead p) :<*>: Op (refund n q'))
-    alg (TaggedInput n p :*>: q) = let (m, q') = get q in tag (n + m) (p :*>: q')
-    --alg (Op (LookAhead (TaggedInput n p)) :*>: q) = let (m, Op q') = get q in tag (max n m) (Op (LookAhead p) :*>: Op (refund n q'))
-    alg (TaggedInput n p :<*: q) = let (m, q') = get q in tag (n + m) (p :<*: q')
-    alg (TaggedInput n p :<|>: TaggedInput m q) 
+    alg (TaggedInput ty n p :<*>: q) = let (m, q') = get q in tag (seqCost ty n m) (p :<*>: q')
+    alg (TaggedInput ty n p :*>: q) = let (m, q') = get q in tag (seqCost ty n m) (p :*>: q')
+    alg (TaggedInput ty n p :<*: q) = let (m, q') = get q in tag (seqCost ty n m) (p :<*: q')
+    alg (CostsInput n p :<|>: CostsInput m q) -- TODO What about refunds?
       | n > m  = tag m (retag (subtract m) n p :<|>: q)
       | m > n  = tag n (p :<|>: retag (subtract n) m q)
       | n == m = tag n (p :<|>: q)
     alg p@Empty = tag 0 p
-    alg (Try _ (TaggedInput n p)) = tag n (Try (Just n) p)
-    --alg (LookAhead (TaggedInput n p)) = tag n (LookAhead p) -- it is not safe to commute this... yet: coins need merging
-    --alg (NotFollowedBy (TaggedInput n p)) = tag n (NotFollowedBy p) -- it is not safe to commute this... yet: coins need merging
-    alg (Branch (TaggedInput n b) p q)
+    -- TODO: Try needs to properly commute the type of the tag
+    alg (Try _ (CostsInput n p)) = tag n (Try (Just n) p)
+    -- TODO: Handle lookAhead
+    alg (Branch (CostsInput n b) p q)
       | m1 > m2  = tag (n + m2) (Branch b (retag (subtract m2) m1 p') q')
       | m2 > m1  = tag (n + m1) (Branch b p' (retag (subtract m1) m2 q'))
       | m1 == m2 = tag (n + m1) (Branch b p' q')
       where (m1, p') = get p
             (m2, q') = get q
-    -- How to do match?
-    alg (Match (TaggedInput n p) fs qs d) =
+    -- TODO: Handle lookAhead
+    alg (Match (CostsInput n p) fs qs d) =
       let mdqs = map get (d : qs)
           m = maximum (map fst mdqs)
           d' : qs' = map (uncurry (retag (subtract m))) mdqs
       in tag (n + m) (Match p fs qs' d')
-    alg (Debug name (TaggedInput n p)) = tag n (Debug name p)
+    alg (LookAhead (CostsInput n p)) = refund n (LookAhead (free n p))
+    alg (NotFollowedBy (CostsInput n p)) = refund n (NotFollowedBy (free n p))
+    alg (Debug name (CostsInput n p)) = tag n (Debug name p)
     alg p = imap untag p
 
-pattern TaggedInput n p = Op (Meta (ConstInput Topup n) p)
+pattern TaggedInput t n p = Op (Meta (ConstInput t n) p)
+pattern CostsInput n p = TaggedInput Costs n p
 
 -- Termination Analysis (Generalised left-recursion checker)
 data Consumption = Some | None | Never

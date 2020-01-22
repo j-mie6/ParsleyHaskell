@@ -16,7 +16,7 @@ module Compiler(compile) where
 import Prelude hiding (pred)
 import ParserAST                  (ParserF(..), Parser(..))
 import Optimiser                  (optimise)
-import Analyser                   (terminationAnalysis)
+import Analyser                   (analyse)
 import CodeGenerator              (codeGen, halt, ret)
 import Machine                    (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
 import Indexed                    (Free(Op), Void1, fold, fold', absurd, Tag(..), imap)
@@ -44,7 +44,7 @@ import qualified Data.Set            as Set     (null)
 compile :: Parser a -> (Machine o a, DMap MVar (LetBinding o a))
 compile (Parser p) =
   let !(p', μs, maxV) = preprocess p
-      !(m, maxΣ) = codeGen ({-terminationAnalysis -}p') halt (maxV + 1) 0
+      !(m, maxΣ) = codeGen (analyse p') halt (maxV + 1) 0
       !ms = compileLets μs (maxV + 1) maxΣ
   in trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (Machine m, ms)
 
@@ -53,7 +53,7 @@ compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.em
   where
     compileLet :: MVar x -> Free ParserF Void1 x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
     compileLet (MVar μ) p (ms, maxΣ) =
-      let (m, maxΣ') = codeGen p ret maxV (maxΣ + 1)
+      let (m, maxΣ') = codeGen (analyse p) ret maxV (maxΣ + 1)
       in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
 
 preprocess :: Free ParserF Void1 a -> (Free ParserF Void1 a, DMap MVar (Free ParserF Void1), IMVar)

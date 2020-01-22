@@ -4,7 +4,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
-module Analyser (constantInput, terminationAnalysis, constantInput') where
+module Analyser (constantInput, analyse) where
 
 import ParserAST                  (ParserF(..), Meta(..), CoinType(..))
 import Machine                    (IMVar, MVar(..), IΣVar)
@@ -17,6 +17,9 @@ import Data.Set                   (Set)
 import Data.Monoid                ((<>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
+
+analyse :: Free ParserF f a -> Free ParserF f a
+analyse = constantInput' {-. terminationAnalysis-}
 
 -- Constant Input Consumption Analysis
 constantInput :: Free ParserF f a -> Maybe Int

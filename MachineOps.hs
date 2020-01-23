@@ -133,10 +133,8 @@ inputInstances(deriveFailureOps)
 runConcrete :: forall s o a x. (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
 runConcrete hs m ret o = [||$$m $$ret ($$unbox $$o) $! $$(raise @o hs)||]
 
-nextSafe :: (?ops :: InputOps s o) => Bool -> Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
-nextSafe True o p good bad = [|| let !(# c, o' #) = $$next $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else $$bad ||]
-nextSafe False o p good bad = [||
-    let bad' = $$bad in
-      if  $$more $$o then let !(# c, o' #) = $$next $$o in if $$p c then $$(good [|| o' ||] [|| c ||]) else bad'
-      else bad'
-  ||]
+sat :: (?ops :: InputOps s o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
+sat o p good bad = [|| 
+  let !(# c, o' #) = $$next $$o 
+  in if $$p c then $$(good [|| o' ||] [|| c ||]) 
+              else $$bad ||]

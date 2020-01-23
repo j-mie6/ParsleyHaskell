@@ -16,7 +16,8 @@
              ImplicitParams,
              TypeFamilies,
              TypeApplications,
-             ViewPatterns #-}
+             ViewPatterns,
+             MultiWayIf #-}
 module Machine where
 
 import MachineOps
@@ -108,18 +109,21 @@ debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 storePiggy :: Int -> Ctx s o a -> Ctx s o a
 storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
 
-smashPiggy :: Ctx s o a -> Ctx s o a
-smashPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
+breakPiggy :: Ctx s o a -> Ctx s o a
+breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
 
 hasCoin :: Ctx s o a -> Bool
 hasCoin = (> 0) . coins
 
+isBankrupt :: Ctx s o a -> Bool
+isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
+
 spendCoin :: Ctx s o a -> Ctx s o a
-spendCoin ctx@(coins -> 0) = spendCoin (smashPiggy ctx)
+spendCoin ctx@(coins -> 0) = spendCoin (breakPiggy ctx)
 spendCoin ctx              = ctx {coins = coins ctx - 1}
 
-refundCoins :: Int -> Ctx s o a -> Ctx s o a
-refundCoins c ctx = ctx {coins = coins ctx + c}
+giveCoins :: Int -> Ctx s o a -> Ctx s o a
+giveCoins c ctx = ctx {coins = coins ctx + c}
 
 newtype MissingDependency = MissingDependency IMVar
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
@@ -243,7 +247,18 @@ execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = let QCons y (QCons x xs') = xs
 execSat :: (?ops :: InputOps s o, FailureOps o) => WQ (Char -> Bool) -> Exec s o (Char ': xs) r a -> ExecMonad s o xs r a
 execSat p (Exec k) =
   do mk <- k
-     asks $! \ctx γ -> nextSafe (skipBounds ctx) (o γ) (_code p) (\o c -> mk (γ {xs = QCons c (xs γ), o = o})) (raiseΓ γ)
+     skip <- asks skipBounds
+     return $! emitLengthCheck (if skip then Nothing else Just 1) mk
+  where
+    readChar bad k γ@Γ{..} = sat o (_code p) (\o c -> k (γ {xs = QCons c xs, o = o})) bad
+    newCode = do
+      bankrupt <- asks isBankrupt
+      hasChange <- asks hasCoin
+      if | bankrupt -> emitLengthCheck (Just 1) <$> k
+         | hasChange -> emitLengthCheck Nothing <$> local spendCoin k
+         | otherwise -> local breakPiggy (emitLengthCheck . Just <$> asks coins <*> local spendCoin k)
+    emitLengthCheck Nothing mk γ = readChar (raiseΓ γ) mk γ
+    emitLengthCheck (Just n) mk γ = [|| let bad' = $$(raiseΓ γ) in $$(generateCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
 
 execEmpt :: (?ops :: InputOps s o, FailureOps o) => ExecMonad s o xs r a
 execEmpt = return $! raiseΓ
@@ -418,7 +433,11 @@ execLogExit name (Exec mk) =
      asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||]
 
 execMeta :: MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
-execMeta _ (Exec k) = k
+execMeta (AddCoins coins) (Exec k) =
+  do coinsLeft <- asks hasCoin
+     local (if coinsLeft then storePiggy coins else giveCoins coins) k
+execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
+--execMeta _ (Exec k) = k
 
 setupHandlerΓ :: FailureOps o => Γ s o xs r a 
               -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
@@ -483,11 +502,13 @@ inputSizeCheck (Just n) p =
   do skip <- asks skipBounds
      mp <- local (addConstCount 1) p
      if skip then return $! mp
-     else if n == 1 then fmap (\ctx γ -> [|| if $$more $$(o γ) then $$(mp γ) else $$(raiseΓ γ) ||]) ask
-     else fmap (\ctx γ -> [||
-        if $$more ($$shiftRight $$(o γ) (n - 1)) then $$(mp γ)
-        else $$(raiseΓ γ)
-      ||]) ask
+     else return $! \γ -> generateCheck n (mp γ) (raiseΓ γ) γ
+
+generateCheck :: (?ops :: InputOps s o, FailureOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs r a -> Code (ST s (Maybe a))
+generateCheck 1 good bad γ = [|| if $$more $$(o γ) then $$good else $$bad ||]
+generateCheck n good bad γ = [||
+  if $$more ($$shiftRight $$(o γ) (n - 1)) then $$good
+  else $$bad ||]
 
 class KOps o where
   suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) r a -> Code (ST s (Maybe a))) -> Γ s o xs r a -> Code (x -> Unboxed o -> ST s (Maybe a))

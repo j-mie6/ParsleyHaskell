@@ -16,7 +16,7 @@ data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output |
 deriving instance Lift BrainFuckOp
 
 cinput :: Parser String
-cinput = lookAhead (string "abc") *> string "aa"
+cinput = lookAhead (string "abc") *> string "ab"
 
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")

@@ -245,20 +245,20 @@ execLift2 :: Defunc (x -> y -> z) -> Exec s o (z ': xs) r a -> ExecMonad s o (y 
 execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefunc2 f x y) xs'})) k
 
 execSat :: (?ops :: InputOps s o, FailureOps o) => WQ (Char -> Bool) -> Exec s o (Char ': xs) r a -> ExecMonad s o xs r a
-execSat p (Exec k) =
-  do mk <- k
+execSat p (Exec k) = newCode
+  {-do mk <- k
      skip <- asks skipBounds
-     return $! emitLengthCheck (if skip then Nothing else Just 1) mk
+     return $! emitLengthCheck ({-if skip then Nothing else -}Just 1) mk-}
   where
     readChar bad k γ@Γ{..} = sat o (_code p) (\o c -> k (γ {xs = QCons c xs, o = o})) bad
     newCode = do
       bankrupt <- asks isBankrupt
       hasChange <- asks hasCoin
-      if | bankrupt -> emitLengthCheck (Just 1) <$> k
-         | hasChange -> emitLengthCheck Nothing <$> local spendCoin k
-         | otherwise -> local breakPiggy (emitLengthCheck . Just <$> asks coins <*> local spendCoin k)
+      if | bankrupt -> trace "I have no coins :(" $ emitLengthCheck (Just 1) <$> k
+         | hasChange -> trace "I have coins!" $ emitLengthCheck Nothing <$> local spendCoin k
+         | otherwise -> trace "I have a piggy :)" $ local breakPiggy (emitLengthCheck . Just <$> asks coins <*> local spendCoin k)
     emitLengthCheck Nothing mk γ = readChar (raiseΓ γ) mk γ
-    emitLengthCheck (Just n) mk γ = [|| let bad' = $$(raiseΓ γ) in $$(generateCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
+    emitLengthCheck (Just n) mk γ = trace ("generating length check of " ++ show n) [|| let bad' = $$(raiseΓ γ) in $$(generateCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
 
 execEmpt :: (?ops :: InputOps s o, FailureOps o) => ExecMonad s o xs r a
 execEmpt = return $! raiseΓ
@@ -435,7 +435,7 @@ execLogExit name (Exec mk) =
 execMeta :: MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
 execMeta (AddCoins coins) (Exec k) =
   do coinsLeft <- asks hasCoin
-     local (if coinsLeft then storePiggy coins else giveCoins coins) k
+     local (storePiggy coins) k
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
 --execMeta _ (Exec k) = k
 
@@ -497,17 +497,20 @@ instance RecBuilder _o where                                                    
 inputInstances(deriveRecBuilder)
 
 inputSizeCheck :: (?ops :: InputOps s o, FailureOps o) => Maybe Int -> ExecMonad s o xs r a -> ExecMonad s o xs r a
+inputSizeCheck _ p = p
+{-
 inputSizeCheck Nothing p = p
 inputSizeCheck (Just n) p =
   do skip <- asks skipBounds
      mp <- local (addConstCount 1) p
      if skip then return $! mp
      else return $! \γ -> generateCheck n (mp γ) (raiseΓ γ) γ
+-}
 
 generateCheck :: (?ops :: InputOps s o, FailureOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs r a -> Code (ST s (Maybe a))
 generateCheck 1 good bad γ = [|| if $$more $$(o γ) then $$good else $$bad ||]
 generateCheck n good bad γ = [||
-  if $$more ($$shiftRight $$(o γ) (n - 1)) then $$good
+  if $$more ($$shiftRight $$(o γ) n) then $$good
   else $$bad ||]
 
 class KOps o where

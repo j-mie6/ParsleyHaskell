@@ -191,6 +191,7 @@ readyExec = fold3 absurd (Exec . alg)
     alg (Put σ k)              = execPut σ k
     alg (LogEnter name k)      = execLogEnter name k
     alg (LogExit name k)       = execLogExit name k
+    alg (MetaM m k)            = execMeta m k
 
 execHalt :: ExecMonad s o '[a] r a
 execHalt = return $! \γ -> [|| return $! Just $! $$(headQ (xs γ)) ||]
@@ -394,6 +395,9 @@ execLogExit :: (?ops :: InputOps s o) => String -> Exec s o xs r a -> ExecMonad 
 execLogExit name (Exec mk) =
   do k <- local debugDown mk
      asks $! \ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||]
+
+execMeta :: MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
+execMeta _ (Exec k) = k
 
 setupHandlerΓ :: FailureOps o => Γ s o xs r a 
               -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))

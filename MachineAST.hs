@@ -9,7 +9,7 @@
              GeneralizedNewtypeDeriving,
              PatternSynonyms #-}
 module MachineAST where
-  
+
 import Indexed           (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, fold3)
 import Utils             (WQ(..))
 import Defunc            (Defunc(APP), pattern FLIP_H)
@@ -59,7 +59,9 @@ data M o k xs r a where
   LogExit   :: String -> k xs r a -> M o k xs r a
   MetaM     :: MetaM -> k xs r a -> M o k xs r a
 
-data MetaM
+data MetaM where
+  AddCoins    :: Int -> MetaM
+  RefundCoins :: Int -> MetaM
 
 _App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs) r a
 _App m = Lift2 APP m
@@ -101,6 +103,7 @@ instance IFunctor3 (M o) where
   imap3 f (Put σ k)                         = Put σ (f k)
   imap3 f (LogEnter name k)                 = LogEnter name (f k)
   imap3 f (LogExit name k)                  = LogExit name (f k)
+  imap3 f (MetaM m k)                       = MetaM m (f k)
 
 instance Show (Machine o a) where show = show . getMachine
 instance Show (Free3 (M o) f xs ks a) where
@@ -140,10 +143,15 @@ instance Show (Free3 (M o) f xs ks a) where
     alg (Put σ k)                             = "(Put " ++ show σ ++ " " ++ getConst3 k ++ ")"
     alg (LogEnter _ k)                        = getConst3 k
     alg (LogExit _ k)                         = getConst3 k
+    alg (MetaM m k)                           = "[" ++ show m ++ "] " ++ getConst3 k
 
 instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
 instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ
 instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
+
+instance Show MetaM where
+  show (AddCoins n)    = "Add " ++ show n ++ " coins"
+  show (RefundCoins n) = "Refund " ++ show n ++ " coins"
 
 instance GEq ΣVar where
   geq (ΣVar u) (ΣVar v)

@@ -50,23 +50,23 @@ codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++
 pattern f :<$>: p <- Era _ (Pure f) :<*>: Era p _
 pattern p :$>: x <- Era _ p :*>: Era _ (Pure x)
 pattern LiftA2 f p q <- Era _ (Era _ (Pure f) :<*>: Era p _) :<*>: Era q _
-pattern TryOrElse n p q <- Era _ (Try n (Era p _)) :<|>: Era q _
+pattern TryOrElse p q <- Era _ (Try (Era p _)) :<|>: Era q _
 
 peephole :: ParserF (History ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (Op3 (_Fmap f m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (Op3 (Lift2 (BLACK f) m))
      runCodeGen p qc
-peephole (TryOrElse n p q) = Just $ CodeGen $ \m ->
+peephole (TryOrElse p q) = Just $ CodeGen $ \m ->
   do (decl, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation (isJust n) φ))
+     pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
      qc <- freshΦ (runCodeGen q φ)
-     return $! Op3 (SoftFork n pc qc decl)
-peephole (Era _ ((Try n (Era p _)) :$>: x) :<|>: Era q _) = Just $ CodeGen $ \m ->
+     return $! Op3 (SoftFork pc qc decl)
+peephole (Era _ ((Try (Era p _)) :$>: x) :<|>: Era q _) = Just $ CodeGen $ \m ->
   do (decl, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation (isJust n) (Op3 (Pop (Op3 (Push x φ))))))
+     pc <- freshΦ (runCodeGen p (deadCommitOptimisation (Op3 (Pop (Op3 (Push x φ))))))
      qc <- freshΦ (runCodeGen q φ)
-     return $! Op3 (SoftFork n pc qc decl)
+     return $! Op3 (SoftFork pc qc decl)
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
@@ -79,13 +79,13 @@ direct (p :<*: q)    m = do qc <- runCodeGen q (Op3 (Pop m)); runCodeGen p qc
 direct Empty         m = do return $! Op3 Empt
 direct (p :<|>: q)   m =
   do (decl, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation False φ))
+     pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
      qc <- freshΦ (runCodeGen q φ)
      return $! Op3 (HardFork pc qc decl)
-direct (Try n p)         m = do fmap (Op3 . Attempt n) (runCodeGen p (deadCommitOptimisation (isJust n) m))
+direct (Try p)           m = do fmap (Op3 . Attempt) (runCodeGen p (deadCommitOptimisation m))
 direct (LookAhead p)     m = do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
-direct (NotFollowedBy p) m = do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit False (Op3 Empt)))))))
-                                return $! Op3 (SoftFork Nothing (Op3 (Tell pc)) (Op3 (Push (code ()) m)) Nothing)
+direct (NotFollowedBy p) m = do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit (Op3 Empt)))))))
+                                return $! Op3 (SoftFork (Op3 (Tell pc)) (Op3 (Push (code ()) m)) Nothing)
 direct (Branch b p q)    m = do (decl, φ) <- makeΦ m
                                 pc <- freshΦ (runCodeGen p (Op3 (Swap (Op3 (_App φ)))))
                                 qc <- freshΦ (runCodeGen q (Op3 (Swap (Op3 (_App φ)))))
@@ -118,11 +118,10 @@ tailCallOptimise μ k         = Op3 (Call μ k)
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret or Halt
 -- However, I'm not yet sure about the interactions with try yet...
-deadCommitOptimisation :: Bool -> Free3 (M o) Void3 xs r a -> Free3 (M o) Void3 xs r a
-deadCommitOptimisation True m       = Op3 (Commit True m)
-deadCommitOptimisation _ (Op3 Ret)  = Op3 Ret
-deadCommitOptimisation _ (Op3 Halt) = Op3 Halt
-deadCommitOptimisation b m          = Op3 (Commit b m)
+deadCommitOptimisation :: Free3 (M o) Void3 xs r a -> Free3 (M o) Void3 xs r a
+deadCommitOptimisation (Op3 Ret)  = Op3 Ret
+deadCommitOptimisation (Op3 Halt) = Op3 Halt
+deadCommitOptimisation m          = Op3 (Commit m)
 
 -- Refactor with asks
 askM :: CodeGenStack (MVar a)

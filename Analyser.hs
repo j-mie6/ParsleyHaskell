@@ -4,7 +4,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
-module Analyser (constantInput, analyse) where
+module Analyser (analyse) where
 
 import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
 import MachineAST                 (IMVar, MVar(..), IΣVar)
@@ -19,30 +19,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
 analyse :: Free ParserF f a -> Free ParserF f a
-analyse = constantInput' {-. terminationAnalysis-}
-
--- Constant Input Consumption Analysis
-constantInput :: Free ParserF f a -> Maybe Int
-constantInput = getConst1 . histo (const (Const1 Nothing)) (alg1 |> (Const1 . alg2 . imap present))
-  where
-    alg1 :: ParserF (History ParserF (Const1 (Maybe Int))) a -> Maybe (Const1 (Maybe Int) a)
-    alg1 (Era (Const1 n) (Try _ _) :<|>: Era (Const1 q) _) = Just (Const1 (n <==> q))
-    alg1 _ = Nothing
-    alg2 :: ParserF (Const1 (Maybe Int)) a -> Maybe Int
-    alg2 (Pure _)                                  = Just 0
-    alg2 (Satisfy _)                               = Just 1
-    alg2 (Const1 p :<*>: Const1 q)                 = p <+> q
-    alg2 (Const1 p :*>: Const1 q)                  = p <+> q
-    alg2 (Const1 p :<*: Const1 q)                  = p <+> q
-    alg2 Empty                                     = Just 0
-    alg2 (Try n _)                                 = n
-    alg2 (LookAhead (Const1 p))                    = p
-    alg2 (NotFollowedBy (Const1 p))                = p
-    alg2 (Branch (Const1 b) (Const1 p) (Const1 q)) = b <+> (p <==> q)
-    alg2 (Match (Const1 p) _ qs (Const1 def))      = p <+> (foldr (<==>) def (map getConst1 qs))
-    alg2 (Debug _ (Const1 p))                      = p
-    alg2 (Let False _ (Const1 p))                  = p
-    alg2 _                                         = Nothing
+analyse = constantInput {-. terminationAnalysis-}
 
 (<+>) :: (Num a, Monad m) => m a -> m a -> m a
 (<+>) = liftA2 (+)
@@ -52,8 +29,8 @@ constantInput = getConst1 . histo (const (Const1 Nothing)) (alg1 |> (Const1 . al
   | otherwise = Nothing
 _ <==> _ = Nothing
 
-constantInput' :: Free ParserF f a -> Free ParserF f a
-constantInput' = untag . fold Var (Op . alg)
+constantInput :: Free ParserF f a -> Free ParserF f a
+constantInput = untag . fold Var (Op . alg)
   where
     tyTag ty n = MetaP (ConstInput ty n) . Op
     tag = tyTag Costs
@@ -81,7 +58,7 @@ constantInput' = untag . fold Var (Op . alg)
       | m > n  = tag n (p :<|>: retag (subtract n) m q)
       | n == m = tag n (p :<|>: q)
     alg p@Empty = tag 0 p
-    alg (Try _ (TaggedInput ty n p)) = tyTag ty n (Try (Just n) p)
+    alg (Try (TaggedInput ty n p)) = tyTag ty n (Try p)
     alg (Branch (TaggedInput ty n b) p q)
       | m1 > m2  = tag (seqCost ty n m2) (Branch b (retag (subtract m2) m1 p') q')
       | m2 > m1  = tag (seqCost ty n m1) (Branch b p' (retag (subtract m1) m2 q'))
@@ -154,7 +131,7 @@ terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold ab
     alg (Satisfy _)                          = return $! Prop Some None True
     alg (Pure _)                             = return $! Prop None Never True
     alg Empty                                = return $! Prop Never None True
-    alg (Try _ p)                            =
+    alg (Try p)                              =
       do x <- runTerm p
          return $! if looping x then x
                    else Prop (success x) None (indisputable x)

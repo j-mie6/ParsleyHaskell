@@ -6,7 +6,6 @@ module Optimiser (optimise) where
 
 import Prelude hiding ((<$>))
 import ParserAST (ParserF(..))
-import Analyser  (constantInput)
 import Indexed   (Free(Op))
 import Utils     (code, (>*<), WQ(..))
 
@@ -89,9 +88,9 @@ optimise (NotFollowedBy (Op (Pure _)))                  = Op Empty
 -- Dead negative-lookahead: notFollowedBy empty         = unit
 optimise (NotFollowedBy (Op Empty))                     = Op (Pure (code ()))
 -- Double Negation Law: notFollowedBy . notFollowedBy   = lookAhead . try . void
-optimise (NotFollowedBy (Op (NotFollowedBy p)))         = optimise (LookAhead (Op (Op (Try (constantInput p) p) :*>: Op (Pure (code ())))))
+optimise (NotFollowedBy (Op (NotFollowedBy p)))         = optimise (LookAhead (Op (Op (Try p) :*>: Op (Pure (code ())))))
 -- Zero Consumption Law: notFollowedBy (try p)          = notFollowedBy p
-optimise (NotFollowedBy (Op (Try _ p)))                 = optimise (NotFollowedBy p)
+optimise (NotFollowedBy (Op (Try p)))                   = optimise (NotFollowedBy p)
 -- Idempotence Law: lookAhead . lookAhead               = lookAhead
 optimise (LookAhead (Op (LookAhead p)))                 = Op (LookAhead p)
 -- Right Identity Law: notFollowedBy . lookAhead        = notFollowedBy
@@ -99,7 +98,7 @@ optimise (NotFollowedBy (Op (LookAhead p)))             = optimise (NotFollowedB
 -- Left Identity Law: lookAhead . notFollowedBy         = notFollowedBy
 optimise (LookAhead (Op (NotFollowedBy p)))             = Op (NotFollowedBy p)
 -- Transparency Law: notFollowedBy (try p <|> q)        = notFollowedBy p *> notFollowedBy q
-optimise (NotFollowedBy (Op (Op (Try _ p) :<|>: q)))    = optimise (optimise (NotFollowedBy p) :*>: optimise (NotFollowedBy q))
+optimise (NotFollowedBy (Op (Op (Try p) :<|>: q)))      = optimise (optimise (NotFollowedBy p) :*>: optimise (NotFollowedBy q))
 -- Distributivity Law: lookAhead p <|> lookAhead q      = lookAhead (p <|> q)
 optimise (Op (LookAhead p) :<|>: Op (LookAhead q))      = optimise (LookAhead (optimise (p :<|>: q)))
 -- Interchange Law: lookAhead (p $> x)                  = lookAhead p $> x
@@ -113,17 +112,9 @@ optimise (NotFollowedBy (Op (p :$>: _)))                = optimise (NotFollowedB
 -- Idempotence Law: notFollowedBy (f <$> p)             = notFollowedBy p
 optimise (NotFollowedBy (Op (_ :<$>: p)))               = optimise (NotFollowedBy p)
 -- Interchange Law: try (p $> x)                        = try p $> x
-optimise (Try n (Op (p :$>: x)))                        = optimise (optimise (Try n p) :$>: x)
+optimise (Try (Op (p :$>: x)))                          = optimise (optimise (Try p) :$>: x)
 -- Interchange law: try (f <$> p)                       = f <$> try p
-optimise (Try n (Op (f :<$>: p)))                       = optimise (f :<$>: optimise (Try n p))
-optimise (Try Nothing p)                                = case constantInput p of
-                                                            Just 0 -> p
-                                                            -- This is a desirable thing to have, but we don't want to miss out
-                                                            -- on possible constant input optimisations. It might be better to
-                                                            -- perform global input size optimisation checks, potentially as a
-                                                            -- separate instruction even? Or use strings, then this is unnecessary
-                                                            --Just 1 -> p
-                                                            ci -> Op (Try ci p)
+optimise (Try (Op (f :<$>: p)))                         = optimise (f :<$>: optimise (Try p))
 -- pure Left law: branch (pure (Left x)) p q            = p <*> pure x
 optimise (Branch (Op (Pure (WQ (Left x) ql))) p _)      = optimise (p :<*>: Op (Pure (WQ x qx))) where qx = [||case $$ql of Left x -> x||]
 -- pure Right law: branch (pure (Right x)) p q          = q <*> pure x

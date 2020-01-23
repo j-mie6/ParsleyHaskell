@@ -40,11 +40,11 @@ data M o k xs r a where
   Call      :: MVar x -> k (x ': xs) r a -> M o k xs r a
   Jump      :: MVar x -> M o k '[] x a
   Empt      :: M o k xs r a
-  Commit    :: Bool -> k xs r a -> M o k xs r a
-  HardFork  :: k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a              --TODO: Deprecate
-  SoftFork  :: Maybe Int -> k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a --TODO: Deprecate
+  Commit    :: k xs r a -> M o k xs r a
+  HardFork  :: k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a --TODO: Deprecate
+  SoftFork  :: k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a --TODO: Deprecate
   Join      :: ΦVar x -> M o k (x ': xs) r a
-  Attempt   :: Maybe Int -> k xs r a -> M o k xs r a                                         --TODO: Deprecate
+  Attempt   :: k xs r a -> M o k xs r a                                         --TODO: Deprecate
   Tell      :: k (o ': xs) r a -> M o k xs r a
   Seek      :: k xs r a -> M o k (o ': xs) r a
   Case      :: k (x ': xs) r a -> k (y ': xs) r a -> Maybe (ΦDecl k z xs r a) -> M o k (Either x y ': xs) r a
@@ -82,13 +82,13 @@ instance IFunctor3 (M o) where
   imap3 f (Call μ k)                        = Call μ (f k)
   imap3 f (Jump μ)                          = Jump μ
   imap3 f Empt                              = Empt
-  imap3 f (Commit exit k)                   = Commit exit (f k)
-  imap3 f (SoftFork n p q (Just (φ, k)))    = SoftFork n (f p) (f q) (Just (φ, f k))
-  imap3 f (SoftFork n p q Nothing)          = SoftFork n (f p) (f q) Nothing
+  imap3 f (Commit k)                        = Commit (f k)
+  imap3 f (SoftFork p q (Just (φ, k)))      = SoftFork (f p) (f q) (Just (φ, f k))
+  imap3 f (SoftFork p q Nothing)            = SoftFork (f p) (f q) Nothing
   imap3 f (HardFork p q (Just (φ, k)))      = HardFork (f p) (f q) (Just (φ, f k))
   imap3 f (HardFork p q Nothing)            = HardFork (f p) (f q) Nothing
   imap3 f (Join φ)                          = Join φ
-  imap3 f (Attempt n k)                     = Attempt n (f k)
+  imap3 f (Attempt k)                       = Attempt (f k)
   imap3 f (Tell k)                          = Tell (f k)
   imap3 f (Seek k)                          = Seek (f k)
   imap3 f (Case p q (Just (φ, k)))          = Case (f p) (f q) (Just (φ, f k))
@@ -118,17 +118,13 @@ instance Show (Free3 (M o) f xs ks a) where
     alg (Lift2 f k)                           = "(Lift2 " ++ show f ++ " " ++ getConst3 k ++ ")"
     alg (Sat _ k)                             = "(Sat f " ++ getConst3 k ++ ")"
     alg Empt                                  = "Empt"
-    alg (Commit True k)                       = "(Commit end " ++ getConst3 k ++ ")"
-    alg (Commit False k)                      = "(Commit " ++ getConst3 k ++ ")"
-    alg (SoftFork Nothing p q Nothing)        = "(SoftFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
-    alg (SoftFork (Just n) p q Nothing)       = "(SoftFork " ++ show n ++ " " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
-    alg (SoftFork Nothing p q (Just (φ, k)))  = "(SoftFork " ++ getConst3 p ++ " " ++ getConst3 q ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
-    alg (SoftFork (Just n) p q (Just (φ, k))) = "(SoftFork " ++ show n ++ " " ++ getConst3 p ++ " " ++ getConst3 q ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
+    alg (Commit k)                            = "(Commit " ++ getConst3 k ++ ")"
+    alg (SoftFork p q Nothing)                = "(SoftFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
+    alg (SoftFork p q (Just (φ, k)))          = "(SoftFork " ++ getConst3 p ++ " " ++ getConst3 q ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
     alg (HardFork p q Nothing)                = "(HardFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
     alg (HardFork p q (Just (φ, k)))          = "(HardFork " ++ getConst3 p ++ " " ++ getConst3 q ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
     alg (Join φ)                              = show φ
-    alg (Attempt Nothing k)                   = "(Try " ++ getConst3 k ++ ")"
-    alg (Attempt (Just n) k)                  = "(Try " ++ show n ++ " " ++ getConst3 k ++ ")"
+    alg (Attempt k)                           = "(Try " ++ getConst3 k ++ ")"
     alg (Tell k)                              = "(Tell " ++ getConst3 k ++ ")"
     alg (Seek k)                              = "(Seek " ++ getConst3 k ++ ")"
     alg (Case p q Nothing)                    = "(Case " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"

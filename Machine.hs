@@ -199,11 +199,11 @@ readyExec = fold3 absurd (Exec . alg)
     alg (Lift2 f k)            = execLift2 f k
     alg (Sat p k)              = execSat p k
     alg Empt                   = execEmpt
-    alg (Commit exit k)        = execCommit exit k
+    alg (Commit k)             = execCommit k
     alg (HardFork p q φ)       = execHardFork p q φ
-    alg (SoftFork n p q φ)     = execSoftFork n p q φ
+    alg (SoftFork p q φ)       = execSoftFork p q φ
     alg (Join φ)               = execJoin φ
-    alg (Attempt n k)          = execAttempt n k
+    alg (Attempt k)            = execAttempt k
     alg (Tell k)               = execTell k
     alg (Seek k)               = execSeek k
     alg (Case p q  φ)          = execCase p q  φ
@@ -245,27 +245,23 @@ execLift2 :: Defunc (x -> y -> z) -> Exec s o (z ': xs) r a -> ExecMonad s o (y 
 execLift2 f (Exec k) = fmap (\m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefunc2 f x y) xs'})) k
 
 execSat :: (?ops :: InputOps s o, FailureOps o) => WQ (Char -> Bool) -> Exec s o (Char ': xs) r a -> ExecMonad s o xs r a
-execSat p (Exec k) = newCode
-  {-do mk <- k
-     skip <- asks skipBounds
-     return $! emitLengthCheck ({-if skip then Nothing else -}Just 1) mk-}
+execSat p (Exec k) = do
+  bankrupt <- asks isBankrupt
+  hasChange <- asks hasCoin
+  if | bankrupt -> trace "I have no coins :(" $ maybeEmitCheck (Just 1) <$> k
+     | hasChange -> trace "I have coins!" $ maybeEmitCheck Nothing <$> local spendCoin k
+     | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
     readChar bad k γ@Γ{..} = sat o (_code p) (\o c -> k (γ {xs = QCons c xs, o = o})) bad
-    newCode = do
-      bankrupt <- asks isBankrupt
-      hasChange <- asks hasCoin
-      if | bankrupt -> trace "I have no coins :(" $ emitLengthCheck (Just 1) <$> k
-         | hasChange -> trace "I have coins!" $ emitLengthCheck Nothing <$> local spendCoin k
-         | otherwise -> trace "I have a piggy :)" $ local breakPiggy (emitLengthCheck . Just <$> asks coins <*> local spendCoin k)
-    emitLengthCheck Nothing mk γ = readChar (raiseΓ γ) mk γ
-    emitLengthCheck (Just n) mk γ = trace ("generating length check of " ++ show n) [|| let bad' = $$(raiseΓ γ) in $$(generateCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
+    maybeEmitCheck Nothing mk γ = readChar (raiseΓ γ) mk γ
+    maybeEmitCheck (Just n) mk γ =
+      [|| let bad' = $$(raiseΓ γ) in $$(emitLengthCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
 
 execEmpt :: (?ops :: InputOps s o, FailureOps o) => ExecMonad s o xs r a
 execEmpt = return $! raiseΓ
 
-execCommit :: Bool -> Exec s o xs r a -> ExecMonad s o xs r a
-execCommit exit (Exec k) = local (\ctx -> if exit then addConstCount (-1) ctx else ctx)
-                                 (fmap (\m γ -> m (γ {hs = tail (hs γ)})) k)
+execCommit :: Exec s o xs r a -> ExecMonad s o xs r a
+execCommit (Exec k) = fmap (\m γ -> m (γ {hs = tail (hs γ)})) k
 
 execHardFork :: (?ops :: InputOps s o, HardForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> ExecMonad s o xs r a
 execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl id $
@@ -284,9 +280,9 @@ instance HardForkHandler _o where         \
 };
 inputInstances(deriveHardForkHandler)
 
-execSoftFork :: (?ops :: InputOps s o, SoftForkHandler o, JoinBuilder o) => Maybe Int -> Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> ExecMonad s o xs r a
-execSoftFork constantInput (Exec p) (Exec q) decl = setupJoinPoint decl id $
-  do mp <- inputSizeCheck constantInput p
+execSoftFork :: (?ops :: InputOps s o, SoftForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> ExecMonad s o xs r a
+execSoftFork (Exec p) (Exec q) decl = setupJoinPoint decl id $
+  do mp <- p
      mq <- q
      return $! \γ -> setupHandlerΓ γ (softForkHandler mq γ) mp
 
@@ -299,8 +295,8 @@ execJoin φ =
   do QJoin k <- asks ((DMap.! φ) . φs)
      return $! \γ -> [|| $$k $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]
 
-execAttempt :: (?ops :: InputOps s o, AttemptHandler o) => Maybe Int -> Exec s o xs r a -> ExecMonad s o xs r a
-execAttempt constantInput (Exec k) = do mk <- inputSizeCheck constantInput k; return $! \γ -> setupHandlerΓ γ attemptHandler mk
+execAttempt :: (?ops :: InputOps s o, AttemptHandler o) => Exec s o xs r a -> ExecMonad s o xs r a
+execAttempt (Exec k) = fmap (\mk γ -> setupHandlerΓ γ attemptHandler mk) k 
 
 #define deriveAttemptHandler(_o) \
 instance AttemptHandler _o where { attemptHandler h c = [||\_ -> $$h ($$unbox $$c)||] };
@@ -496,20 +492,9 @@ instance RecBuilder _o where                                                    
 };
 inputInstances(deriveRecBuilder)
 
-inputSizeCheck :: (?ops :: InputOps s o, FailureOps o) => Maybe Int -> ExecMonad s o xs r a -> ExecMonad s o xs r a
-inputSizeCheck _ p = p
-{-
-inputSizeCheck Nothing p = p
-inputSizeCheck (Just n) p =
-  do skip <- asks skipBounds
-     mp <- local (addConstCount 1) p
-     if skip then return $! mp
-     else return $! \γ -> generateCheck n (mp γ) (raiseΓ γ) γ
--}
-
-generateCheck :: (?ops :: InputOps s o, FailureOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs r a -> Code (ST s (Maybe a))
-generateCheck 1 good bad γ = [|| if $$more $$(o γ) then $$good else $$bad ||]
-generateCheck n good bad γ = [||
+emitLengthCheck :: (?ops :: InputOps s o, FailureOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs r a -> Code (ST s (Maybe a))
+emitLengthCheck 1 good bad γ = [|| if $$more $$(o γ) then $$good else $$bad ||]
+emitLengthCheck n good bad γ = trace ("generating length check of " ++ show n) $ [||
   if $$more ($$shiftRight $$(o γ) n) then $$good
   else $$bad ||]
 

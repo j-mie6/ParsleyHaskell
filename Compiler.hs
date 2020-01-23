@@ -97,7 +97,7 @@ findLetsAlg p = LetFinder $ do
             p :*>: q          -> do runLetFinder p;  runLetFinder q
             p :<*: q          -> do runLetFinder p;  runLetFinder q
             p :<|>: q         -> do runLetFinder p;  runLetFinder q
-            Try n p           -> do runLetFinder p
+            Try p             -> do runLetFinder p
             LookAhead p       -> do runLetFinder p
             NotFollowedBy p   -> do runLetFinder p
             Branch b p q      -> do runLetFinder b;  runLetFinder p; runLetFinder q
@@ -143,7 +143,7 @@ postprocess (p :*>: q)          = LetInserter (fmap optimise (liftA2 (:*>:)  (ru
 postprocess (p :<*: q)          = LetInserter (fmap optimise (liftA2 (:<*:)  (runLetInserter p)  (runLetInserter q)))
 postprocess (p :<|>: q)         = LetInserter (fmap optimise (liftA2 (:<|>:) (runLetInserter p)  (runLetInserter q)))
 postprocess Empty               = LetInserter (return        (Op Empty))
-postprocess (Try n p)           = LetInserter (fmap optimise (fmap (Try n) (runLetInserter p)))
+postprocess (Try p)             = LetInserter (fmap optimise (fmap Try (runLetInserter p)))
 postprocess (LookAhead p)       = LetInserter (fmap optimise (fmap LookAhead (runLetInserter p)))
 postprocess (NotFollowedBy p)   = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
 postprocess (Branch b p q)      = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))

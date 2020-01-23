@@ -46,7 +46,7 @@ notFollowedBy :: Parser a -> Parser ()
 notFollowedBy = Parser . Op . NotFollowedBy . unParser
 
 try :: Parser a -> Parser a
-try = Parser . Op . Try Nothing . unParser
+try = Parser . Op . Try . unParser
 
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
 match vs (Parser p) f (Parser def) = Parser (Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs) def))
@@ -80,7 +80,7 @@ data ParserF (k :: * -> *) (a :: *) where
   (:<*:)        :: k a -> k b -> ParserF k a
   (:<|>:)       :: k a -> k a -> ParserF k a
   Empty         :: ParserF k a
-  Try           :: Maybe Int -> k a -> ParserF k a
+  Try           :: k a -> ParserF k a
   LookAhead     :: k a -> ParserF k a
   Let           :: Bool -> MVar a -> k a -> ParserF k a
   NotFollowedBy :: k a -> ParserF k ()
@@ -104,7 +104,7 @@ instance IFunctor ParserF where
   imap f (p :<*: q)          = f p :<*: f q
   imap f (p :<|>: q)         = f p :<|>: f q
   imap _ Empty               = Empty
-  imap f (Try n p)           = Try n (f p)
+  imap f (Try p)             = Try (f p)
   imap f (LookAhead p)       = LookAhead (f p)
   imap f (Let r v p)         = Let r v (f p)
   imap f (NotFollowedBy p)   = NotFollowedBy (f p)
@@ -125,8 +125,7 @@ instance Show (Free ParserF f a) where
       alg (Const1 p :<*: Const1 q)                  = concat ["(", p, " <* ", q, ")"]
       alg (Const1 p :<|>: Const1 q)                 = concat ["(", p, " <|> ", q, ")"]
       alg Empty                                     = "empty"
-      alg (Try Nothing (Const1 p))                  = concat ["(try ? ", p, ")"]
-      alg (Try (Just n) (Const1 p))                 = concat ["(try ", show n, " ", p, ")"]
+      alg (Try (Const1 p))                          = concat ["(try ", p, ")"]
       alg (LookAhead (Const1 p))                    = concat ["(lookAhead ", p, ")"]
       alg (Let False v _)                           = concat ["(let-bound ", show v, ")"]
       alg (Let True v _)                            = concat ["(rec ", show v, ")"]

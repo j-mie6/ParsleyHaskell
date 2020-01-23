@@ -1,6 +1,6 @@
 {-# LANGUAGE ViewPatterns #-}
-module Queue (Queue, empty, enqueue, dequeue, null) where
-  
+module Queue (Queue, empty, enqueue, dequeue, null, size) where
+
 import Prelude hiding (null)
 
 data Queue a = Queue {

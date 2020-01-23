@@ -15,7 +15,8 @@
              CPP,
              ImplicitParams,
              TypeFamilies,
-             TypeApplications #-}
+             TypeApplications,
+             ViewPatterns #-}
 module Machine where
 
 import MachineOps
@@ -24,13 +25,13 @@ import Input                      (PreparedInput(..), Rep, Unboxed, OffWith, Unp
 import Indexed                    (Free3, Void3, absurd, fold3)
 import Utils                      (WQ(..), code, (>*<), Code)
 import Defunc                     (Defunc, genDefunc2, genDefunc)
-import Data.Word                  (Word64)
 import Control.Monad              (forM, join, liftM2)
 import Control.Monad.ST           (ST)
 import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadReader)
 import Control.Exception          (Exception, throw)
 import Data.STRef                 (STRef)
 import Data.STRef.Unboxed         (STRefU)
+import Queue                      (Queue, enqueue, dequeue)
 import Data.Map.Strict            (Map)
 import Data.Dependent.Map         (DMap, DSum(..))
 import Data.GADT.Compare          (GCompare)
@@ -42,6 +43,7 @@ import Language.Haskell.TH        (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, toList, traverseWithKey)
+import qualified Queue                      (empty, size, null)
 
 #define inputInstances(derivation) \
 derivation(Int)                    \
@@ -72,9 +74,11 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
                      , stcs       :: Map IΣVar (QORef s)
                      , constCount :: Int
-                     , debugLevel :: Int }
+                     , debugLevel :: Int
+                     , coins      :: Int
+                     , piggies    :: Queue Int }
 emptyCtx :: Ctx s o a
-emptyCtx = Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0
+emptyCtx = Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0 0 Queue.empty
 
 insertM :: MVar x -> Code (AbsExec s o a x) -> Ctx s o a -> Ctx s o a
 insertM μ q ctx = ctx {μs = DMap.insert μ (QAbsExec q) (μs ctx)}
@@ -99,6 +103,23 @@ debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
 
 debugDown :: Ctx s o a -> Ctx s o a
 debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
+
+-- Piggy bank functions
+storePiggy :: Int -> Ctx s o a -> Ctx s o a
+storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
+
+smashPiggy :: Ctx s o a -> Ctx s o a
+smashPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
+
+hasCoin :: Ctx s o a -> Bool
+hasCoin = (> 0) . coins
+
+spendCoin :: Ctx s o a -> Ctx s o a
+spendCoin ctx@(coins -> 0) = spendCoin (smashPiggy ctx)
+spendCoin ctx              = ctx {coins = coins ctx - 1}
+
+refundCoins :: Int -> Ctx s o a -> Ctx s o a
+refundCoins c ctx = ctx {coins = coins ctx + c}
 
 newtype MissingDependency = MissingDependency IMVar
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar

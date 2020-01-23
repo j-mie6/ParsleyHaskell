@@ -6,8 +6,8 @@
 {-# LANGUAGE PatternSynonyms #-}
 module Analyser (constantInput, analyse) where
 
-import ParserAST                  (ParserF(..), Meta(..), CoinType(..))
-import Machine                    (IMVar, MVar(..), IΣVar)
+import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
+import MachineAST                 (IMVar, MVar(..), IΣVar)
 import Indexed                    (Free(..), History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
@@ -55,10 +55,10 @@ _ <==> _ = Nothing
 constantInput' :: Free ParserF f a -> Free ParserF f a
 constantInput' = untag . fold Var (Op . alg)
   where
-    tyTag ty n = Meta (ConstInput ty n) . Op
+    tyTag ty n = MetaP (ConstInput ty n) . Op
     tag = tyTag Costs
     refunds = tyTag Refunded
-    free n  = Op . Meta (ConstInput Free n)
+    free n  = Op . MetaP (ConstInput Free n)
     untag (TaggedInput _ 0 p) = p
     untag (TaggedInput _ 1 p) = p
     untag p = p
@@ -98,7 +98,7 @@ constantInput' = untag . fold Var (Op . alg)
     alg (Debug name (CostsInput n p)) = tag n (Debug name p)
     alg p = imap untag p
 
-pattern TaggedInput t n p = Op (Meta (ConstInput t n) p)
+pattern TaggedInput t n p = Op (MetaP (ConstInput t n) p)
 pattern CostsInput n p = TaggedInput Costs n p
 
 -- Termination Analysis (Generalised left-recursion checker)

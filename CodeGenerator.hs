@@ -10,7 +10,7 @@
 module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..))
-import Machine                    (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, _Fmap, _App, _Modify)
+import MachineAST                 (M(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, _Fmap, _App, _Modify)
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
 import Utils                      (code, (>*<), WQ(..))
 import Defunc                     (Defunc(BLACK))
@@ -107,7 +107,7 @@ direct (ChainPost p op) m =
      opc <- freshM (runCodeGen op (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))
      freshM (runCodeGen p (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ m)))))))
 direct (Debug name p) m = do fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
-direct (Meta _ p) m = runCodeGen p m
+direct (MetaP _ p) m = runCodeGen p m
 
 tailCallOptimise :: MVar x -> Free3 (M o) Void3 (x ': xs) r a -> Free3 (M o) Void3 xs r a
 tailCallOptimise μ (Op3 Ret) = Op3 (Jump μ)

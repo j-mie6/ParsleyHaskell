@@ -9,7 +9,7 @@
 module ParserAST where
 
 import Indexed                    (IFunctor, Free(Op), Void1, Const1(..), imap, fold)
-import Machine                    (IMVar, MVar(..), IΣVar(..))
+import MachineAST                 (IMVar, MVar(..), IΣVar(..))
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 import Data.List                  (intercalate)
@@ -89,11 +89,11 @@ data ParserF (k :: * -> *) (a :: *) where
   ChainPre      :: k (a -> a) -> k a -> ParserF k a
   ChainPost     :: k a -> k (a -> a) -> ParserF k a
   Debug         :: String -> k a -> ParserF k a
-  Meta          :: Meta -> k a -> ParserF k a
+  MetaP         :: MetaP -> k a -> ParserF k a
 
 data CoinType = Costs | Refunded | Free deriving Show
-data Meta where
-  ConstInput :: CoinType -> Int -> Meta
+data MetaP where
+  ConstInput :: CoinType -> Int -> MetaP
 
 -- Instances
 instance IFunctor ParserF where
@@ -113,7 +113,7 @@ instance IFunctor ParserF where
   imap f (ChainPre op p)     = ChainPre (f op) (f p)
   imap f (ChainPost p op)    = ChainPost (f p) (f op)
   imap f (Debug name p)      = Debug name (f p)
-  imap f (Meta m p)          = Meta m (f p)
+  imap f (MetaP m p)         = MetaP m (f p)
 
 instance Show (Free ParserF f a) where
   show = getConst1 . fold (const (Const1 "")) (Const1 . alg)
@@ -136,9 +136,9 @@ instance Show (Free ParserF f a) where
       alg (ChainPre (Const1 op) (Const1 p))         = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))        = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                      = p
-      alg (Meta m (Const1 p))                       = concat [p, " [", show m, "]"]
+      alg (MetaP m (Const1 p))                      = concat [p, " [", show m, "]"]
 
-instance Show Meta where
+instance Show MetaP where
   show (ConstInput Refunded n) = concat ["refunds ", show n, " tokens"]
   show (ConstInput Costs n) = concat ["consumes ", show n, " tokens"]
   show (ConstInput Free n) = concat ["consumes ", show n, " tokens for free"]

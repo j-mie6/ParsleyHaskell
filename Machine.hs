@@ -16,7 +16,6 @@
              ImplicitParams,
              TypeFamilies,
              TypeApplications,
-             ViewPatterns,
              MultiWayIf #-}
 module Machine where
 
@@ -74,12 +73,11 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
                      , stcs       :: Map IΣVar (QORef s)
-                     , constCount :: Int
                      , debugLevel :: Int
                      , coins      :: Int
                      , piggies    :: Queue Int }
 emptyCtx :: Ctx s o a
-emptyCtx = Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0 0 Queue.empty
+emptyCtx = Ctx DMap.empty DMap.empty DMap.empty Map.empty 0 0 Queue.empty
 
 insertM :: MVar x -> Code (AbsExec s o a x) -> Ctx s o a -> Ctx s o a
 insertM μ q ctx = ctx {μs = DMap.insert μ (QAbsExec q) (μs ctx)}
@@ -92,12 +90,6 @@ insertΣ σ qref ctx = ctx {σs = DMap.insert σ (QSTRef qref) (σs ctx)}
 
 insertSTC :: ΣVar x -> Code (STRefU s Int) -> Ctx s o a -> Ctx s o a
 insertSTC (ΣVar v) qref ctx = ctx {stcs = Map.insert v (QORef qref) (stcs ctx)}
-
-addConstCount :: Int -> Ctx s o a -> Ctx s o a
-addConstCount x ctx = ctx {constCount = constCount ctx + x}
-
-skipBounds :: Ctx s o a -> Bool
-skipBounds ctx = constCount ctx > 0
 
 debugUp :: Ctx s o a -> Ctx s o a
 debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
@@ -119,8 +111,7 @@ isBankrupt :: Ctx s o a -> Bool
 isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
 
 spendCoin :: Ctx s o a -> Ctx s o a
-spendCoin ctx@(coins -> 0) = spendCoin (breakPiggy ctx)
-spendCoin ctx              = ctx {coins = coins ctx - 1}
+spendCoin ctx = ctx {coins = coins ctx - 1}
 
 giveCoins :: Int -> Ctx s o a -> Ctx s o a
 giveCoins c ctx = ctx {coins = coins ctx + c}

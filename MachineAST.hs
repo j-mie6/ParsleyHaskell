@@ -43,7 +43,6 @@ data M o k xs r a where
   Commit    :: k xs r a -> M o k xs r a
   HardFork  :: k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a --TODO: Deprecate
   SoftFork  :: k xs r a -> k xs r a -> Maybe (ΦDecl k x xs r a) -> M o k xs r a --TODO: Deprecate
-  Join      :: ΦVar x -> M o k (x ': xs) r a
   Attempt   :: k xs r a -> M o k xs r a                                         --TODO: Deprecate
   Tell      :: k (o ': xs) r a -> M o k xs r a
   Seek      :: k xs r a -> M o k (o ': xs) r a
@@ -51,6 +50,8 @@ data M o k xs r a where
   Choices   :: [WQ (x -> Bool)] -> [k xs r a] -> k xs r a -> Maybe (ΦDecl k y xs r a) -> M o k (x ': xs) r a
   ChainIter :: ΣVar x -> MVar x -> M o k '[] x a
   ChainInit :: ΣVar x -> k '[] x a -> MVar x -> k xs r a -> M o k xs r a
+  Join      :: ΦVar x -> M o k (x ': xs) r a
+  MkJoin    :: ΦVar x -> k (x ': xs) r a -> k xs r a -> M o k xs r a
   Swap      :: k (x ': y ': xs) r a -> M o k (y ': x ': xs) r a
   Make      :: ΣVar x -> k xs r a -> M o k (x ': xs) r a
   Get       :: ΣVar x -> k (x ': xs) r a -> M o k xs r a
@@ -87,7 +88,6 @@ instance IFunctor3 (M o) where
   imap3 f (SoftFork p q Nothing)            = SoftFork (f p) (f q) Nothing
   imap3 f (HardFork p q (Just (φ, k)))      = HardFork (f p) (f q) (Just (φ, f k))
   imap3 f (HardFork p q Nothing)            = HardFork (f p) (f q) Nothing
-  imap3 f (Join φ)                          = Join φ
   imap3 f (Attempt k)                       = Attempt (f k)
   imap3 f (Tell k)                          = Tell (f k)
   imap3 f (Seek k)                          = Seek (f k)
@@ -97,6 +97,8 @@ instance IFunctor3 (M o) where
   imap3 f (Choices fs ks def Nothing)       = Choices fs (map f ks) (f def) Nothing
   imap3 f (ChainIter σ μ)                   = ChainIter σ μ
   imap3 f (ChainInit σ l μ k)               = ChainInit σ (f l) μ (f k)
+  imap3 f (Join φ)                          = Join φ
+  imap3 f (MkJoin φ p k)                    = MkJoin φ (f p) (f k)
   imap3 f (Swap k)                          = Swap (f k)
   imap3 f (Make σ k)                        = Make σ (f k)
   imap3 f (Get σ k)                         = Get σ (f k)
@@ -123,7 +125,6 @@ instance Show (Free3 (M o) f xs ks a) where
     alg (SoftFork p q (Just (φ, k)))          = "(SoftFork " ++ getConst3 p ++ " " ++ getConst3 q ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
     alg (HardFork p q Nothing)                = "(HardFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
     alg (HardFork p q (Just (φ, k)))          = "(HardFork " ++ getConst3 p ++ " " ++ getConst3 q ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
-    alg (Join φ)                              = show φ
     alg (Attempt k)                           = "(Try " ++ getConst3 k ++ ")"
     alg (Tell k)                              = "(Tell " ++ getConst3 k ++ ")"
     alg (Seek k)                              = "(Seek " ++ getConst3 k ++ ")"
@@ -133,6 +134,8 @@ instance Show (Free3 (M o) f xs ks a) where
     alg (Choices _ ks def (Just (φ, k)))      = "(Choices [" ++ intercalate ", " (map getConst3 ks) ++ "] " ++ getConst3 def ++ " (" ++ show φ ++ " = " ++ getConst3 k ++ "))"
     alg (ChainIter σ μ)                       = "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
     alg (ChainInit σ m μ k)                   = "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ getConst3 m ++ " " ++ getConst3 k ++ "}"
+    alg (Join φ)                              = show φ
+    alg (MkJoin φ p k)                        = "(let " ++ show φ ++ " = " ++ getConst3 p ++ " in " ++ getConst3 k ++ ")"
     alg (Swap k)                              = "(Swap " ++ getConst3 k ++ ")"
     alg (Make σ k)                            = "(Make " ++ show σ ++ " " ++ getConst3 k ++ ")"
     alg (Get σ k)                             = "(Get " ++ show σ ++ " " ++ getConst3 k ++ ")"

@@ -61,12 +61,16 @@ peephole (TryOrElse p q) = Just $ CodeGen $ \m ->
   do (decl, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
      qc <- freshΦ (runCodeGen q φ)
-     return $! Op3 (SoftFork pc qc decl)
+     return $! case decl of
+       Nothing -> Op3 (SoftFork pc qc Nothing)
+       Just (φ, x) -> Op3 (MkJoin φ x (Op3 (SoftFork pc qc Nothing)))
 peephole (Era _ ((Try (Era p _)) :$>: x) :<|>: Era q _) = Just $ CodeGen $ \m ->
   do (decl, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (Op3 (Pop (Op3 (Push x φ))))))
      qc <- freshΦ (runCodeGen q φ)
-     return $! Op3 (SoftFork pc qc decl)
+     return $! case decl of
+       Nothing -> Op3 (SoftFork pc qc Nothing)
+       Just (φ, x) -> Op3 (MkJoin φ x (Op3 (SoftFork pc qc Nothing)))
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
@@ -81,7 +85,9 @@ direct (p :<|>: q)   m =
   do (decl, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
      qc <- freshΦ (runCodeGen q φ)
-     return $! Op3 (HardFork pc qc decl)
+     return $! case decl of
+       Nothing -> Op3 (HardFork pc qc Nothing)
+       Just (φ, x) -> Op3 (MkJoin φ x (Op3 (HardFork pc qc Nothing)))
 direct (Try p)           m = do fmap (Op3 . Attempt) (runCodeGen p (deadCommitOptimisation m))
 direct (LookAhead p)     m = do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
 direct (NotFollowedBy p) m = do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit (Op3 Empt)))))))

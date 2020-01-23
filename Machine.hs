@@ -191,9 +191,8 @@ readyExec = fold3 absurd (Exec . alg)
     alg (Sat p k)              = execSat p k
     alg Empt                   = execEmpt
     alg (Commit k)             = execCommit k
-    alg (HardFork p q φ)       = execHardFork p q φ
-    alg (SoftFork p q φ)       = execSoftFork p q φ
-    alg (Join φ)               = execJoin φ
+    alg (HardFork p q _)       = execHardFork p q
+    alg (SoftFork p q _)       = execSoftFork p q
     alg (Attempt k)            = execAttempt k
     alg (Tell k)               = execTell k
     alg (Seek k)               = execSeek k
@@ -201,6 +200,8 @@ readyExec = fold3 absurd (Exec . alg)
     alg (Choices fs ks def  φ) = execChoices fs ks def  φ
     alg (ChainIter σ μ)        = execChainIter σ μ
     alg (ChainInit σ l μ k)    = execChainInit σ l μ k
+    alg (Join φ)               = execJoin φ
+    alg (MkJoin φ p k)         = execMkJoin φ p k
     alg (Swap k)               = execSwap k
     alg (Make σ k)             = execMake σ k
     alg (Get σ k)              = execGet σ k
@@ -254,8 +255,8 @@ execEmpt = return $! raiseΓ
 execCommit :: Exec s o xs r a -> ExecMonad s o xs r a
 execCommit (Exec k) = fmap (\m γ -> m (γ {hs = tail (hs γ)})) k
 
-execHardFork :: (?ops :: InputOps s o, HardForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> ExecMonad s o xs r a
-execHardFork (Exec p) (Exec q) decl = setupJoinPoint decl id $
+execHardFork :: (?ops :: InputOps s o, HardForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> ExecMonad s o xs r a
+execHardFork (Exec p) (Exec q) =
   do mp <- p
      mq <- q
      return $! \γ -> setupHandlerΓ γ (hardForkHandler mq γ) mp
@@ -271,8 +272,8 @@ instance HardForkHandler _o where         \
 };
 inputInstances(deriveHardForkHandler)
 
-execSoftFork :: (?ops :: InputOps s o, SoftForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> Maybe (ΦDecl (Exec s o) x xs r a) -> ExecMonad s o xs r a
-execSoftFork (Exec p) (Exec q) decl = setupJoinPoint decl id $
+execSoftFork :: (?ops :: InputOps s o, SoftForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> ExecMonad s o xs r a
+execSoftFork (Exec p) (Exec q) =
   do mp <- p
      mq <- q
      return $! \γ -> setupHandlerΓ γ (softForkHandler mq γ) mp
@@ -280,11 +281,6 @@ execSoftFork (Exec p) (Exec q) decl = setupJoinPoint decl id $
 #define deriveSoftForkHandler(_o) \
 instance SoftForkHandler _o where { softForkHandler mq γ h c = [||\_ -> $$(mq (γ {o = c}))||] };
 inputInstances(deriveSoftForkHandler)
-
-execJoin :: (?ops :: InputOps s o) => ΦVar x -> ExecMonad s o (x ': xs) r a
-execJoin φ =
-  do QJoin k <- asks ((DMap.! φ) . φs)
-     return $! \γ -> [|| $$k $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]
 
 execAttempt :: (?ops :: InputOps s o, AttemptHandler o) => Exec s o xs r a -> ExecMonad s o xs r a
 execAttempt (Exec k) = fmap (\mk γ -> setupHandlerΓ γ attemptHandler mk) k 
@@ -353,6 +349,14 @@ instance ChainHandler _o where              \
       } ||]                                 \
 };
 inputInstances(deriveChainHandler)
+
+execJoin :: (?ops :: InputOps s o) => ΦVar x -> ExecMonad s o (x ': xs) r a
+execJoin φ =
+  do QJoin k <- asks ((DMap.! φ) . φs)
+     return $! \γ -> [|| $$k $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]
+
+execMkJoin :: (?ops :: InputOps s o, JoinBuilder o) => ΦVar x -> Exec s o (x ': xs) r a -> Exec s o xs r a -> ExecMonad s o xs r a
+execMkJoin φ p (Exec k) = setupJoinPoint (Just (φ, p)) id k
 
 execSwap :: Exec s o (x ': y ': xs) r a -> ExecMonad s o (y ': x ': xs) r a
 execSwap (Exec k) = fmap (\mk γ -> mk (γ {xs = let QCons y (QCons x xs') = xs γ in QCons x (QCons y xs')})) k

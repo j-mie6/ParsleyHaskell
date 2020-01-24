@@ -44,7 +44,7 @@ import Language.Haskell.TH        (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, toList, traverseWithKey)
-import qualified Queue                      (empty, size, null)
+import qualified Queue                      (empty, size, null, foldr)
 
 #define inputInstances(derivation) \
 derivation(Int)                    \
@@ -119,6 +119,9 @@ giveCoins c ctx = ctx {coins = coins ctx + c}
 
 voidCoins :: Ctx s o a -> Ctx s o a
 voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
+
+liquidate :: Ctx s o a -> Int
+liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
 
 newtype MissingDependency = MissingDependency IMVar
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
@@ -422,6 +425,7 @@ execMeta (AddCoins coins) (Exec k) =
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
+execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
 --execMeta _ (Exec k) = k
 
 setupHandlerΓ :: FailureOps o => Γ s o xs r a 
@@ -476,6 +480,7 @@ instance RecBuilder _o where                                                    
 inputInstances(deriveRecBuilder)
 
 emitLengthCheck :: (?ops :: InputOps s o, FailureOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs r a -> Code (ST s (Maybe a))
+emitLengthCheck 0 good _ _   = good
 emitLengthCheck 1 good bad γ = [|| if $$more $$(o γ) then $$good else $$bad ||]
 emitLengthCheck n good bad γ = trace ("generating length check of " ++ show n) $ [||
   if $$more ($$shiftRight $$(o γ) n) then $$good

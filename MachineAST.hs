@@ -62,6 +62,7 @@ data M o k xs r a where
 data MetaM where
   AddCoins    :: Int -> MetaM
   RefundCoins :: Int -> MetaM
+  DrainCoins  :: Int -> MetaM
 
 _App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs) r a
 _App m = Lift2 APP m
@@ -142,6 +143,7 @@ instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
 instance Show MetaM where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"
   show (RefundCoins n) = "Refund " ++ show n ++ " coins"
+  show (DrainCoins n)    = "Using " ++ show n ++ " coins"
 
 instance GEq ΣVar where
   geq (ΣVar u) (ΣVar v)

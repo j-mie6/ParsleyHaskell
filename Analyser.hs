@@ -4,11 +4,12 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TypeOperators #-}
 module Analyser (analyse) where
 
 import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
 import MachineAST                 (IMVar, MVar(..), IΣVar)
-import Indexed                    (Free(..), History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd)
+import Indexed                    (Free(..), History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd, (:*:)(..), ifst, isnd, (/\))
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
 import Control.Monad.State.Strict (State, get, put, evalState)
@@ -30,7 +31,7 @@ analyse = constantInput {-. terminationAnalysis-}
 _ <==> _ = Nothing
 
 constantInput :: Free ParserF f a -> Free ParserF f a
-constantInput = untag . fold Var (Op . alg)
+constantInput = untag . ifst . fold (Var /\ const (Const1 False)) ((Op . alg) /\ (Const1 . forkNode))
   where
     tyTag ty n = MetaP (ConstInput ty n) . Op
     tag = tyTag Costs
@@ -40,40 +41,50 @@ constantInput = untag . fold Var (Op . alg)
     untag (TaggedInput _ 1 p) = p
     untag p = p
     retag f n p = untag (CostsInput (max (f n) 0) p)
-    get (TaggedInput _ n p) = (n, p)
-    get p = (0, p)
+    get (TaggedInput _ n p :*: _) = (n, p)
+    get (p :*: _) = (0, p)
 
     -- This should be sufficient? Worse case we add more length checks than necessary
     seqCost Costs n m = n + m
     seqCost Refunded n m = max n m
 
-    alg :: ParserF (Free ParserF f) a -> ParserF (Free ParserF f) a
-    alg p@(Pure _) = tag 0 p
-    alg p@(Satisfy _) = tag 1 p
-    alg (TaggedInput ty n p :<*>: q) = let (m, q') = get q in tag (seqCost ty n m) (p :<*>: q')
-    alg (TaggedInput ty n p :*>: q) = let (m, q') = get q in tag (seqCost ty n m) (p :*>: q')
-    alg (TaggedInput ty n p :<*: q) = let (m, q') = get q in tag (seqCost ty n m) (p :<*: q')
-    alg (CostsInput n p :<|>: CostsInput m q) -- TODO What about refunds?
+    -- We need to ensure that any join points are isolated from their corresponding forks
+    -- They will be drained before entry AROUND the node and refunded INSIDE the node
+    -- This affects any sequence node with a fork node to its left. We'll make a separate
+    -- algebra to break out this separation of concerns
+    forkNode :: ParserF f a -> Bool
+    forkNode (_ :<|>: _)     = True
+    forkNode (Branch _ _ _)  = True
+    forkNode (Match _ _ _ _) = True
+    forkNode _               = False
+
+    alg :: ParserF (Free ParserF f :*: Const1 Bool) a -> ParserF (Free ParserF f) a
+    alg (Pure x) = tag 0 (Pure x)
+    alg (Satisfy p) = tag 1 (Satisfy p)
+    alg ((TaggedInput ty n p :*: _) :<*>: q) = let (m, q') = get q in tag (seqCost ty n m) (p :<*>: q')
+    alg ((TaggedInput ty n p :*: _) :*>: q) = let (m, q') = get q in tag (seqCost ty n m) (p :*>: q')
+    alg ((TaggedInput ty n p :*: _) :<*: q) = let (m, q') = get q in tag (seqCost ty n m) (p :<*: q')
+    alg ((CostsInput n p :*: _) :<|>: (CostsInput m q :*: _)) -- TODO What about refunds?
       | n > m  = tag m (retag (subtract m) n p :<|>: q)
       | m > n  = tag n (p :<|>: retag (subtract n) m q)
       | n == m = tag n (p :<|>: q)
-    alg p@Empty = tag 0 p
-    alg (Try (TaggedInput ty n p)) = tyTag ty n (Try p)
-    alg (Branch (TaggedInput ty n b) p q)
+    alg Empty = tag 0 Empty
+    alg (Try (TaggedInput ty n p :*: _)) = tyTag ty n (Try p)
+    alg (Branch (TaggedInput ty n b :*: _) p q)
       | m1 > m2  = tag (seqCost ty n m2) (Branch b (retag (subtract m2) m1 p') q')
       | m2 > m1  = tag (seqCost ty n m1) (Branch b p' (retag (subtract m1) m2 q'))
       | m1 == m2 = tag (seqCost ty n m1) (Branch b p' q')
       where (m1, p') = get p
             (m2, q') = get q
-    alg (Match (TaggedInput ty n p) fs qs d) =
+    alg (Match (TaggedInput ty n p :*: _) fs qs d) =
       let mdqs = map get (d : qs)
           m = maximum (map fst mdqs)
           d' : qs' = map (uncurry (retag (subtract m))) mdqs
       in tag (seqCost ty n m) (Match p fs qs' d')
-    alg (LookAhead (CostsInput n p)) = refunds n (LookAhead (free n p))
-    alg (NotFollowedBy (CostsInput n p)) = refunds n (NotFollowedBy (free n p))
-    alg (Debug name (CostsInput n p)) = tag n (Debug name p)
-    alg p = imap untag p
+    alg (LookAhead (CostsInput n p :*: _)) = refunds n (LookAhead (free n p))
+    alg (NotFollowedBy (CostsInput n p :*: _)) = refunds n (NotFollowedBy (free n p))
+    alg (Debug name (CostsInput n p :*: _)) = tag n (Debug name p)
+    alg p = imap (untag . ifst) p
 
 pattern TaggedInput t n p = Op (MetaP (ConstInput t n) p)
 pattern CostsInput n p = TaggedInput Costs n p

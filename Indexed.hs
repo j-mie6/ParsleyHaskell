@@ -7,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeOperators #-}
 module Indexed where
 
 import Control.Applicative ((<|>), liftA2)
@@ -66,6 +67,14 @@ histo gen alg = present . fold (Genesis . gen) (alg >>= Era)
 
 extract :: IFunctor f => (forall j. f a j -> a j) -> Free f a i -> a i
 extract = fold id
+
+data (f :*: g) k = f k :*: g k
+(/\) :: (a -> f k) -> (a -> g k) -> (a -> (f :*: g) k)
+(f /\ g) x = f x :*: g x
+ifst :: (f :*: g) k -> f k
+ifst (x :*: _) = x
+isnd :: (f :*: g) k -> g k
+isnd (_ :*: y) = y
 
 class                         Chain r k         where (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
 instance {-# OVERLAPPABLE #-} Chain a a         where (|>) = liftA2 (flip fromMaybe)

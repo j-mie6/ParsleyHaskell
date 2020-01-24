@@ -1,7 +1,8 @@
 {-# LANGUAGE ViewPatterns #-}
-module Queue (Queue, empty, enqueue, dequeue, null, size) where
+module Queue (Queue, empty, enqueue, dequeue, null, size, foldr) where
 
-import Prelude hiding (null)
+import Prelude hiding (null, foldr)
+import qualified Prelude (foldr)
 
 data Queue a = Queue {
   outsz :: Int,
@@ -27,5 +28,11 @@ null _ = False
 size :: Queue a -> Int
 size q = insz q + outsz q
 
+toList :: Queue a -> [a]
+toList q = (outs q ++ reverse (ins q))
+
+foldr :: (a -> b -> b) -> b -> Queue a -> b
+foldr f k = Prelude.foldr f k . toList
+
 instance Show a => Show (Queue a) where
-  show q = show (outs q ++ reverse (ins q))
+  show = show . toList 

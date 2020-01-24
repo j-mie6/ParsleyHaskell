@@ -117,6 +117,9 @@ spendCoin ctx = ctx {coins = coins ctx - 1}
 giveCoins :: Int -> Ctx s o a -> Ctx s o a
 giveCoins c ctx = ctx {coins = coins ctx + c}
 
+voidCoins :: Ctx s o a -> Ctx s o a
+voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
+
 newtype MissingDependency = MissingDependency IMVar
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
 type ExecMonad s o xs r a = Reader (Ctx s o a) (Γ s o xs r a -> Code (ST s (Maybe a)))
@@ -413,8 +416,11 @@ execLogExit name (Exec mk) =
     (local debugDown mk) 
     ask
 
-execMeta :: MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
-execMeta (AddCoins coins) (Exec k) = local (storePiggy coins) k
+execMeta :: (?ops :: InputOps s o, FailureOps o) => MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
+execMeta (AddCoins coins) (Exec k) = 
+  do requiresPiggy <- asks hasCoin
+     if requiresPiggy then local (storePiggy coins) k
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
 --execMeta _ (Exec k) = k
 
@@ -438,7 +444,7 @@ instance JoinBuilder _o where                                                   
     liftM2 (\mk ctx γ -> [||                                                      \
       let join x !o# = $$(mk (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) \
       in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))                           \
-    ||]) k ask                                                                    \
+    ||]) (local voidCoins k) ask                                                  \
 };
 inputInstances(deriveJoinBuilder)
 

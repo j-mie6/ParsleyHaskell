@@ -10,7 +10,7 @@
 module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
-import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), ΦDecl, _Fmap, _App, _Modify)
+import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify)
 import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
 import Utils                      (code, (>*<), WQ(..))
 import Defunc                     (Defunc(BLACK))
@@ -58,19 +58,13 @@ peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (Op3 (Lift2 (BLACK f) m))
      runCodeGen p qc
 peephole (TryOrElse p q) = Just $ CodeGen $ \m ->
-  do (decl, φ) <- makeΦ m
+  do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     qc <- freshΦ (runCodeGen q φ)
-     return $! case decl of
-       Nothing -> Op3 (SoftFork pc qc Nothing)
-       Just (φ, x) -> Op3 (MkJoin φ x (Op3 (SoftFork pc qc Nothing)))
+     fmap (binder . Op3 . SoftFork pc) (freshΦ (runCodeGen q φ))
 peephole (Era _ ((Try (Era p _)) :$>: x) :<|>: Era q _) = Just $ CodeGen $ \m ->
-  do (decl, φ) <- makeΦ m
+  do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (Op3 (Pop (Op3 (Push x φ))))))
-     qc <- freshΦ (runCodeGen q φ)
-     return $! case decl of
-       Nothing -> Op3 (SoftFork pc qc Nothing)
-       Just (φ, x) -> Op3 (MkJoin φ x (Op3 (SoftFork pc qc Nothing)))
+     fmap (binder . Op3 . SoftFork pc) (freshΦ (runCodeGen q φ))
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
@@ -82,24 +76,21 @@ direct (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (Op3 (Pop qc))
 direct (p :<*: q)    m = do qc <- runCodeGen q (Op3 (Pop m)); runCodeGen p qc
 direct Empty         m = do return $! Op3 Empt
 direct (p :<|>: q)   m =
-  do (decl, φ) <- makeΦ m
+  do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     qc <- freshΦ (runCodeGen q φ)
-     return $! case decl of
-       Nothing -> Op3 (HardFork pc qc Nothing)
-       Just (φ, x) -> Op3 (MkJoin φ x (Op3 (HardFork pc qc Nothing)))
+     fmap (binder . Op3 . HardFork pc) (freshΦ (runCodeGen q φ))
 direct (Try p)           m = do fmap (Op3 . Attempt) (runCodeGen p (deadCommitOptimisation m))
 direct (LookAhead p)     m = do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
 direct (NotFollowedBy p) m = do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit (Op3 Empt)))))))
-                                return $! Op3 (SoftFork (Op3 (Tell pc)) (Op3 (Push (code ()) m)) Nothing)
-direct (Branch b p q)    m = do (decl, φ) <- makeΦ m
+                                return $! Op3 (SoftFork (Op3 (Tell pc)) (Op3 (Push (code ()) m)))
+direct (Branch b p q)    m = do (binder, φ) <- makeΦ m
                                 pc <- freshΦ (runCodeGen p (Op3 (Swap (Op3 (_App φ)))))
                                 qc <- freshΦ (runCodeGen q (Op3 (Swap (Op3 (_App φ)))))
-                                runCodeGen b (Op3 (Case pc qc decl))
-direct (Match p fs qs def) m = do (decl, φ) <- makeΦ m
+                                fmap binder (runCodeGen b (Op3 (Case pc qc)))
+direct (Match p fs qs def) m = do (binder, φ) <- makeΦ m
                                   qcs <- traverse (freshΦ . flip runCodeGen φ) qs
                                   defc <- freshΦ (runCodeGen def φ)
-                                  runCodeGen p (Op3 (Choices fs qcs defc decl))
+                                  fmap binder (runCodeGen p (Op3 (Choices fs qcs defc)))
 direct (Let _ !μ _) m = return $! tailCallOptimise μ m
 direct (ChainPre op p) m =
   do μ <- askM
@@ -142,8 +133,8 @@ freshM = mapVFreshT newScope
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
-makeΦ :: Free3 (M o) Void3 (x ': xs) r a -> CodeGenStack (Maybe (ΦDecl (Free3 (M o) Void3) x xs r a), Free3 (M o) Void3 (x ': xs) r a)
-makeΦ m | elidable m = return $! (Nothing, m)
+makeΦ :: Free3 (M o) Void3 (x ': xs) r a -> CodeGenStack (Free3 (M o) Void3 xs r a -> Free3 (M o) Void3 xs r a, Free3 (M o) Void3 (x ': xs) r a)
+makeΦ m | elidable m = return $! (id, m)
   where 
     -- This is double-φ optimisation:   If a φ-node points directly to another φ-node, then it can be elided
     elidable (Op3 (Join _)) = True
@@ -151,11 +142,7 @@ makeΦ m | elidable m = return $! (Nothing, m)
     elidable (Op3 Ret)      = True
     elidable (Op3 Halt)     = True
     elidable _              = False
-makeΦ m =
-  do φ <- askΦ
-     let decl = Just (φ, m)
-     let join = Op3 (Join φ)
-     return $! (decl, join)
+makeΦ m = fmap (\φ -> (Op3 . MkJoin φ m, Op3 (Join φ))) askΦ
 
 freshΣ :: CodeGenStack (ΣVar a)
 freshΣ = lift (lift (construct ΣVar))

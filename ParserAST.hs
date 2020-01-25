@@ -91,7 +91,7 @@ data ParserF (k :: * -> *) (a :: *) where
   Debug         :: String -> k a -> ParserF k a
   MetaP         :: MetaP -> k a -> ParserF k a
 
-data CoinType = Costs | Refunded | Free deriving Show
+data CoinType = Costs | Refunded | Free | Transports deriving Show
 data MetaP where
   ConstInput :: CoinType -> Int -> MetaP
 
@@ -141,3 +141,4 @@ instance Show MetaP where
   show (ConstInput Refunded n) = concat ["refunds ", show n, " tokens"]
   show (ConstInput Costs n) = concat ["consumes ", show n, " tokens"]
   show (ConstInput Free n) = concat ["consumes ", show n, " tokens for free"]
+  show (ConstInput Transports n) = concat ["transports ", show n, " tokens across join"]

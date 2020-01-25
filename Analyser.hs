@@ -43,6 +43,8 @@ constantInput = untag . ifst . fold (Var /\ const (Const1 False)) ((Op . alg) /\
     retag f n p = untag (CostsInput (max (f n) 0) p)
     get (TaggedInput _ n p :*: _) = (n, p)
     get (p :*: _) = (0, p)
+    guardJoin (Const1 True) n = Op . MetaP (ConstInput Transports n)
+    guardJoin (Const1 False) _ = id
 
     -- This should be sufficient? Worse case we add more length checks than necessary
     seqCost Costs n m = n + m
@@ -61,26 +63,26 @@ constantInput = untag . ifst . fold (Var /\ const (Const1 False)) ((Op . alg) /\
     alg :: ParserF (Free ParserF f :*: Const1 Bool) a -> ParserF (Free ParserF f) a
     alg (Pure x) = tag 0 (Pure x)
     alg (Satisfy p) = tag 1 (Satisfy p)
-    alg ((TaggedInput ty n p :*: _) :<*>: q) = let (m, q') = get q in tag (seqCost ty n m) (p :<*>: q')
-    alg ((TaggedInput ty n p :*: _) :*>: q) = let (m, q') = get q in tag (seqCost ty n m) (p :*>: q')
-    alg ((TaggedInput ty n p :*: _) :<*: q) = let (m, q') = get q in tag (seqCost ty n m) (p :<*: q')
+    alg ((TaggedInput ty n p :*: fork) :<*>: q) = let (m, q') = get q in tag (seqCost ty n m) (guardJoin fork m p :<*>: q')
+    alg ((TaggedInput ty n p :*: fork) :*>: q) = let (m, q') = get q in tag (seqCost ty n m) (guardJoin fork m p :*>: q')
+    alg ((TaggedInput ty n p :*: fork) :<*: q) = let (m, q') = get q in tag (seqCost ty n m) (guardJoin fork m p :<*: q')
     alg ((CostsInput n p :*: _) :<|>: (CostsInput m q :*: _)) -- TODO What about refunds?
       | n > m  = tag m (retag (subtract m) n p :<|>: q)
       | m > n  = tag n (p :<|>: retag (subtract n) m q)
       | n == m = tag n (p :<|>: q)
     alg Empty = tag 0 Empty
     alg (Try (TaggedInput ty n p :*: _)) = tyTag ty n (Try p)
-    alg (Branch (TaggedInput ty n b :*: _) p q)
-      | m1 > m2  = tag (seqCost ty n m2) (Branch b (retag (subtract m2) m1 p') q')
-      | m2 > m1  = tag (seqCost ty n m1) (Branch b p' (retag (subtract m1) m2 q'))
-      | m1 == m2 = tag (seqCost ty n m1) (Branch b p' q')
+    alg (Branch (TaggedInput ty n b :*: fork) p q)
+      | m1 > m2  = tag (seqCost ty n m2) (Branch (guardJoin fork m2 b) (retag (subtract m2) m1 p') q')
+      | m2 > m1  = tag (seqCost ty n m1) (Branch (guardJoin fork m1 b) p' (retag (subtract m1) m2 q'))
+      | m1 == m2 = tag (seqCost ty n m1) (Branch (guardJoin fork m1 b) p' q')
       where (m1, p') = get p
             (m2, q') = get q
-    alg (Match (TaggedInput ty n p :*: _) fs qs d) =
+    alg (Match (TaggedInput ty n p :*: fork) fs qs d) =
       let mdqs = map get (d : qs)
-          m = maximum (map fst mdqs)
+          m = minimum (map fst mdqs)
           d' : qs' = map (uncurry (retag (subtract m))) mdqs
-      in tag (seqCost ty n m) (Match p fs qs' d')
+      in tag (seqCost ty n m) (Match (guardJoin fork m p) fs qs' d')
     alg (LookAhead (CostsInput n p :*: _)) = refunds n (LookAhead (free n p))
     alg (NotFollowedBy (CostsInput n p :*: _)) = refunds n (NotFollowedBy (free n p))
     alg (Debug name (CostsInput n p :*: _)) = tag n (Debug name p)

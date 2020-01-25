@@ -425,7 +425,7 @@ execMeta (AddCoins coins) (Exec k) =
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
-execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
+execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((max 0) . (coins -) . liquidate)) k -- MAX is NOT needed, but the Drain has the incorrect number of tokens for the moment :\
 --execMeta _ (Exec k) = k
 
 setupHandlerΓ :: FailureOps o => Γ s o xs r a 

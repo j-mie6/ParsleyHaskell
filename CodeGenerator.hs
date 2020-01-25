@@ -107,6 +107,7 @@ direct (Debug name p) m = do fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogE
 direct (MetaP (ConstInput Costs n) p) m    = do fmap (Op3 . MetaM (AddCoins n)) (runCodeGen p m)
 direct (MetaP (ConstInput Refunded n) p) m = do fmap (Op3 . MetaM (AddCoins n)) (runCodeGen p m)
 direct (MetaP (ConstInput Free n) p) m     = do runCodeGen p (Op3 (MetaM (RefundCoins n) m))
+direct (MetaP (ConstInput Transports n) p) m   = do runCodeGen p (Op3 (MetaM (RefundCoins n) m))
 --direct (MetaP _ p) m = runCodeGen p m
 
 tailCallOptimise :: MVar x -> Free3 (M o) Void3 (x ': xs) r a -> Free3 (M o) Void3 xs r a
@@ -142,6 +143,7 @@ makeΦ m | elidable m = return $! (id, m)
     elidable (Op3 Ret)      = True
     elidable (Op3 Halt)     = True
     elidable _              = False
+makeΦ m@(Op3 (MetaM (RefundCoins n) _)) = fmap (\φ -> (Op3 . MkJoin φ m, Op3 (MetaM (DrainCoins n) (Op3 (Join φ))))) askΦ
 makeΦ m = fmap (\φ -> (Op3 . MkJoin φ m, Op3 (Join φ))) askΦ
 
 freshΣ :: CodeGenStack (ΣVar a)

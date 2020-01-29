@@ -16,7 +16,7 @@ module Compiler(compile) where
 import Prelude hiding (pred)
 import ParserAST                  (ParserF(..), Parser(..))
 import Optimiser                  (optimise)
-import Analyser                   (analyse)
+import CombinatorAnalyser         (analyse)
 import CodeGenerator              (codeGen, halt, ret)
 import MachineAST                 (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
 import Indexed                    (Free(Op), Void1, fold, fold', absurd, Tag(..), imap)

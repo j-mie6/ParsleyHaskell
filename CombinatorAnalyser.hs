@@ -5,7 +5,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeOperators #-}
-module Analyser (analyse) where
+module CombinatorAnalyser (analyse) where
 
 import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
 import MachineAST                 (IMVar, MVar(..), IΣVar)

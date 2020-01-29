@@ -95,7 +95,7 @@ library
   exposed-modules:     Parsley
 
   -- Modules included in this library but not exported.
-  other-modules:       Compiler, Indexed, Machine, MachineOps, Utils, Optimiser, Analyser, ParserAST, MachineAST, CodeGenerator, Fresh, Input, Defunc, Queue
+  other-modules:       Compiler, Indexed, Machine, MachineOps, Utils, Optimiser, CombinatorAnalyser, MachineAnalyser, ParserAST, MachineAST, CodeGenerator, Fresh, Input, Defunc, Queue
 
   -- LANGUAGE extensions used by modules in this package.
   other-extensions:    TemplateHaskell

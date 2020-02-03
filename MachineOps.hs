@@ -76,7 +76,7 @@ offToInt   = _offToInt   ?ops
 
 type AbsExec s o a x = (x -> Unboxed o -> ST s (Maybe a)) -> Unboxed o -> (Unboxed o -> ST s (Maybe a)) -> ST s (Maybe a)
 newtype QAbsExec s o a x = QAbsExec (Code (AbsExec s o a x))
-newtype QJoin s o a x = QJoin (Code (x -> Unboxed o -> ST s (Maybe a)))
+newtype QJoin s o a x = QJoin (Code (x -> Unboxed  o -> ST s (Maybe a)))
 
 tailQ :: QList (x ': xs) -> QList xs
 tailQ (QCons x xs) = xs

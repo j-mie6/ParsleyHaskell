@@ -441,14 +441,15 @@ class RecBuilder o => JoinBuilder o where
                  -> ExecMonad s o xs r a
                  -> ExecMonad s o xs r a
 
-#define deriveJoinBuilder(_o)                                                     \
-instance JoinBuilder _o where                                                     \
-{                                                                                 \
-  setupJoinPoint φ (Exec k) mx =                                                  \
-    liftM2 (\mk ctx γ -> [||                                                      \
-      let join x !o# = $$(mk (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) \
-      in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))                           \
-    ||]) (local voidCoins k) ask                                                  \
+#define deriveJoinBuilder(_o)                                      \
+instance JoinBuilder _o where                                      \
+{                                                                  \
+  setupJoinPoint φ (Exec k) mx =                                   \
+    liftM2 (\mk ctx γ -> [||                                       \
+      let join x !(o# :: Unboxed _o) =                             \
+        $$(mk (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) \
+      in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))            \
+    ||]) (local voidCoins k) ask                                   \
 };
 inputInstances(deriveJoinBuilder)
 

@@ -61,6 +61,7 @@ data M o k xs r a where
 
 data MetaM where
   AddCoins    :: Int -> MetaM
+  FreeCoins   :: Int -> MetaM
   RefundCoins :: Int -> MetaM
   DrainCoins  :: Int -> MetaM
 

@@ -68,13 +68,13 @@ histo gen alg = present . fold (Genesis . gen) (alg >>= Era)
 extract :: IFunctor f => (forall j. f a j -> a j) -> Free f a i -> a i
 extract = fold id
 
-data (f :*: g) k = f k :*: g k
-(/\) :: (a -> f k) -> (a -> g k) -> (a -> (f :*: g) k)
-(f /\ g) x = f x :*: g x
-ifst :: (f :*: g) k -> f k
-ifst (x :*: _) = x
-isnd :: (f :*: g) k -> g k
-isnd (_ :*: y) = y
+data (f :**: g) i j k = f i j k :**: g i j k
+(/\) :: (a -> f i j k) -> (a -> g i j k) -> (a -> (f :**: g) i j k)
+(f /\ g) x = f x :**: g x
+ifst3 :: (f :**: g) i j k -> f i j k
+ifst3 (x :**: _) = x
+isnd3 :: (f :**: g) i j k -> g i j k
+isnd3 (_ :**: y) = y
 
 class                         Chain r k         where (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
 instance {-# OVERLAPPABLE #-} Chain a a         where (|>) = liftA2 (flip fromMaybe)

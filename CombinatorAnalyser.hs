@@ -6,7 +6,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
-module CombinatorAnalyser (analyse) where
+module CombinatorAnalyser (analyse, compliance, Compliance) where
 
 import ParserAST                  (ParserF(..){-, MetaP(..), CoinType(..)-})
 import MachineAST                 (IMVar, MVar(..), IΣVar)

@@ -42,17 +42,20 @@ data Cofree f a i = a i :< f (Cofree f a) i
 extract :: Cofree f a i -> a i
 extract (x :< _) = x
 
+instance IFunctor f => IFunctor (Cofree f) where
+  imap f (x :< xs) = f x :< imap (imap f) xs
+
 histo :: forall f a i. IFunctor f => (forall j. f (Cofree f a) j -> a j)
                                   -> Fix f i -> a i
 histo alg = extract . cata (alg >>= (:<))
 
-data (f :**: g) i j k = f i j k :**: g i j k
-(/\) :: (a -> f i j k) -> (a -> g i j k) -> (a -> (f :**: g) i j k)
-(f /\ g) x = f x :**: g x
-ifst3 :: (f :**: g) i j k -> f i j k
-ifst3 (x :**: _) = x
-isnd3 :: (f :**: g) i j k -> g i j k
-isnd3 (_ :**: y) = y
+data (f :*: g) i = f i :*: g i
+(/\) :: (a -> f i) -> (a -> g i) -> (a -> (f :*: g) i)
+(f /\ g) x = f x :*: g x
+ifst :: (f :*: g) i -> f i
+ifst (x :*: _) = x
+isnd :: (f :*: g) i -> g i
+isnd (_ :*: y) = y
 
 class                         Chain r k         where (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
 instance {-# OVERLAPPABLE #-} Chain a a         where (|>) = liftA2 (flip fromMaybe)

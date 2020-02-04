@@ -13,7 +13,8 @@ module CodeGenerator (codeGen, halt, ret) where
 import ParserAST                  (ParserF(..){- MetaP(..), CoinType(..)-})
 import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
 import MachineAnalyser            (coinsNeeded)
-import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>))
+import CombinatorAnalyser         (compliance, Compliance)
+import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>), (/\), ifst, isnd, (:*:)(..))
 import Utils                      (code, (>*<), WQ(..))
 import Defunc                     (Defunc(BLACK))
 import Control.Applicative        (liftA2)
@@ -46,8 +47,9 @@ ret = In3 Ret
 codeGen :: forall o xs r a b. Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
-    (m, maxΣ) = finalise (histo alg p)
-    alg = {-peephole |> -}(\x -> CodeGen (direct (imap extract x)))
+    (m, maxΣ) = finalise (ifst (histo alg p))
+    alg :: forall a. ParserF (Cofree ParserF (CodeGen o b :*: Compliance)) a -> (CodeGen o b :*: Compliance) a
+    alg = {-peephole |> -}(\x -> CodeGen (direct (imap (ifst . extract) x))) /\ (compliance . imap (isnd . extract))
     
     finalise :: CodeGen o b a -> (Fix3 (M o) xs r b, IΣVar)
     finalise cg = 

@@ -7,10 +7,12 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..){- MetaP(..), CoinType(..)-})
-import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify)
+import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
+import MachineAnalyser            (coinsNeeded)
 import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>))
 import Utils                      (code, (>*<), WQ(..))
 import Defunc                     (Defunc(BLACK))
@@ -41,11 +43,17 @@ halt = In3 Halt
 ret :: Fix3 (M o) '[x] x a
 ret = In3 Ret
 
-codeGen :: Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
+codeGen :: forall o xs r a b. Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
-    (m, maxΣ) = runCodeGenStack (runCodeGen (histo alg p) terminal) μ0 0 σ0
+    (m, maxΣ) = finalise (histo alg p)
     alg = {-peephole |> -}(\x -> CodeGen (direct (imap extract x)))
+    
+    finalise :: CodeGen o b a -> (Fix3 (M o) xs r b, IΣVar)
+    finalise cg = 
+      let ({-(-}m{-, _)-}, maxΣ) = runCodeGenStack (runCodeGen cg {-False-} terminal) μ0 0 σ0 
+          n = coinsNeeded m
+      in (addCoins n m, maxΣ)
 
 --pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
 --pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)

@@ -65,6 +65,15 @@ data MetaM where
   RefundCoins :: Int -> MetaM
   DrainCoins  :: Int -> MetaM
 
+mkCoin :: (Int -> MetaM) -> Int -> Fix3 (M o) xs r a -> Fix3 (M o) xs r a
+mkCoin meta 0 = id
+mkCoin meta n = In3 . MetaM (meta n)
+
+addCoins = mkCoin AddCoins
+freeCoins = mkCoin FreeCoins
+refundCoins = mkCoin RefundCoins
+drainCoins = mkCoin DrainCoins
+
 _App :: Fix3 (M o) (y ': xs) r a -> M o (Fix3 (M o)) (x ': (x -> y) ': xs) r a
 _App m = Lift2 APP m
 

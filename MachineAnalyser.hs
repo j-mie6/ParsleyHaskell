@@ -8,8 +8,8 @@ import Machine
 import MachineAST
 import Indexed
 
-constInput :: Fix3 (M o) xs r a -> Int
-constInput = fst . getConst3 . cata3 (Const3 . alg)
+coinsNeeded :: Fix3 (M o) xs r a -> Int
+coinsNeeded = fst . getConst3 . cata3 (Const3 . alg)
   where
     algCatch :: (Int, Bool) -> (Int, Bool) -> (Int, Bool)
     algCatch k1 (k2, True) = k1

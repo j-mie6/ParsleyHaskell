@@ -59,15 +59,13 @@ instance {-# OVERLAPPABLE #-} Chain a a         where (|>) = liftA2 (flip fromMa
 instance {-# OVERLAPS #-}     Chain a (Maybe a) where (|>) = liftA2 (<|>)
 
 data Unit1 k = Unit
-data Void1 k
-data Const1 a k = Const1 {getConst1 :: a}
+newtype Const1 a k = Const1 {getConst1 :: a}
 data Tag t f k a = Tag {tag :: t, tagged :: f k a}
 
 instance IFunctor f => IFunctor (Tag t f) where
   imap f (Tag t k) = Tag t (imap f k)
 
 data Unit3 i j k = Unit3
-data Void3 i j k
-data Const3 a i j k = Const3 {getConst3 :: a}
+newtype Const3 a i j k = Const3 {getConst3 :: a}
 
 

@@ -8,7 +8,7 @@
 {-# LANGUAGE ViewPatterns #-}
 module CombinatorAnalyser (analyse) where
 
-import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
+import ParserAST                  (ParserF(..){-, MetaP(..), CoinType(..)-})
 import MachineAST                 (IMVar, MVar(..), IΣVar)
 import Indexed                    (Fix(..), Cofree(..), Const1(..), imap, cata, histo, extract, (|>))
 import Control.Applicative        (liftA2)

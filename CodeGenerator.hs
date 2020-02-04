@@ -9,7 +9,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 module CodeGenerator (codeGen, halt, ret) where
 
-import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
+import ParserAST                  (ParserF(..){- MetaP(..), CoinType(..)-})
 import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify)
 import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>))
 import Utils                      (code, (>*<), WQ(..))
@@ -45,14 +45,14 @@ codeGen :: Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = runCodeGenStack (runCodeGen (histo alg p) terminal) μ0 0 σ0
-    alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
+    alg = {-peephole |> -}(\x -> CodeGen (direct (imap extract x)))
 
-pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
-pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
-pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
-pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
+--pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
+--pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
+--pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
+--pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
-peephole :: ParserF (Cofree ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
+{-peephole :: ParserF (Cofree ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In3 (_Fmap f m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (In3 (Lift2 (BLACK f) m))
@@ -66,7 +66,7 @@ peephole ((_ :< ((Try (p :< _)) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ \m -
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (In3 (Pop (In3 (Push x φ))))))
      fmap (binder . In3 . SoftFork pc) (freshΦ (runCodeGen q φ))
 -- TODO: One more for fmap try
-peephole _ = Nothing
+peephole _ = Nothing-}
 
 direct :: ParserF (CodeGen o b) a -> Fix3 (M o) (a ': xs) r b -> CodeGenStack (Fix3 (M o) xs r b)
 direct (Pure x)      m = do return $! (In3 (Push x m))
@@ -104,10 +104,10 @@ direct (ChainPost p op) m =
      opc <- freshM (runCodeGen op (In3 (_Modify σ (In3 (ChainIter σ μ)))))
      freshM (runCodeGen p (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ m)))))))
 direct (Debug name p) m = do fmap (In3 . LogEnter name) (runCodeGen p (In3 (LogExit name m)))
-direct (MetaP (ConstInput Costs n) p) m    = do fmap (In3 . MetaM (AddCoins n)) (runCodeGen p m)
-direct (MetaP (ConstInput Refunded n) p) m = do fmap (In3 . MetaM (AddCoins n)) (runCodeGen p m)
-direct (MetaP (ConstInput Free n) p) m     = do runCodeGen p (In3 (MetaM (RefundCoins n) m))
-direct (MetaP (ConstInput Transports n) p) m   = do runCodeGen p (In3 (MetaM (RefundCoins n) m))
+--direct (MetaP (ConstInput Costs n) p) m    = do fmap (In3 . MetaM (AddCoins n)) (runCodeGen p m)
+--direct (MetaP (ConstInput Refunded n) p) m = do fmap (In3 . MetaM (AddCoins n)) (runCodeGen p m)
+--direct (MetaP (ConstInput Free n) p) m     = do runCodeGen p (In3 (MetaM (RefundCoins n) m))
+--direct (MetaP (ConstInput Transports n) p) m   = do runCodeGen p (In3 (MetaM (RefundCoins n) m))
 --direct (MetaP _ p) m = runCodeGen p m
 
 tailCallOptimise :: MVar x -> Fix3 (M o) (x ': xs) r a -> Fix3 (M o) xs r a

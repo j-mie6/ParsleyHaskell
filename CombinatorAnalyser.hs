@@ -10,7 +10,7 @@ module CombinatorAnalyser (analyse) where
 
 import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
 import MachineAST                 (IMVar, MVar(..), IΣVar)
-import Indexed                    (Free(..), History(Era), Void1, Const1(..), imap, fold, histo, present, (|>), absurd)
+import Indexed                    (Fix(..), Cofree(..), Const1(..), imap, cata, histo, extract, (|>))
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
 import Control.Monad.State.Strict (State, get, put, evalState)
@@ -21,12 +21,12 @@ import Safe.Coerce                (coerce)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
-analyse :: Free ParserF f a -> Free ParserF f a
-analyse = constantInput {-. terminationAnalysis-}
+analyse :: Fix ParserF a -> Fix ParserF a
+analyse = id {-. terminationAnalysis-}
 
-newtype (a :->: f) k = IFunc {run :: a -> f k}
+{-newtype (a :->: f) k = IFunc {run :: a -> f k}
 send :: a -> (a :->: f) k -> f k
-send = flip run
+send = flip run-}
 
 data Compliance k = DomComp | NonComp | Comp | FullPure deriving Show
 
@@ -50,9 +50,11 @@ compliance (l :*>: r) = seqCompliance l r
 compliance (LookAhead c) = c -- Lookahead will consume input on failure, so its compliance matches that which is beneath it
 compliance (NotFollowedBy _) = FullPure
 compliance (Debug _ c) = c
-compliance _ = NonComp -- Match, Branch, ChainPre, ChainPost
+compliance (ChainPre _ _) = DomComp
+compliance (ChainPost _ _) = DomComp
+compliance _ = NonComp -- Match, Branch
 
-constantInput :: Free ParserF f a -> Free ParserF f a
+{-constantInput :: Free ParserF f a -> Free ParserF f a
 constantInput = untag . send True . fold (IFunc . const . Var) (IFunc . (Op .) . flip alg)
   where
     tyTag ty n = MetaP (ConstInput ty n) . Op
@@ -115,6 +117,8 @@ constantInput = untag . send True . fold (IFunc . const . Var) (IFunc . (Op .) .
 pattern TaggedInput t n p = Op (MetaP (ConstInput t n) p)
 pattern CostsInput n p = TaggedInput Costs n p
 
+-}
+
 -- Termination Analysis (Generalised left-recursion checker)
 data Consumption = Some | None | Never
 data Prop = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool} | Unknown
@@ -160,8 +164,8 @@ branching (Prop Some f _) ps = Prop (foldr (|||) Some (map success ps)) f False
 
 --data InferredTerm = Loops | Safe | Undecidable
 newtype Termination a = Termination {runTerm :: ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop}
-terminationAnalysis :: Free ParserF Void1 a -> Free ParserF Void1 a
-terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (fold absurd (Termination . alg) p)) Set.empty) Map.empty)) then p
+terminationAnalysis :: Fix ParserF a -> Fix ParserF a
+terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (cata (Termination . alg) p)) Set.empty) Map.empty)) then p
                         else error "Parser will loop indefinitely: either it is left-recursive or iterates over pure computations"
   where
     alg :: ParserF Termination a -> ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop

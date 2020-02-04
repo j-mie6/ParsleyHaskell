@@ -8,13 +8,15 @@ import Machine
 import MachineAST
 import Indexed
 
-constInput :: Free3 (M o) Void3 xs r a -> Int
-constInput = fst . fold3 absurd ((\(x, b) -> Const3 x :**: Const3 b) . alg)
+constInput :: Fix3 (M o) xs r a -> Int
+constInput = fst . cata3 (fromPair . alg)
   where
     fst :: (Const3 x :**: Const3 y) (xs :: [*]) r a -> x
     fst = getConst3 . ifst3
     snd :: (Const3 x :**: Const3 y) (xs :: [*]) r a -> y
     snd = getConst3 . isnd3
+    fromPair :: (x, y) -> (Const3 x :**: Const3 y) (xs :: [*]) r a 
+    fromPair (x, b) = Const3 x :**: Const3 b
     toPair :: (Const3 x :**: Const3 y) (xs :: [*]) r a -> (x, y)
     toPair (x :**: y) = (getConst3 x, getConst3 y)
 
@@ -39,12 +41,10 @@ constInput = fst . fold3 absurd ((\(x, b) -> Const3 x :**: Const3 b) . alg)
     alg (Attempt k)               = toPair k
     alg (Tell k)                  = toPair k
     alg (Seek k)                  = toPair k
-    {-
-    alg (Case p q)                = min (getConst3 p) (getConst3 q)
-    alg (Choices _ ks def)        = minimum (map getConst3 (def:ks))
-    alg (ChainIter σ μ)           = 0
-    alg (ChainInit σ m μ k)       = 0
-    -}
+    alg (Case p q)                = algCatch (toPair p) (toPair q)
+    alg (Choices _ ks def)        = foldr (algCatch . toPair) (toPair def) ks
+    alg (ChainIter _ _)           = (0, False)
+    alg (ChainInit _ _ _ _)       = (0, False)
     alg (Join _)                  = (0, False)
     alg (MkJoin _ b k)            = (fst k + fst b, snd k || snd b)
     alg (Swap k)                  = toPair k

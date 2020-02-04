@@ -10,7 +10,7 @@
              PatternSynonyms #-}
 module MachineAST where
 
-import Indexed           (IFunctor3, Free3(Op3), Void3, Const3(..), imap3, fold3)
+import Indexed           (IFunctor3, Fix3(In3), Const3(..), imap3, cata3)
 import Utils             (WQ(..))
 import Defunc            (Defunc(APP), pattern FLIP_H)
 import Data.Word         (Word64)
@@ -19,14 +19,14 @@ import Safe.Coerce       (coerce)
 import Data.List         (intercalate)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 
-newtype Machine o a = Machine { getMachine :: Free3 (M o) Void3 '[] Void a }
+newtype Machine o a = Machine { getMachine :: Fix3 (M o) '[] Void a }
 newtype ΣVar (a :: *) = ΣVar IΣVar
 newtype MVar (a :: *) = MVar IMVar
 newtype ΦVar (a :: *) = ΦVar IΦVar
 newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
-newtype LetBinding o a x = LetBinding (Free3 (M o) Void3 '[] x a)
+newtype LetBinding o a x = LetBinding (Fix3 (M o) '[] x a)
 instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
 data M o k xs r a where
@@ -65,14 +65,14 @@ data MetaM where
   RefundCoins :: Int -> MetaM
   DrainCoins  :: Int -> MetaM
 
-_App :: Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': (x -> y) ': xs) r a
+_App :: Fix3 (M o) (y ': xs) r a -> M o (Fix3 (M o)) (x ': (x -> y) ': xs) r a
 _App m = Lift2 APP m
 
-_Fmap :: WQ (x -> y) -> Free3 (M o) f (y ': xs) r a -> M o (Free3 (M o) f) (x ': xs) r a
-_Fmap f m = Push f (Op3 (Lift2 (FLIP_H APP) m))
+_Fmap :: WQ (x -> y) -> Fix3 (M o) (y ': xs) r a -> M o (Fix3 (M o)) (x ': xs) r a
+_Fmap f m = Push f (In3 (Lift2 (FLIP_H APP) m))
 
-_Modify :: ΣVar x -> Free3 (M o) f xs r a -> M o (Free3 (M o) f) ((x -> x) ': xs) r a
-_Modify σ m = Get σ (Op3 (_App (Op3 (Put σ m))))
+_Modify :: ΣVar x -> Fix3 (M o) xs r a -> M o (Fix3 (M o)) ((x -> x) ': xs) r a
+_Modify σ m = Get σ (In3 (_App (In3 (Put σ m))))
 
 instance IFunctor3 (M o) where
   imap3 f Halt                = Halt
@@ -105,8 +105,8 @@ instance IFunctor3 (M o) where
   imap3 f (MetaM m k)         = MetaM m (f k)
 
 instance Show (Machine o a) where show = show . getMachine
-instance Show (Free3 (M o) f xs ks a) where
-  show = getConst3 . fold3 (const (Const3 "")) (Const3 . alg) where
+instance Show (Fix3 (M o) xs ks a) where
+  show = getConst3 . cata3 (Const3 . alg) where
     alg :: forall i j k. M o (Const3 String) i j k -> String
     alg Halt                = "Halt"
     alg Ret                 = "Ret"

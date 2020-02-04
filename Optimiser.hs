@@ -6,127 +6,127 @@ module Optimiser (optimise) where
 
 import Prelude hiding ((<$>))
 import ParserAST (ParserF(..))
-import Indexed   (Free(Op))
+import Indexed   (Fix(In))
 import Utils     (code, (>*<), WQ(..))
 
-pattern f :<$>: p = Op (Pure f) :<*>: p
-pattern p :$>: x = p :*>: Op (Pure x)
-pattern x :<$: p = Op (Pure x) :<*: p
-pattern LiftA2 f p q = Op (f :<$>: p) :<*>: q
+pattern f :<$>: p = In (Pure f) :<*>: p
+pattern p :$>: x = p :*>: In (Pure x)
+pattern x :<$: p = In (Pure x) :<*: p
+pattern LiftA2 f p q = In (f :<$>: p) :<*>: q
 
-optimise :: ParserF (Free ParserF f) a -> Free ParserF f a
+optimise :: ParserF (Fix ParserF) a -> Fix ParserF a
 -- DESTRUCTIVE OPTIMISATION
 -- Right Absorption Law: empty <*> u                    = empty
-optimise (Op Empty :<*>: _)                             = Op Empty
+optimise (In Empty :<*>: _)                             = In Empty
 -- Failure Weakening Law: u <*> empty                   = u *> empty
-optimise (u :<*>: Op Empty)                             = optimise (u :*>: Op Empty)
+optimise (u :<*>: In Empty)                             = optimise (u :*>: In Empty)
 -- Right Absorption Law: empty *> u                     = empty
-optimise (Op Empty :*>: _)                              = Op Empty
+optimise (In Empty :*>: _)                              = In Empty
 -- Right Absorption Law: empty <* u                     = empty
-optimise (Op Empty :<*: _)                              = Op Empty
+optimise (In Empty :<*: _)                              = In Empty
 -- Failure Weakening Law: u <* empty                    = u *> empty
-optimise (u :<*: Op Empty)                              = optimise (u :*>: Op Empty)
+optimise (u :<*: In Empty)                              = optimise (u :*>: In Empty)
 -- Branch Absorption Law: branch empty p q              = empty
-optimise (Branch (Op Empty) _ _)                        = Op Empty
+optimise (Branch (In Empty) _ _)                        = In Empty
 -- Branch Weakening Law: branch b empty empty           = b *> empty
-optimise (Branch b (Op Empty) (Op Empty))               = optimise (b :*>: Op Empty)
+optimise (Branch b (In Empty) (In Empty))               = optimise (b :*>: In Empty)
 -- Match Absorption Law: match _ empty _ def            = def
-optimise (Match (Op Empty) _ _ def)                     = def
+optimise (Match (In Empty) _ _ def)                     = def
 -- Match Weakening Law: match _ p (const empty) empty   = p *> empty
-optimise (Match p _ qs (Op Empty))
-  | all (\case {Op Empty -> True; _ -> False}) qs = optimise (p :*>: Op Empty)
+optimise (Match p _ qs (In Empty))
+  | all (\case {In Empty -> True; _ -> False}) qs = optimise (p :*>: In Empty)
 -- APPLICATIVE OPTIMISATION
 -- Homomorphism Law: pure f <*> pure x                  = pure (f x)
-optimise (Op (Pure f) :<*>: Op (Pure x))                = Op (Pure ([f $ x]))
+optimise (In (Pure f) :<*>: In (Pure x))                = In (Pure ([f $ x]))
 -- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law
 -- Functor Composition Law: f <$> (g <$> p)             = (f . g) <$> p
-optimise (f :<$>: Op (g :<$>: p))                       = optimise (([f . g]) :<$>: p)
+optimise (f :<$>: In (g :<$>: p))                       = optimise (([f . g]) :<$>: p)
 -- Composition Law: u <*> (v <*> w)                     = (.) <$> u <*> v <*> w
-optimise (u :<*>: Op (v :<*>: w))                       = optimise (optimise (optimise (code (.) :<$>: u) :<*>: v) :<*>: w)
+optimise (u :<*>: In (v :<*>: w))                       = optimise (optimise (optimise (code (.) :<$>: u) :<*>: v) :<*>: w)
 -- Reassociation Law 1: (u *> v) <*> w                  = u *> (v <*> w)
-optimise (Op (u :*>: v) :<*>: w)                        = optimise (u :*>: (optimise (v :<*>: w)))
+optimise (In (u :*>: v) :<*>: w)                        = optimise (u :*>: (optimise (v :<*>: w)))
 -- Interchange Law: u <*> pure x                        = pure ($ x) <*> u
-optimise (u :<*>: Op (Pure x))                          = optimise (([flip (code ($)) x]) :<$>: u)
+optimise (u :<*>: In (Pure x))                          = optimise (([flip (code ($)) x]) :<$>: u)
 -- Right Absorption Law: (f <$> p) *> q                 = p *> q
-optimise (Op (f :<$>: p) :*>: q)                        = Op (p :*>: q)
+optimise (In (f :<$>: p) :*>: q)                        = In (p :*>: q)
 -- Left Absorption Law: p <* (f <$> q)                  = p <* q
-optimise (p :<*: (Op (f :<$>: q)))                      = Op (p :<*: q)
+optimise (p :<*: (In (f :<$>: q)))                      = In (p :<*: q)
 -- Reassociation Law 2: u <*> (v <* w)                  = (u <*> v) <* w
-optimise (u :<*>: Op (v :<*: w))                        = optimise (optimise (u :<*>: v) :<*: w)
+optimise (u :<*>: In (v :<*: w))                        = optimise (optimise (u :<*>: v) :<*: w)
 -- Reassociation Law 3: u <*> (v $> x)                  = (u <*> pure x) <* v
-optimise (u :<*>: Op (v :$>: x))                        = optimise (optimise (u :<*>: Op (Pure x)) :<*: v)
+optimise (u :<*>: In (v :$>: x))                        = optimise (optimise (u :<*>: In (Pure x)) :<*: v)
 -- ALTERNATIVE OPTIMISATION
 -- Left Catch Law: pure x <|> u                         = pure x
-optimise (p@(Op (Pure x)) :<|>: _)                      = p
+optimise (p@(In (Pure x)) :<|>: _)                      = p
 -- Left Neutral Law: empty <|> u                        = u
-optimise (Op Empty :<|>: u)                             = u
+optimise (In Empty :<|>: u)                             = u
 -- Right Neutral Law: u <|> empty                       = u
-optimise (u :<|>: Op Empty)                             = u
+optimise (u :<|>: In Empty)                             = u
 -- Associativity Law: (u <|> v) <|> w                   = u <|> (v <|> w)
-optimise (Op (u :<|>: v) :<|>: w)                       = Op (u :<|>: optimise (v :<|>: w))
+optimise (In (u :<|>: v) :<|>: w)                       = In (u :<|>: optimise (v :<|>: w))
 -- SEQUENCING OPTIMISATION
 -- Identity law: pure x *> u                            = u
-optimise (Op (Pure _) :*>: u)                           = u
+optimise (In (Pure _) :*>: u)                           = u
 -- Identity law: (u $> x) *> v                          = u *> v
-optimise (Op (u :$>: _) :*>: v)                         = Op (u :*>: v)
+optimise (In (u :$>: _) :*>: v)                         = In (u :*>: v)
 -- Associativity Law: u *> (v *> w)                     = (u *> v) *> w
-optimise (u :*>: Op (v :*>: w))                         = optimise (optimise (u :*>: v) :*>: w)
+optimise (u :*>: In (v :*>: w))                         = optimise (optimise (u :*>: v) :*>: w)
 -- Identity law: u <* pure x                            = u
-optimise (u :<*: Op (Pure _))                           = u
+optimise (u :<*: In (Pure _))                           = u
 -- Identity law: u <* (v $> x)                          = u <* v
-optimise (u :<*: Op (v :$>: _))                         = optimise (u :<*: v)
+optimise (u :<*: In (v :$>: _))                         = optimise (u :<*: v)
 -- Commutativity Law: x <$ u                            = u $> x
 optimise (x :<$: u)                                     = optimise (u :$>: x)
 -- Associativity Law (u <* v) <* w                      = u <* (v <* w)
-optimise (Op (u :<*: v) :<*: w)                         = optimise (u :<*: optimise (v :<*: w))
+optimise (In (u :<*: v) :<*: w)                         = optimise (u :<*: optimise (v :<*: w))
 -- Pure lookahead: lookAhead (pure x)                   = pure x
-optimise (LookAhead p@(Op (Pure x)))                    = p
+optimise (LookAhead p@(In (Pure x)))                    = p
 -- Dead lookahead: lookAhead empty                      = empty
-optimise (LookAhead p@(Op Empty))                       = p
+optimise (LookAhead p@(In Empty))                       = p
 -- Pure negative-lookahead: notFollowedBy (pure x)      = empty
-optimise (NotFollowedBy (Op (Pure _)))                  = Op Empty
+optimise (NotFollowedBy (In (Pure _)))                  = In Empty
 -- Dead negative-lookahead: notFollowedBy empty         = unit
-optimise (NotFollowedBy (Op Empty))                     = Op (Pure (code ()))
+optimise (NotFollowedBy (In Empty))                     = In (Pure (code ()))
 -- Double Negation Law: notFollowedBy . notFollowedBy   = lookAhead . try . void
-optimise (NotFollowedBy (Op (NotFollowedBy p)))         = optimise (LookAhead (Op (Op (Try p) :*>: Op (Pure (code ())))))
+optimise (NotFollowedBy (In (NotFollowedBy p)))         = optimise (LookAhead (In (In (Try p) :*>: In (Pure (code ())))))
 -- Zero Consumption Law: notFollowedBy (try p)          = notFollowedBy p
-optimise (NotFollowedBy (Op (Try p)))                   = optimise (NotFollowedBy p)
+optimise (NotFollowedBy (In (Try p)))                   = optimise (NotFollowedBy p)
 -- Idempotence Law: lookAhead . lookAhead               = lookAhead
-optimise (LookAhead (Op (LookAhead p)))                 = Op (LookAhead p)
+optimise (LookAhead (In (LookAhead p)))                 = In (LookAhead p)
 -- Right Identity Law: notFollowedBy . lookAhead        = notFollowedBy
-optimise (NotFollowedBy (Op (LookAhead p)))             = optimise (NotFollowedBy p)
+optimise (NotFollowedBy (In (LookAhead p)))             = optimise (NotFollowedBy p)
 -- Left Identity Law: lookAhead . notFollowedBy         = notFollowedBy
-optimise (LookAhead (Op (NotFollowedBy p)))             = Op (NotFollowedBy p)
+optimise (LookAhead (In (NotFollowedBy p)))             = In (NotFollowedBy p)
 -- Transparency Law: notFollowedBy (try p <|> q)        = notFollowedBy p *> notFollowedBy q
-optimise (NotFollowedBy (Op (Op (Try p) :<|>: q)))      = optimise (optimise (NotFollowedBy p) :*>: optimise (NotFollowedBy q))
+optimise (NotFollowedBy (In (In (Try p) :<|>: q)))      = optimise (optimise (NotFollowedBy p) :*>: optimise (NotFollowedBy q))
 -- Distributivity Law: lookAhead p <|> lookAhead q      = lookAhead (p <|> q)
-optimise (Op (LookAhead p) :<|>: Op (LookAhead q))      = optimise (LookAhead (optimise (p :<|>: q)))
+optimise (In (LookAhead p) :<|>: In (LookAhead q))      = optimise (LookAhead (optimise (p :<|>: q)))
 -- Interchange Law: lookAhead (p $> x)                  = lookAhead p $> x
-optimise (LookAhead (Op (p :$>: x)))                    = optimise (optimise (LookAhead p) :$>: x)
+optimise (LookAhead (In (p :$>: x)))                    = optimise (optimise (LookAhead p) :$>: x)
 -- Interchange law: lookAhead (f <$> p)                 = f <$> lookAhead p
-optimise (LookAhead (Op (f :<$>: p)))                   = optimise (f :<$>: optimise (LookAhead p))
+optimise (LookAhead (In (f :<$>: p)))                   = optimise (f :<$>: optimise (LookAhead p))
 -- Absorption Law: p <*> notFollowedBy q                = (p <*> unit) <* notFollowedBy q
-optimise (p :<*>: Op (NotFollowedBy q))                 = optimise (optimise (p :<*>: Op (Pure (code ()))) :<*: Op (NotFollowedBy q))
+optimise (p :<*>: In (NotFollowedBy q))                 = optimise (optimise (p :<*>: In (Pure (code ()))) :<*: In (NotFollowedBy q))
 -- Idempotence Law: notFollowedBy (p $> x)              = notFollowedBy p
-optimise (NotFollowedBy (Op (p :$>: _)))                = optimise (NotFollowedBy p)
+optimise (NotFollowedBy (In (p :$>: _)))                = optimise (NotFollowedBy p)
 -- Idempotence Law: notFollowedBy (f <$> p)             = notFollowedBy p
-optimise (NotFollowedBy (Op (_ :<$>: p)))               = optimise (NotFollowedBy p)
+optimise (NotFollowedBy (In (_ :<$>: p)))               = optimise (NotFollowedBy p)
 -- Interchange Law: try (p $> x)                        = try p $> x
-optimise (Try (Op (p :$>: x)))                          = optimise (optimise (Try p) :$>: x)
+optimise (Try (In (p :$>: x)))                          = optimise (optimise (Try p) :$>: x)
 -- Interchange law: try (f <$> p)                       = f <$> try p
-optimise (Try (Op (f :<$>: p)))                         = optimise (f :<$>: optimise (Try p))
+optimise (Try (In (f :<$>: p)))                         = optimise (f :<$>: optimise (Try p))
 -- pure Left law: branch (pure (Left x)) p q            = p <*> pure x
-optimise (Branch (Op (Pure (WQ (Left x) ql))) p _)      = optimise (p :<*>: Op (Pure (WQ x qx))) where qx = [||case $$ql of Left x -> x||]
+optimise (Branch (In (Pure (WQ (Left x) ql))) p _)      = optimise (p :<*>: In (Pure (WQ x qx))) where qx = [||case $$ql of Left x -> x||]
 -- pure Right law: branch (pure (Right x)) p q          = q <*> pure x
-optimise (Branch (Op (Pure (WQ (Right x) ql))) _ q)     = optimise (q :<*>: Op (Pure (WQ x qx))) where qx = [||case $$ql of Right x -> x||]
+optimise (Branch (In (Pure (WQ (Right x) ql))) _ q)     = optimise (q :<*>: In (Pure (WQ x qx))) where qx = [||case $$ql of Right x -> x||]
 -- Generalised Identity law: branch b (pure f) (pure g) = either f g <$> b
-optimise (Branch b (Op (Pure f)) (Op (Pure g)))         = optimise (([either f g]) :<$>: b)
+optimise (Branch b (In (Pure f)) (In (Pure g)))         = optimise (([either f g]) :<$>: b)
 -- Interchange law: branch (x *> y) p q                 = x *> branch y p q
-optimise (Branch (Op (x :*>: y)) p q)                   = optimise (x :*>: optimise (Branch y p q))
+optimise (Branch (In (x :*>: y)) p q)                   = optimise (x :*>: optimise (Branch y p q))
 -- Negated Branch law: branch b p empty                 = branch (swapEither <$> b) empty p
-optimise (Branch b p (Op Empty))                        = Op (Branch (Op (Op (Pure ([either (code Right) (code Left)])) :<*>: b)) (Op Empty) p)
+optimise (Branch b p (In Empty))                        = In (Branch (In (In (Pure ([either (code Right) (code Left)])) :<*>: b)) (In Empty) p)
 -- Branch Fusion law: branch (branch b empty (pure f)) empty k                  = branch (g <$> b) empty k where g is a monad transforming (>>= f)
-optimise (Branch (Op (Branch b (Op Empty) (Op (Pure (WQ f qf))))) (Op Empty) k) = optimise (Branch (optimise (Op (Pure (WQ g qg)) :<*>: b)) (Op Empty) k)
+optimise (Branch (In (Branch b (In Empty) (In (Pure (WQ f qf))))) (In Empty) k) = optimise (Branch (optimise (In (Pure (WQ g qg)) :<*>: b)) (In Empty) k)
   where
     g (Left _) = Left ()
     g (Right x) = case f x of
@@ -137,31 +137,31 @@ optimise (Branch (Op (Branch b (Op Empty) (Op (Pure (WQ f qf))))) (Op Empty) k) 
                                Left _ -> Left ()
                                Right y -> Right y||]
 -- Distributivity Law: f <$> branch b p q                = branch b ((f .) <$> p) ((f .) <$> q)
-optimise (f :<$>: Op (Branch b p q))                     = optimise (Branch b (optimise (([(.) f]) :<$>: p)) (optimise (([(.) f]) :<$>: q)))  -- FIXME?
+optimise (f :<$>: In (Branch b p q))                     = optimise (Branch b (optimise (([(.) f]) :<$>: p)) (optimise (([(.) f]) :<$>: q)))  -- FIXME?
 -- pure Match law: match vs (pure x) f def               = if elem x vs then f x else def
-optimise (Match (Op (Pure (WQ x _))) fs qs def)          = foldr (\(f, q) k -> if _val f x then q else k) def (zip fs qs)
+optimise (Match (In (Pure (WQ x _))) fs qs def)          = foldr (\(f, q) k -> if _val f x then q else k) def (zip fs qs)
 -- Generalised Identity Match law: match vs p (pure . f) def = f <$> (p >?> flip elem vs) <|> def
 optimise (Match p fs qs def)
-  | all (\case {Op (Pure _) -> True; _ -> False}) qs     = optimise (optimise (WQ apply qapply :<$>: (p >?> (WQ validate qvalidate))) :<|>: def)
-    where apply x    = foldr (\(f, Op (Pure y)) k -> if _val f x then _val y else k) (error "whoopsie") (zip fs qs)
-          qapply     = foldr (\(f, Op (Pure y)) k -> [||\x -> if $$(_code f) x then $$(_code y) else $$k x||]) ([||const (error "whoopsie")||]) (zip fs qs)
+  | all (\case {In (Pure _) -> True; _ -> False}) qs     = optimise (optimise (WQ apply qapply :<$>: (p >?> (WQ validate qvalidate))) :<|>: def)
+    where apply x    = foldr (\(f, In (Pure y)) k -> if _val f x then _val y else k) (error "whoopsie") (zip fs qs)
+          qapply     = foldr (\(f, In (Pure y)) k -> [||\x -> if $$(_code f) x then $$(_code y) else $$k x||]) ([||const (error "whoopsie")||]) (zip fs qs)
           validate x = foldr (\f b -> _val f x || b) False fs
           qvalidate  = foldr (\f k -> [||\x -> $$(_code f) x || $$k x||]) [||const False||] fs
 -- Distributivity Law: f <$> match vs p g def            = match vs p ((f <$>) . g) (f <$> def)
-optimise (f :<$>: (Op (Match p fs qs def)))              = Op (Match p fs (map (optimise . (f :<$>:)) qs) (optimise (f :<$>: def)))
+optimise (f :<$>: (In (Match p fs qs def)))              = In (Match p fs (map (optimise . (f :<$>:)) qs) (optimise (f :<$>: def)))
 -- Trivial let-bindings - NOTE: These will get moved when Let nodes no longer have the "source" in them
-optimise (Let False _ p@(Op (Pure _)))                = p
-optimise (Let False _ p@(Op Empty))                   = p
-optimise (Let False _ p@(Op (Satisfy _)))             = p
-optimise (Let False _ p@(Op (Op (Satisfy _) :$>: x))) = p
+optimise (Let False _ p@(In (Pure _)))                = p
+optimise (Let False _ p@(In Empty))                   = p
+optimise (Let False _ p@(In (Satisfy _)))             = p
+optimise (Let False _ p@(In (In (Satisfy _) :$>: x))) = p
 -- Applicative-fusion across let boundary?
---optimise (Let _ p@(Op ()))
-optimise p                                               = Op p
+--optimise (Let _ p@(In ()))
+optimise p                                               = In p
 
 -- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p
 
-(>?>) :: Free ParserF f a -> WQ (a -> Bool) -> Free ParserF f a
-p >?> (WQ f qf) = Op (Branch (Op (WQ g qg :<$>: p)) (Op Empty) (Op (Pure (code id))))
+(>?>) :: Fix ParserF a -> WQ (a -> Bool) -> Fix ParserF a
+p >?> (WQ f qf) = In (Branch (In (WQ g qg :<$>: p)) (In Empty) (In (Pure (code id))))
   where
     g x = if f x then Right x else Left ()
     qg = [||\x -> if $$qf x then Right x else Left ()||]

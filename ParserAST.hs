@@ -8,60 +8,60 @@
 {-# LANGUAGE TemplateHaskell #-}
 module ParserAST where
 
-import Indexed                    (IFunctor, Free(Op), Void1, Const1(..), imap, fold)
+import Indexed                    (IFunctor, Fix(In), Const1(..), imap, cata)
 import MachineAST                 (IMVar, MVar(..), IΣVar(..))
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
 import Data.List                  (intercalate)
 
 -- Parser wrapper type
-newtype Parser a = Parser {unParser :: Free ParserF Void1 a}
+newtype Parser a = Parser {unParser :: Fix ParserF a}
 
 -- Core smart constructors
 pure :: WQ a -> Parser a
-pure = Parser . Op . Pure
+pure = Parser . In . Pure
 
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
-Parser p <*> Parser q = Parser (Op (p :<*>: q))
+Parser p <*> Parser q = Parser (In (p :<*>: q))
 
 (<*) :: Parser a -> Parser b -> Parser a
-Parser p <* Parser q = Parser (Op (p :<*: q))
+Parser p <* Parser q = Parser (In (p :<*: q))
 
 (*>) :: Parser a -> Parser b -> Parser b
-Parser p *> Parser q = Parser (Op (p :*>: q))
+Parser p *> Parser q = Parser (In (p :*>: q))
 
 empty :: Parser a
-empty = Parser (Op Empty)
+empty = Parser (In Empty)
 
 (<|>) :: Parser a -> Parser a -> Parser a
-Parser p <|> Parser q = Parser (Op (p :<|>: q))
+Parser p <|> Parser q = Parser (In (p :<|>: q))
 
 satisfy :: WQ (Char -> Bool) -> Parser Char
-satisfy = Parser . Op . Satisfy
+satisfy = Parser . In . Satisfy
 
 lookAhead :: Parser a -> Parser a
-lookAhead = Parser . Op . LookAhead . unParser
+lookAhead = Parser . In . LookAhead . unParser
 
 notFollowedBy :: Parser a -> Parser ()
-notFollowedBy = Parser . Op . NotFollowedBy . unParser
+notFollowedBy = Parser . In . NotFollowedBy . unParser
 
 try :: Parser a -> Parser a
-try = Parser . Op . Try . unParser
+try = Parser . In . Try . unParser
 
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-match vs (Parser p) f (Parser def) = Parser (Op (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs) def))
+match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs) def))
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
-branch (Parser c) (Parser p) (Parser q) = Parser (Op (Branch c p q))
+branch (Parser c) (Parser p) (Parser q) = Parser (In (Branch c p q))
 
 chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre (Parser op) (Parser p) = Parser (Op (ChainPre op p))
+chainPre (Parser op) (Parser p) = Parser (In (ChainPre op p))
 
 chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost (Parser p) (Parser op) = Parser (Op (ChainPost p op))
+chainPost (Parser p) (Parser op) = Parser (In (ChainPost p op))
 
 debug :: String -> Parser a -> Parser a
-debug name (Parser p) = Parser (Op (Debug name p))
+debug name (Parser p) = Parser (In (Debug name p))
 
 -- Fixities
 -- Applicative
@@ -115,8 +115,8 @@ instance IFunctor ParserF where
   imap f (Debug name p)      = Debug name (f p)
   imap f (MetaP m p)         = MetaP m (f p)
 
-instance Show (Free ParserF f a) where
-  show = getConst1 . fold (const (Const1 "")) (Const1 . alg)
+instance Show (Fix ParserF a) where
+  show = getConst1 . cata (Const1 . alg)
     where
       alg (Pure x)                                  = "(pure x)"
       alg (Satisfy _)                               = "(satisfy f)"

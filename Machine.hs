@@ -22,7 +22,7 @@ module Machine where
 import MachineOps
 import MachineAST
 import Input                      (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString, Stream)
-import Indexed                    (Free3, Void3, absurd, fold3)
+import Indexed                    (Fix3, cata3)
 import Utils                      (WQ(..), code, (>*<), Code)
 import Defunc                     (Defunc, genDefunc2, genDefunc)
 import Data.Functor               ((<&>))
@@ -184,8 +184,8 @@ scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
              body <- unTypeQ (letBuilder v (package names))
              return (FunD name [Clause [] (NormalB body) []])
 
-readyExec :: (?ops :: InputOps s o, Ops o) => Free3 (M o) Void3 xs r a -> Exec s o xs r a
-readyExec = fold3 absurd (Exec . alg)
+readyExec :: (?ops :: InputOps s o, Ops o) => Fix3 (M o) xs r a -> Exec s o xs r a
+readyExec = cata3 (Exec . alg)
   where
     alg :: (?ops :: InputOps s o, Ops o) => M o (Exec s o) xs r a -> ExecMonad s o xs r a
     alg Halt                = execHalt
@@ -424,6 +424,7 @@ execMeta (AddCoins coins) (Exec k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
+execMeta (FreeCoins coins) (Exec k) = local (giveCoins coins) k
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
 execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((max 0) . (coins -) . liquidate)) k -- MAX is NOT needed, but the Drain has the incorrect number of tokens for the moment :\
 --execMeta _ (Exec k) = k

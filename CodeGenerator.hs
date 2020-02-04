@@ -11,7 +11,7 @@ module CodeGenerator (codeGen, halt, ret) where
 
 import ParserAST                  (ParserF(..), MetaP(..), CoinType(..))
 import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify)
-import Indexed                    (IFunctor, Free, Free3(Op3), History(Era), Void1, Void3, imap, histo, present, (|>), absurd)
+import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>))
 import Utils                      (code, (>*<), WQ(..))
 import Defunc                     (Defunc(BLACK))
 import Control.Applicative        (liftA2)
@@ -33,93 +33,93 @@ runCodeGenStack m μ0 φ0 σ0 =
    flip evalFreshT φ0) m
 
 newtype CodeGen o b a = 
-  CodeGen {runCodeGen :: forall xs r. Free3 (M o) Void3 (a ': xs) r b -> CodeGenStack (Free3 (M o) Void3 xs r b)}
+  CodeGen {runCodeGen :: forall xs r. Fix3 (M o) (a ': xs) r b -> CodeGenStack (Fix3 (M o) xs r b)}
 
-halt :: Free3 (M o) Void3 '[a] Void a
-halt = Op3 Halt
+halt :: Fix3 (M o) '[a] Void a
+halt = In3 Halt
 
-ret :: Free3 (M o) Void3 '[x] x a
-ret = Op3 Ret
+ret :: Fix3 (M o) '[x] x a
+ret = In3 Ret
 
-codeGen :: Free ParserF Void1 a -> Free3 (M o) Void3 (a ': xs) r b -> IMVar -> IΣVar -> (Free3 (M o) Void3 xs r b, IΣVar)
+codeGen :: Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
-    (m, maxΣ) = runCodeGenStack (runCodeGen (histo absurd alg p) terminal) μ0 0 σ0
-    alg = peephole |> (\x -> CodeGen (direct (imap present x)))
+    (m, maxΣ) = runCodeGenStack (runCodeGen (histo alg p) terminal) μ0 0 σ0
+    alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
 
-pattern f :<$>: p <- Era _ (Pure f) :<*>: Era p _
-pattern p :$>: x <- Era _ p :*>: Era _ (Pure x)
-pattern LiftA2 f p q <- Era _ (Era _ (Pure f) :<*>: Era p _) :<*>: Era q _
-pattern TryOrElse p q <- Era _ (Try (Era p _)) :<|>: Era q _
+pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
+pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
+pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
+pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
-peephole :: ParserF (History ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
-peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (Op3 (_Fmap f m))
+peephole :: ParserF (Cofree ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
+peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In3 (_Fmap f m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
-  do qc <- runCodeGen q (Op3 (Lift2 (BLACK f) m))
+  do qc <- runCodeGen q (In3 (Lift2 (BLACK f) m))
      runCodeGen p qc
 peephole (TryOrElse p q) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     fmap (binder . Op3 . SoftFork pc) (freshΦ (runCodeGen q φ))
-peephole (Era _ ((Try (Era p _)) :$>: x) :<|>: Era q _) = Just $ CodeGen $ \m ->
+     fmap (binder . In3 . SoftFork pc) (freshΦ (runCodeGen q φ))
+peephole ((_ :< ((Try (p :< _)) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation (Op3 (Pop (Op3 (Push x φ))))))
-     fmap (binder . Op3 . SoftFork pc) (freshΦ (runCodeGen q φ))
+     pc <- freshΦ (runCodeGen p (deadCommitOptimisation (In3 (Pop (In3 (Push x φ))))))
+     fmap (binder . In3 . SoftFork pc) (freshΦ (runCodeGen q φ))
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
-direct :: ParserF (CodeGen o b) a -> Free3 (M o) Void3 (a ': xs) r b -> CodeGenStack (Free3 (M o) Void3 xs r b)
-direct (Pure x)      m = do return $! (Op3 (Push x m))
-direct (Satisfy p)   m = do return $! (Op3 (Sat p m))
-direct (pf :<*>: px) m = do pxc <- runCodeGen px (Op3 (_App m)); runCodeGen pf pxc
-direct (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (Op3 (Pop qc))
-direct (p :<*: q)    m = do qc <- runCodeGen q (Op3 (Pop m)); runCodeGen p qc
-direct Empty         m = do return $! Op3 Empt
+direct :: ParserF (CodeGen o b) a -> Fix3 (M o) (a ': xs) r b -> CodeGenStack (Fix3 (M o) xs r b)
+direct (Pure x)      m = do return $! (In3 (Push x m))
+direct (Satisfy p)   m = do return $! (In3 (Sat p m))
+direct (pf :<*>: px) m = do pxc <- runCodeGen px (In3 (_App m)); runCodeGen pf pxc
+direct (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In3 (Pop qc))
+direct (p :<*: q)    m = do qc <- runCodeGen q (In3 (Pop m)); runCodeGen p qc
+direct Empty         m = do return $! In3 Empt
 direct (p :<|>: q)   m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     fmap (binder . Op3 . HardFork pc) (freshΦ (runCodeGen q φ))
-direct (Try p)           m = do fmap (Op3 . Attempt) (runCodeGen p (deadCommitOptimisation m))
-direct (LookAhead p)     m = do fmap (Op3 . Tell) (runCodeGen p (Op3 (Swap (Op3 (Seek m)))))
-direct (NotFollowedBy p) m = do pc <- runCodeGen p (Op3 (Pop (Op3 (Seek (Op3 (Commit (Op3 Empt)))))))
-                                return $! Op3 (SoftFork (Op3 (Tell pc)) (Op3 (Push (code ()) m)))
+     fmap (binder . In3 . HardFork pc) (freshΦ (runCodeGen q φ))
+direct (Try p)           m = do fmap (In3 . Attempt) (runCodeGen p (deadCommitOptimisation m))
+direct (LookAhead p)     m = do fmap (In3 . Tell) (runCodeGen p (In3 (Swap (In3 (Seek m)))))
+direct (NotFollowedBy p) m = do pc <- runCodeGen p (In3 (Pop (In3 (Seek (In3 (Commit (In3 Empt)))))))
+                                return $! In3 (SoftFork (In3 (Tell pc)) (In3 (Push (code ()) m)))
 direct (Branch b p q)    m = do (binder, φ) <- makeΦ m
-                                pc <- freshΦ (runCodeGen p (Op3 (Swap (Op3 (_App φ)))))
-                                qc <- freshΦ (runCodeGen q (Op3 (Swap (Op3 (_App φ)))))
-                                fmap binder (runCodeGen b (Op3 (Case pc qc)))
+                                pc <- freshΦ (runCodeGen p (In3 (Swap (In3 (_App φ)))))
+                                qc <- freshΦ (runCodeGen q (In3 (Swap (In3 (_App φ)))))
+                                fmap binder (runCodeGen b (In3 (Case pc qc)))
 direct (Match p fs qs def) m = do (binder, φ) <- makeΦ m
                                   qcs <- traverse (freshΦ . flip runCodeGen φ) qs
                                   defc <- freshΦ (runCodeGen def φ)
-                                  fmap binder (runCodeGen p (Op3 (Choices fs qcs defc)))
+                                  fmap binder (runCodeGen p (In3 (Choices fs qcs defc)))
 direct (Let _ !μ _) m = return $! tailCallOptimise μ m
 direct (ChainPre op p) m =
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (Op3 (_Fmap ([flip (code (.))]) (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))))
-     pc <- freshM (runCodeGen p (Op3 (_App m)))
-     return $! Op3 (Push (code id) (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ pc)))))))
+     opc <- freshM (runCodeGen op (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
+     pc <- freshM (runCodeGen p (In3 (_App m)))
+     return $! In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ pc)))))))
 direct (ChainPost p op) m =
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (Op3 (_Modify σ (Op3 (ChainIter σ μ)))))
-     freshM (runCodeGen p (Op3 (Make σ (Op3 (ChainInit σ opc μ (Op3 (Get σ m)))))))
-direct (Debug name p) m = do fmap (Op3 . LogEnter name) (runCodeGen p (Op3 (LogExit name m)))
-direct (MetaP (ConstInput Costs n) p) m    = do fmap (Op3 . MetaM (AddCoins n)) (runCodeGen p m)
-direct (MetaP (ConstInput Refunded n) p) m = do fmap (Op3 . MetaM (AddCoins n)) (runCodeGen p m)
-direct (MetaP (ConstInput Free n) p) m     = do runCodeGen p (Op3 (MetaM (RefundCoins n) m))
-direct (MetaP (ConstInput Transports n) p) m   = do runCodeGen p (Op3 (MetaM (RefundCoins n) m))
+     opc <- freshM (runCodeGen op (In3 (_Modify σ (In3 (ChainIter σ μ)))))
+     freshM (runCodeGen p (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ m)))))))
+direct (Debug name p) m = do fmap (In3 . LogEnter name) (runCodeGen p (In3 (LogExit name m)))
+direct (MetaP (ConstInput Costs n) p) m    = do fmap (In3 . MetaM (AddCoins n)) (runCodeGen p m)
+direct (MetaP (ConstInput Refunded n) p) m = do fmap (In3 . MetaM (AddCoins n)) (runCodeGen p m)
+direct (MetaP (ConstInput Free n) p) m     = do runCodeGen p (In3 (MetaM (RefundCoins n) m))
+direct (MetaP (ConstInput Transports n) p) m   = do runCodeGen p (In3 (MetaM (RefundCoins n) m))
 --direct (MetaP _ p) m = runCodeGen p m
 
-tailCallOptimise :: MVar x -> Free3 (M o) Void3 (x ': xs) r a -> Free3 (M o) Void3 xs r a
-tailCallOptimise μ (Op3 Ret) = Op3 (Jump μ)
-tailCallOptimise μ k         = Op3 (Call μ k)
+tailCallOptimise :: MVar x -> Fix3 (M o) (x ': xs) r a -> Fix3 (M o) xs r a
+tailCallOptimise μ (In3 Ret) = In3 (Jump μ)
+tailCallOptimise μ k         = In3 (Call μ k)
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret or Halt
 -- However, I'm not yet sure about the interactions with try yet...
-deadCommitOptimisation :: Free3 (M o) Void3 xs r a -> Free3 (M o) Void3 xs r a
-deadCommitOptimisation (Op3 Ret)  = Op3 Ret
-deadCommitOptimisation (Op3 Halt) = Op3 Halt
-deadCommitOptimisation m          = Op3 (Commit m)
+deadCommitOptimisation :: Fix3 (M o) xs r a -> Fix3 (M o) xs r a
+deadCommitOptimisation (In3 Ret)  = In3 Ret
+deadCommitOptimisation (In3 Halt) = In3 Halt
+deadCommitOptimisation m          = In3 (Commit m)
 
 -- Refactor with asks
 askM :: CodeGenStack (MVar a)
@@ -134,17 +134,17 @@ freshM = mapVFreshT newScope
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
-makeΦ :: Free3 (M o) Void3 (x ': xs) r a -> CodeGenStack (Free3 (M o) Void3 xs r a -> Free3 (M o) Void3 xs r a, Free3 (M o) Void3 (x ': xs) r a)
+makeΦ :: Fix3 (M o) (x ': xs) r a -> CodeGenStack (Fix3 (M o) xs r a -> Fix3 (M o) xs r a, Fix3 (M o) (x ': xs) r a)
 makeΦ m | elidable m = return $! (id, m)
-  where 
+  where
     -- This is double-φ optimisation:   If a φ-node points directly to another φ-node, then it can be elided
-    elidable (Op3 (Join _)) = True
+    elidable (In3 (Join _)) = True
     -- This is terminal-φ optimisation: If a φ-node points directly to a terminal operation, then it can be elided
-    elidable (Op3 Ret)      = True
-    elidable (Op3 Halt)     = True
+    elidable (In3 Ret)      = True
+    elidable (In3 Halt)     = True
     elidable _              = False
-makeΦ m@(Op3 (MetaM (RefundCoins n) _)) = fmap (\φ -> (Op3 . MkJoin φ m, Op3 (MetaM (DrainCoins n) (Op3 (Join φ))))) askΦ
-makeΦ m = fmap (\φ -> (Op3 . MkJoin φ m, Op3 (Join φ))) askΦ
+makeΦ m@(In3 (MetaM (RefundCoins n) _)) = fmap (\φ -> (In3 . MkJoin φ m, In3 (MetaM (DrainCoins n) (In3 (Join φ))))) askΦ
+makeΦ m = fmap (\φ -> (In3 . MkJoin φ m, In3 (Join φ))) askΦ
 
 freshΣ :: CodeGenStack (ΣVar a)
 freshΣ = lift (lift (construct ΣVar))

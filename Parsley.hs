@@ -10,7 +10,7 @@ module Parsley ( Parser, runParser, parseFromFile
                -- Applicative
                , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2, liftA3
                -- Alternative
-               , empty, (<|>), (<+>), optional, option, choice, oneOf, noneOf, maybeP
+               , empty, (<|>), (<+>), optionally, optional, option, choice, oneOf, noneOf, maybeP
                -- Monoidal
                , unit, (<~>), (<~), (~>)
                -- Selective
@@ -190,8 +190,11 @@ item :: Parser Char
 item = satisfy (WQ (const True) [|| const True ||])
 
 -- Composite Combinators
+optionally :: Parser a -> WQ b -> Parser b
+optionally p x = p $> x <|> pure x
+
 optional :: Parser a -> Parser ()
-optional p = void p <|> unit
+optional = flip optionally (code ())
 
 option :: WQ a -> Parser a -> Parser a
 option x p = p <|> pure x

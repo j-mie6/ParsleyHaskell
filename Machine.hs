@@ -485,7 +485,7 @@ emitLengthCheck :: (?ops :: InputOps s o, FailureOps o) => Int -> Code (ST s (Ma
 emitLengthCheck 0 good _ _   = good
 emitLengthCheck 1 good bad γ = [|| if $$more $$(o γ) then $$good else $$bad ||]
 emitLengthCheck n good bad γ = trace ("generating length check of " ++ show n) $ [||
-  if $$more ($$shiftRight $$(o γ) n) then $$good
+  if $$more ($$shiftRight $$(o γ) (n - 1)) then $$good
   else $$bad ||]
 
 class KOps o where

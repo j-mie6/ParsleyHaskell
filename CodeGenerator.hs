@@ -111,10 +111,10 @@ direct (p :<|>: q)       cut m =
      let nq = coinsNeeded qc
      let dp = np - (min np nq)
      let dq = nq - (min np nq)
-     return $! (binder (In3 (HardFork pc qc)), handled && handled')
+     return $! (binder (In3 (HardFork (addCoins dp pc) (addCoins dq qc))), handled && handled')
 direct (Try p)           cut m = do fmap ((In3 . Attempt) >< const False) (runCodeGen (ifst p) False (deadCommitOptimisation m))
-direct (LookAhead p)     cut m = do (pc, handled) <- runCodeGen (ifst p) cut (In3 (Swap (In3 (Seek m))))
-                                    n <- fmap (coinsNeeded . fst) (runCodeGen (ifst p) cut (In3 Empt)) -- Dodgy hack, but oh well
+direct (LookAhead p)     cut m = do n <- fmap (coinsNeeded . fst) (runCodeGen (ifst p) cut (In3 Empt)) -- Dodgy hack, but oh well
+                                    (pc, handled) <- runCodeGen (ifst p) cut (In3 (Swap (In3 (Seek (refundCoins n m)))))
                                     return $! (In3 (Tell pc), handled)
 direct (NotFollowedBy p) _   m = do (pc, _) <- runCodeGen (ifst p) False (In3 (Pop (In3 (Seek (In3 (Commit (In3 Empt)))))))
                                     let np = coinsNeeded pc

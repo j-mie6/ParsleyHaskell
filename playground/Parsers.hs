@@ -21,7 +21,7 @@ cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac"
     --m = match "ab" (lookAhead item) op empty
     --op 'a' = item $> code "aaaaa"
     --op 'b' = item $> code "bbbbb"
-    m = many (item *> char 'a')
+    m = string "abcd" <* eof
 
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")
@@ -45,7 +45,7 @@ brainfuck = whitespace *> bf <* eof
     op '-' = item $> code Decrement
     op '.' = item $> code Output
     op ',' = item $> code Input
-    op '[' = between (lexeme item) (try (char ']')) (code Loop <$> bf)
+    op '[' = between (lexeme item) (char ']') (code Loop <$> bf)
 
 type JSProgram = [JSElement]
 type JSCompoundStm = [JSStm]

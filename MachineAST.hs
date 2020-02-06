@@ -66,7 +66,7 @@ data MetaM where
   DrainCoins  :: Int -> MetaM
 
 mkCoin :: (Int -> MetaM) -> Int -> Fix3 (M o) xs r a -> Fix3 (M o) xs r a
-mkCoin meta 0 = id
+--mkCoin meta 0 = id
 mkCoin meta n = In3 . MetaM (meta n)
 
 addCoins = mkCoin AddCoins

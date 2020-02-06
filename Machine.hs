@@ -100,7 +100,6 @@ debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
 -- Piggy bank functions
 storePiggy :: Int -> Ctx s o a -> Ctx s o a
-storePiggy 0 ctx = ctx
 storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
 
 breakPiggy :: Ctx s o a -> Ctx s o a
@@ -421,13 +420,17 @@ execLogExit name (Exec mk) =
     ask
 
 execMeta :: (?ops :: InputOps s o, FailureOps o) => MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
+execMeta (AddCoins 0) (Exec k) = k
 execMeta (AddCoins coins) (Exec k) = 
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
+execMeta (FreeCoins 0) (Exec k) = k
 execMeta (FreeCoins coins) (Exec k) = local (giveCoins coins) k
+execMeta (RefundCoins 0) (Exec k) = k
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
-execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ({-(max 0) . -}(coins -) . liquidate)) k
+execMeta (DrainCoins 0) (Exec k) = k
+execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
 
 setupHandlerΓ :: FailureOps o => Γ s o xs r a 
               -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))

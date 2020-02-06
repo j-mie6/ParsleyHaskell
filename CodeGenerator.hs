@@ -88,14 +88,14 @@ direct :: ParserF (CodeGen o b :*: Compliance) a -> Bool -> Fix3 (M o) (a ': xs)
 direct (Pure x)    cut   m = do return $! (In3 (Push x m), False)
 direct (Satisfy p) True  m = do return $! (In3 (Sat p (addCoins (coinsNeeded m) m)), True)
 direct (Satisfy p) False m = do return $! (In3 (Sat p m), True)
-direct (pf :<*>: px) cut m = mdo (pxc, handled') <- runCodeGen (ifst px) (cut && not handled) (In3 (_App m))
-                                 (pfc, handled) <- runCodeGen (ifst pf) cut pxc
+direct (pf :<*>: px) cut m = mdo (pfc, handled) <- runCodeGen (ifst pf) cut pxc
+                                 (pxc, handled') <- runCodeGen (ifst px) (cut && not handled) (In3 (_App m))
                                  return $! (pfc, handled')
-direct (p :*>: q) cut m = mdo (qc, handled') <- runCodeGen (ifst q) (cut && not handled) m
-                              (pc, handled) <- runCodeGen (ifst p) cut (In3 (Pop qc))
+direct (p :*>: q) cut m = mdo (pc, handled) <- runCodeGen (ifst p) cut (In3 (Pop qc))
+                              (qc, handled') <- runCodeGen (ifst q) (cut && not handled) m
                               return $! (pc, handled')
-direct (p :<*: q) cut m = mdo (qc, handled') <- runCodeGen (ifst q) (cut && not handled) (In3 (Pop m))
-                              (pc, handled) <- runCodeGen (ifst p) cut qc
+direct (p :<*: q) cut m = mdo (pc, handled) <- runCodeGen (ifst p) cut qc
+                              (qc, handled') <- runCodeGen (ifst q) (cut && not handled) (In3 (Pop m))
                               return $! (pc, handled')
 direct Empty cut m   = do return $! (In3 Empt, False)
 direct ((p :*: NonComp) :<|>: (q :*: FullPure)) _ m = 
@@ -127,30 +127,30 @@ direct (NotFollowedBy p) _   m =
 direct (Branch b p q)    cut m = 
   mdo let nm = coinsNeeded m
       (binder, φ) <- makeΦ (addCoins nm m)
-      (pc, handled') <- freshΦ (runCodeGen (ifst p) (cut && not handled) (In3 (Swap (In3 (_App (drainCoins nm φ))))))
-      (qc, handled'') <- freshΦ (runCodeGen (ifst q) (cut && not handled) (In3 (Swap (In3 (_App (drainCoins nm φ))))))
       let minc = coinsNeeded (In3 (Case pc qc))
       let dp = max 0 (coinsNeeded pc - minc)
       let dq = max 0 (coinsNeeded qc - minc)
       (bc, handled) <- runCodeGen (ifst b) cut (In3 (Case (addCoins dp pc) (addCoins dq qc))) 
+      (pc, handled') <- freshΦ (runCodeGen (ifst p) (cut && not handled) (In3 (Swap (In3 (_App (drainCoins nm φ))))))
+      (qc, handled'') <- freshΦ (runCodeGen (ifst q) (cut && not handled) (In3 (Swap (In3 (_App (drainCoins nm φ))))))
       return $! (binder bc, handled' && handled'')
 direct (Match p fs qs def) cut m = 
   mdo let nm = coinsNeeded m
       (binder, φ) <- makeΦ (addCoins nm m)
+      (pc, handled) <- runCodeGen (ifst p) cut (In3 (Choices fs qcs' defc'))
       let process q = liftA2 (biliftA2 (:) (&&)) (freshΦ (runCodeGen (ifst q) (cut && not handled) (drainCoins nm φ)))
       (qcs, handled'') <- foldr process (return ([], handled')) qs
       (defc, handled') <- freshΦ (runCodeGen (ifst def) (cut && not handled) (drainCoins nm φ))
       let minc = coinsNeeded (In3 (Choices fs qcs defc))
       let defc':qcs' = map (max 0 . subtract minc . coinsNeeded >>= addCoins) (defc:qcs)
-      (pc, handled) <- runCodeGen (ifst p) cut (In3 (Choices fs qcs' defc'))
       return $! (binder pc, handled'')
 direct (Let _ μ _) True m = return $! (tailCallOptimise μ m, False)
 direct (Let _ μ _) False m = return $! (tailCallOptimise μ (addCoins (coinsNeeded m) m), False)
 direct (ChainPre (op :*: NonComp) p) _ m =
   do μ <- askM
      σ <- freshΣ
-     (opc, _) <- freshM (runCodeGen op True (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
-     (pc, _) <- freshM (runCodeGen (ifst p) False (In3 (_App m)))
+     (opc, _) <- trace "sup" freshM (runCodeGen op True (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
+     (pc, _) <- trace "sup" freshM (runCodeGen (ifst p) False (In3 (_App m)))
      return $! (In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ (addCoins (coinsNeeded pc) pc)))))))), True)
 direct (ChainPre op p) cut m =
   do μ <- askM

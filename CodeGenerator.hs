@@ -99,16 +99,14 @@ direct (p :<*: q) cut m = mdo (pc, handled) <- runCodeGen (ifst p) cut qc
                               return $! (pc, handled')
 direct Empty cut m   = do return $! (In3 Empt, False)
 direct ((p :*: NonComp) :<|>: (q :*: FullPure)) _ m = 
-  do let nm = coinsNeeded m
-     (binder, φ) <- makeΦ m
-     (pc, _) <- freshΦ (runCodeGen p True (drainCoins nm (deadCommitOptimisation φ)))
-     (qc, _) <- freshΦ (runCodeGen q False (drainCoins nm φ))
+  do (binder, φ) <- makeΦ m
+     (pc, _) <- freshΦ (runCodeGen p True (deadCommitOptimisation φ))
+     (qc, _) <- freshΦ (runCodeGen q False φ)
      return $! (binder (In3 (HardFork pc qc)), True)
 direct (p :<|>: q)       cut m = 
-  do let nm = coinsNeeded m
-     (binder, φ) <- makeΦ (addCoins nm m)
-     (pc, _) <- freshΦ (runCodeGen (ifst p) False (drainCoins nm (deadCommitOptimisation φ)))
-     (qc, handled) <- freshΦ (runCodeGen (ifst q) cut (drainCoins nm φ))
+  do (binder, φ) <- makeΦ m
+     (pc, _) <- freshΦ (runCodeGen (ifst p) False (deadCommitOptimisation φ))
+     (qc, handled) <- freshΦ (runCodeGen (ifst q) cut φ)
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
      let dp = np - (min np nq)
@@ -119,28 +117,26 @@ direct (LookAhead p)     cut m =
   do n <- fmap (coinsNeeded . fst) (runCodeGen (ifst p) cut (In3 Empt)) -- Dodgy hack, but oh well
      (pc, handled) <- runCodeGen (ifst p) cut (In3 (Swap (In3 (Seek (refundCoins n m)))))
      return $! (In3 (Tell pc), handled)
-direct (NotFollowedBy p) _   m = 
+direct (NotFollowedBy p) _ m = 
   do (pc, _) <- runCodeGen (ifst p) False (In3 (Pop (In3 (Seek (In3 (Commit (In3 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
      return $! (In3 (SoftFork (addCoins (max (np - nm) 0) (In3 (Tell pc))) (In3 (Push (code ()) m))), False)
 direct (Branch b p q)    cut m = 
-  mdo let nm = coinsNeeded m
-      (binder, φ) <- makeΦ (addCoins nm m)
+  mdo (binder, φ) <- makeΦ m
       let minc = coinsNeeded (In3 (Case pc qc))
       let dp = max 0 (coinsNeeded pc - minc)
       let dq = max 0 (coinsNeeded qc - minc)
       (bc, handled) <- runCodeGen (ifst b) cut (In3 (Case (addCoins dp pc) (addCoins dq qc))) 
-      (pc, handled') <- freshΦ (runCodeGen (ifst p) (cut && not handled) (In3 (Swap (In3 (_App (drainCoins nm φ))))))
-      (qc, handled'') <- freshΦ (runCodeGen (ifst q) (cut && not handled) (In3 (Swap (In3 (_App (drainCoins nm φ))))))
+      (pc, handled') <- freshΦ (runCodeGen (ifst p) (cut && not handled) (In3 (Swap (In3 (_App φ)))))
+      (qc, handled'') <- freshΦ (runCodeGen (ifst q) (cut && not handled) (In3 (Swap (In3 (_App φ)))))
       return $! (binder bc, handled' && handled'')
 direct (Match p fs qs def) cut m = 
-  mdo let nm = coinsNeeded m
-      (binder, φ) <- makeΦ (addCoins nm m)
+  mdo (binder, φ) <- makeΦ m
       (pc, handled) <- runCodeGen (ifst p) cut (In3 (Choices fs qcs' defc'))
-      let process q = liftA2 (biliftA2 (:) (&&)) (freshΦ (runCodeGen (ifst q) (cut && not handled) (drainCoins nm φ)))
+      let process q = liftA2 (biliftA2 (:) (&&)) (freshΦ (runCodeGen (ifst q) (cut && not handled) φ))
       (qcs, handled'') <- foldr process (return ([], handled')) qs
-      (defc, handled') <- freshΦ (runCodeGen (ifst def) (cut && not handled) (drainCoins nm φ))
+      (defc, handled') <- freshΦ (runCodeGen (ifst def) (cut && not handled) φ)
       let minc = coinsNeeded (In3 (Choices fs qcs defc))
       let defc':qcs' = map (max 0 . subtract minc . coinsNeeded >>= addCoins) (defc:qcs)
       return $! (binder pc, handled'')
@@ -211,8 +207,7 @@ makeΦ m | elidable m = return $! (id, m)
     elidable (In3 Ret)      = True
     elidable (In3 Halt)     = True
     elidable _              = False
-makeΦ m@(In3 (MetaM (RefundCoins n) _)) = fmap (\φ -> (In3 . MkJoin φ m, In3 (MetaM (DrainCoins n) (In3 (Join φ))))) askΦ
-makeΦ m = fmap (\φ -> (In3 . MkJoin φ m, In3 (Join φ))) askΦ
+makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In3 . MkJoin φ (addCoins n m), drainCoins n (In3 (Join φ)))) askΦ
 
 freshΣ :: CodeGenStack (ΣVar a)
 freshΣ = lift (lift (construct ΣVar))

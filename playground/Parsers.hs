@@ -21,7 +21,9 @@ cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac"
     --m = match "ab" (lookAhead item) op empty
     --op 'a' = item $> code "aaaaa"
     --op 'b' = item $> code "bbbbb"
-    m = string "abcd" <* eof
+    m = bf <* item
+    bf = match ">" item op empty
+    op '>' = string ">"
 
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")

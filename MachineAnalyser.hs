@@ -1,7 +1,4 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
 module MachineAnalyser where
 
 import Machine
@@ -35,7 +32,7 @@ coinsNeeded = fst . getConst3 . cata3 (Const3 . alg)
     alg (Case p q)                         = algCatch (getConst3 p) (getConst3 q)
     alg (Choices _ ks def)                 = foldr (algCatch . getConst3) (getConst3 def) ks
     alg (ChainIter _ _)                    = (0, False)
-    alg (ChainInit _ _ _ _)                = (0, False)
+    alg (ChainInit _ _ _ (Const3 k))       = (0, snd k)
     alg (Join _)                           = (0, False)
     alg (MkJoin _ (Const3 b) (Const3 k))   = (fst k + fst b, snd k || snd b)
     alg (Swap k)                           = getConst3 k

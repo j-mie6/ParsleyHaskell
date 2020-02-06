@@ -2,16 +2,15 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+--{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
 module CodeGenerator (codeGen, halt, ret) where
 
-import ParserAST                  (ParserF(..){- MetaP(..), CoinType(..)-})
+import ParserAST                  (ParserF(..))
 import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
 import MachineAnalyser            (coinsNeeded)
 import CombinatorAnalyser         (compliance, Compliance(..))
@@ -45,14 +44,14 @@ halt = In3 Halt
 ret :: Fix3 (M o) '[x] x a
 ret = In3 Ret
 
-codeGen :: forall o xs r a b. Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
+codeGen :: {-forall o xs r a b. -}Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
 codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = finalise (ifst (histo alg p))
-    alg :: forall a. ParserF (Cofree ParserF (CodeGen o b :*: Compliance)) a -> (CodeGen o b :*: Compliance) a
+    --alg :: forall a. ParserF (Cofree ParserF (CodeGen o b :*: Compliance)) a -> (CodeGen o b :*: Compliance) a
     alg = {-peephole |> -}(\x -> CodeGen (direct (imap extract x))) /\ (compliance . imap (isnd . extract))
     
-    finalise :: CodeGen o b a -> (Fix3 (M o) xs r b, IΣVar)
+    --finalise :: CodeGen o b a -> (Fix3 (M o) xs r b, IΣVar)
     finalise cg = 
       let ((m, _), maxΣ) = runCodeGenStack (runCodeGen cg False terminal) μ0 0 σ0 
           n = coinsNeeded m
@@ -82,6 +81,9 @@ peephole _ = Nothing-}
 (><) :: (a -> b) -> (c -> d) -> (a, c) -> (b, d)
 (f >< g) (x, y) = (f x, g y)
 
+biliftA2 :: (a -> b -> c) -> (x -> y -> z) -> (a, x) -> (b, y) -> (c, z)
+biliftA2 f g (x1, y1) (x2, y2) = (f x1 x2, g y1 y2)
+
 direct :: ParserF (CodeGen o b :*: Compliance) a -> Bool -> Fix3 (M o) (a ': xs) r b -> CodeGenStack (Fix3 (M o) xs r b, Bool)
 direct (Pure x)    cut   m = do return $! (In3 (Push x m), False)
 direct (Satisfy p) True  m = do return $! (In3 (Sat p (addCoins (coinsNeeded m) m)), True)
@@ -105,44 +107,75 @@ direct ((p :*: NonComp) :<|>: (q :*: FullPure)) _ m =
 direct (p :<|>: q)       cut m = 
   do let nm = coinsNeeded m
      (binder, φ) <- makeΦ (addCoins nm m)
-     (pc, handled) <- freshΦ (runCodeGen (ifst p) cut (drainCoins nm (deadCommitOptimisation φ)))
-     (qc, handled') <- freshΦ (runCodeGen (ifst q) cut (drainCoins nm φ))
+     (pc, _) <- freshΦ (runCodeGen (ifst p) False (drainCoins nm (deadCommitOptimisation φ)))
+     (qc, handled) <- freshΦ (runCodeGen (ifst q) cut (drainCoins nm φ))
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
      let dp = np - (min np nq)
      let dq = nq - (min np nq)
-     return $! (binder (In3 (HardFork (addCoins dp pc) (addCoins dq qc))), handled && handled')
+     return $! (binder (In3 (HardFork (addCoins dp pc) (addCoins dq qc))), handled)
 direct (Try p)           cut m = do fmap ((In3 . Attempt) >< const False) (runCodeGen (ifst p) False (deadCommitOptimisation m))
-direct (LookAhead p)     cut m = do n <- fmap (coinsNeeded . fst) (runCodeGen (ifst p) cut (In3 Empt)) -- Dodgy hack, but oh well
-                                    (pc, handled) <- runCodeGen (ifst p) cut (In3 (Swap (In3 (Seek (refundCoins n m)))))
-                                    return $! (In3 (Tell pc), handled)
-direct (NotFollowedBy p) _   m = do (pc, _) <- runCodeGen (ifst p) False (In3 (Pop (In3 (Seek (In3 (Commit (In3 Empt)))))))
-                                    let np = coinsNeeded pc
-                                    let nm = coinsNeeded m
-                                    return $! (In3 (SoftFork (addCoins (max (np - nm) 0) (In3 (Tell pc))) (In3 (Push (code ()) m))), False)
-direct (Branch b p q)    cut m = do (binder, φ) <- makeΦ m
-                                    (pc, _) <- freshΦ (runCodeGen (ifst p) False (In3 (Swap (In3 (_App φ))))) -- TODO no no more like sequence
-                                    (qc, _) <- freshΦ (runCodeGen (ifst q) False (In3 (Swap (In3 (_App φ))))) -- TODO no no more like sequence
-                                    (qb, _) <- runCodeGen (ifst b) cut (In3 (Case pc qc)) 
-                                    return $! (binder qb, undefined) -- TODO
-direct (Match p fs qs def) cut m = do (binder, φ) <- makeΦ m
-                                      (qcs, _) <- fmap unzip (traverse (freshΦ . flip (flip runCodeGen False) φ . ifst) qs) -- TODO no no more like sequence
-                                      (defc, _) <- freshΦ (runCodeGen (ifst def) False φ) -- TODO no no more like sequence
-                                      (pc, _) <- runCodeGen (ifst p) cut (In3 (Choices fs qcs defc))
-                                      return $! (binder pc, undefined) -- TODO
+direct (LookAhead p)     cut m = 
+  do n <- fmap (coinsNeeded . fst) (runCodeGen (ifst p) cut (In3 Empt)) -- Dodgy hack, but oh well
+     (pc, handled) <- runCodeGen (ifst p) cut (In3 (Swap (In3 (Seek (refundCoins n m)))))
+     return $! (In3 (Tell pc), handled)
+direct (NotFollowedBy p) _   m = 
+  do (pc, _) <- runCodeGen (ifst p) False (In3 (Pop (In3 (Seek (In3 (Commit (In3 Empt)))))))
+     let np = coinsNeeded pc
+     let nm = coinsNeeded m
+     return $! (In3 (SoftFork (addCoins (max (np - nm) 0) (In3 (Tell pc))) (In3 (Push (code ()) m))), False)
+direct (Branch b p q)    cut m = 
+  mdo let nm = coinsNeeded m
+      (binder, φ) <- makeΦ (addCoins nm m)
+      (pc, handled') <- freshΦ (runCodeGen (ifst p) (cut && not handled) (In3 (Swap (In3 (_App (drainCoins nm φ))))))
+      (qc, handled'') <- freshΦ (runCodeGen (ifst q) (cut && not handled) (In3 (Swap (In3 (_App (drainCoins nm φ))))))
+      let minc = coinsNeeded (In3 (Case pc qc))
+      let dp = max 0 (coinsNeeded pc - minc)
+      let dq = max 0 (coinsNeeded qc - minc)
+      (bc, handled) <- runCodeGen (ifst b) cut (In3 (Case (addCoins dp pc) (addCoins dq qc))) 
+      return $! (binder bc, handled' && handled'')
+direct (Match p fs qs def) cut m = 
+  mdo let nm = coinsNeeded m
+      (binder, φ) <- makeΦ (addCoins nm m)
+      let process q = liftA2 (biliftA2 (:) (&&)) (freshΦ (runCodeGen (ifst q) (cut && not handled) (drainCoins nm φ)))
+      (qcs, handled'') <- foldr process (return ([], handled')) qs
+      (defc, handled') <- freshΦ (runCodeGen (ifst def) (cut && not handled) (drainCoins nm φ))
+      let minc = coinsNeeded (In3 (Choices fs qcs defc))
+      let defc':qcs' = map (max 0 . subtract minc . coinsNeeded >>= addCoins) (defc:qcs)
+      (pc, handled) <- runCodeGen (ifst p) cut (In3 (Choices fs qcs' defc'))
+      return $! (binder pc, handled'')
 direct (Let _ μ _) True m = return $! (tailCallOptimise μ m, False)
 direct (Let _ μ _) False m = return $! (tailCallOptimise μ (addCoins (coinsNeeded m) m), False)
-direct (ChainPre op p) cut m = -- TODO, this shoud work similarly to <|> with added (R <~>)
+direct (ChainPre (op :*: NonComp) p) _ m =
   do μ <- askM
      σ <- freshΣ
-     (opc, _) <- freshM (runCodeGen (ifst op) True (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
-     (pc, _) <- freshM (runCodeGen (ifst p) cut (In3 (_App m)))
-     return $! (In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ pc))))))), False)
-direct (ChainPost p op) cut m =  -- TODO, this shoud work similarly to <|>
+     (opc, _) <- freshM (runCodeGen op True (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
+     (pc, _) <- freshM (runCodeGen (ifst p) False (In3 (_App m)))
+     return $! (In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ (addCoins (coinsNeeded pc) pc)))))))), True)
+direct (ChainPre op p) cut m =
   do μ <- askM
      σ <- freshΣ
-     (opc, _) <- freshM (runCodeGen (ifst op) False (In3 (_Modify σ (In3 (ChainIter σ μ))))) -- Verify this should be false?
-     freshM (runCodeGen (ifst p) cut (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ m)))))))
+     (opc, _) <- freshM (runCodeGen (ifst op) False (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
+     let nop = coinsNeeded opc
+     (pc, handled) <- freshM (runCodeGen (ifst p) cut (In3 (_App m)))
+     let addCoinsP = if cut then id else addCoins (coinsNeeded pc)
+     return $! (In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ (addCoins nop opc) μ (In3 (Get σ (addCoinsP pc)))))))), handled)
+direct (ChainPost p (op :*: NonComp)) cut m =
+  do μ <- askM
+     σ <- freshΣ
+     let nm = coinsNeeded m
+     (opc, _) <- freshM (runCodeGen op True (In3 (_Modify σ (In3 (ChainIter σ μ)))))
+     (pc, _) <- freshM (runCodeGen (ifst p) cut (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ (addCoins nm m))))))))
+     return $! (pc, True)
+direct (ChainPost p op) cut m =
+  mdo μ <- askM
+      σ <- freshΣ
+      let nm = coinsNeeded m
+      (opc, _) <- freshM (runCodeGen (ifst op) False (In3 (_Modify σ (In3 (ChainIter σ μ)))))
+      let nop = coinsNeeded opc
+      let addCoinsM = if cut && handled then addCoins nm else id
+      (pc, handled) <- freshM (runCodeGen (ifst p) cut (In3 (Make σ (In3 (ChainInit σ (addCoins nop opc) μ (In3 (Get σ (addCoinsM m))))))))
+      return $! (pc, handled)
 direct (Debug name p) cut m = do fmap ((In3 . LogEnter name) >< id) (runCodeGen (ifst p) cut (In3 (LogExit name m)))
 
 tailCallOptimise :: MVar x -> Fix3 (M o) (x ': xs) r a -> Fix3 (M o) xs r a

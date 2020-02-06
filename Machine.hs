@@ -426,8 +426,7 @@ execMeta (AddCoins coins) (Exec k) =
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
 execMeta (FreeCoins coins) (Exec k) = local (giveCoins coins) k
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
-execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((max 0) . (coins -) . liquidate)) k -- MAX is NOT needed, but the Drain has the incorrect number of tokens for the moment :\
---execMeta _ (Exec k) = k
+execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ({-(max 0) . -}(coins -) . liquidate)) k
 
 setupHandlerΓ :: FailureOps o => Γ s o xs r a 
               -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
@@ -473,7 +472,7 @@ instance RecBuilder _o where                                                    
         let {loop !o# =                                                               \
           $$(let ctx' = insertSTC σ cref (insertM μ [||\_ (!o#) _ -> loop o#||] ctx); \
                  γ = Γ QNil [||noreturn||] [||$$bx o#||] hs                           \
-             in run l γ ctx')};                                                       \
+             in run l γ (voidCoins ctx'))};                                           \
         loop ($$unbox $$o)                                                            \
       } ||];                                                                          \
   buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                             \

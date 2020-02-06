@@ -1,14 +1,10 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE ViewPatterns #-}
 module CombinatorAnalyser (analyse, compliance, Compliance(..)) where
 
-import ParserAST                  (ParserF(..){-, MetaP(..), CoinType(..)-})
+import ParserAST                  (ParserF(..))
 import MachineAST                 (IMVar, MVar(..), IΣVar)
 import Indexed                    (Fix(..), Cofree(..), Const1(..), imap, cata, histo, extract, (|>))
 import Control.Applicative        (liftA2)
@@ -22,19 +18,20 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
 analyse :: Fix ParserF a -> Fix ParserF a
-analyse = id {-. terminationAnalysis-}
+analyse = id {-terminationAnalysis-}
 
-{-newtype (a :->: f) k = IFunc {run :: a -> f k}
-send :: a -> (a :->: f) k -> f k
-send = flip run-}
-
-data Compliance k = DomComp | NonComp | Comp | FullPure deriving Show
+data Compliance k = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
 
 seqCompliance :: Compliance a -> Compliance b -> Compliance c
 seqCompliance c FullPure = coerce c
 seqCompliance FullPure c = coerce c
 seqCompliance Comp _     = Comp
 seqCompliance _ _        = NonComp
+
+caseCompliance :: Compliance a -> Compliance b -> Compliance c
+caseCompliance c FullPure = coerce c
+caseCompliance FullPure c = coerce c
+caseCompliance c1 c2 | c1 == coerce c2 = coerce c1
 
 compliance :: ParserF Compliance a -> Compliance a
 compliance (Pure _) = FullPure
@@ -50,74 +47,12 @@ compliance (l :*>: r) = seqCompliance l r
 compliance (LookAhead c) = c -- Lookahead will consume input on failure, so its compliance matches that which is beneath it
 compliance (NotFollowedBy _) = FullPure
 compliance (Debug _ c) = c
-compliance (ChainPre _ _) = DomComp
-compliance (ChainPost _ _) = DomComp
-compliance _ = NonComp -- Match, Branch
-
-{-constantInput :: Free ParserF f a -> Free ParserF f a
-constantInput = untag . send True . fold (IFunc . const . Var) (IFunc . (Op .) . flip alg)
-  where
-    tyTag ty n = MetaP (ConstInput ty n) . Op
-    tag = tyTag Costs
-    refunds = tyTag Refunded
-    free n  = Op . MetaP (ConstInput Free n)
-    untag (TaggedInput _ 0 p) = p
-    untag (TaggedInput _ 1 p) = p
-    untag p = p
-    retag f n p = untag (CostsInput (max (f n) 0) p)
-    get cut (send cut -> TaggedInput _ n p) = (n, p)
-    get cut (send cut -> p) = (0, p)
-
-    -- This should be sufficient? Worse case we add more length checks than necessary
-    seqCost Costs n m = n + m
-    seqCost Refunded n m = max n m
-
-    satisfyObligationsSeq cut cons ty n p q
-      -- p failed to satisfy the obligation, so the burden is on q
-      | cut && n == 0 = let (m, q') = get True q in tag m (cons p q')
-      -- p has satisfied the obligation, so the node consumes 1 input and q is left untouched
-      | cut && n == 1 = tag 1 (cons p (untag (send False q)))
-      -- no cut obligation, so proceed as normal
-      | otherwise     = let (m, q') = get False q in tag (seqCost ty n m) (cons p q')
-
-    -- Lets focus on another problem for a minute, the join point problem is not appropriate
-    -- to solve in this domain. The code generator has a better chance as it has the continuation
-    -- We need to prevent semantic shift permitting more backtracking. This can be done by
-    -- splitting out the first character from the left-branch of an <|> except where a try is present
-    -- This will be done by passing a Bool down the tree to indicate whether to perform a split or
-    -- not.
-    alg :: Bool -> ParserF (Bool :->: Free ParserF f) a -> ParserF (Free ParserF f) a
-    alg _ (Pure x) = tag 0 (Pure x)
-    alg _ (Satisfy p) = tag 1 (Satisfy p)
-    alg cut ((send cut -> TaggedInput ty n p) :<*>: q) = satisfyObligationsSeq cut (:<*>:) ty n p q
-    alg cut ((send cut -> TaggedInput ty n p) :*>: q) = satisfyObligationsSeq cut (:*>:) ty n p q
-    alg cut ((send cut -> TaggedInput ty n p) :<*: q) = satisfyObligationsSeq cut (:<*:) ty n p q
-    alg cut ((send True -> CostsInput n p) :<|>: (send cut -> CostsInput m q)) -- TODO What about refunds?
-      | n > m  = tag m (retag (subtract m) n p :<|>: q)
-      | m > n  = tag n (p :<|>: retag (subtract n) m q)
-      | n == m = tag n (p :<|>: q)
-    alg _ Empty = tag 0 Empty
-    alg _ (Try (send False -> TaggedInput ty n p)) = tyTag ty n (Try p)
-    {-alg cut (Branch (send cut -> TaggedInput ty n b) p q)
-      | m1 > m2  = tag (seqCost ty n m2) (Branch b (retag (subtract m2) m1 p') q')
-      | m2 > m1  = tag (seqCost ty n m1) (Branch b p' (retag (subtract m1) m2 q'))
-      | m1 == m2 = tag (seqCost ty n m1) (Branch b p' q')
-      where (m1, p') = get p
-            (m2, q') = get q
-    alg cut (Match (send cut -> TaggedInput ty n p) fs qs d) =
-      let mdqs = map get (d : qs)
-          m = minimum (map fst mdqs)
-          d' : qs' = map (uncurry (retag (subtract m))) mdqs
-      in tag (seqCost ty n m) (Match p fs qs' d')-}
-    alg cut (LookAhead (send cut -> CostsInput n p)) = refunds n (LookAhead (free n p))
-    alg _ (NotFollowedBy (send False -> CostsInput n p)) = refunds n (NotFollowedBy (free n p))
-    alg cut (Debug name (send cut -> CostsInput n p)) = tag n (Debug name p)
-    alg cut p = imap (untag . send cut) p
-
-pattern TaggedInput t n p = Op (MetaP (ConstInput t n) p)
-pattern CostsInput n p = TaggedInput Costs n p
-
--}
+compliance (ChainPre NonComp p) = seqCompliance Comp p
+compliance (ChainPre op p) = seqCompliance NonComp p
+compliance (ChainPost p NonComp) = seqCompliance p Comp
+compliance (ChainPost p op) = seqCompliance p NonComp
+compliance (Branch b p q) = seqCompliance b (caseCompliance p q)
+compliance (Match p _ qs def) = seqCompliance p (foldr1 caseCompliance (def:qs))
 
 -- Termination Analysis (Generalised left-recursion checker)
 data Consumption = Some | None | Never

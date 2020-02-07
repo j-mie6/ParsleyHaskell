@@ -128,13 +128,13 @@ letInsertion lets recs p = (p', μs, μMax)
       let bound = HashSet.member name lets
       let recu = HashSet.member name recs
       if bound || recu then case HashMap.lookup name vs of
-        Just v  -> let μ = MVar v in return $! Op (Let recu μ (μs DMap.! μ))
+        Just v  -> let μ = MVar v in return $! optimise (Let recu μ (μs DMap.! μ))
         Nothing -> mdo
           v <- newVar
           let μ = MVar v
           put (HashMap.insert name v vs, DMap.insert μ q' μs)
           q' <- runLetInserter (postprocess q)
-          return $! Op (Let recu μ q')
+          return $! optimise (Let recu μ q')
       else do runLetInserter (postprocess q)
 
 postprocess :: ParserF LetInserter a -> LetInserter a
@@ -148,9 +148,9 @@ postprocess (LookAhead p)       = LetInserter (fmap optimise (fmap LookAhead (ru
 postprocess (NotFollowedBy p)   = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
 postprocess (Branch b p q)      = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
 postprocess (Match p fs qs d)   = LetInserter (fmap optimise (liftA4 Match (runLetInserter p) (return fs) (traverse runLetInserter qs) (runLetInserter d)))
-postprocess (ChainPre op p)     = LetInserter (fmap Op       (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
-postprocess (ChainPost p op)    = LetInserter (fmap Op       (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
-postprocess (Debug name p)      = LetInserter (fmap Op       (fmap (Debug name) (runLetInserter p)))
+postprocess (ChainPre op p)     = LetInserter (fmap optimise (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
+postprocess (ChainPost p op)    = LetInserter (fmap optimise (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
+postprocess (Debug name p)      = LetInserter (fmap optimise (fmap (Debug name) (runLetInserter p)))
 postprocess (Pure x)            = LetInserter (return        (Op (Pure x)))
 postprocess (Satisfy f)         = LetInserter (return        (Op (Satisfy f)))
 

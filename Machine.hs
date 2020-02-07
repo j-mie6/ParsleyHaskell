@@ -18,7 +18,8 @@
              ImplicitParams,
              TypeFamilies,
              TypeApplications,
-             PatternSynonyms #-}
+             PatternSynonyms,
+             InstanceSigs #-}
 module Machine where
 
 import MachineOps

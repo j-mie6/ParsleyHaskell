@@ -420,16 +420,16 @@ execLogExit name (Exec mk) =
     ask
 
 execMeta :: (?ops :: InputOps s o, FailureOps o) => MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
-execMeta (AddCoins 0) (Exec k) = k
+--execMeta (AddCoins 0) (Exec k) = k
 execMeta (AddCoins coins) (Exec k) = 
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
-execMeta (FreeCoins 0) (Exec k) = k
+--execMeta (FreeCoins 0) (Exec k) = k
 execMeta (FreeCoins coins) (Exec k) = local (giveCoins coins) k
-execMeta (RefundCoins 0) (Exec k) = k
+--execMeta (RefundCoins 0) (Exec k) = k
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
-execMeta (DrainCoins 0) (Exec k) = k
+--execMeta (DrainCoins 0) (Exec k) = k
 execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
 
 setupHandlerΓ :: FailureOps o => Γ s o xs r a 

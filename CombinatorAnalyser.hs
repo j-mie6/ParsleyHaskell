@@ -19,7 +19,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
 analyse :: Fix ParserF a -> Fix ParserF a
-analyse = id {-terminationAnalysis-}
+analyse = cutAnalysis False {-terminationAnalysis-}
 
 data Compliance k = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
 
@@ -54,6 +54,7 @@ compliance (ChainPost p NonComp)    = seqCompliance p Comp
 compliance (ChainPost p op)         = seqCompliance p NonComp
 compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
 compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
+compliance (MetaP _ c)              = c 
 
 newtype CutAnalysis a = CutAnalysis {cutOut :: Bool -> (Fix ParserF a, Bool)}
 
@@ -106,7 +107,7 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . ifst . cata ((CutAnalysis .
     alg (ChainPost p op) cut = 
       let (p', handled) = cutOut (ifst p) cut
           (op', _) = cutOut (ifst op) False
-      in (In (ChainPost p' op'), handled)
+      in (mkCut (cut && handled) (In (ChainPost p' op')), handled)
     alg (Branch b p q) cut =
       let (b', handled) = cutOut (ifst b) cut
           (p', handled') = cutOut (ifst p) (cut && not handled)

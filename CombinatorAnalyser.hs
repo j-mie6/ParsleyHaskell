@@ -35,9 +35,10 @@ seqCompliance Comp _     = Comp
 seqCompliance _ _        = NonComp
 
 caseCompliance :: Compliance a -> Compliance b -> Compliance c
-caseCompliance c FullPure = coerce c
-caseCompliance FullPure c = coerce c
+caseCompliance c FullPure              = coerce c
+caseCompliance FullPure c              = coerce c
 caseCompliance c1 c2 | c1 == coerce c2 = coerce c1
+caseCompliance _ _                     = NonComp
 
 compliance :: ParserF Compliance a -> Compliance a
 compliance (Pure _)                 = FullPure

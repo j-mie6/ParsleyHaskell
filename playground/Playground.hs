@@ -49,8 +49,8 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
     write :: a -> Tape a -> Tape a
     write x (Tape ls _ rs) = Tape ls x rs
 
---javascript :: String -> Maybe JSProgram
---javascript = $$(Parsley.runParser Parsers.javascript)
+javascript :: String -> IO (Maybe Parsers.JSProgram)
+javascript = $$(Parsley.parseFromFile Parsers.javascript)
 
 --boom :: String -> Maybe ()
 --boom = $$(Parsley.runParser Parsers.failure)
@@ -68,5 +68,5 @@ main =
      print (nfb "a")
      print (nfb "ab")
      print (nfb "c")-}
-     print (cinput ("abcd")) >>
+  do javascript "inputs/fibonacci.js" >>= print
      return ()

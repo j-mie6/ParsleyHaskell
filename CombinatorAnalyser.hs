@@ -67,6 +67,8 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . ifst . cata ((CutAnalysis .
     mkCut True = In . MetaP Cut
     mkCut False = id
 
+    requiresCut = In . MetaP RequiresCut
+
     seqAlg :: (Fix ParserF a -> Fix ParserF b -> ParserF (Fix ParserF) c) -> Bool -> CutAnalysis a -> CutAnalysis b -> (Fix ParserF c, Bool)
     seqAlg con cut l r =
       let (l', handled) = cutOut l cut
@@ -81,8 +83,8 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . ifst . cata ((CutAnalysis .
     alg (Satisfy f) cut = (mkCut cut (In (Satisfy f)), True)
     alg Empty _ = (In Empty, False)
     alg (Let r μ p) cut = (mkCut (not cut) (In (Let r μ (fst (cutOut (ifst p) True)))), False) -- If there is no cut, we generate a piggy for the continuation
-    alg (Try p) _ = {-fmap (const False) $-} rewrap Try False (ifst p)
-    alg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (In (fst (cutOut p True) :<|>: fst (cutOut q False)), True)
+    alg (Try p) _ = fmap (const False) $ rewrap Try False (ifst p)
+    alg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (requiresCut (In (fst (cutOut p True) :<|>: fst (cutOut q False))), True)
     alg (p :<|>: q) cut = 
       let (q', handled) = cutOut (ifst q) cut 
       in (In (fst (cutOut (ifst p) False) :<|>: q'), handled)
@@ -95,15 +97,15 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . ifst . cata ((CutAnalysis .
     alg (ChainPre (op :*: NonComp) p) _ = 
       let (op', _) = cutOut op True
           (p', _) = cutOut (ifst p) False
-      in (In (ChainPre op' p'), True)
+      in (requiresCut (In (ChainPre op' p')), True)
     alg (ChainPre op p) cut = 
       let (op', _) = cutOut (ifst op) False
           (p', handled) = cutOut (ifst p) cut
-      in (In (ChainPre op' p'), handled)
+      in (mkCut (not cut) (In (ChainPre op' p')), handled)
     alg (ChainPost p (op :*: NonComp)) cut = 
       let (p', _) = cutOut (ifst p) cut
           (op', _) = cutOut op True
-      in (In (ChainPost p' op'), True)
+      in (requiresCut (In (ChainPost p' op')), True)
     alg (ChainPost p op) cut = 
       let (p', handled) = cutOut (ifst p) cut
           (op', _) = cutOut (ifst op) False

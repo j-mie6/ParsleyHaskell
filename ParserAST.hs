@@ -93,6 +93,7 @@ data ParserF (k :: * -> *) (a :: *) where
 
 data MetaP where
   Cut :: MetaP
+  RequiresCut :: MetaP
 
 -- Instances
 instance IFunctor ParserF where
@@ -137,4 +138,5 @@ instance Show (Fix ParserF a) where
       alg (MetaP m (Const1 p))                      = concat [p, " [", show m, "]"]
 
 instance Show MetaP where
-  show Cut = "Cut"
+  show Cut = "coins after"
+  show RequiresCut = "requires cut"

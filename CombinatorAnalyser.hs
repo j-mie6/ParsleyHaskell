@@ -2,11 +2,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE TypeOperators #-}
 module CombinatorAnalyser (analyse, compliance, Compliance(..)) where
 
-import ParserAST                  (ParserF(..))
+import ParserAST                  (ParserF(..), MetaP(..))
 import MachineAST                 (IMVar, MVar(..), IΣVar)
-import Indexed                    (Fix(..), Cofree(..), Const1(..), imap, cata, histo, extract, (|>))
+import Indexed                    (Fix(..), Cofree(..), Const1(..), imap, cata, histo, extract, (|>), (:*:)(..), (/\), ifst, isnd)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
 import Control.Monad.State.Strict (State, get, put, evalState)
@@ -34,25 +35,88 @@ caseCompliance FullPure c = coerce c
 caseCompliance c1 c2 | c1 == coerce c2 = coerce c1
 
 compliance :: ParserF Compliance a -> Compliance a
-compliance (Pure _) = FullPure
-compliance (Satisfy _) = NonComp
-compliance Empty = FullPure
-compliance (Let _ _ _) = DomComp
-compliance (Try _) = DomComp
+compliance (Pure _)                 = FullPure
+compliance (Satisfy _)              = NonComp
+compliance Empty                    = FullPure
+compliance (Let _ _ _)              = DomComp
+compliance (Try _)                  = DomComp
 compliance (NonComp :<|>: FullPure) = Comp
-compliance (_ :<|>: _) = NonComp
-compliance (l :<*>: r) = seqCompliance l r
-compliance (l :<*: r) = seqCompliance l r
-compliance (l :*>: r) = seqCompliance l r
-compliance (LookAhead c) = c -- Lookahead will consume input on failure, so its compliance matches that which is beneath it
-compliance (NotFollowedBy _) = FullPure
-compliance (Debug _ c) = c
-compliance (ChainPre NonComp p) = seqCompliance Comp p
-compliance (ChainPre op p) = seqCompliance NonComp p
-compliance (ChainPost p NonComp) = seqCompliance p Comp
-compliance (ChainPost p op) = seqCompliance p NonComp
-compliance (Branch b p q) = seqCompliance b (caseCompliance p q)
-compliance (Match p _ qs def) = seqCompliance p (foldr1 caseCompliance (def:qs))
+compliance (_ :<|>: _)              = NonComp
+compliance (l :<*>: r)              = seqCompliance l r
+compliance (l :<*: r)               = seqCompliance l r
+compliance (l :*>: r)               = seqCompliance l r
+compliance (LookAhead c)            = c -- Lookahead will consume input on failure, so its compliance matches that which is beneath it
+compliance (NotFollowedBy _)        = FullPure
+compliance (Debug _ c)              = c
+compliance (ChainPre NonComp p)     = seqCompliance Comp p
+compliance (ChainPre op p)          = seqCompliance NonComp p
+compliance (ChainPost p NonComp)    = seqCompliance p Comp
+compliance (ChainPost p op)         = seqCompliance p NonComp
+compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
+compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
+
+newtype CutAnalysis a = CutAnalysis {cutOut :: Bool -> (Fix ParserF a, Bool)}
+
+biliftA2 :: (a -> b -> c) -> (x -> y -> z) -> (a, x) -> (b, y) -> (c, z)
+biliftA2 f g (x1, y1) (x2, y2) = (f x1 x2, g y1 y2)
+
+cutAnalysis :: Bool -> Fix ParserF a -> Fix ParserF a
+cutAnalysis letBound = fst . ($ letBound) . cutOut . ifst . cata ((CutAnalysis . alg) /\ (compliance . imap isnd))
+  where
+    mkCut True = In . MetaP Cut
+    mkCut False = id
+
+    seqAlg :: (Fix ParserF a -> Fix ParserF b -> ParserF (Fix ParserF) c) -> Bool -> CutAnalysis a -> CutAnalysis b -> (Fix ParserF c, Bool)
+    seqAlg con cut l r =
+      let (l', handled) = cutOut l cut
+          (r', handled') = cutOut r (cut && not handled)
+      in (In (con l' r'), handled || handled')
+
+    rewrap :: (Fix ParserF a -> ParserF (Fix ParserF) b) -> Bool -> CutAnalysis a -> (Fix ParserF b, Bool)
+    rewrap con cut p = let (p', handled) = cutOut p cut in (In (con p'), handled)
+
+    alg :: ParserF (CutAnalysis :*: Compliance) a -> Bool -> (Fix ParserF a, Bool)
+    alg (Pure x) _ = (In (Pure x), False)
+    alg (Satisfy f) cut = (mkCut cut (In (Satisfy f)), True)
+    alg Empty _ = (In Empty, False)
+    alg (Let r μ p) cut = (mkCut (not cut) (In (Let r μ (fst (cutOut (ifst p) True)))), False) -- If there is no cut, we generate a piggy for the continuation
+    alg (Try p) _ = {-fmap (const False) $-} rewrap Try False (ifst p)
+    alg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (In (fst (cutOut p True) :<|>: fst (cutOut q False)), True)
+    alg (p :<|>: q) cut = 
+      let (q', handled) = cutOut (ifst q) cut 
+      in (In (fst (cutOut (ifst p) False) :<|>: q'), handled)
+    alg (l :<*>: r) cut = seqAlg (:<*>:) cut (ifst l) (ifst r)
+    alg (l :<*: r) cut = seqAlg (:<*:) cut (ifst l) (ifst r)
+    alg (l :*>: r) cut = seqAlg (:*>:) cut (ifst l) (ifst r)
+    alg (LookAhead p) cut = rewrap LookAhead cut (ifst p)
+    alg (NotFollowedBy p) _ = fmap (const False) $ rewrap NotFollowedBy False (ifst p)
+    alg (Debug msg p) cut = rewrap (Debug msg) cut (ifst p)
+    alg (ChainPre (op :*: NonComp) p) _ = 
+      let (op', _) = cutOut op True
+          (p', _) = cutOut (ifst p) False
+      in (In (ChainPre op' p'), True)
+    alg (ChainPre op p) cut = 
+      let (op', _) = cutOut (ifst op) False
+          (p', handled) = cutOut (ifst p) cut
+      in (In (ChainPre op' p'), handled)
+    alg (ChainPost p (op :*: NonComp)) cut = 
+      let (p', _) = cutOut (ifst p) cut
+          (op', _) = cutOut op True
+      in (In (ChainPost p' op'), True)
+    alg (ChainPost p op) cut = 
+      let (p', handled) = cutOut (ifst p) cut
+          (op', _) = cutOut (ifst op) False
+      in (In (ChainPost p' op'), handled)
+    alg (Branch b p q) cut =
+      let (b', handled) = cutOut (ifst b) cut
+          (p', handled') = cutOut (ifst p) (cut && not handled)
+          (q', handled'') = cutOut (ifst q) (cut && not handled)
+      in (In (Branch b' p' q'), handled || (handled' && handled''))
+    alg (Match p f qs def) cut = 
+      let (p', handled) = cutOut (ifst p) cut
+          (def', handled') = cutOut (ifst def) (cut && not handled)
+          (qs', handled'') = foldr (\q -> biliftA2 (:) (&&) (cutOut (ifst q) (cut && not handled))) ([], handled') qs
+      in (In (Match p' f qs' def'), handled || handled'')
 
 -- Termination Analysis (Generalised left-recursion checker)
 data Consumption = Some | None | Never

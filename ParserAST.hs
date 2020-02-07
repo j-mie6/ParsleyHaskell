@@ -89,11 +89,10 @@ data ParserF (k :: * -> *) (a :: *) where
   ChainPre      :: k (a -> a) -> k a -> ParserF k a
   ChainPost     :: k a -> k (a -> a) -> ParserF k a
   Debug         :: String -> k a -> ParserF k a
-  --MetaP         :: MetaP -> k a -> ParserF k a
+  MetaP         :: MetaP -> k a -> ParserF k a
 
---data CoinType = Costs | Refunded | Free | Transports deriving Show
---data MetaP where
---  ConstInput :: CoinType -> Int -> MetaP
+data MetaP where
+  Cut :: MetaP
 
 -- Instances
 instance IFunctor ParserF where
@@ -113,7 +112,7 @@ instance IFunctor ParserF where
   imap f (ChainPre op p)     = ChainPre (f op) (f p)
   imap f (ChainPost p op)    = ChainPost (f p) (f op)
   imap f (Debug name p)      = Debug name (f p)
-  --imap f (MetaP m p)         = MetaP m (f p)
+  imap f (MetaP m p)         = MetaP m (f p)
 
 instance Show (Fix ParserF a) where
   show = getConst1 . cata (Const1 . alg)
@@ -135,10 +134,7 @@ instance Show (Fix ParserF a) where
       alg (ChainPre (Const1 op) (Const1 p))         = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))        = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                      = p
-      --alg (MetaP m (Const1 p))                      = concat [p, " [", show m, "]"]
+      alg (MetaP m (Const1 p))                      = concat [p, " [", show m, "]"]
 
-{-instance Show MetaP where
-  show (ConstInput Refunded n) = concat ["refunds ", show n, " tokens"]
-  show (ConstInput Costs n) = concat ["consumes ", show n, " tokens"]
-  show (ConstInput Free n) = concat ["consumes ", show n, " tokens for free"]
-  show (ConstInput Transports n) = concat ["transports ", show n, " tokens across join"]-}
+instance Show MetaP where
+  show Cut = "Cut"

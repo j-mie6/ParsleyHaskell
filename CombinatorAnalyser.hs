@@ -3,7 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeOperators #-}
-module CombinatorAnalyser (analyse, compliance, Compliance(..)) where
+module CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
 
 import ParserAST                  (ParserF(..), MetaP(..))
 import MachineAST                 (IMVar, MVar(..), IΣVar)
@@ -18,8 +18,13 @@ import Safe.Coerce                (coerce)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
-analyse :: Fix ParserF a -> Fix ParserF a
-analyse = cutAnalysis False {-terminationAnalysis-}
+data AnalysisFlags = AnalysisFlags {
+  letBound :: Bool
+}
+emptyFlags = AnalysisFlags False
+
+analyse :: AnalysisFlags -> Fix ParserF a -> Fix ParserF a
+analyse flags = cutAnalysis (letBound flags) {-terminationAnalysis-}
 
 data Compliance k = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
 

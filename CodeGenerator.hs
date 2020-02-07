@@ -11,7 +11,6 @@ module CodeGenerator (codeGen, halt, ret) where
 import ParserAST                  (ParserF(..), MetaP(..))
 import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
 import MachineAnalyser            (coinsNeeded)
-import CombinatorAnalyser         (compliance, Compliance(..))
 import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>))
 import Utils                      (code, (>*<), WQ(..))
 import Defunc                     (Defunc(BLACK))
@@ -43,15 +42,15 @@ ret :: Fix3 (M o) '[x] x a
 ret = In3 Ret
 
 -- TODO, ensure that let-bound parsers do not use finalise to add coins!
-codeGen :: Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
-codeGen p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
+codeGen :: Bool -> Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
+codeGen letBound p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = finalise (histo alg p)
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg = 
       let (m, maxΣ) = runCodeGenStack (runCodeGen cg terminal) μ0 0 σ0 
           n = coinsNeeded m
-      in (addCoins n m, maxΣ)
+      in (if letBound then m else addCoins n m, maxΣ)
 
 pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
 pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)

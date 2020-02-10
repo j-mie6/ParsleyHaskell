@@ -66,6 +66,8 @@ main =
      print (nfb "a")
      print (nfb "ab")
      print (nfb "c")-}
-  do res <- javascript "inputs/fibonacci.js"
-     print res
+  do javascript "inputs/fibonacci.js" >>= print
+     javascript "inputs/heapsort.js" >>= print
+     javascript "inputs/game.js" >>= print
+     javascript "inputs/big.js" >>= print
      return ()

@@ -42,6 +42,7 @@ brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyParsers.brainfuck)
 main :: IO ()
 main =
   defaultMain [ regex
+              , javascript
               , brainfuck
               , tailTest 
               ]
@@ -132,6 +133,22 @@ deriving instance NFData JSUnary
 deriving instance NFData JSMember
 deriving instance NFData JSCons
 deriving instance NFData JSAtom
+
+jsParsleyB :: ByteString -> Maybe JSProgram
+jsParsleyB = $$(Parsley.runParser ParsleyParsers.javascript)
+
+javascript :: Benchmark
+javascript =
+  let bfTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe JSProgram) -> Benchmark
+      bfTest = benchmark ["inputs/fibonacci.js", "inputs/heapsort.js", "inputs/game.js", "inputs/big.js"]
+  in bgroup "Javascript"
+       [ bfTest bytestring      "Parsley (ByteString)"      jsParsleyB
+       --, bfTest string          "Happy"                     HappyParsers.brainfuck
+       --, bfTest string          "Parsec (String)"           (parsecParse ParsecParsers.brainfuck)
+       --, bfTest text            "Parsec (Text)"             (parsecParse ParsecParsers.brainfuck)
+       --, bfTest string          "Mega (String)"             (megaParse MegaparsecParsers.brainfuck)
+       --, bfTest text            "Mega (Text)"               (megaParse MegaparsecParsers.brainfuck)
+       ]
 
 -- Utils
 parsecParse :: Parsec.Stream s Identity Char => ParsecParsers.Parser s a -> s -> Maybe a

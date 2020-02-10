@@ -9,6 +9,7 @@
              FlexibleContexts,
              NumericUnderscores,
              UnboxedTuples #-}
+{- LANGUAGE NoMonoLocalBinds #-}
 module Main where
 import Parsers (BrainFuckOp(..))
 import qualified Parsers

@@ -14,7 +14,7 @@ module Input where
 
 import Utils                    (Code)
 import Data.Array.Base          (UArray(..), listArray)
-import GHC.Prim                 (Int#, Addr#, ByteArray#, nullAddr#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#)
+import GHC.Prim                 (Int#, Addr#, ByteArray#, nullAddr#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
 import GHC.Exts                 (Int(..), Char(..), TYPE, RuntimeRep(..))
 import Data.Text.Array          (aBA, empty)
 import Data.Text.Internal       (Text(..))
@@ -119,7 +119,7 @@ instance Input [Char] Int where
 instance Input (UArray Int Char) Int where
   prepare qinput = [||
       let UArray _ _ size input# = $$qinput
-          next i@(I# i#) = (# C# (indexWideCharArray# input# i#), i + 1 #)
+          next i@(I# i#) = (# C# (indexWideCharArray# input# i#), I# (i# +# 1#) #)
           o << i = max (o - i) 0
       in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
     ||]
@@ -128,7 +128,7 @@ instance Input Text16 Int where
   prepare qinput = [||
       let Text16 (Text arr off size) = $$qinput
           arr# = aBA arr
-          next i@(I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), i + 1 #)
+          next i@(I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), I# (i# +# 1#) #)
           o << i = max (o - i) 0
       in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
     ||]
@@ -137,7 +137,7 @@ instance Input ByteString Int where
   prepare qinput = [||
       let PS (ForeignPtr addr# final) off size = $$qinput
           next i@(I# i#) = 
-            case readWord8OffAddr# addr# i# realWorld# of
+            case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of 
                 _ -> (# C# (chr# (word2Int# x)), i + 1 #)
           o << i = max (o - i) 0

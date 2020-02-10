@@ -115,6 +115,24 @@ brainfuck =
        , bfTest string          "Native"                    NativeParsers.brainfuck
        ]
 
+-- Javascript
+deriving instance Generic JSElement
+deriving instance Generic JSStm
+deriving instance Generic JSVar
+deriving instance Generic JSExpr'
+deriving instance Generic JSUnary
+deriving instance Generic JSMember
+deriving instance Generic JSCons
+deriving instance Generic JSAtom
+deriving instance NFData JSElement
+deriving instance NFData JSStm
+deriving instance NFData JSVar
+deriving instance NFData JSExpr'
+deriving instance NFData JSUnary
+deriving instance NFData JSMember
+deriving instance NFData JSCons
+deriving instance NFData JSAtom
+
 -- Utils
 parsecParse :: Parsec.Stream s Identity Char => ParsecParsers.Parser s a -> s -> Maybe a
 parsecParse p = either (const Nothing) Just  . Parsec.parse p ""

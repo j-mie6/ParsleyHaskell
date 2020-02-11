@@ -5,9 +5,11 @@ module Parsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred, repeat)
 import Parsley
+import Control.Monad (liftM)
 import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper, isDigit, digitToInt)
 import Data.Set (fromList, member)
 import Data.Maybe (catMaybes)
+import Text.Read (readMaybe)
 
 data Expr = Var String | Num Int | Add Expr Expr deriving Show
 data Asgn = Asgn String Expr deriving Show
@@ -15,10 +17,20 @@ data Asgn = Asgn String Expr deriving Show
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show
 deriving instance Lift BrainFuckOp
 
+cinput :: Parser String
+cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac") --(char 'a' <|> char 'b') *> string "ab"
+  where
+    --m = match "ab" (lookAhead item) op empty
+    --op 'a' = item $> code "aaaaa"
+    --op 'b' = item $> code "bbbbb"
+    m = bf <* item
+    bf = match ">" item op empty
+    op '>' = string ">"
+
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")
 
-{-brainfuck :: Parser [BrainFuckOp]
+brainfuck :: Parser [BrainFuckOp]
 brainfuck = whitespace *> bf <* eof
   where
     whitespace = skipMany (noneOf "<>+-[],.")
@@ -37,7 +49,7 @@ brainfuck = whitespace *> bf <* eof
     op '-' = item $> code Decrement
     op '.' = item $> code Output
     op ',' = item $> code Input
-    op '[' = between (lexeme item) (try (char ']')) (code Loop <$> bf)-}
+    op '[' = between (lexeme item) (char ']') (code Loop <$> bf)
 
 type JSProgram = [JSElement]
 type JSCompoundStm = [JSStm]
@@ -139,11 +151,68 @@ jsUnreservedName = \s -> not (member s keys)
 jsStringLetter :: Char -> Bool
 jsStringLetter c = (c /= '"') && (c /= '\\') && (c > '\026')
 
-failure :: Parser String
-failure = code catMaybes <$> between (token "\"") (token "\"") (many stringChar)
+{-failure :: Parser ()
+failure = expr
   where
-    stringChar :: Parser (Maybe Char)
-    stringChar = code Just <$> satisfy (code jsStringLetter)
+    expr :: Parser ()
+    expr = item *> expr'
+    expr' :: Parser ()
+    expr' = expr *> expr'-}
+
+failure :: Parser ()
+failure = x
+  where
+    x = z <* y <* y
+    y = try item
+    z = x *> z
+
+numbers :: Parser (Either Int Double)
+numbers = natFloat
+  where
+    natFloat :: Parser (Either Int Double)
+    natFloat = char '0' *> zeroNumFloat <|> decimalFloat
+
+    zeroNumFloat :: Parser (Either Int Double)
+    zeroNumFloat = code Left <$> (hexadecimal <|> octal)
+               <|> decimalFloat
+               <|> (fromMaybeP (fractFloat <*> pure (code 0)) empty)
+               <|> pure (code (Left 0))
+
+    decimalFloat :: Parser (Either Int Double)
+    decimalFloat = fromMaybeP (decimal <**> (option ([(.) (code Just) (code Left)]) fractFloat)) empty
+
+    fractFloat :: Parser (Int -> Maybe (Either Int Double))
+    fractFloat = WQ f qf <$> fractExponent
+      where
+        f g x = liftM Right (g x)
+        qf = [||\g x -> liftM Right (g x)||]
+
+    fractExponent :: Parser (Int -> Maybe Double)
+    fractExponent = WQ f qf <$> (option (code "") fraction) <*> option (code "") exponent'
+      where
+        f :: String -> String -> Int -> Maybe Double
+        f fract exp n = readMaybe (show n ++ fract ++ exp)
+        qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
+
+    fraction :: Parser [Char]
+    fraction = ([(:) (code '.')]) <$> (char '.' 
+            *> some (oneOf ['0'..'9']))
+
+    exponent' :: Parser [Char]
+    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE" 
+             *> (((code (:) <$> oneOf "+-") <|> pure (code id))
+             <*> (code show <$> decimal)))
+
+    decimal = number (code 10) (oneOf ['0'..'9'])
+    hexadecimal = oneOf "xX" *> number (code 16) (oneOf (['a'..'f'] ++ ['A'..'F'] ++ ['0'..'9']))
+    octal = oneOf "oO" *> number (code 8) (oneOf ['0'..'7'])
+
+    number :: WQ Int -> Parser Char -> Parser Int
+    number qbase digit = pfoldl (WQ f qf) (code 0) digit
+      where
+        f x d = _val qbase * x + digitToInt d
+        qf = [||\x d -> $$(_code qbase) * x + digitToInt d||]
+
 
 javascript :: Parser JSProgram
 javascript = whitespace *> many element <* eof
@@ -241,7 +310,54 @@ javascript = whitespace *> many element <* eof
     identifier :: Parser String
     identifier = try ((identStart <:> many identLetter) >?> code jsUnreservedName) <* whitespace
     naturalOrFloat :: Parser (Either Int Double)
-    naturalOrFloat = code Left <$> (code read <$> some (oneOf "0123456789"))
+    naturalOrFloat = natFloat <* whitespace--}code Left <$> (code read <$> some (oneOf ['0'..'9'])) <* whitespace
+
+    -- Nonsense to deal with floats and ints
+    natFloat :: Parser (Either Int Double)
+    natFloat = char '0' *> zeroNumFloat <|> decimalFloat
+
+    zeroNumFloat :: Parser (Either Int Double)
+    zeroNumFloat = code Left <$> (hexadecimal <|> octal)
+               <|> decimalFloat
+               <|> (fromMaybeP (fractFloat <*> pure (code 0)) empty)
+               <|> pure (code (Left 0))
+
+    decimalFloat :: Parser (Either Int Double)
+    decimalFloat = debug "decimal float" $ fromMaybeP (decimal <**> (option ([(.) (code Just) (code Left)]) fractFloat)) empty
+
+    fractFloat :: Parser (Int -> Maybe (Either Int Double))
+    fractFloat = WQ f qf <$> fractExponent
+      where
+        f g x = liftM Right (g x)
+        qf = [||\g x -> liftM Right (g x)||]
+
+    fractExponent :: Parser (Int -> Maybe Double)
+    fractExponent = WQ f qf <$> option (code "") fraction <*> option (code "") exponent'
+      where
+        f :: String -> String -> Int -> Maybe Double
+        f fract exp n = readMaybe (show n ++ fract ++ exp)
+        qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
+
+    fraction :: Parser [Char]
+    fraction = ([(:) (code '.')]) <$> (char '.' 
+            *> some (oneOf ['0'..'9']))
+
+    exponent' :: Parser [Char]
+    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE" 
+             *> (((code (:) <$> oneOf "+-") <|> pure (code id))
+             <*> (code show <$> decimal)))
+
+    decimal :: Parser Int
+    decimal = number (code 10) (oneOf ['0'..'9'])
+    hexadecimal = oneOf "xX" *> number (code 16) (oneOf (['a'..'f'] ++ ['A'..'F'] ++ ['0'..'9']))
+    octal = oneOf "oO" *> number (code 8) (oneOf ['0'..'7'])
+
+    number :: WQ Int -> Parser Char -> Parser Int
+    number qbase digit = pfoldl (WQ f qf) (code 0) digit
+      where
+        f x d = _val qbase * x + digitToInt d
+        qf = [||\x d -> $$(_code qbase) * x + digitToInt d||]
+
     stringLiteral :: Parser String
     stringLiteral = code catMaybes <$> between (token "\"") (token "\"") (many stringChar)
     symbol :: Char -> Parser Char

@@ -173,7 +173,7 @@ javascript = whitespace *> many element <* eof
     identifier :: Parser String
     identifier = try ((identStart <:> many identLetter) >?> code jsUnreservedName) <* whitespace
     naturalOrFloat :: Parser (Either Int Double)
-    naturalOrFloat = code Left <$> (code read <$> some (oneOf "0123456789"))
+    naturalOrFloat = code Left <$> (code read <$> some (oneOf "0123456789")) <* whitespace
     stringLiteral :: Parser String
     stringLiteral = code catMaybes <$> between (token "\"") (token "\"") (many stringChar)
     symbol :: Char -> Parser Char

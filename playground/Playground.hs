@@ -59,8 +59,11 @@ javascript = $$(Parsley.parseFromFile Parsers.javascript)
 --nfb :: String -> Maybe ()
 --nfb = $$(Parsley.runParser Parsers.nfb)
 
-cinput :: String -> Maybe String
-cinput = $$(Parsley.runParser Parsers.cinput)
+--cinput :: String -> Maybe String
+--cinput = $$(Parsley.runParser Parsers.cinput)
+
+--numbers :: String -> Maybe (Either Int Double)
+--numbers = $$(Parsley.runParser Parsers.numbers)
 
 main :: IO ()
 main =
@@ -69,8 +72,12 @@ main =
      print (nfb "a")
      print (nfb "ab")
      print (nfb "c")-}
-  do javascript "inputs/fibonacci.js" >>= print
-     javascript "inputs/heapsort.js" >>= print
-     javascript "inputs/game.js" >>= print
+  do --javascript "inputs/fibonacci.js" >>= print
+     --javascript "inputs/heapsort.js" >>= print
+     --javascript "inputs/game.js" >>= print
      javascript "inputs/big.js" >>= print
+     --return (numbers "01234") >>= print
+     --return (numbers "7e4") >>= print
+     --return (numbers "7.821") >>= print
+     --return (numbers "0xffa") >>= print
      return ()

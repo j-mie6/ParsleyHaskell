@@ -188,11 +188,13 @@ numbers = natFloat
         qf = [||\g x -> liftM Right (g x)||]
 
     fractExponent :: Parser (Int -> Maybe Double)
-    fractExponent = WQ f qf <$> (option (code "") fraction) <*> option (code "") exponent'
+    fractExponent = WQ f qf <$> fraction <*> option (code "") exponent'
+                <|> WQ g qg <$> exponent'
       where
-        f :: String -> String -> Int -> Maybe Double
         f fract exp n = readMaybe (show n ++ fract ++ exp)
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
+        g exp n = readMaybe (show n ++ exp)
+        qg = [||\exp n -> readMaybe (show n ++ exp)||] 
 
     fraction :: Parser [Char]
     fraction = ([(:) (code '.')]) <$> (char '.' 
@@ -332,11 +334,13 @@ javascript = whitespace *> many element <* eof
         qf = [||\g x -> liftM Right (g x)||]
 
     fractExponent :: Parser (Int -> Maybe Double)
-    fractExponent = WQ f qf <$> option (code "") fraction <*> option (code "") exponent'
+    fractExponent = WQ f qf <$> fraction <*> option (code "") exponent'
+                <|> WQ g qg <$> exponent'
       where
-        f :: String -> String -> Int -> Maybe Double
         f fract exp n = readMaybe (show n ++ fract ++ exp)
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
+        g exp n = readMaybe (show n ++ exp)
+        qg = [||\exp n -> readMaybe (show n ++ exp)||] 
 
     fraction :: Parser [Char]
     fraction = ([(:) (code '.')]) <$> (char '.' 
@@ -353,13 +357,13 @@ javascript = whitespace *> many element <* eof
     octal = oneOf "oO" *> number (code 8) (oneOf ['0'..'7'])
 
     number :: WQ Int -> Parser Char -> Parser Int
-    number qbase digit = pfoldl (WQ f qf) (code 0) digit
+    number qbase digit = pfoldl1 (WQ f qf) (code 0) digit
       where
         f x d = _val qbase * x + digitToInt d
         qf = [||\x d -> $$(_code qbase) * x + digitToInt d||]
 
     stringLiteral :: Parser String
-    stringLiteral = code catMaybes <$> between (token "\"") (token "\"") (many stringChar)
+    stringLiteral = code catMaybes <$> between (token "\"") (token "\"") (many stringChar) <* whitespace
     symbol :: Char -> Parser Char
     symbol c = try (char c) <* whitespace
     parens :: Parser a -> Parser a

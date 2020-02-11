@@ -62,8 +62,8 @@ javascript = $$(Parsley.parseFromFile Parsers.javascript)
 --cinput :: String -> Maybe String
 --cinput = $$(Parsley.runParser Parsers.cinput)
 
---numbers :: String -> Maybe (Either Int Double)
---numbers = $$(Parsley.runParser Parsers.numbers)
+numbers :: String -> Maybe (Either Int Double)
+numbers = $$(Parsley.runParser Parsers.numbers)
 
 main :: IO ()
 main =

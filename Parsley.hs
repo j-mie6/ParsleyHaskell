@@ -22,7 +22,7 @@ module Parsley ( Parser, runParser, parseFromFile
                , lookAhead, notFollowedBy, try
                -- Iteratives
                , chainl1, chainr1, chainPre, chainPost, chainl, chainr
-               , pfoldr, pfoldl
+               , pfoldr, pfoldl, pfoldr1, pfoldl1
                , many, manyN, some
                , skipMany, skipManyN, skipSome
                , sepBy, sepBy1, endBy, endBy1, manyTill, someTill
@@ -257,6 +257,12 @@ pfoldr f k p = chainPre (f <$> p) (pure k)
 
 pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
 pfoldl f k p = chainPost (pure k) (([flip f]) <$> p)
+
+pfoldr1 :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
+pfoldr1 f k p = ([foldr f k]) <$> some p
+
+pfoldl1 :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
+pfoldl1 f k p = chainPost (f <$> pure k <*> p) (([flip f]) <$> p)
 
 data Level a = InfixL  [Parser (a -> a -> a)]
              | InfixR  [Parser (a -> a -> a)]

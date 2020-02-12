@@ -3,7 +3,6 @@ module CommonFunctions where
 import Data.Int
 import Data.Char (ord, chr, isAlpha, isAlphaNum, isSpace, isUpper, isDigit, digitToInt)
 import Data.Set (fromList, member)
-import Data.Maybe (catMaybes)
 
 isDigit :: Char -> Bool
 isDigit c

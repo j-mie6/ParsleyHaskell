@@ -14,9 +14,6 @@ import Control.Monad (liftM)
 digit :: Parser Int
 digit = code toDigit <$> satisfy (code isDigit)
 
-greaterThan5 :: Int -> Bool
-greaterThan5 = (> 5)
-
 plus :: Parser (Int -> Int -> Int)
 plus = char '+' $> code (+)
 
@@ -33,10 +30,6 @@ pred = precedence [ Prefix [token "!" $> code Not]
                   , InfixR [token "&&" $> code And]] 
                   ( token "t" $> code T
                 <|> token "f" $> code F)
-
-phiTest :: Parser Char
---phiTest = try (char 'b') <|> char 'a' *> phiTest
-phiTest = skipMany (char 'a') *> char 'b'
 
 -- Brainfuck benchmark
 deriving instance Lift BrainFuckOp

@@ -40,31 +40,13 @@ brainfuckParsleyF :: FilePath -> IO (Maybe [BrainFuckOp])
 brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyParsers.brainfuck)
 
 main :: IO ()
-main =
+main = --do
+  --input <- readFile "inputs/big.js"
+  --print (megaParse MegaparsecParsers.javascript input)
   defaultMain [ regex
               , javascript
               , brainfuck
-              , tailTest 
               ]
-
-as :: Data.ByteString.Lazy.ByteString -> Maybe ()
-as = $$(Parsley.runParser (Parsley.skipMany (Parsley.char 'a') Parsley.<* Parsley.eof))
-
-streams :: String -> Maybe String
-streams = $$(Parsley.runParser (Parsley.token "abc" Parsley.<* Parsley.eof))
-
--- Tail Recursion Benchmark
-tailTestP :: String -> Maybe Char
-tailTestP = $$(Parsley.runParser ParsleyParsers.phiTest)
-
-tailTest :: Benchmark
-tailTest = bgroup "tail-rec" [ bench "tail-rec 0"      $ nf (tailTestP) (replicate 0 'a' ++ "b")
-                             , bench "tail-rec 1"      $ nf (tailTestP) (replicate 1 'a' ++ "b")
-                             , bench "tail-rec 10"     $ nf (tailTestP) (replicate 10 'a' ++ "b")
-                             , bench "tail-rec 100"    $ nf (tailTestP) (replicate 100 'a' ++ "b")
-                             , bench "tail-rec 1000"   $ nf (tailTestP) (replicate 1000 'a' ++ "b")
-                             , bench "tail-rec 10,000" $ nf (tailTestP) (replicate 10_000 'a' ++ "b")
-                             ]
 
 -- Regex Wars 2019
 regexP :: ByteString -> Maybe Bool
@@ -139,15 +121,15 @@ jsParsleyB = $$(Parsley.runParser ParsleyParsers.javascript)
 
 javascript :: Benchmark
 javascript =
-  let bfTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe JSProgram) -> Benchmark
-      bfTest = benchmark ["inputs/fibonacci.js", "inputs/heapsort.js", "inputs/game.js", "inputs/big.js"]
+  let jsTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe JSProgram) -> Benchmark
+      jsTest = benchmark ["inputs/fibonacci.js", "inputs/heapsort.js", "inputs/game.js", "inputs/big.js"]
   in bgroup "Javascript"
-       [ bfTest bytestring      "Parsley (ByteString)"      jsParsleyB
-       --, bfTest string          "Happy"                     HappyParsers.brainfuck
-       --, bfTest string          "Parsec (String)"           (parsecParse ParsecParsers.brainfuck)
-       --, bfTest text            "Parsec (Text)"             (parsecParse ParsecParsers.brainfuck)
-       --, bfTest string          "Mega (String)"             (megaParse MegaparsecParsers.brainfuck)
-       --, bfTest text            "Mega (Text)"               (megaParse MegaparsecParsers.brainfuck)
+       [ jsTest bytestring      "Parsley (ByteString)"      jsParsleyB
+       --, jsTest string          "Happy"                     HappyParsers.javascript
+       , jsTest string          "Parsec (String)"           (parsecParse ParsecParsers.javascript)
+       , jsTest text            "Parsec (Text)"             (parsecParse ParsecParsers.javascript)
+       , jsTest string          "Mega (String)"             (megaParse MegaparsecParsers.javascript)
+       , jsTest text            "Mega (Text)"               (megaParse MegaparsecParsers.javascript)
        ]
 
 -- Utils

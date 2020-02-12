@@ -1,5 +1,5 @@
 {
-module HappyParsers where
+module Happys.Brainfuck where
 import CommonFunctions (BrainFuckOp(..))
 }
 

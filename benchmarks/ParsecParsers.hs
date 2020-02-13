@@ -205,8 +205,7 @@ javascript = whitespace *> many element <* eof
         f fract exp n = readMaybe (show n ++ fract ++ exp)
 
     fraction :: Parser s [Char]
-    fraction = ('.' :) <$> (char '.' 
-            *> some (oneOf ['0'..'9']))
+    fraction = char '.' <:> some (oneOf ['0'..'9'])
 
     exponent' :: Parser s [Char]
     exponent' = ('e' :) <$> (oneOf "eE" 

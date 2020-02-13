@@ -199,8 +199,7 @@ javascript = whitespace *> many element <* eof
         qg = [||\exp n -> readMaybe (show n ++ exp)||] 
 
     fraction :: Parser [Char]
-    fraction = ([(:) (code '.')]) <$> (char '.' 
-            *> some (oneOf ['0'..'9']))
+    fraction = char '.' <:> some (oneOf ['0'..'9'])
 
     exponent' :: Parser [Char]
     exponent' = ([(:) (code 'e')]) <$> (oneOf "eE" 

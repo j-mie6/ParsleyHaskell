@@ -328,7 +328,28 @@ TokenSub
 
     noIdLetter :: String -> Bool
     noIdLetter (c:_) | idLetter c = True
-    noIdLetter _ = False 
+    noIdLetter _ = False
+
+    numLit :: Char -> String -> (Either Int Double -> String -> Parser a) -> Parser a
+    numLit '0' = zeroNumFloat
+    numLit d = decimalFloat . (d:)
+
+    -- Integers are the worst... Maybe look at Scala Parsley TokenInt?
+    zeroNumFloat :: String -> (Either Int Double -> String -> Parser a) -> Parser a
+    zeroNumFloat ('x':cs) k = hexadecimal cs k
+    zeroNumFloat ('X':cs) k = hexadecimal cs k
+    zeroNumFloat ('o':cs) k = octal cs k
+    zeroNumFloat ('O':cs) k = octal cs k
+    zeroNumFloat ('.':cs) k = undefined
+    zeroNumFloat ('e':cs) k = undefined
+    zeroNumFloat ('E':cs) k = undefined
+    zeroNumFloat cs k = undefined
+
+    decimalFloat :: String -> (Either Int Double -> String -> Parser a) -> Parser a
+    decimalFloat cs k = k (Left 0) cs
+
+    hexadecimal = undefined
+    octal = undefined
 
     charLit :: String -> (Char -> String -> Parser a) -> Parser a
     charLit ('\\':cs) k = escape cs (\c (t:cs) -> if t == '\'' then k c cs else empty)
@@ -390,10 +411,6 @@ TokenSub
     escape ('U':'S':cs) k = k '\US' cs
     escape ('V':'T':cs) k = k '\VT' cs
     escape _ _ = empty
-
-    numLit :: Char -> String -> (Either Int Double -> String -> Parser a) -> Parser a
-    numLit '0' cs k = undefined
-    numLit d cs k = undefined
 
     whiteSpace :: String -> String
     whiteSpace (c:cs) | isSpace c = whiteSpace cs

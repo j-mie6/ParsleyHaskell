@@ -2,9 +2,10 @@ module YodaParsers where
 
 import Text.Yoda
 import CommonFunctions
+import Data.Char (isDigit, digitToInt)
 
 manyTestBad :: Parser Int
-manyTestBad = chainl1 (toDigit <$> satisfy (isDigit)) ((+) <$ char '+')
+manyTestBad = chainl1 (digitToInt <$> satisfy (isDigit)) ((+) <$ char '+')
 
 manyTestOk :: Parser [Char]
 manyTestOk = cull (many (char 'a'))

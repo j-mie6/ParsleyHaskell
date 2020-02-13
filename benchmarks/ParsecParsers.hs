@@ -252,8 +252,8 @@ javascript = whitespace *> many element <* eof
     multiLineComment :: Parser s ()
     multiLineComment =
       let inComment = void (token "*/")
-                  <|> skipSome (noneOf "/*") *> inComment
-                  <|> oneOf "/*" *> inComment
+                  <|> skipSome (satisfy (/= '*')) *> inComment
+                  <|> char '*' *> inComment
       in token "/*" *> inComment
 
     identStart = satisfy jsIdentStart

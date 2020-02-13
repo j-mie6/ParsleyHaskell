@@ -6,13 +6,13 @@ module ParsleyParsers where
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
 import CommonFunctions
-import Data.Char (isSpace, isUpper, digitToInt)
+import Data.Char (isSpace, isUpper, digitToInt, isDigit)
 import Data.Maybe (catMaybes)
 import Text.Read (readMaybe)
 import Control.Monad (liftM)
 
 digit :: Parser Int
-digit = code toDigit <$> satisfy (code isDigit)
+digit = code digitToInt <$> satisfy (code isDigit)
 
 plus :: Parser (Int -> Int -> Int)
 plus = char '+' $> code (+)
@@ -249,8 +249,8 @@ javascript = whitespace *> many element <* eof
     multiLineComment :: Parser ()
     multiLineComment =
       let inComment = void (token "*/")
-                  <|> skipSome (noneOf "/*") *> inComment
-                  <|> oneOf "/*" *> inComment
+                  <|> skipSome (noneOf "*") *> inComment
+                  <|> char '*' *> inComment
       in token "/*" *> inComment
 
     identStart = satisfy (code jsIdentStart)

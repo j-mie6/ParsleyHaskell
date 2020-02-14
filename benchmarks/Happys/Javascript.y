@@ -61,7 +61,6 @@ import Text.Read (readMaybe)
     '^' { TokenXor }
     '&&' { TokenAnd }
     '||' { TokenOr }
-    char { TokenChar $$ }
     string { TokenString $$ }
     '(' { TokenLParen }
     ')' { TokenRParen }
@@ -140,15 +139,47 @@ Asgn : Asgn '=' CondExpr { JSAsgn $1 $3 }
      | CondExpr { $1 }
 
 CondExpr :: { JSExpr' }
-CondExpr : Expr_ Ternary { jsCondExprBuild $1 $2 }
+CondExpr : OrExpr Ternary { jsCondExprBuild $1 $2 }
 
 Ternary :: { Maybe (JSExpr', JSExpr') }
 Ternary : '?' Asgn ':' Asgn { Just ($2, $4) }
         | { Nothing }
 
--- TODO Finish this
-Expr_ :: { JSExpr' }
-Expr_ : MemOrCon { JSUnary $1 }
+-- Expressions
+OrExpr :: { JSExpr' }
+OrExpr : OrExpr '||' AndExpr { JSOr $1 $3 } | AndExpr { $1 }
+AndExpr : AndExpr '&&' BitOrExpr { JSAnd $1 $3 } | BitOrExpr { $1 }
+BitOrExpr : BitOrExpr '|' BitXorExpr { JSBitOr $1 $3 } | BitXorExpr { $1 }
+BitXorExpr : BitXorExpr '^' BitAndExpr { JSBitXor $1 $3 } | BitAndExpr { $1 }
+BitAndExpr : BitAndExpr '&' EqExpr { JSBitAnd $1 $3 } | EqExpr { $1 }
+EqExpr : EqExpr '==' CompExpr { JSEq $1 $3 }
+       | EqExpr '!=' CompExpr { JSNe $1 $3 }
+       | CompExpr { $1 }
+CompExpr : CompExpr '<=' ShiftExpr { JSLe $1 $3 }
+         | CompExpr '<' ShiftExpr { JSLt $1 $3 }
+         | CompExpr '>=' ShiftExpr { JSGe $1 $3 }
+         | CompExpr '>' ShiftExpr { JSGt $1 $3 }
+         | ShiftExpr { $1 }
+ShiftExpr : ShiftExpr '<<' WeakArithExpr { JSShl $1 $3 }
+          | ShiftExpr '>>' WeakArithExpr { JSShr $1 $3 }
+          | WeakArithExpr { $1 }
+WeakArithExpr : WeakArithExpr '+' StrongArithExpr { JSAdd $1 $3 }
+              | WeakArithExpr '-' StrongArithExpr { JSSub $1 $3 }
+              | StrongArithExpr { $1 }
+StrongArithExpr : StrongArithExpr '*' Postfixes { JSMul $1 $3 }
+                | StrongArithExpr '/' Postfixes { JSDiv $1 $3 }
+                | StrongArithExpr '%' Postfixes { JSMod $1 $3 }
+                | Postfixes { $1 }
+Postfixes : Postfixes '--' { jsDec $1 }
+          | Postfixes '++' { jsInc $1 }
+          | Prefixes { $1 }
+Prefixes : '--' Prefixes { jsDec $2 }
+         | '++' Prefixes { jsInc $2 }
+         | '-' Prefixes { jsNeg $2 }
+         | '+' Prefixes { jsPlus $2 }
+         | '~' Prefixes { jsBitNeg $2 }
+         | '!' Prefixes { jsNot $2 }
+         | MemOrCon { JSUnary $1 }
 
 MemOrCon :: { JSUnary }
 MemOrCon : delete Member { JSDel $2 }
@@ -236,7 +267,6 @@ data Token = TokenNumber (Either Int Double)
            | TokenXor
            | TokenAnd
            | TokenOr
-           | TokenChar Char
            | TokenString String
            | TokenLParen
            | TokenRParen
@@ -300,7 +330,6 @@ lexer k = do
     nextToken '-' cs k = k TokenSub cs
     nextToken '+' ('+':cs) k = k TokenInc cs
     nextToken '+' cs k = k TokenAdd cs
-    nextToken '\'' cs k = charLit cs (k . TokenChar)
     nextToken '"' cs k = stringLit cs (k . TokenString)
     nextToken c cs k | isDigit c = numLit c cs (k . TokenNumber)
     nextToken 'b' ('r':'e':'a':'k':cs) k | noIdLetter cs = k TokenBreak cs
@@ -364,11 +393,6 @@ lexer k = do
     decimal = number isDigit id
     hexadecimal = number isHexDigit ("0x" ++)
     octal = number isOctDigit ("0o" ++)
-
-    charLit :: String -> (Char -> String -> Parser a) -> Parser a
-    charLit ('\\':cs) k = escape cs (\c (t:cs) -> if t == '\'' then k c cs else empty)
-    charLit (c:'\'':cs) k = k c cs
-    charLit _ k = empty
 
     stringLit :: String -> (String -> String -> Parser a) -> Parser a
     stringLit = go id

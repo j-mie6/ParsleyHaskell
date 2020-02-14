@@ -4,7 +4,10 @@ module Happys.Javascript where
 import CommonFunctions
 import Control.Monad.Reader
 import Control.Applicative
-import Data.Char (isSpace, isAlpha, isDigit, isAlphaNum, isUpper)
+import Data.Char (isSpace, isAlpha, isDigit, isAlphaNum, isUpper, isHexDigit, isOctDigit)
+import Data.Maybe (fromMaybe)
+import Data.List (span)
+import Text.Read (readMaybe)
 }
 
 %name javascript Program
@@ -293,12 +296,10 @@ lexer k = do
     nextToken '>' ('>':cs) k = k TokenShr cs
     nextToken '>' ('=':cs) k = k TokenGeq cs
     nextToken '>' cs k = k TokenGt cs
-{-
-TokenDec
-TokenInc
-TokenAdd
-TokenSub
--}
+    nextToken '-' ('-':cs) k = k TokenDec cs
+    nextToken '-' cs k = k TokenSub cs
+    nextToken '+' ('+':cs) k = k TokenInc cs
+    nextToken '+' cs k = k TokenAdd cs
     nextToken '\'' cs k = charLit cs (k . TokenChar)
     nextToken '"' cs k = stringLit cs (k . TokenString)
     nextToken c cs k | isDigit c = numLit c cs (k . TokenNumber)
@@ -319,7 +320,7 @@ TokenSub
     nextToken 'v' ('a':'r':cs) k | noIdLetter cs = k TokenVar cs
     nextToken 'w' ('h':'i':'l':'e':cs) k | noIdLetter cs = k TokenWhile cs
     nextToken 'w' ('i':'t':'h':cs) k | noIdLetter cs = k TokenWith cs
-    nextToken c cs k | idLetter c = k (TokenId (c:takeWhile idLetter cs)) (dropWhile idLetter cs)
+    nextToken c cs k | idLetter c = let (ident, rest) = span idLetter cs in k (TokenId (c:ident)) rest
     nextToken c cs k = empty
 
     idLetter :: Char -> Bool
@@ -332,24 +333,37 @@ TokenSub
 
     numLit :: Char -> String -> (Either Int Double -> String -> Parser a) -> Parser a
     numLit '0' = zeroNumFloat
-    numLit d = decimalFloat . (d:)
+    numLit d = (fromMaybe empty .) . decimalFloat . (d :)
 
-    -- Integers are the worst... Maybe look at Scala Parsley TokenInt?
     zeroNumFloat :: String -> (Either Int Double -> String -> Parser a) -> Parser a
-    zeroNumFloat ('x':cs) k = hexadecimal cs k
-    zeroNumFloat ('X':cs) k = hexadecimal cs k
-    zeroNumFloat ('o':cs) k = octal cs k
-    zeroNumFloat ('O':cs) k = octal cs k
-    zeroNumFloat ('.':cs) k = undefined
-    zeroNumFloat ('e':cs) k = undefined
-    zeroNumFloat ('E':cs) k = undefined
-    zeroNumFloat cs k = undefined
+    zeroNumFloat ('x':cs) k = hexadecimal cs (k . Left)
+    zeroNumFloat ('X':cs) k = hexadecimal cs (k . Left)
+    zeroNumFloat ('o':cs) k = octal cs (k . Left)
+    zeroNumFloat ('O':cs) k = octal cs (k . Left)
+    zeroNumFloat cs k = fromMaybe (k (Left 0) cs) (fractFloat 0 cs k <|> decimalFloat cs k)
 
-    decimalFloat :: String -> (Either Int Double -> String -> Parser a) -> Parser a
-    decimalFloat cs k = k (Left 0) cs
+    decimalFloat :: String -> (Either Int Double -> String -> Parser a) -> Maybe (Parser a)
+    decimalFloat cs k = return (decimal cs (\x cs -> fromMaybe (k (Left x) cs) (fractFloat x cs k)))
 
-    hexadecimal = undefined
-    octal = undefined
+    fractFloat :: Int -> String -> (Either Int Double -> String -> Parser a) -> Maybe (Parser a)
+    fractFloat x ('.':cs) = fractExpMaker ('.':) x cs
+    fractFloat x ('e':cs) = exponent x cs
+    fractFloat x ('E':cs) = exponent x cs
+    fractFloat x cs = return Nothing
+
+    exponent :: Int -> String -> (Either Int Double -> String -> Parser a) -> Maybe (Parser a)
+    exponent x ('+':cs) = fractExpMaker ('e':) x cs
+    exponent x ('-':cs) = fractExpMaker (('e':) . ('-':)) x cs
+    exponent x cs = fractExpMaker ('e':) x cs
+    
+    fractExpMaker :: (String -> String) -> Int -> String -> (Either Int Double -> String -> Parser a) -> Maybe (Parser a)
+    fractExpMaker conv x cs k = let (y, rest) = span isDigit cs in fmap (flip k rest . Right) (readMaybe (show x ++ conv y))
+
+    number :: (Char -> Bool) -> (String -> String) -> String -> (Int -> String -> Parser a) -> Parser a
+    number digit conv cs k = let (x, rest) = span digit cs in maybe empty (flip k rest) (readMaybe (conv x))
+    decimal = number isDigit id
+    hexadecimal = number isHexDigit ("0x" ++)
+    octal = number isOctDigit ("0o" ++)
 
     charLit :: String -> (Char -> String -> Parser a) -> Parser a
     charLit ('\\':cs) k = escape cs (\c (t:cs) -> if t == '\'' then k c cs else empty)
@@ -425,6 +439,6 @@ TokenSub
     multiLineComment [] = empty
 
 main :: IO ()
-main = print (runParser javascript "print(4E10)")
+main = print (runParser javascript "print(1238)")
 
 }

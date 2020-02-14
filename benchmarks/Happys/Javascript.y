@@ -463,7 +463,4 @@ lexer k = do
     multiLineComment (_:cs) = multiLineComment cs
     multiLineComment [] = empty
 
-main :: IO ()
-main = print (runParser javascript "print(1238)")
-
 }

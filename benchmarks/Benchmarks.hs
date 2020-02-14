@@ -120,12 +120,16 @@ deriving instance NFData JSAtom
 jsParsleyB :: ByteString -> Maybe JSProgram
 jsParsleyB = $$(Parsley.runParser ParsleyParsers.javascript)
 
+jsParsleyS :: String -> Maybe JSProgram
+jsParsleyS = $$(Parsley.runParser ParsleyParsers.javascript)
+
 javascript :: Benchmark
 javascript =
   let jsTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe JSProgram) -> Benchmark
       jsTest = benchmark ["inputs/fibonacci.js", "inputs/heapsort.js", "inputs/game.js", "inputs/big.js"]
   in bgroup "Javascript"
        [ jsTest bytestring      "Parsley (ByteString)"      jsParsleyB
+       , jsTest string          "Parsley (String)"          jsParsleyS
        , jsTest string          "Happy"                     (Happys.Javascript.runParser Happys.Javascript.javascript)
        , jsTest string          "Parsec (String)"           (parsecParse ParsecParsers.javascript)
        , jsTest text            "Parsec (Text)"             (parsecParse ParsecParsers.javascript)

@@ -24,6 +24,7 @@ import qualified MegaparsecParsers
 import qualified AttoparsecParsers
 import qualified NativeParsers
 import qualified Happys.Brainfuck
+import qualified Happys.Javascript
 import qualified Parsley
 import qualified Text.Yoda                  as Yoda
 import qualified Text.Parsec                as Parsec
@@ -40,9 +41,9 @@ brainfuckParsleyF :: FilePath -> IO (Maybe [BrainFuckOp])
 brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyParsers.brainfuck)
 
 main :: IO ()
-main = --do
+main = do
   --input <- readFile "inputs/big.js"
-  --print (megaParse MegaparsecParsers.javascript input)
+  --print (Happys.Javascript.runParser Happys.Javascript.javascript input)
   defaultMain [ regex
               , javascript
               , brainfuck
@@ -125,7 +126,7 @@ javascript =
       jsTest = benchmark ["inputs/fibonacci.js", "inputs/heapsort.js", "inputs/game.js", "inputs/big.js"]
   in bgroup "Javascript"
        [ jsTest bytestring      "Parsley (ByteString)"      jsParsleyB
-       --, jsTest string          "Happy"                     HappyParsers.javascript
+       , jsTest string          "Happy"                     (Happys.Javascript.runParser Happys.Javascript.javascript)
        , jsTest string          "Parsec (String)"           (parsecParse ParsecParsers.javascript)
        , jsTest text            "Parsec (Text)"             (parsecParse ParsecParsers.javascript)
        , jsTest string          "Mega (String)"             (megaParse MegaparsecParsers.javascript)

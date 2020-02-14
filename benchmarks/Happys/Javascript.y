@@ -357,8 +357,8 @@ lexer k = do
     idLetter c = isAlphaNum c
 
     noIdLetter :: String -> Bool
-    noIdLetter (c:_) | idLetter c = True
-    noIdLetter _ = False
+    noIdLetter (c:_) | idLetter c = False
+    noIdLetter _ = True
 
     numLit :: Char -> String -> (Either Int Double -> String -> Parser a) -> Parser a
     numLit '0' = zeroNumFloat
@@ -372,7 +372,8 @@ lexer k = do
     zeroNumFloat cs k = fromMaybe (k (Left 0) cs) (fractFloat 0 cs k <|> decimalFloat cs k)
 
     decimalFloat :: String -> (Either Int Double -> String -> Parser a) -> Maybe (Parser a)
-    decimalFloat cs k = return (decimal cs (\x cs -> fromMaybe (k (Left x) cs) (fractFloat x cs k)))
+    decimalFloat (d:cs) k | isDigit d = return (decimal (d:cs) (\x cs -> fromMaybe (k (Left x) cs) (fractFloat x cs k)))
+    decimalFloat _ _ = empty
 
     fractFloat :: Int -> String -> (Either Int Double -> String -> Parser a) -> Maybe (Parser a)
     fractFloat x ('.':cs) = fractExpMaker ('.':) x cs

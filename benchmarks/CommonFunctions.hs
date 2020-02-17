@@ -128,3 +128,15 @@ jsUnreservedName = \s -> not (member s keys)
 
 jsStringLetter :: Char -> Bool
 jsStringLetter c = (c /= '"') && (c /= '\\') && (c > '\026')
+
+nandIdentStart :: Char -> Bool
+nandIdentStart c = isAlpha c || c == '_'
+
+nandIdentLetter :: Char -> Bool
+nandIdentLetter c = isAlphaNum c || c == '_'
+
+nandUnreservedName :: String -> Bool
+nandUnreservedName = \s -> not (member s keys)
+  where
+    keys = fromList ["if", "else", "while",
+                     "function", "var"]

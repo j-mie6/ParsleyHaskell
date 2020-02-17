@@ -422,7 +422,7 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
                          replace ' '  = color White "·"
                          replace c    = return c
                          go i
-                           | $$same i $$end = []
+                           | $$same i $$end || not ($$more i) = []
                            | otherwise  = let (# c, i' #) = $$next i in replace c ++ go i'
                      in go $$start ||]
     eof        = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]

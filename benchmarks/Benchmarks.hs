@@ -44,7 +44,11 @@ main :: IO ()
 main = do
   --input <- readFile "inputs/big.js"
   --print (Happys.Javascript.runParser Happys.Javascript.javascript input)
+  --nandParsleyB <$> Data.ByteString.readFile "inputs/arrays.nand" >>= print
+  --nandParsleyB <$> Data.ByteString.readFile "inputs/fibonacci.nand" >>= print
+  --nandParsleyB <$> Data.ByteString.readFile "inputs/fizzbuzz.nand" >>= print
   defaultMain [ regex
+              , nandlang
               , javascript
               , brainfuck
               ]
@@ -128,14 +132,30 @@ javascript =
   let jsTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe JSProgram) -> Benchmark
       jsTest = benchmark ["inputs/fibonacci.js", "inputs/heapsort.js", "inputs/game.js", "inputs/big.js"]
   in bgroup "Javascript"
-       [ jsTest bytestring      "Parsley (ByteString)"      jsParsleyB
-       , jsTest string          "Parsley (String)"          jsParsleyS
-       , jsTest string          "Happy"                     (Happys.Javascript.runParser Happys.Javascript.javascript)
-       , jsTest string          "Parsec (String)"           (parsecParse ParsecParsers.javascript)
-       , jsTest text            "Parsec (Text)"             (parsecParse ParsecParsers.javascript)
-       , jsTest string          "Mega (String)"             (megaParse MegaparsecParsers.javascript)
-       , jsTest text            "Mega (Text)"               (megaParse MegaparsecParsers.javascript)
+       [ jsTest bytestring "Parsley (ByteString)" jsParsleyB
+       , jsTest string     "Parsley (String)"     jsParsleyS
+       , jsTest string     "Happy"                (Happys.Javascript.runParser Happys.Javascript.javascript)
+       , jsTest string     "Parsec (String)"      (parsecParse ParsecParsers.javascript)
+       , jsTest text       "Parsec (Text)"        (parsecParse ParsecParsers.javascript)
+       , jsTest string     "Mega (String)"        (megaParse MegaparsecParsers.javascript)
+       , jsTest text       "Mega (Text)"          (megaParse MegaparsecParsers.javascript)
        ]
+
+-- Nandlang
+
+nandParsleyB :: ByteString -> Maybe ()
+nandParsleyB = $$(Parsley.runParser ParsleyParsers.nandlang)
+
+nandBison :: ByteString -> Maybe ()
+nandBison _ = Nothing
+
+nandlang :: Benchmark
+nandlang =
+  let nandTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe ()) -> Benchmark
+      nandTest = benchmark ["inputs/fibonacci.nand", "inputs/fizzbuzz.nand", "inputs/arrays.nand"]
+  in bgroup "Nandlang"
+       [ nandTest bytestring "Parsley" nandParsleyB
+       , nandTest bytestring "Bison"   nandBison ]
 
 -- Utils
 parsecParse :: Parsec.Stream s Identity Char => ParsecParsers.Parser s a -> s -> Maybe a

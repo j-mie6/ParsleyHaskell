@@ -319,7 +319,7 @@ nandlang = whitespace *> skipMany funcdef <* eof
     index :: Parser ()
     index = brackets nat
     identifier :: Parser ()
-    identifier = try ((identStart <:> many identLetter) >?> code nandUnreservedName) *> whitespace
+    identifier = try (identStart *> skipMany identLetter) *> whitespace--try ((identStart <:> many identLetter) >?> code nandUnreservedName) *> whitespace
     variable :: Parser ()
     variable = identifier *> optional index
 
@@ -337,7 +337,7 @@ nandlang = whitespace *> skipMany funcdef <* eof
     bit = (char '0' <|> char '1') *> whitespace
 
     nat :: Parser ()
-    nat = char '0' *> (decimal <|> hexadecimal <|> octal <|> unit) <|> decimal
+    nat = decimal
 
     charLit :: Parser ()
     charLit = between (char '\'') (symbol '\'') charChar

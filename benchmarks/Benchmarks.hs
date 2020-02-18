@@ -25,6 +25,7 @@ import qualified AttoparsecParsers
 import qualified NativeParsers
 import qualified Happys.Brainfuck
 import qualified Happys.Javascript
+import qualified Bisons.Bison as Bison
 import qualified Parsley
 import qualified Text.Yoda                  as Yoda
 import qualified Text.Parsec                as Parsec
@@ -47,11 +48,19 @@ main = do
   --nandParsleyB <$> Data.ByteString.readFile "inputs/arrays.nand" >>= print
   --nandParsleyB <$> Data.ByteString.readFile "inputs/fibonacci.nand" >>= print
   --nandParsleyB <$> Data.ByteString.readFile "inputs/fizzbuzz.nand" >>= print
-  defaultMain [ regex
+  defaultMain [ {-regex
+              , -}eof
               , nandlang
               , javascript
               , brainfuck
               ]
+
+-- EOF
+eofP :: String -> Maybe ()
+eofP = $$(Parsley.runParser Parsley.eof)
+
+eof :: Benchmark
+eof = env (return ("", "a")) $ \(~(yay, nay)) -> bgroup "eof" [ bench "yay" $ nf eofP yay, bench "nay" $ nf eofP "nay"]
 
 -- Regex Wars 2019
 regexP :: ByteString -> Maybe Bool
@@ -146,16 +155,13 @@ javascript =
 nandParsleyB :: ByteString -> Maybe ()
 nandParsleyB = $$(Parsley.runParser ParsleyParsers.nandlang)
 
-nandBison :: ByteString -> Maybe ()
-nandBison _ = Nothing
-
 nandlang :: Benchmark
 nandlang =
   let nandTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe ()) -> Benchmark
       nandTest = benchmark ["inputs/fibonacci.nand", "inputs/fizzbuzz.nand", "inputs/arrays.nand"]
   in bgroup "Nandlang"
        [ nandTest bytestring "Parsley" nandParsleyB
-       , nandTest bytestring "Bison"   nandBison ]
+       , nandTest bytestring "Bison"   Bison.nand ]
 
 -- Utils
 parsecParse :: Parsec.Stream s Identity Char => ParsecParsers.Parser s a -> s -> Maybe a

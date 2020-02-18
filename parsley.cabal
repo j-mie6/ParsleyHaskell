@@ -47,6 +47,8 @@ cabal-version:       >=1.10
 
 
 executable benchmarks
+  cc-options:          -O3
+  c-sources:           benchmarks/Bisons/lex.yy.c, benchmarks/Bisons/Nandlang.tab.c
   build-tools:         happy
   build-depends:       base >=4.10 && <5,
                        parsley,
@@ -65,7 +67,7 @@ executable benchmarks
                        bytestring,
                        array,
                        containers
-  other-modules:       ParsleyParsers, YodaParsers, ParsecParsers, MegaparsecParsers, AttoparsecParsers, NativeParsers, Happys.Brainfuck, Happys.Javascript CommonFunctions
+  other-modules:       ParsleyParsers, YodaParsers, ParsecParsers, MegaparsecParsers, AttoparsecParsers, NativeParsers, Happys.Brainfuck, Happys.Javascript, Bisons.Bison, CommonFunctions
   other-extensions:    TemplateHaskell
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs

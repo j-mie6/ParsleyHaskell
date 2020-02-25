@@ -30,8 +30,7 @@ import qualified Parsley
 import qualified Text.Yoda                  as Yoda
 import qualified Text.Parsec                as Parsec
 import qualified Text.Megaparsec            as Megaparsec
-import qualified Data.Attoparsec.Text       as AttoparsecText
-import qualified Data.Attoparsec.ByteString as AttoparsecByteString
+import qualified Data.Attoparsec.Text       as Attoparsec
 import qualified Data.Text.IO
 import qualified Data.ByteString
 import qualified Data.ByteString.Lazy
@@ -45,14 +44,13 @@ main :: IO ()
 main = do
   --input <- readFile "inputs/big.js"
   --print (Happys.Javascript.runParser Happys.Javascript.javascript input)
-  --nandParsleyB <$> Data.ByteString.readFile "inputs/arrays.nand" >>= print
-  --nandParsleyB <$> Data.ByteString.readFile "inputs/fibonacci.nand" >>= print
-  --nandParsleyB <$> Data.ByteString.readFile "inputs/fizzbuzz.nand" >>= print
+  attoParse AttoparsecParsers.javascript <$> Data.Text.IO.readFile "inputs/fibonacci.js" >>= print
+  attoParse AttoparsecParsers.javascript <$> Data.Text.IO.readFile "inputs/heapsort.js" >>= print
+  attoParse AttoparsecParsers.javascript <$> Data.Text.IO.readFile "inputs/game.js" >>= print
   defaultMain [ {-regex
-              , -}eof
-              , nandlang
-              , javascript
+              , -}javascript
               , brainfuck
+              , nandlang
               ]
 
 -- EOF
@@ -99,17 +97,19 @@ brainfuck =
   let bfTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe [BrainFuckOp]) -> Benchmark
       bfTest = benchmark ["inputs/helloworld.bf", "inputs/helloworld_golfed.bf", "inputs/compiler.bf"]
   in bgroup "Brainfuck"
-       [ bfTest string          "Parsley (Stream)"          (brainfuckParsleySS . CharList)
-       , bfTest string          "Happy"                     Happys.Brainfuck.brainfuck
+       [ {-bfTest string          "Parsley (Stream)"          (brainfuckParsleySS . CharList)
+       ,-} bfTest string          "Happy"                     Happys.Brainfuck.brainfuck
        , bfTest string          "Parsley (String)"          brainfuckParsleyS
        , bfTest text            "Parsley (Text)"            (brainfuckParsleyT . Text16)
-       , bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB
-       , bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
+       --, bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB
+       --, bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
        , bfTest string          "Parsec (String)"           (parsecParse ParsecParsers.brainfuck)
        , bfTest text            "Parsec (Text)"             (parsecParse ParsecParsers.brainfuck)
        , bfTest string          "Mega (String)"             (megaParse MegaparsecParsers.brainfuck)
        , bfTest text            "Mega (Text)"               (megaParse MegaparsecParsers.brainfuck)
-       , bfTest string          "Native"                    NativeParsers.brainfuck
+       --, bfTest bytestring      "Mega (Bytestring)"         (megaParse MegaparsecParsers.brainfuck)
+       , bfTest text            "Atto (Text)"               (attoParse AttoparsecParsers.brainfuck)
+       --, bfTest string          "Native"                    NativeParsers.brainfuck
        ]
 
 -- Javascript
@@ -130,8 +130,8 @@ deriving instance NFData JSMember
 deriving instance NFData JSCons
 deriving instance NFData JSAtom 
 
-jsParsleyB :: ByteString -> Maybe JSProgram
-jsParsleyB = $$(Parsley.runParser ParsleyParsers.javascript)
+jsParsleyT :: Text -> Maybe JSProgram
+jsParsleyT = $$(Parsley.runParser ParsleyParsers.javascript)
 
 jsParsleyS :: String -> Maybe JSProgram
 jsParsleyS = $$(Parsley.runParser ParsleyParsers.javascript)
@@ -141,13 +141,14 @@ javascript =
   let jsTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe JSProgram) -> Benchmark
       jsTest = benchmark ["inputs/fibonacci.js", "inputs/heapsort.js", "inputs/game.js", "inputs/big.js"]
   in bgroup "Javascript"
-       [ jsTest bytestring "Parsley (ByteString)" jsParsleyB
-       , jsTest string     "Parsley (String)"     jsParsleyS
-       , jsTest string     "Happy"                (Happys.Javascript.runParser Happys.Javascript.javascript)
-       , jsTest string     "Parsec (String)"      (parsecParse ParsecParsers.javascript)
-       , jsTest text       "Parsec (Text)"        (parsecParse ParsecParsers.javascript)
-       , jsTest string     "Mega (String)"        (megaParse MegaparsecParsers.javascript)
-       , jsTest text       "Mega (Text)"          (megaParse MegaparsecParsers.javascript)
+       [ jsTest text   "Parsley (Text)"       jsParsleyT
+       , jsTest string "Parsley (String)"     jsParsleyS
+       , jsTest text   "Atto"                 (attoParse AttoparsecParsers.javascript)
+       , jsTest string "Happy"                (Happys.Javascript.runParser Happys.Javascript.javascript)
+       , jsTest string "Parsec (String)"      (parsecParse ParsecParsers.javascript)
+       , jsTest text   "Parsec (Text)"        (parsecParse ParsecParsers.javascript)
+       , jsTest string "Mega (String)"        (megaParse MegaparsecParsers.javascript)
+       , jsTest text   "Mega (Text)"          (megaParse MegaparsecParsers.javascript)
        ]
 
 -- Nandlang
@@ -169,6 +170,9 @@ parsecParse p = either (const Nothing) Just  . Parsec.parse p ""
 
 megaParse :: (Megaparsec.Stream s, Megaparsec.Token s ~ Char) => MegaparsecParsers.Parser s a -> s -> Maybe a
 megaParse = Megaparsec.parseMaybe
+
+attoParse :: Attoparsec.Parser a -> Text -> Maybe a
+attoParse p = Attoparsec.maybeResult . Attoparsec.parse p
 
 string          :: FilePath -> IO String
 string          = readFile

@@ -40,6 +40,7 @@ import Debug.Trace                (trace)
 import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
 import Data.Text                  (Text)
 import Data.Functor.Const         (Const(..), getConst)
+import Data.Void                  (Void)
 import Language.Haskell.TH        (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
@@ -217,7 +218,7 @@ readyExec = cata3 (Exec . alg)
     alg (LogExit name k)    = execLogExit name k
     alg (MetaM m k)         = execMeta m k
 
-execHalt :: ExecMonad s o '[a] r a
+execHalt :: ExecMonad s o '[a] Void a
 execHalt = return $! \γ -> [|| return $! Just $! $$(headQ (xs γ)) ||]
 
 execRet :: (?ops :: InputOps s o, KOps o) => ExecMonad s o (x ': xs) x a

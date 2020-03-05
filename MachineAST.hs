@@ -29,6 +29,7 @@ newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype LetBinding o a x = LetBinding (Fix3 (M o) '[] x a)
 instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
+-- Remove Halt
 data M o k xs r a where
   Halt      :: M o k '[a] Void a
   Ret       :: M o k '[x] x a

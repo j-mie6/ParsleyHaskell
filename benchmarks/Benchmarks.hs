@@ -41,11 +41,6 @@ brainfuckParsleyF :: FilePath -> IO (Maybe [BrainFuckOp])
 brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyParsers.brainfuck)
 
 main :: IO ()
-<<<<<<< HEAD
-main =
-  defaultMain [ regex
-              , javascript
-=======
 main = do
   --input <- readFile "inputs/big.js"
   --print (Happys.Javascript.runParser Happys.Javascript.javascript input)
@@ -54,7 +49,6 @@ main = do
   attoParse AttoparsecParsers.javascript <$> Data.Text.IO.readFile "inputs/game.js" >>= print
   defaultMain [ {-regex
               , -}javascript
->>>>>>> master
               , brainfuck
               , nandlang
               ]
@@ -157,41 +151,6 @@ javascript =
        , jsTest text   "Mega (Text)"          (megaParse MegaparsecParsers.javascript)
        ]
 
-<<<<<<< HEAD
--- Javascript
-deriving instance Generic JSElement
-deriving instance Generic JSStm
-deriving instance Generic JSVar
-deriving instance Generic JSExpr'
-deriving instance Generic JSUnary
-deriving instance Generic JSMember
-deriving instance Generic JSCons
-deriving instance Generic JSAtom
-deriving instance NFData JSElement
-deriving instance NFData JSStm
-deriving instance NFData JSVar
-deriving instance NFData JSExpr'
-deriving instance NFData JSUnary
-deriving instance NFData JSMember
-deriving instance NFData JSCons
-deriving instance NFData JSAtom
-
-jsParsleyB :: ByteString -> Maybe JSProgram
-jsParsleyB = $$(Parsley.runParser ParsleyParsers.javascript)
-
-javascript :: Benchmark
-javascript =
-  let bfTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe JSProgram) -> Benchmark
-      bfTest = benchmark ["inputs/fibonacci.js", "inputs/heapsort.js", "inputs/game.js", "inputs/big.js"]
-  in bgroup "Javascript"
-       [ bfTest bytestring      "Parsley (ByteString)"      jsParsleyB
-       --, bfTest string          "Happy"                     HappyParsers.brainfuck
-       --, bfTest string          "Parsec (String)"           (parsecParse ParsecParsers.brainfuck)
-       --, bfTest text            "Parsec (Text)"             (parsecParse ParsecParsers.brainfuck)
-       --, bfTest string          "Mega (String)"             (megaParse MegaparsecParsers.brainfuck)
-       --, bfTest text            "Mega (Text)"               (megaParse MegaparsecParsers.brainfuck)
-       ]
-=======
 -- Nandlang
 
 nandParsleyB :: ByteString -> Maybe ()
@@ -204,7 +163,6 @@ nandlang =
   in bgroup "Nandlang"
        [ nandTest bytestring "Parsley" nandParsleyB
        , nandTest bytestring "Bison"   Bison.nand ]
->>>>>>> master
 
 -- Utils
 parsecParse :: Parsec.Stream s Identity Char => ParsecParsers.Parser s a -> s -> Maybe a

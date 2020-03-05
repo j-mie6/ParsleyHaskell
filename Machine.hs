@@ -17,7 +17,8 @@
              TypeFamilies,
              TypeApplications,
              PatternSynonyms,
-             InstanceSigs #-}
+             InstanceSigs,
+             MultiWayIf #-}
 module Machine where
 
 import MachineOps

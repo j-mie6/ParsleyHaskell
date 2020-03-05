@@ -6,7 +6,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
-module CodeGenerator (codeGen, halt, ret) where
+module CodeGenerator (codeGen) where
 
 import ParserAST                  (ParserF(..), MetaP(..))
 import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
@@ -35,20 +35,14 @@ runCodeGenStack m μ0 φ0 σ0 =
 newtype CodeGen o b a = 
   CodeGen {runCodeGen :: forall xs r. Fix3 (M o) (a ': xs) r b -> CodeGenStack (Fix3 (M o) xs r b)}
 
-halt :: Fix3 (M o) '[a] Void a
-halt = In3 Halt
-
-ret :: Fix3 (M o) '[x] x a
-ret = In3 Ret
-
 -- TODO, ensure that let-bound parsers do not use finalise to add coins!
-codeGen :: Bool -> Fix ParserF a -> Fix3 (M o) (a ': xs) r b -> IMVar -> IΣVar -> (Fix3 (M o) xs r b, IΣVar)
-codeGen letBound p terminal μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
+codeGen :: Bool -> Fix ParserF a -> IMVar -> IΣVar -> (Fix3 (M o) '[] a b, IΣVar)
+codeGen letBound p μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = finalise (histo alg p)
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg = 
-      let (m, maxΣ) = runCodeGenStack (runCodeGen cg terminal) μ0 0 σ0 
+      let (m, maxΣ) = runCodeGenStack (runCodeGen cg (In3 Ret)) μ0 0 σ0 
           n = coinsNeeded m
       in (if letBound then m else addCoins n m, maxΣ)
 
@@ -162,7 +156,6 @@ tailCallOptimise μ k         = In3 (Call μ k)
 -- However, I'm not yet sure about the interactions with try yet...
 deadCommitOptimisation :: Fix3 (M o) xs r a -> Fix3 (M o) xs r a
 deadCommitOptimisation (In3 Ret)  = In3 Ret
-deadCommitOptimisation (In3 Halt) = In3 Halt
 deadCommitOptimisation m          = In3 (Commit m)
 
 -- Refactor with asks
@@ -185,7 +178,6 @@ makeΦ m | elidable m = return $! (id, m)
     elidable (In3 (Join _)) = True
     -- This is terminal-φ optimisation: If a φ-node points directly to a terminal operation, then it can be elided
     elidable (In3 Ret)      = True
-    elidable (In3 Halt)     = True
     elidable _              = False
 makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In3 . MkJoin φ (addCoins n m), drainCoins n (In3 (Join φ)))) askΦ
 

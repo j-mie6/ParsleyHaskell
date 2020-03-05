@@ -42,7 +42,6 @@ import Debug.Trace                (trace)
 import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
 import Data.Text                  (Text)
 import Data.Functor.Const         (Const(..), getConst)
-import Data.Void                  (Void)
 import Language.Haskell.TH        (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import qualified Data.Map.Strict    as Map  ((!), insert, empty)
@@ -155,7 +154,7 @@ exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
              nameLet
              QAbsExec
              (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyExec k))
-             (\names -> run (readyExec m) (Γ QNil [||noreturn||] [||offset||] []) (emptyCtx {μs = names})))
+             (\names -> run (readyExec m) (Γ QNil [||\x o# -> return $! Just x||] [||offset||] []) (emptyCtx {μs = names})))
   ||]
 
 missingDependency :: MVar x -> MissingDependency
@@ -191,7 +190,6 @@ readyExec :: (?ops :: InputOps s o, Ops o) => Fix3 (M o) xs r a -> Exec s o xs r
 readyExec = cata3 (Exec . alg)
   where
     alg :: (?ops :: InputOps s o, Ops o) => M o (Exec s o) xs r a -> ExecMonad s o xs r a
-    alg Halt                = execHalt
     alg Ret                 = execRet
     alg (Call μ k)          = execCall μ k
     alg (Jump μ)            = execJump μ
@@ -219,9 +217,6 @@ readyExec = cata3 (Exec . alg)
     alg (LogEnter name k)   = execLogEnter name k
     alg (LogExit name k)    = execLogExit name k
     alg (MetaM m k)         = execMeta m k
-
-execHalt :: ExecMonad s o '[a] Void a
-execHalt = return $! \γ -> [|| return $! Just $! $$(headQ (xs γ)) ||]
 
 execRet :: (?ops :: InputOps s o, KOps o) => ExecMonad s o (x ': xs) x a
 execRet = return $! resume

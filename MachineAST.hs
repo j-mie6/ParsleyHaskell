@@ -14,12 +14,11 @@ import Indexed           (IFunctor3, Fix3(In3), Const3(..), imap3, cata3)
 import Utils             (WQ(..))
 import Defunc            (Defunc(APP), pattern FLIP_H)
 import Data.Word         (Word64)
-import Data.Void         (Void)
 import Safe.Coerce       (coerce)
 import Data.List         (intercalate)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 
-newtype Machine o a = Machine { getMachine :: Fix3 (M o) '[] Void a }
+newtype Machine o a = Machine { getMachine :: Fix3 (M o) '[] a a }
 newtype ΣVar (a :: *) = ΣVar IΣVar
 newtype MVar (a :: *) = MVar IMVar
 newtype ΦVar (a :: *) = ΦVar IΦVar
@@ -29,9 +28,7 @@ newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype LetBinding o a x = LetBinding (Fix3 (M o) '[] x a)
 instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
--- Remove Halt
-data M o k xs r a where
-  Halt      :: M o k '[a] Void a
+data M o (k :: [*] -> * -> * -> *) (xs :: [*]) (r :: *) (a :: *) where
   Ret       :: M o k '[x] x a
   Push      :: WQ x -> k (x ': xs) r a -> M o k xs r a
   Pop       :: k xs r a -> M o k (x ': xs) r a
@@ -85,7 +82,6 @@ _Modify :: ΣVar x -> Fix3 (M o) xs r a -> M o (Fix3 (M o)) ((x -> x) ': xs) r a
 _Modify σ m = Get σ (In3 (_App (In3 (Put σ m))))
 
 instance IFunctor3 (M o) where
-  imap3 f Halt                = Halt
   imap3 f Ret                 = Ret
   imap3 f (Push x k)          = Push x (f k)
   imap3 f (Pop k)             = Pop (f k)
@@ -115,37 +111,36 @@ instance IFunctor3 (M o) where
   imap3 f (MetaM m k)         = MetaM m (f k)
 
 instance Show (Machine o a) where show = show . getMachine
-instance Show (Fix3 (M o) xs ks a) where
-  show = getConst3 . cata3 (Const3 . alg) where
-    alg :: forall i j k. M o (Const3 String) i j k -> String
-    alg Halt                = "Halt"
-    alg Ret                 = "Ret"
-    alg (Call μ k)          = "(Call " ++ show μ ++ " " ++ getConst3 k ++ ")"
-    alg (Jump μ)            = "(Jump " ++ show μ ++ ")"
-    alg (Push _ k)          = "(Push x " ++ getConst3 k ++ ")"
-    alg (Pop k)             = "(Pop " ++ getConst3 k ++ ")"
-    alg (Lift2 f k)         = "(Lift2 " ++ show f ++ " " ++ getConst3 k ++ ")"
-    alg (Sat _ k)           = "(Sat f " ++ getConst3 k ++ ")"
-    alg Empt                = "Empt"
-    alg (Commit k)          = "(Commit " ++ getConst3 k ++ ")"
-    alg (SoftFork p q)      = "(SoftFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
-    alg (HardFork p q)      = "(HardFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
-    alg (Attempt k)         = "(Try " ++ getConst3 k ++ ")"
-    alg (Tell k)            = "(Tell " ++ getConst3 k ++ ")"
-    alg (Seek k)            = "(Seek " ++ getConst3 k ++ ")"
-    alg (Case p q)          = "(Case " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
-    alg (Choices _ ks def)  = "(Choices [" ++ intercalate ", " (map getConst3 ks) ++ "] " ++ getConst3 def ++ ")"
-    alg (ChainIter σ μ)     = "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
-    alg (ChainInit σ m μ k) = "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ getConst3 m ++ " " ++ getConst3 k ++ "}"
-    alg (Join φ)            = show φ
-    alg (MkJoin φ p k)      = "(let " ++ show φ ++ " = " ++ getConst3 p ++ " in " ++ getConst3 k ++ ")"
-    alg (Swap k)            = "(Swap " ++ getConst3 k ++ ")"
-    alg (Make σ k)          = "(Make " ++ show σ ++ " " ++ getConst3 k ++ ")"
-    alg (Get σ k)           = "(Get " ++ show σ ++ " " ++ getConst3 k ++ ")"
-    alg (Put σ k)           = "(Put " ++ show σ ++ " " ++ getConst3 k ++ ")"
-    alg (LogEnter _ k)      = getConst3 k
-    alg (LogExit _ k)       = getConst3 k
-    alg (MetaM m k)         = "[" ++ show m ++ "] " ++ getConst3 k
+instance Show (Fix3 (M o) xs r a) where
+  show x = let Const3 s = cata3 alg x in s where
+    alg :: forall i j. M o (Const3 String) i j a -> Const3 String i j a
+    alg Ret                 = Const3 $ "Ret"
+    alg (Call μ k)          = Const3 $ "(Call " ++ show μ ++ " " ++ getConst3 k ++ ")"
+    alg (Jump μ)            = Const3 $ "(Jump " ++ show μ ++ ")"
+    alg (Push _ k)          = Const3 $ "(Push x " ++ getConst3 k ++ ")"
+    alg (Pop k)             = Const3 $ "(Pop " ++ getConst3 k ++ ")"
+    alg (Lift2 f k)         = Const3 $ "(Lift2 " ++ show f ++ " " ++ getConst3 k ++ ")"
+    alg (Sat _ k)           = Const3 $ "(Sat f " ++ getConst3 k ++ ")"
+    alg Empt                = Const3 $ "Empt"
+    alg (Commit k)          = Const3 $ "(Commit " ++ getConst3 k ++ ")"
+    alg (SoftFork p q)      = Const3 $ "(SoftFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
+    alg (HardFork p q)      = Const3 $ "(HardFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
+    alg (Attempt k)         = Const3 $ "(Try " ++ getConst3 k ++ ")"
+    alg (Tell k)            = Const3 $ "(Tell " ++ getConst3 k ++ ")"
+    alg (Seek k)            = Const3 $ "(Seek " ++ getConst3 k ++ ")"
+    alg (Case p q)          = Const3 $ "(Case " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
+    alg (Choices _ ks def)  = Const3 $ "(Choices [" ++ intercalate ", " (map getConst3 ks) ++ "] " ++ getConst3 def ++ ")"
+    alg (ChainIter σ μ)     = Const3 $ "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
+    alg (ChainInit σ m μ k) = Const3 $ "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ getConst3 m ++ " " ++ getConst3 k ++ "}"
+    alg (Join φ)            = Const3 $ show φ
+    alg (MkJoin φ p k)      = Const3 $ "(let " ++ show φ ++ " = " ++ getConst3 p ++ " in " ++ getConst3 k ++ ")"
+    alg (Swap k)            = Const3 $ "(Swap " ++ getConst3 k ++ ")"
+    alg (Make σ k)          = Const3 $ "(Make " ++ show σ ++ " " ++ getConst3 k ++ ")"
+    alg (Get σ k)           = Const3 $ "(Get " ++ show σ ++ " " ++ getConst3 k ++ ")"
+    alg (Put σ k)           = Const3 $ "(Put " ++ show σ ++ " " ++ getConst3 k ++ ")"
+    alg (LogEnter _ k)      = Const3 $ getConst3 k
+    alg (LogExit _ k)       = Const3 $ getConst3 k
+    alg (MetaM m k)         = Const3 $ "[" ++ show m ++ "] " ++ getConst3 k
 
 instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
 instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ

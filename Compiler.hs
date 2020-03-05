@@ -17,7 +17,7 @@ import Prelude hiding (pred)
 import ParserAST                  (ParserF(..), Parser(..))
 import Optimiser                  (optimise)
 import CombinatorAnalyser         (analyse, emptyFlags, AnalysisFlags(..))
-import CodeGenerator              (codeGen, halt, ret)
+import CodeGenerator              (codeGen)
 import MachineAST                 (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
 import Indexed                    (Fix(In), cata, cata', Tag(..), imap)
 import Control.Applicative        (liftA, liftA2, liftA3)
@@ -44,7 +44,7 @@ import qualified Data.Set            as Set     (null)
 compile :: Parser a -> (Machine o a, DMap MVar (LetBinding o a))
 compile (Parser p) =
   let !(p', μs, maxV) = preprocess p
-      !(m, maxΣ) = codeGen False (analyse emptyFlags p') halt (maxV + 1) 0
+      !(m, maxΣ) = codeGen False (analyse emptyFlags p') (maxV + 1) 0
       !ms = compileLets μs (maxV + 1) maxΣ
   in trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (Machine m, ms)
 
@@ -53,7 +53,7 @@ compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.em
   where
     compileLet :: MVar x -> Fix ParserF x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
     compileLet (MVar μ) p (ms, maxΣ) =
-      let (m, maxΣ') = codeGen True (analyse (emptyFlags {letBound = True}) p) ret maxV (maxΣ + 1)
+      let (m, maxΣ') = codeGen True (analyse (emptyFlags {letBound = True}) p) maxV (maxΣ + 1)
       in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
 
 preprocess :: Fix ParserF a -> (Fix ParserF a, DMap MVar (Fix ParserF), IMVar)

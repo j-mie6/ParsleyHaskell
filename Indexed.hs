@@ -17,7 +17,7 @@ class IFunctor (f :: (* -> *) -> * -> *) where
   imap :: (forall j. a j -> b j) -> f a i -> f b i
 
 class IFunctor3 (f :: ([*] -> * -> * -> *) -> [*] -> * -> * -> *) where
-  imap3 :: (forall i' j' k'. a i' j' k' -> b i' j' k') -> f a i j k -> f b i j k
+  imap3 :: (forall i' j'. a i' j' x -> b i' j' x) -> f a i j x -> f b i j x
 
 newtype Fix f a = In (f (Fix f) a)
 newtype Fix3 f i j k = In3 (f (Fix3 f) i j k)
@@ -35,7 +35,7 @@ cata' :: IFunctor f => (forall j. Fix f j -> f a j -> a j)
                     -> Fix f i -> a i
 cata' alg i@(In x) = alg i (imap (cata' alg) x)
 
-cata3 :: IFunctor3 f => (forall i' j' k'. f a i' j' k' -> a i' j' k') -> Fix3 f i j k -> a i j k
+cata3 :: IFunctor3 f => (forall i' j'. f a i' j' x -> a i' j' x) -> Fix3 f i j x -> a i j x
 cata3 alg (In3 x)  = alg (imap3 (cata3 alg) x)
 
 data Cofree f a i = a i :< f (Cofree f a) i

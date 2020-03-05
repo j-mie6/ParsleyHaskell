@@ -12,14 +12,15 @@ import Indexed                    (IFunctor, Fix(In), Const1(..), imap, cata)
 import MachineAST                 (IMVar, MVar(..), IΣVar(..))
 import Utils                      (WQ(..))
 import Language.Haskell.TH.Syntax (Lift)
+import Defunc
 import Data.List                  (intercalate)
 
 -- Parser wrapper type
-newtype Parser a = Parser {unParser :: Fix ParserF a}
+newtype Parser a = Parser {unParser :: Fix (ParserF WQ) a}
 
 -- Core smart constructors
 pure :: WQ a -> Parser a
-pure = Parser . In . Pure
+pure = Parser . In . Pure . BLACK
 
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
 Parser p <*> Parser q = Parser (In (p :<*>: q))
@@ -37,7 +38,7 @@ empty = Parser (In Empty)
 Parser p <|> Parser q = Parser (In (p :<|>: q))
 
 satisfy :: WQ (Char -> Bool) -> Parser Char
-satisfy = Parser . In . Satisfy
+satisfy = Parser . In . Satisfy . BLACK
 
 lookAhead :: Parser a -> Parser a
 lookAhead = Parser . In . LookAhead . unParser
@@ -49,7 +50,7 @@ try :: Parser a -> Parser a
 try = Parser . In . Try . unParser
 
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> WQ (== v) [||(== v)||]) vs) (map (unParser . f) vs) def))
+match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> BLACK (WQ (== v) [||(== v)||])) vs) (map (unParser . f) vs) def))
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (Branch c p q))
@@ -72,31 +73,31 @@ infixl 4 *>
 infixl 3 <|>
 
 -- Core datatype
-data ParserF (k :: * -> *) (a :: *) where
-  Pure          :: WQ a -> ParserF k a
-  Satisfy       :: WQ (Char -> Bool) -> ParserF k Char
-  (:<*>:)       :: k (a -> b) -> k a -> ParserF k b
-  (:*>:)        :: k a -> k b -> ParserF k b
-  (:<*:)        :: k a -> k b -> ParserF k a
-  (:<|>:)       :: k a -> k a -> ParserF k a
-  Empty         :: ParserF k a
-  Try           :: k a -> ParserF k a
-  LookAhead     :: k a -> ParserF k a
-  Let           :: Bool -> MVar a -> k a -> ParserF k a
-  NotFollowedBy :: k a -> ParserF k ()
-  Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF k c
-  Match         :: k a -> [WQ (a -> Bool)] -> [k b] -> k b -> ParserF k b
-  ChainPre      :: k (a -> a) -> k a -> ParserF k a
-  ChainPost     :: k a -> k (a -> a) -> ParserF k a
-  Debug         :: String -> k a -> ParserF k a
-  MetaP         :: MetaP -> k a -> ParserF k a
+data ParserF (q :: * -> *) (k :: * -> *) (a :: *) where
+  Pure          :: Defunc q a -> ParserF q k a
+  Satisfy       :: Defunc q (Char -> Bool) -> ParserF q k Char
+  (:<*>:)       :: k (a -> b) -> k a -> ParserF q k b
+  (:*>:)        :: k a -> k b -> ParserF q k b
+  (:<*:)        :: k a -> k b -> ParserF q k a
+  (:<|>:)       :: k a -> k a -> ParserF q k a
+  Empty         :: ParserF q k a
+  Try           :: k a -> ParserF q k a
+  LookAhead     :: k a -> ParserF q k a
+  Let           :: Bool -> MVar a -> k a -> ParserF q k a
+  NotFollowedBy :: k a -> ParserF q k ()
+  Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF q k c
+  Match         :: k a -> [Defunc q (a -> Bool)] -> [k b] -> k b -> ParserF q k b
+  ChainPre      :: k (a -> a) -> k a -> ParserF q k a
+  ChainPost     :: k a -> k (a -> a) -> ParserF q k a
+  Debug         :: String -> k a -> ParserF q k a
+  MetaP         :: MetaP -> k a -> ParserF q k a
 
 data MetaP where
   Cut :: MetaP
   RequiresCut :: MetaP
 
 -- Instances
-instance IFunctor ParserF where
+instance IFunctor (ParserF q) where
   imap _ (Pure x)            = Pure x
   imap _ (Satisfy p)         = Satisfy p
   imap f (p :<*>: q)         = f p :<*>: f q
@@ -115,7 +116,7 @@ instance IFunctor ParserF where
   imap f (Debug name p)      = Debug name (f p)
   imap f (MetaP m p)         = MetaP m (f p)
 
-instance Show (Fix ParserF a) where
+instance Show (Fix (ParserF q) a) where
   show = getConst1 . cata (Const1 . alg)
     where
       alg (Pure x)                                  = "(pure x)"

@@ -12,7 +12,7 @@ import ParserAST                  (ParserF(..), MetaP(..))
 import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
 import MachineAnalyser            (coinsNeeded)
 import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>))
-import Utils                      (code, (>*<), WQ(..))
+import Utils                      (code, Quapplicative((>*<)))
 import Defunc                     (Defunc(BLACK))
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
@@ -32,11 +32,11 @@ runCodeGenStack m μ0 φ0 σ0 =
    flip evalFreshT μ0 . 
    flip evalFreshT φ0) m
 
-newtype CodeGen o b a = 
-  CodeGen {runCodeGen :: forall xs r. Fix3 (M o) (a ': xs) r b -> CodeGenStack (Fix3 (M o) xs r b)}
+newtype CodeGen q o b a = 
+  CodeGen {runCodeGen :: forall xs r. Fix3 (M q o) (a ': xs) r b -> CodeGenStack (Fix3 (M q o) xs r b)}
 
 -- TODO, ensure that let-bound parsers do not use finalise to add coins!
-codeGen :: Bool -> Fix ParserF a -> IMVar -> IΣVar -> (Fix3 (M o) '[] a b, IΣVar)
+codeGen :: Quapplicative q => Bool -> Fix (ParserF q) a -> IMVar -> IΣVar -> (Fix3 (M q o) '[] a b, IΣVar)
 codeGen letBound p μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = finalise (histo alg p)
@@ -51,10 +51,10 @@ pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
 pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
-peephole :: ParserF (Cofree ParserF (CodeGen o b)) a -> Maybe (CodeGen o b a)
+peephole :: Quapplicative q => ParserF q (Cofree (ParserF q) (CodeGen q o b)) a -> Maybe (CodeGen q o b a)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In3 (_Fmap f m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
-  do qc <- runCodeGen q (In3 (Lift2 (BLACK f) m))
+  do qc <- runCodeGen q (In3 (Lift2 f m))
      runCodeGen p qc
 peephole (TryOrElse p q) = Just $ CodeGen $ \m -> -- FIXME!
   do (binder, φ) <- makeΦ m
@@ -91,7 +91,7 @@ peephole (MetaP Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m ->
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
-direct :: ParserF (CodeGen o b) a -> Fix3 (M o) (a ': xs) r b -> CodeGenStack (Fix3 (M o) xs r b)
+direct :: Quapplicative q => ParserF q (CodeGen q o b) a -> Fix3 (M q o) (a ': xs) r b -> CodeGenStack (Fix3 (M q o) xs r b)
 direct (Pure x)      m = do return $! In3 (Push x m)
 direct (Satisfy p)   m = do return $! In3 (Sat p m)
 direct (pf :<*>: px) m = do pxc <- runCodeGen px (In3 (_App m)); runCodeGen pf pxc
@@ -148,13 +148,13 @@ direct (ChainPost p op) m =
 direct (Debug name p) m = do fmap (In3 . LogEnter name) (runCodeGen p (In3 (LogExit name m)))
 direct (MetaP Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
 
-tailCallOptimise :: MVar x -> Fix3 (M o) (x ': xs) r a -> Fix3 (M o) xs r a
+tailCallOptimise :: MVar x -> Fix3 (M q o) (x ': xs) r a -> Fix3 (M q o) xs r a
 tailCallOptimise μ (In3 Ret) = In3 (Jump μ)
 tailCallOptimise μ k         = In3 (Call μ k)
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret or Halt
 -- However, I'm not yet sure about the interactions with try yet...
-deadCommitOptimisation :: Fix3 (M o) xs r a -> Fix3 (M o) xs r a
+deadCommitOptimisation :: Fix3 (M q o) xs r a -> Fix3 (M q o) xs r a
 deadCommitOptimisation (In3 Ret)  = In3 Ret
 deadCommitOptimisation m          = In3 (Commit m)
 
@@ -171,7 +171,7 @@ freshM = mapVFreshT newScope
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
-makeΦ :: Fix3 (M o) (x ': xs) r a -> CodeGenStack (Fix3 (M o) xs r a -> Fix3 (M o) xs r a, Fix3 (M o) (x ': xs) r a)
+makeΦ :: Fix3 (M q o) (x ': xs) r a -> CodeGenStack (Fix3 (M q o) xs r a -> Fix3 (M q o) xs r a, Fix3 (M q o) (x ': xs) r a)
 makeΦ m | elidable m = return $! (id, m)
   where
     -- This is double-φ optimisation:   If a φ-node points directly to another φ-node, then it can be elided

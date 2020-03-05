@@ -5,7 +5,7 @@ import Machine
 import MachineAST
 import Indexed
 
-coinsNeeded :: Fix3 (M o) xs r a -> Int
+coinsNeeded :: Fix3 (M q o) xs r a -> Int
 coinsNeeded = fst . getConst3 . cata3 (Const3 . alg)
   where
     algCatch :: (Int, Bool) -> (Int, Bool) -> (Int, Bool)
@@ -13,7 +13,7 @@ coinsNeeded = fst . getConst3 . cata3 (Const3 . alg)
     algCatch (k1, True) k2 = k2
     algCatch (k1, _) (k2, _) = (min k1 k2, False)
 
-    alg :: M o (Const3 (Int, Bool)) xs r a -> (Int, Bool)
+    alg :: M q o (Const3 (Int, Bool)) xs r a -> (Int, Bool)
     --alg Halt                               = (0, False)
     alg Ret                                = (0, False)
     alg (Push _ (Const3 k))                = (fst k, False)

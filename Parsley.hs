@@ -35,7 +35,7 @@ module Parsley ( Parser, runParser, parseFromFile
                -- Expressions
                , Level(..), precedence
                -- Template Haskell Utils
-               , code, (>*<), WQ(..), Lift
+               , code, (>*<), makeQ, _code, _val, WQ, Lift
                -- Template Haskell Crap
                , bool
                , module Input
@@ -46,7 +46,7 @@ import Input hiding               (PreparedInput(..))
 import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
-import Utils                      (code, (>*<), WQ(..), Code)
+import Utils                      (code, Quapplicative(..), WQ, Code)
 import Data.Function              (fix)
 import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
@@ -80,10 +80,10 @@ liftA3 :: WQ (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
 liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
-many = pfoldr (code (:)) (WQ [] [||[]||])
+many = pfoldr (code (:)) (makeQ [] [||[]||])
 {-many p = newRegister (pure (code id)) (\r ->
     let go = modify r (code flip >*< code (.) <$> (code (:) <$> p)) *> go
-         <|> (WQ ($ []) [||\f -> f []||] <$> get r)
+         <|> (makeQ ($ []) [||\f -> f []||] <$> get r)
     in go)-}
 
 manyN :: Int -> Parser a -> Parser [a]
@@ -108,7 +108,7 @@ skipSome = skipManyN 1
 p <+> q = code Left <$> p <|> code Right <$> q
 
 sepBy :: Parser a -> Parser b -> Parser [a]
-sepBy p sep = sepBy1 p sep <|> pure (WQ [] [||[]||])
+sepBy p sep = sepBy1 p sep <|> pure (makeQ [] [||[]||])
 
 sepBy1 :: Parser a -> Parser b -> Parser [a]
 sepBy1 p sep = p <:> many (sep *> p)
@@ -120,7 +120,7 @@ endBy1 :: Parser a -> Parser b -> Parser [a]
 endBy1 p sep = some (p <* sep)
 
 manyTill :: Parser a -> Parser b -> Parser [a]
-manyTill p end = let go = end $> WQ [] [||[]||] <|> p <:> go in go
+manyTill p end = let go = end $> makeQ [] [||[]||] <|> p <:> go in go
 
 someTill :: Parser a -> Parser b -> Parser [a]
 someTill p end = notFollowedBy end *> (p <:> manyTill p end)
@@ -131,7 +131,7 @@ someTill p end = notFollowedBy end *> (p <:> manyTill p end)
 (<:>) = liftA2 (code (:))
 
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
-(<**>) = liftA2 (WQ (flip ($)) [|| (flip ($)) ||])
+(<**>) = liftA2 (makeQ (flip ($)) [|| (flip ($)) ||])
 
 unit :: Parser ()
 unit = pure (code ())
@@ -150,7 +150,7 @@ unit = pure (code ())
 
   -- Auxillary functions
 sequence :: [Parser a] -> Parser [a]
-sequence = foldr (<:>) (pure (WQ [] [||[]||]))
+sequence = foldr (<:>) (pure (makeQ [] [||[]||]))
 
 traverse :: (a -> Parser b) -> [a] -> Parser [b]
 traverse f = sequence . map f
@@ -159,10 +159,10 @@ string :: String -> Parser String
 string = traverse char
 
 oneOf :: [Char] -> Parser Char
-oneOf cs = satisfy (WQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
+oneOf cs = satisfy (makeQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
 
 noneOf :: [Char] -> Parser Char
-noneOf cs = satisfy (WQ (not . flip elem cs) [||\c -> not $$(ofChars cs [||c||])||])
+noneOf cs = satisfy (makeQ (not . flip elem cs) [||\c -> not $$(ofChars cs [||c||])||])
 
 ofChars :: [Char] -> Code Char -> Code Bool
 ofChars = foldr (\c rest qc -> [|| c == $$qc || $$(rest qc) ||]) (const [||False||])
@@ -184,10 +184,10 @@ between open close p = open *> p <* close
 
 -- Parsing Primitives
 char :: Char -> Parser Char
-char c = code c <$ satisfy (WQ (== c) [||(== c)||])
+char c = code c <$ satisfy (makeQ (== c) [||(== c)||])
 
 item :: Parser Char
-item = satisfy (WQ (const True) [|| const True ||])
+item = satisfy (makeQ (const True) [|| const True ||])
 
 -- Composite Combinators
 optionally :: Parser a -> WQ b -> Parser b
@@ -210,13 +210,13 @@ constp :: Parser a -> Parser (b -> a)
 constp = (code const <$>)
 
 (<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
-cond <?|> (p, q) = branch (WQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
+cond <?|> (p, q) = branch (makeQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
 
 (>?>) :: Parser a -> WQ (a -> Bool) -> Parser a
 p >?> f = p >??> pure f
 
 (>??>) :: Parser a -> Parser (a -> Bool) -> Parser a
-px >??> pf = select (liftA2 (WQ g qg) pf px) empty
+px >??> pf = select (liftA2 (makeQ g qg) pf px) empty
   where
     g f x = if f x then Right x else Left ()
     qg = [||\f x -> if f x then Right x else Left ()||]
@@ -234,10 +234,10 @@ select :: Parser (Either a b) -> Parser (a -> b) -> Parser b
 select p q = branch p q (pure (code id))
 
 fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
-fromMaybeP pm px = select (WQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
+fromMaybeP pm px = select (makeQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
 
 maybeP :: Parser a -> Parser (Maybe a)
-maybeP p = option (WQ Nothing [||Nothing||]) (code Just <$> p)
+maybeP p = option (makeQ Nothing [||Nothing||]) (code Just <$> p)
 
 -- Iterative Parsers
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a

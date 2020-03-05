@@ -20,6 +20,7 @@ import CombinatorAnalyser         (analyse, emptyFlags, AnalysisFlags(..))
 import CodeGenerator              (codeGen)
 import MachineAST                 (Machine(..), IMVar, IΣVar, MVar(..), LetBinding(..))
 import Indexed                    (Fix(In), cata, cata', Tag(..), imap)
+import Utils                      (Quapplicative, WQ)
 import Control.Applicative        (liftA, liftA2, liftA3)
 import Control.Monad              (forM, forM_)
 import Control.Monad.Reader       (Reader, runReader, local, ask, asks, MonadReader)
@@ -41,31 +42,31 @@ import qualified Data.HashSet        as HashSet (member, insert, empty, union)
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey, size)
 import qualified Data.Set            as Set     (null)
 
-compile :: Parser a -> (Machine o a, DMap MVar (LetBinding o a))
+compile :: Parser a -> (Machine o a, DMap MVar (LetBinding WQ o a))
 compile (Parser p) =
   let !(p', μs, maxV) = preprocess p
       !(m, maxΣ) = codeGen False (analyse emptyFlags p') (maxV + 1) 0
       !ms = compileLets μs (maxV + 1) maxΣ
   in trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (Machine m, ms)
 
-compileLets :: DMap MVar (Fix ParserF) -> IMVar -> IΣVar -> DMap MVar (LetBinding o a)
+compileLets :: Quapplicative q => DMap MVar (Fix (ParserF q)) -> IMVar -> IΣVar -> DMap MVar (LetBinding q o a)
 compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.empty, maxΣ) μs in ms
   where
-    compileLet :: MVar x -> Fix ParserF x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
+    compileLet :: Quapplicative q => MVar x -> Fix (ParserF q) x -> (DMap MVar (LetBinding q o a), IΣVar) -> (DMap MVar (LetBinding q o a), IΣVar)
     compileLet (MVar μ) p (ms, maxΣ) =
       let (m, maxΣ') = codeGen True (analyse (emptyFlags {letBound = True}) p) maxV (maxΣ + 1)
       in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
 
-preprocess :: Fix ParserF a -> (Fix ParserF a, DMap MVar (Fix ParserF), IMVar)
+preprocess :: Quapplicative q => Fix (ParserF q) a -> (Fix (ParserF q) a, DMap MVar (Fix (ParserF q)), IMVar)
 preprocess p =
   let q = tagParser p
       (lets, recs) = findLets q
   in letInsertion lets recs q
 
-data ParserName = forall a. ParserName (StableName# (Fix ParserF a))
-newtype Tagger a = Tagger { runTagger :: Fix (Tag ParserName ParserF) a }
+data ParserName = forall a q. ParserName (StableName# (Fix (ParserF q) a))
+newtype Tagger q a = Tagger { runTagger :: Fix (Tag ParserName (ParserF q)) a }
 
-tagParser :: Fix ParserF a -> Fix (Tag ParserName ParserF) a
+tagParser :: Fix (ParserF q) a -> Fix (Tag ParserName (ParserF q)) a
 tagParser = runTagger . cata' alg
   where
     alg p q = Tagger (In (Tag (makeParserName p) (imap runTagger q)))
@@ -76,7 +77,7 @@ data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
 type LetFinderCtx   = HashSet ParserName
 newtype LetFinder a = LetFinder { runLetFinder :: StateT LetFinderState (Reader LetFinderCtx) () }
 
-findLets :: Fix (Tag ParserName ParserF) a -> (HashSet ParserName, HashSet ParserName)
+findLets :: Fix (Tag ParserName (ParserF q)) a -> (HashSet ParserName, HashSet ParserName)
 findLets p = (lets, recs)
   where
     state = LetFinderState HashMap.empty HashSet.empty HashSet.empty
@@ -84,7 +85,7 @@ findLets p = (lets, recs)
     LetFinderState preds recs _ = runReader (execStateT (runLetFinder (cata findLetsAlg p)) state) ctx
     lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
 
-findLetsAlg :: Tag ParserName ParserF LetFinder a -> LetFinder a
+findLetsAlg :: Tag ParserName (ParserF q) LetFinder a -> LetFinder a
 findLetsAlg p = LetFinder $ do 
   let name = tag p
   let q = tagged p
@@ -108,19 +109,19 @@ findLetsAlg p = LetFinder $ do
             _                 -> do return ())
           doNotProcessAgain name))
 
-newtype LetInserter a =
+newtype LetInserter q a =
   LetInserter {
       runLetInserter :: HFreshT IMVar 
                         (State ( HashMap ParserName IMVar
-                               , DMap MVar (Fix ParserF))) 
-                        (Fix ParserF a)
+                               , DMap MVar (Fix (ParserF q)))) 
+                        (Fix (ParserF q) a)
     }
-letInsertion :: HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName ParserF) a -> (Fix ParserF a, DMap MVar (Fix ParserF), IMVar)
+letInsertion :: Quapplicative q => HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName (ParserF q)) a -> (Fix (ParserF q) a, DMap MVar (Fix (ParserF q)), IMVar)
 letInsertion lets recs p = (p', μs, μMax)
   where
     m = cata alg p
     ((p', μMax), (vs, μs)) = runState (runFreshT (runLetInserter m) 0) (HashMap.empty, DMap.empty)
-    alg :: Tag ParserName ParserF LetInserter a -> LetInserter a
+    alg :: Quapplicative q => Tag ParserName (ParserF q) (LetInserter q) a -> LetInserter q a
     alg p = LetInserter $ do
       let name = tag p
       let q = tagged p
@@ -137,7 +138,7 @@ letInsertion lets recs p = (p', μs, μMax)
           return $! optimise (Let recu μ q')
       else do runLetInserter (postprocess q)
 
-postprocess :: ParserF LetInserter a -> LetInserter a
+postprocess :: Quapplicative q => ParserF q (LetInserter q) a -> LetInserter q a
 postprocess (pf :<*>: px)       = LetInserter (fmap optimise (liftA2 (:<*>:) (runLetInserter pf) (runLetInserter px)))
 postprocess (p :*>: q)          = LetInserter (fmap optimise (liftA2 (:*>:)  (runLetInserter p)  (runLetInserter q)))
 postprocess (p :<*: q)          = LetInserter (fmap optimise (liftA2 (:<*:)  (runLetInserter p)  (runLetInserter q)))
@@ -190,7 +191,7 @@ doNotProcessAgain x = modifyBefore (HashSet.insert x)
 addName :: MonadReader LetFinderCtx m => ParserName -> m b -> m b
 addName x = local (HashSet.insert x)
 
-makeParserName :: Fix ParserF a -> ParserName
+makeParserName :: Fix (ParserF q) a -> ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
 makeParserName !p = unsafePerformIO (fmap (\(StableName name) -> ParserName name) (makeStableName p))
 

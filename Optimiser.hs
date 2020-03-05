@@ -2,19 +2,20 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 module Optimiser (optimise) where
 
 import Prelude hiding ((<$>))
 import ParserAST (ParserF(..))
 import Indexed   (Fix(In))
-import Utils     (code, (>*<), WQ(..))
+import Utils     (code, Quapplicative(..))
 
 pattern f :<$>: p = In (Pure f) :<*>: p
 pattern p :$>: x = p :*>: In (Pure x)
 pattern x :<$: p = In (Pure x) :<*: p
 pattern LiftA2 f p q = In (f :<$>: p) :<*>: q
 
-optimise :: ParserF (Fix ParserF) a -> Fix ParserF a
+optimise :: Quapplicative q => ParserF q (Fix (ParserF q)) a -> Fix (ParserF q) a
 -- DESTRUCTIVE OPTIMISATION
 -- Right Absorption Law: empty <*> u                    = empty
 optimise (In Empty :<*>: _)                             = In Empty
@@ -116,9 +117,9 @@ optimise (Try (In (p :$>: x)))                          = optimise (optimise (Tr
 -- Interchange law: try (f <$> p)                       = f <$> try p
 optimise (Try (In (f :<$>: p)))                         = optimise (f :<$>: optimise (Try p))
 -- pure Left law: branch (pure (Left x)) p q            = p <*> pure x
-optimise (Branch (In (Pure (WQ (Left x) ql))) p _)      = optimise (p :<*>: In (Pure (WQ x qx))) where qx = [||case $$ql of Left x -> x||]
+optimise (Branch (In (Pure (l@(_val -> Left x)))) p _)  = optimise (p :<*>: In (Pure (makeQ x qx))) where qx = [||case $$(_code l) of Left x -> x||]
 -- pure Right law: branch (pure (Right x)) p q          = q <*> pure x
-optimise (Branch (In (Pure (WQ (Right x) ql))) _ q)     = optimise (q :<*>: In (Pure (WQ x qx))) where qx = [||case $$ql of Right x -> x||]
+optimise (Branch (In (Pure (r@(_val -> Right x)))) _ q) = optimise (q :<*>: In (Pure (makeQ x qx))) where qx = [||case $$(_code r) of Right x -> x||]
 -- Generalised Identity law: branch b (pure f) (pure g) = either f g <$> b
 optimise (Branch b (In (Pure f)) (In (Pure g)))         = optimise (([either f g]) :<$>: b)
 -- Interchange law: branch (x *> y) p q                 = x *> branch y p q
@@ -126,23 +127,23 @@ optimise (Branch (In (x :*>: y)) p q)                   = optimise (x :*>: optim
 -- Negated Branch law: branch b p empty                 = branch (swapEither <$> b) empty p
 optimise (Branch b p (In Empty))                        = In (Branch (In (In (Pure ([either (code Right) (code Left)])) :<*>: b)) (In Empty) p)
 -- Branch Fusion law: branch (branch b empty (pure f)) empty k                  = branch (g <$> b) empty k where g is a monad transforming (>>= f)
-optimise (Branch (In (Branch b (In Empty) (In (Pure (WQ f qf))))) (In Empty) k) = optimise (Branch (optimise (In (Pure (WQ g qg)) :<*>: b)) (In Empty) k)
+optimise (Branch (In (Branch b (In Empty) (In (Pure f)))) (In Empty) k) = optimise (Branch (optimise (In (Pure (makeQ g qg)) :<*>: b)) (In Empty) k)
   where
     g (Left _) = Left ()
-    g (Right x) = case f x of
+    g (Right x) = case _val f x of
       Left _ -> Left ()
       Right x -> Right x
     qg = [||\case Left _ -> Left ()
-                  Right x -> case $$qf x of
+                  Right x -> case $$(_code f) x of
                                Left _ -> Left ()
                                Right y -> Right y||]
 -- Distributivity Law: f <$> branch b p q                = branch b ((f .) <$> p) ((f .) <$> q)
 optimise (f :<$>: In (Branch b p q))                     = optimise (Branch b (optimise (([(.) f]) :<$>: p)) (optimise (([(.) f]) :<$>: q)))  -- FIXME?
 -- pure Match law: match vs (pure x) f def               = if elem x vs then f x else def
-optimise (Match (In (Pure (WQ x _))) fs qs def)          = foldr (\(f, q) k -> if _val f x then q else k) def (zip fs qs)
+optimise (Match (In (Pure x)) fs qs def)          = foldr (\(f, q) k -> if _val f (_val x) then q else k) def (zip fs qs)
 -- Generalised Identity Match law: match vs p (pure . f) def = f <$> (p >?> flip elem vs) <|> def
 optimise (Match p fs qs def)
-  | all (\case {In (Pure _) -> True; _ -> False}) qs     = optimise (optimise (WQ apply qapply :<$>: (p >?> (WQ validate qvalidate))) :<|>: def)
+  | all (\case {In (Pure _) -> True; _ -> False}) qs     = optimise (optimise (makeQ apply qapply :<$>: (p >?> (makeQ validate qvalidate))) :<|>: def)
     where apply x    = foldr (\(f, In (Pure y)) k -> if _val f x then _val y else k) (error "whoopsie") (zip fs qs)
           qapply     = foldr (\(f, In (Pure y)) k -> [||\x -> if $$(_code f) x then $$(_code y) else $$k x||]) ([||const (error "whoopsie")||]) (zip fs qs)
           validate x = foldr (\f b -> _val f x || b) False fs
@@ -160,8 +161,8 @@ optimise p                                               = In p
 
 -- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p
 
-(>?>) :: Fix ParserF a -> WQ (a -> Bool) -> Fix ParserF a
-p >?> (WQ f qf) = In (Branch (In (WQ g qg :<$>: p)) (In Empty) (In (Pure (code id))))
+(>?>) :: Quapplicative q => Fix (ParserF q) a -> q (a -> Bool) -> Fix (ParserF q) a
+p >?> f = In (Branch (In (makeQ g qg :<$>: p)) (In Empty) (In (Pure (code id))))
   where
-    g x = if f x then Right x else Left ()
-    qg = [||\x -> if $$qf x then Right x else Left ()||]
+    g x = if _val f x then Right x else Left ()
+    qg = [||\x -> if $$(_code f) x then Right x else Left ()||]

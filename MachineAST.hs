@@ -18,44 +18,44 @@ import Safe.Coerce       (coerce)
 import Data.List         (intercalate)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 
-newtype Machine o a = Machine { getMachine :: Fix3 (M o) '[] a a }
+newtype Machine o a = Machine { getMachine :: Fix3 (M WQ o) '[] a a }
 newtype ΣVar (a :: *) = ΣVar IΣVar
 newtype MVar (a :: *) = MVar IMVar
 newtype ΦVar (a :: *) = ΦVar IΦVar
 newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
-newtype LetBinding o a x = LetBinding (Fix3 (M o) '[] x a)
-instance Show (LetBinding o a x) where show (LetBinding m) = show m
+newtype LetBinding q o a x = LetBinding (Fix3 (M q o) '[] x a)
+instance Show (LetBinding q o a x) where show (LetBinding m) = show m
 
-data M o (k :: [*] -> * -> * -> *) (xs :: [*]) (r :: *) (a :: *) where
-  Ret       :: M o k '[x] x a
-  Push      :: WQ x -> k (x ': xs) r a -> M o k xs r a
-  Pop       :: k xs r a -> M o k (x ': xs) r a
-  Lift2     :: Defunc (x -> y -> z) -> k (z ': xs) r a -> M o k (y ': x ': xs) r a
-  Sat       :: WQ (Char -> Bool) -> k (Char ': xs) r a -> M o k xs r a
-  Call      :: MVar x -> k (x ': xs) r a -> M o k xs r a
-  Jump      :: MVar x -> M o k '[] x a
-  Empt      :: M o k xs r a
-  Commit    :: k xs r a -> M o k xs r a
-  HardFork  :: k xs r a -> k xs r a -> M o k xs r a --TODO: Deprecate
-  SoftFork  :: k xs r a -> k xs r a -> M o k xs r a --TODO: Deprecate
-  Attempt   :: k xs r a -> M o k xs r a             --TODO: Deprecate
-  Tell      :: k (o ': xs) r a -> M o k xs r a
-  Seek      :: k xs r a -> M o k (o ': xs) r a
-  Case      :: k (x ': xs) r a -> k (y ': xs) r a -> M o k (Either x y ': xs) r a
-  Choices   :: [WQ (x -> Bool)] -> [k xs r a] -> k xs r a -> M o k (x ': xs) r a
-  ChainIter :: ΣVar x -> MVar x -> M o k '[] x a
-  ChainInit :: ΣVar x -> k '[] x a -> MVar x -> k xs r a -> M o k xs r a
-  Join      :: ΦVar x -> M o k (x ': xs) r a
-  MkJoin    :: ΦVar x -> k (x ': xs) r a -> k xs r a -> M o k xs r a
-  Swap      :: k (x ': y ': xs) r a -> M o k (y ': x ': xs) r a
-  Make      :: ΣVar x -> k xs r a -> M o k (x ': xs) r a
-  Get       :: ΣVar x -> k (x ': xs) r a -> M o k xs r a
-  Put       :: ΣVar x -> k xs r a -> M o k (x ': xs) r a
-  LogEnter  :: String -> k xs r a -> M o k xs r a
-  LogExit   :: String -> k xs r a -> M o k xs r a
-  MetaM     :: MetaM -> k xs r a -> M o k xs r a
+data M q o (k :: [*] -> * -> * -> *) (xs :: [*]) (r :: *) (a :: *) where
+  Ret       :: M q o k '[x] x a
+  Push      :: Defunc q x -> k (x ': xs) r a -> M q o k xs r a
+  Pop       :: k xs r a -> M q o k (x ': xs) r a
+  Lift2     :: Defunc q (x -> y -> z) -> k (z ': xs) r a -> M q o k (y ': x ': xs) r a
+  Sat       :: Defunc q (Char -> Bool) -> k (Char ': xs) r a -> M q o k xs r a
+  Call      :: MVar x -> k (x ': xs) r a -> M q o k xs r a
+  Jump      :: MVar x -> M q o k '[] x a
+  Empt      :: M q o k xs r a
+  Commit    :: k xs r a -> M q o k xs r a
+  HardFork  :: k xs r a -> k xs r a -> M q o k xs r a --TODO: Deprecate
+  SoftFork  :: k xs r a -> k xs r a -> M q o k xs r a --TODO: Deprecate
+  Attempt   :: k xs r a -> M q o k xs r a             --TODO: Deprecate
+  Tell      :: k (o ': xs) r a -> M q o k xs r a
+  Seek      :: k xs r a -> M q o k (o ': xs) r a
+  Case      :: k (x ': xs) r a -> k (y ': xs) r a -> M q o k (Either x y ': xs) r a
+  Choices   :: [Defunc q (x -> Bool)] -> [k xs r a] -> k xs r a -> M q o k (x ': xs) r a
+  ChainIter :: ΣVar x -> MVar x -> M q o k '[] x a
+  ChainInit :: ΣVar x -> k '[] x a -> MVar x -> k xs r a -> M q o k xs r a
+  Join      :: ΦVar x -> M q o k (x ': xs) r a
+  MkJoin    :: ΦVar x -> k (x ': xs) r a -> k xs r a -> M q o k xs r a
+  Swap      :: k (x ': y ': xs) r a -> M q o k (y ': x ': xs) r a
+  Make      :: ΣVar x -> k xs r a -> M q o k (x ': xs) r a
+  Get       :: ΣVar x -> k (x ': xs) r a -> M q o k xs r a
+  Put       :: ΣVar x -> k xs r a -> M q o k (x ': xs) r a
+  LogEnter  :: String -> k xs r a -> M q o k xs r a
+  LogExit   :: String -> k xs r a -> M q o k xs r a
+  MetaM     :: MetaM -> k xs r a -> M q o k xs r a
 
 data MetaM where
   AddCoins    :: Int -> MetaM
@@ -63,7 +63,7 @@ data MetaM where
   RefundCoins :: Int -> MetaM
   DrainCoins  :: Int -> MetaM
 
-mkCoin :: (Int -> MetaM) -> Int -> Fix3 (M o) xs r a -> Fix3 (M o) xs r a
+mkCoin :: (Int -> MetaM) -> Int -> Fix3 (M q o) xs r a -> Fix3 (M q o) xs r a
 mkCoin meta 0 = id
 mkCoin meta n = In3 . MetaM (meta n)
 
@@ -72,16 +72,16 @@ freeCoins = mkCoin FreeCoins
 refundCoins = mkCoin RefundCoins
 drainCoins = mkCoin DrainCoins
 
-_App :: Fix3 (M o) (y ': xs) r a -> M o (Fix3 (M o)) (x ': (x -> y) ': xs) r a
+_App :: Fix3 (M q o) (y ': xs) r a -> M q o (Fix3 (M q o)) (x ': (x -> y) ': xs) r a
 _App m = Lift2 APP m
 
-_Fmap :: WQ (x -> y) -> Fix3 (M o) (y ': xs) r a -> M o (Fix3 (M o)) (x ': xs) r a
+_Fmap :: Defunc q (x -> y) -> Fix3 (M q o) (y ': xs) r a -> M q o (Fix3 (M q o)) (x ': xs) r a
 _Fmap f m = Push f (In3 (Lift2 (FLIP_H APP) m))
 
-_Modify :: ΣVar x -> Fix3 (M o) xs r a -> M o (Fix3 (M o)) ((x -> x) ': xs) r a
+_Modify :: ΣVar x -> Fix3 (M q o) xs r a -> M q o (Fix3 (M q o)) ((x -> x) ': xs) r a
 _Modify σ m = Get σ (In3 (_App (In3 (Put σ m))))
 
-instance IFunctor3 (M o) where
+instance IFunctor3 (M q o) where
   imap3 f Ret                 = Ret
   imap3 f (Push x k)          = Push x (f k)
   imap3 f (Pop k)             = Pop (f k)
@@ -111,9 +111,9 @@ instance IFunctor3 (M o) where
   imap3 f (MetaM m k)         = MetaM m (f k)
 
 instance Show (Machine o a) where show = show . getMachine
-instance Show (Fix3 (M o) xs r a) where
+instance Show (Fix3 (M q o) xs r a) where
   show x = let Const3 s = cata3 alg x in s where
-    alg :: forall i j. M o (Const3 String) i j a -> Const3 String i j a
+    alg :: forall i j. M q o (Const3 String) i j a -> Const3 String i j a
     alg Ret                 = Const3 $ "Ret"
     alg (Call μ k)          = Const3 $ "(Call " ++ show μ ++ " " ++ getConst3 k ++ ")"
     alg (Jump μ)            = Const3 $ "(Jump " ++ show μ ++ ")"

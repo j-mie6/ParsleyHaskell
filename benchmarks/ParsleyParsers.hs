@@ -138,7 +138,7 @@ javascript = whitespace *> many element <* eof
     conCall = identifier <**>
                 (dot *> (([flip (code JSQual)]) <$> conCall)
              <|> ([flip (code JSConCall)]) <$> parens (commaSep asgn)
-             <|> pure (WQ (\name -> JSConCall name []) [||\name -> JSConCall name []||]))
+             <|> pure (makeQ (\name -> JSConCall name []) [||\name -> JSConCall name []||]))
     member :: Parser JSMember
     member = primaryExpr <**>
                 (([flip (code JSCall)]) <$> parens (commaSep asgn)
@@ -184,14 +184,14 @@ javascript = whitespace *> many element <* eof
     decimalFloat = fromMaybeP (decimal <**> (option ([(.) (code Just) (code Left)]) fractFloat)) empty
 
     fractFloat :: Parser (Int -> Maybe (Either Int Double))
-    fractFloat = WQ f qf <$> fractExponent
+    fractFloat = makeQ f qf <$> fractExponent
       where
         f g x = liftM Right (g x)
         qf = [||\g x -> liftM Right (g x)||]
 
     fractExponent :: Parser (Int -> Maybe Double)
-    fractExponent = WQ f qf <$> fraction <*> option (code "") exponent'
-                <|> WQ g qg <$> exponent'
+    fractExponent = makeQ f qf <$> fraction <*> option (code "") exponent'
+                <|> makeQ g qg <$> exponent'
       where
         f fract exp n = readMaybe (show n ++ fract ++ exp)
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
@@ -212,7 +212,7 @@ javascript = whitespace *> many element <* eof
     octal = oneOf "oO" *> number (code 8) (oneOf ['0'..'7'])
 
     number :: WQ Int -> Parser Char -> Parser Int
-    number qbase digit = pfoldl1 (WQ f qf) (code 0) digit
+    number qbase digit = pfoldl1 (makeQ f qf) (code 0) digit
       where
         f x d = _val qbase * x + digitToInt d
         qf = [||\x d -> $$(_code qbase) * x + digitToInt d||]
@@ -243,7 +243,7 @@ javascript = whitespace *> many element <* eof
     spaces = skipSome space
 
     oneLineComment :: Parser ()
-    oneLineComment = void (token "//" *> skipMany (satisfy (WQ (/= '\n') [||(/= '\n')||])))
+    oneLineComment = void (token "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))
 
     multiLineComment :: Parser ()
     multiLineComment =
@@ -280,7 +280,7 @@ javascript = whitespace *> many element <* eof
         escCode '\\' = pure (code ('\\'))
         escCode '"' = pure (code ('"'))
         escCode '\'' = pure (code ('\''))
-        escCode '^' = WQ (\c -> toEnum (fromEnum c - fromEnum 'A' + 1)) [||\c -> toEnum (fromEnum c - fromEnum 'A' + 1)||] <$> satisfy (code isUpper)
+        escCode '^' = makeQ (\c -> toEnum (fromEnum c - fromEnum 'A' + 1)) [||\c -> toEnum (fromEnum c - fromEnum 'A' + 1)||] <$> satisfy (code isUpper)
         escCode 'A' = token "CK" $> code ('\ACK')
         escCode 'B' = token "S" $> code ('\BS') <|> token "EL" $> code ('\BEL')
         escCode 'C' = token "R" $> code ('\CR') <|> token "AN" $> code ('\CAN')
@@ -401,4 +401,4 @@ nandlang = whitespace *> skipMany funcdef <* eof
     spaces :: Parser ()
     spaces = skipSome space
     oneLineComment :: Parser ()
-    oneLineComment = void (token "//" *> skipMany (satisfy (WQ (/= '\n') [||(/= '\n')||])))
+    oneLineComment = void (token "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))

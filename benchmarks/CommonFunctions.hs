@@ -3,6 +3,7 @@ module CommonFunctions where
 import Data.Int
 import Data.Char (ord, chr, isAlpha, isAlphaNum, isSpace, isUpper, isDigit, digitToInt)
 import Data.Set (fromList, member)
+<<<<<<< HEAD
 import Data.Maybe (catMaybes)
 
 isDigit :: Char -> Bool
@@ -14,6 +15,8 @@ isDigit c
 
 toDigit :: Char -> Int
 toDigit c = fromEnum c - fromEnum '0'
+=======
+>>>>>>> master
 
 data Pred = And Pred Pred | Not Pred | T | F deriving Show
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show
@@ -135,7 +138,26 @@ jsUnreservedName = \s -> not (member s keys)
     keys = fromList ["true", "false", "if", "else",
                      "for", "while", "break", "continue",
                      "function", "var", "new", "delete",
+<<<<<<< HEAD
                      "this", "null", "return"]
 
 jsStringLetter :: Char -> Bool
 jsStringLetter c = (c /= '"') && (c /= '\\') && (c > '\026')
+=======
+                     "this", "null", "return", "with"]
+
+jsStringLetter :: Char -> Bool
+jsStringLetter c = (c /= '"') && (c /= '\\') && (c > '\026')
+
+nandIdentStart :: Char -> Bool
+nandIdentStart c = isAlpha c || c == '_'
+
+nandIdentLetter :: Char -> Bool
+nandIdentLetter c = isAlphaNum c || c == '_'
+
+nandUnreservedName :: String -> Bool
+nandUnreservedName = \s -> not (member s keys)
+  where
+    keys = fromList ["if", "else", "while",
+                     "function", "var"]
+>>>>>>> master

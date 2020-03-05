@@ -8,8 +8,8 @@
              TypeFamilies,
              FlexibleContexts,
              NumericUnderscores,
-             UnboxedTuples #-}
-{- LANGUAGE NoMonoLocalBinds #-}
+             UnboxedTuples,
+             NoMonomorphismRestriction #-}
 module Main where
 import Parsers (BrainFuckOp(..))
 import qualified Parsers
@@ -53,31 +53,21 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
 javascript :: String -> IO (Maybe Parsers.JSProgram)
 javascript = $$(Parsley.parseFromFile Parsers.javascript)
 
---boom :: String -> Maybe ()
+--boom :: String -> Maybe String
 --boom = $$(Parsley.runParser Parsers.failure)
 
 --nfb :: String -> Maybe ()
 --nfb = $$(Parsley.runParser Parsers.nfb)
 
---cinput :: String -> Maybe String
---cinput = $$(Parsley.runParser Parsers.cinput)
-
-numbers :: String -> Maybe (Either Int Double)
-numbers = $$(Parsley.runParser Parsers.numbers)
-
 main :: IO ()
 main =
-{-  do res <- parseBrainfuck "inputs/helloworld.bf"
+  {-do res <- parseBrainfuck "inputs/helloworld.bf"
      print res
      print (nfb "a")
      print (nfb "ab")
      print (nfb "c")-}
-  do --javascript "inputs/fibonacci.js" >>= print
-     --javascript "inputs/heapsort.js" >>= print
-     --javascript "inputs/game.js" >>= print
+  do javascript "inputs/fibonacci.js" >>= print
+     javascript "inputs/heapsort.js" >>= print
+     javascript "inputs/game.js" >>= print
      javascript "inputs/big.js" >>= print
-     --return (numbers "01234") >>= print
-     --return (numbers "7e4") >>= print
-     --return (numbers "7.821") >>= print
-     --return (numbers "0xffa") >>= print
      return ()

@@ -148,9 +148,9 @@ postprocess (LookAhead p)       = LetInserter (fmap optimise (fmap LookAhead (ru
 postprocess (NotFollowedBy p)   = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
 postprocess (Branch b p q)      = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
 postprocess (Match p fs qs d)   = LetInserter (fmap optimise (liftA4 Match (runLetInserter p) (return fs) (traverse runLetInserter qs) (runLetInserter d)))
-postprocess (ChainPre op p)     = LetInserter (fmap In       (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
-postprocess (ChainPost p op)    = LetInserter (fmap In       (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
-postprocess (Debug name p)      = LetInserter (fmap In       (fmap (Debug name) (runLetInserter p)))
+postprocess (ChainPre op p)     = LetInserter (fmap optimise (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
+postprocess (ChainPost p op)    = LetInserter (fmap optimise (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
+postprocess (Debug name p)      = LetInserter (fmap optimise (fmap (Debug name) (runLetInserter p)))
 postprocess (Pure x)            = LetInserter (return        (In (Pure x)))
 postprocess (Satisfy f)         = LetInserter (return        (In (Satisfy f)))
 

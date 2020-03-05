@@ -188,13 +188,11 @@ numbers = natFloat
         qf = [||\g x -> liftM Right (g x)||]
 
     fractExponent :: Parser (Int -> Maybe Double)
-    fractExponent = WQ f qf <$> fraction <*> option (code "") exponent'
-                <|> WQ g qg <$> exponent'
+    fractExponent = WQ f qf <$> (option (code "") fraction) <*> option (code "") exponent'
       where
+        f :: String -> String -> Int -> Maybe Double
         f fract exp n = readMaybe (show n ++ fract ++ exp)
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
-        g exp n = readMaybe (show n ++ exp)
-        qg = [||\exp n -> readMaybe (show n ++ exp)||] 
 
     fraction :: Parser [Char]
     fraction = ([(:) (code '.')]) <$> (char '.' 
@@ -325,7 +323,7 @@ javascript = whitespace *> many element <* eof
                <|> pure (code (Left 0))
 
     decimalFloat :: Parser (Either Int Double)
-    decimalFloat = fromMaybeP (decimal <**> (option ([(.) (code Just) (code Left)]) fractFloat)) empty
+    decimalFloat = debug "decimal float" $ fromMaybeP (decimal <**> (option ([(.) (code Just) (code Left)]) fractFloat)) empty
 
     fractFloat :: Parser (Int -> Maybe (Either Int Double))
     fractFloat = WQ f qf <$> fractExponent
@@ -334,13 +332,11 @@ javascript = whitespace *> many element <* eof
         qf = [||\g x -> liftM Right (g x)||]
 
     fractExponent :: Parser (Int -> Maybe Double)
-    fractExponent = WQ f qf <$> fraction <*> option (code "") exponent'
-                <|> WQ g qg <$> exponent'
+    fractExponent = WQ f qf <$> option (code "") fraction <*> option (code "") exponent'
       where
+        f :: String -> String -> Int -> Maybe Double
         f fract exp n = readMaybe (show n ++ fract ++ exp)
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
-        g exp n = readMaybe (show n ++ exp)
-        qg = [||\exp n -> readMaybe (show n ++ exp)||] 
 
     fraction :: Parser [Char]
     fraction = ([(:) (code '.')]) <$> (char '.' 

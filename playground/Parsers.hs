@@ -27,6 +27,9 @@ cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac"
     bf = match ">" item op empty
     op '>' = string ">"
 
+defuncTest :: Parser (Maybe Int)
+defuncTest = code Just <$> (code (+) <$> (item $> code 1) <*> (item $> code 8))
+
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")
 
@@ -323,7 +326,7 @@ javascript = whitespace *> many element <* eof
                <|> pure (code (Left 0))
 
     decimalFloat :: Parser (Either Int Double)
-    decimalFloat = debug "decimal float" $ fromMaybeP (decimal <**> (option ([(.) (code Just) (code Left)]) fractFloat)) empty
+    decimalFloat = fromMaybeP (decimal <**> (option ([(.) (code Just) (code Left)]) fractFloat)) empty
 
     fractFloat :: Parser (Int -> Maybe (Either Int Double))
     fractFloat = makeQ f qf <$> fractExponent

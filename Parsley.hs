@@ -3,7 +3,8 @@
              RankNTypes,
              TypeApplications,
              ScopedTypeVariables,
-             FlexibleContexts #-}
+             FlexibleContexts,
+             PatternSynonyms #-}
 module Parsley ( Parser, runParser, parseFromFile
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
@@ -43,7 +44,7 @@ module Parsley ( Parser, runParser, parseFromFile
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Input hiding               (PreparedInput(..))
-import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug)
+import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
 import Utils                      (code, Quapplicative(..), WQ, Code)
@@ -52,10 +53,15 @@ import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
+import Defunc                     (Defunc(CHAR, EQ_H, UNIT, APP, CONS, EMPTY, ID, FLIP, BLACK), pattern FLIP_H)
 
 {-# INLINE fmap #-}
 fmap :: WQ (a -> b) -> Parser a -> Parser b
-fmap f = (pure f <*>)
+fmap = _fmap . BLACK
+
+{-# INLINE _fmap #-}
+_fmap :: Defunc WQ (a -> b) -> Parser a -> Parser b
+_fmap f = (_pure f <*>)
 
 (<$>) :: WQ (a -> b) -> Parser a -> Parser b
 (<$>) = fmap
@@ -72,15 +78,19 @@ x <$ p = p *> pure x
 (<&>) :: Parser a -> WQ (a -> b) -> Parser b
 (<&>) = flip fmap
 
+{-# INLINE _liftA2 #-}
+_liftA2 :: Defunc WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
+_liftA2 f p q = _fmap f p <*> q
+
 {-# INLINE liftA2 #-}
 liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
-liftA2 f p q = f <$> p <*> q
+liftA2 = _liftA2 . BLACK
 
 liftA3 :: WQ (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
 liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
-many = pfoldr (code (:)) (makeQ [] [||[]||])
+many = _pfoldr CONS EMPTY
 {-many p = newRegister (pure (code id)) (\r ->
     let go = modify r (code flip >*< code (.) <$> (code (:) <$> p)) *> go
          <|> (makeQ ($ []) [||\f -> f []||] <$> get r)
@@ -108,7 +118,7 @@ skipSome = skipManyN 1
 p <+> q = code Left <$> p <|> code Right <$> q
 
 sepBy :: Parser a -> Parser b -> Parser [a]
-sepBy p sep = sepBy1 p sep <|> pure (makeQ [] [||[]||])
+sepBy p sep = sepBy1 p sep <|> _pure EMPTY
 
 sepBy1 :: Parser a -> Parser b -> Parser [a]
 sepBy1 p sep = p <:> many (sep *> p)
@@ -120,7 +130,7 @@ endBy1 :: Parser a -> Parser b -> Parser [a]
 endBy1 p sep = some (p <* sep)
 
 manyTill :: Parser a -> Parser b -> Parser [a]
-manyTill p end = let go = end $> makeQ [] [||[]||] <|> p <:> go in go
+manyTill p end = let go = end *> _pure EMPTY <|> p <:> go in go
 
 someTill :: Parser a -> Parser b -> Parser [a]
 someTill p end = notFollowedBy end *> (p <:> manyTill p end)
@@ -128,13 +138,13 @@ someTill p end = notFollowedBy end *> (p <:> manyTill p end)
 -- Additional Combinators
 {-# INLINE (<:>) #-}
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
-(<:>) = liftA2 (code (:))
+(<:>) = _liftA2 CONS
 
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
-(<**>) = liftA2 (makeQ (flip ($)) [|| (flip ($)) ||])
+(<**>) = _liftA2 (FLIP_H APP)
 
 unit :: Parser ()
-unit = pure (code ())
+unit = _pure UNIT
 
 (<~>) :: Parser a -> Parser b -> Parser (a, b)
 (<~>) = liftA2 (code (,))
@@ -150,7 +160,7 @@ unit = pure (code ())
 
   -- Auxillary functions
 sequence :: [Parser a] -> Parser [a]
-sequence = foldr (<:>) (pure (makeQ [] [||[]||]))
+sequence = foldr (<:>) (_pure EMPTY)
 
 traverse :: (a -> Parser b) -> [a] -> Parser [b]
 traverse f = sequence . map f
@@ -184,7 +194,7 @@ between open close p = open *> p <* close
 
 -- Parsing Primitives
 char :: Char -> Parser Char
-char c = code c <$ satisfy (makeQ (== c) [||(== c)||])
+char c = code c <$ _satisfy (EQ_H (CHAR c))
 
 item :: Parser Char
 item = satisfy (makeQ (const True) [|| const True ||])
@@ -231,7 +241,7 @@ while :: Parser Bool -> Parser ()
 while x = fix (when x)
 
 select :: Parser (Either a b) -> Parser (a -> b) -> Parser b
-select p q = branch p q (pure (code id))
+select p q = branch p q (_pure ID)
 
 fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
 fromMaybeP pm px = select (makeQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
@@ -241,10 +251,10 @@ maybeP p = option (makeQ Nothing [||Nothing||]) (code Just <$> p)
 
 -- Iterative Parsers
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
-chainl1 p op = chainPost p (code flip <$> op <*> p)
+chainl1 p op = chainPost p (_fmap FLIP op <*> p)
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
-chainr1 p op = let go = p <**> ((code flip <$> op <*> go) <|> pure (code id)) in go
+chainr1 p op = let go = p <**> ((_fmap FLIP op <*> go) <|> _pure ID) in go
 
 chainr :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
 chainr p op x = chainr1 p op <|> pure x
@@ -252,17 +262,20 @@ chainr p op x = chainr1 p op <|> pure x
 chainl :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
 chainl p op x = chainl1 p op <|> pure x
 
+_pfoldr :: Defunc WQ (a -> b -> b) -> Defunc WQ b -> Parser a -> Parser b
+_pfoldr f k p = chainPre (_fmap f p) (_pure k) 
+
 pfoldr :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
-pfoldr f k p = chainPre (f <$> p) (pure k)
+pfoldr f k = _pfoldr (BLACK f) (BLACK k)
 
 pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
-pfoldl f k p = chainPost (pure k) (([flip f]) <$> p)
+pfoldl f k p = chainPost (pure k) (_fmap (FLIP_H (BLACK f)) p)
 
 pfoldr1 :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
 pfoldr1 f k p = ([foldr f k]) <$> some p
 
 pfoldl1 :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
-pfoldl1 f k p = chainPost (f <$> pure k <*> p) (([flip f]) <$> p)
+pfoldl1 f k p = chainPost (f <$> pure k <*> p) (_fmap (FLIP_H (BLACK f)) p)
 
 data Level a = InfixL  [Parser (a -> a -> a)]
              | InfixR  [Parser (a -> a -> a)]

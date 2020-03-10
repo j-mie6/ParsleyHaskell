@@ -51,7 +51,10 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
     write x (Tape ls _ rs) = Tape ls x rs
 
 javascript :: String -> IO (Maybe Parsers.JSProgram)
-javascript = $$(Parsley.parseFromFile Parsers.javascript)
+javascript = const (return Nothing)-- $$(Parsley.parseFromFile Parsers.javascript)
+
+defuncTest :: String -> Maybe (Maybe Int)
+defuncTest = $$(Parsley.runParser Parsers.defuncTest)
 
 --boom :: String -> Maybe String
 --boom = $$(Parsley.runParser Parsers.failure)

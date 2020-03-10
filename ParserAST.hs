@@ -10,7 +10,7 @@ module ParserAST where
 
 import Indexed                    (IFunctor, Fix(In), Const1(..), imap, cata)
 import MachineAST                 (IMVar, MVar(..), IΣVar(..))
-import Utils                      (WQ(..))
+import Utils                      (WQ, makeQ)
 import Language.Haskell.TH.Syntax (Lift)
 import Defunc
 import Data.List                  (intercalate)
@@ -20,7 +20,10 @@ newtype Parser a = Parser {unParser :: Fix (ParserF WQ) a}
 
 -- Core smart constructors
 pure :: WQ a -> Parser a
-pure = Parser . In . Pure . BLACK
+pure = _pure . BLACK
+
+_pure :: Defunc WQ a -> Parser a
+_pure = Parser . In . Pure
 
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
 Parser p <*> Parser q = Parser (In (p :<*>: q))
@@ -38,7 +41,10 @@ empty = Parser (In Empty)
 Parser p <|> Parser q = Parser (In (p :<|>: q))
 
 satisfy :: WQ (Char -> Bool) -> Parser Char
-satisfy = Parser . In . Satisfy . BLACK
+satisfy = _satisfy . BLACK
+
+_satisfy :: Defunc WQ (Char -> Bool) -> Parser Char
+_satisfy = Parser . In . Satisfy
 
 lookAhead :: Parser a -> Parser a
 lookAhead = Parser . In . LookAhead . unParser
@@ -50,7 +56,7 @@ try :: Parser a -> Parser a
 try = Parser . In . Try . unParser
 
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> BLACK (WQ (== v) [||(== v)||])) vs) (map (unParser . f) vs) def))
+match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> EQ_H (makeQ v [||v||])) vs) (map (unParser . f) vs) def))
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (Branch c p q))
@@ -119,8 +125,8 @@ instance IFunctor (ParserF q) where
 instance Show (Fix (ParserF q) a) where
   show = getConst1 . cata (Const1 . alg)
     where
-      alg (Pure x)                                  = "(pure x)"
-      alg (Satisfy _)                               = "(satisfy f)"
+      alg (Pure x)                                  = "(pure " ++ show x ++ ")"
+      alg (Satisfy f)                               = "(satisfy " ++ show f ++ ")"
       alg (Const1 pf :<*>: Const1 px)               = concat ["(", pf, " <*> ",  px, ")"]
       alg (Const1 p :*>: Const1 q)                  = concat ["(", p, " *> ", q, ")"]
       alg (Const1 p :<*: Const1 q)                  = concat ["(", p, " <* ", q, ")"]
@@ -132,7 +138,7 @@ instance Show (Fix (ParserF q) a) where
       alg (Let True v _)                            = concat ["(rec ", show v, ")"]
       alg (NotFollowedBy (Const1 p))                = concat ["(notFollowedBy ", p, ")"]
       alg (Branch (Const1 b) (Const1 p) (Const1 q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-      alg (Match (Const1 p) fs qs (Const1 def))     = concat ["(match ", p, " [", intercalate ", " (map getConst1 qs), "] ", def, ")"]
+      alg (Match (Const1 p) fs qs (Const1 def))     = concat ["(match ", p, " ", show fs, " [", intercalate ", " (map getConst1 qs), "] ", def, ")"]
       alg (ChainPre (Const1 op) (Const1 p))         = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))        = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                      = p

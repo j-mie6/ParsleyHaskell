@@ -13,7 +13,7 @@ import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar
 import MachineAnalyser            (coinsNeeded)
 import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>))
 import Utils                      (code, Quapplicative((>*<)))
-import Defunc                     (Defunc(BLACK))
+import Defunc                     (Defunc(BLACK, COMPOSE, UNIT, ID), pattern FLIP_H)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict (State, get, modify', runState, MonadState)
@@ -72,7 +72,7 @@ peephole (MetaP RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $
 peephole (MetaP RequiresCut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m -> 
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
+     opc <- freshM (runCodeGen op (In3 (_Fmap (FLIP_H COMPOSE) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
      pc <- freshM (runCodeGen p (In3 (_App m)))
      return $! In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ (addCoins (coinsNeeded pc) pc))))))))
 peephole (MetaP RequiresCut (_ :< ChainPost (p :< _) (op :< _))) = Just $ CodeGen $ \m -> 
@@ -84,7 +84,7 @@ peephole (MetaP RequiresCut (_ :< ChainPost (p :< _) (op :< _))) = Just $ CodeGe
 peephole (MetaP Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m -> 
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
+     opc <- freshM (runCodeGen op (In3 (_Fmap (FLIP_H COMPOSE) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
      let nop = coinsNeeded opc
      pc <- freshM (runCodeGen p (In3 (_App m)))
      return $! In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ (addCoins nop opc) μ (In3 (Get σ (addCoins (coinsNeeded pc) pc))))))))
@@ -115,7 +115,7 @@ direct (NotFollowedBy p) m =
   do pc <- runCodeGen p (In3 (Pop (In3 (Seek (In3 (Commit (In3 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
-     return $! In3 (SoftFork (addCoins (max (np - nm) 0) (In3 (Tell pc))) (In3 (Push (code ()) m)))
+     return $! In3 (SoftFork (addCoins (max (np - nm) 0) (In3 (Tell pc))) (In3 (Push UNIT m)))
 direct (Branch b p q) m = 
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In3 (Swap (In3 (_App φ)))))
@@ -135,10 +135,10 @@ direct (Let _ μ _) m = return $! tailCallOptimise μ m
 direct (ChainPre op p) m =
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (In3 (_Fmap ([flip (code (.))]) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
+     opc <- freshM (runCodeGen op (In3 (_Fmap (FLIP_H COMPOSE) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
      let nop = coinsNeeded opc
      pc <- freshM (runCodeGen p (In3 (_App m)))
-     return $! In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ (addCoins nop opc) μ (In3 (Get σ pc)))))))
+     return $! In3 (Push ID (In3 (Make σ (In3 (ChainInit σ (addCoins nop opc) μ (In3 (Get σ pc)))))))
 direct (ChainPost p op) m =
   do μ <- askM
      σ <- freshΣ

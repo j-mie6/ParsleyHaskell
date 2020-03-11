@@ -10,7 +10,7 @@ module ParserAST where
 
 import Indexed                    (IFunctor, Fix(In), Const1(..), imap, cata)
 import MachineAST                 (IMVar, MVar(..), IΣVar(..))
-import Utils                      (WQ, makeQ)
+import Utils                      (WQ, code)
 import Language.Haskell.TH.Syntax (Lift)
 import Defunc
 import Data.List                  (intercalate)
@@ -56,7 +56,7 @@ try :: Parser a -> Parser a
 try = Parser . In . Try . unParser
 
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> EQ_H (makeQ v [||v||])) vs) (map (unParser . f) vs) def))
+match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> EQ_H (code v)) vs) (map (unParser . f) vs) def))
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (Branch c p q))

@@ -194,7 +194,7 @@ between open close p = open *> p <* close
 
 -- Parsing Primitives
 char :: Char -> Parser Char
-char c = code c <$ _satisfy (EQ_H (CHAR c))
+char c = _satisfy (EQ_H (CHAR c)) *> _pure (CHAR c)
 
 item :: Parser Char
 item = satisfy (makeQ (const True) [|| const True ||])
@@ -272,7 +272,7 @@ pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
 pfoldl f k p = chainPost (pure k) (_fmap (FLIP_H (BLACK f)) p)
 
 pfoldr1 :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
-pfoldr1 f k p = ([foldr f k]) <$> some p
+pfoldr1 f k p = f <$> p <*> pfoldr f k p
 
 pfoldl1 :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
 pfoldl1 f k p = chainPost (f <$> pure k <*> p) (_fmap (FLIP_H (BLACK f)) p)

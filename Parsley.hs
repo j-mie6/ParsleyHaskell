@@ -201,10 +201,13 @@ item = satisfy (makeQ (const True) [|| const True ||])
 
 -- Composite Combinators
 optionally :: Parser a -> WQ b -> Parser b
-optionally p x = p $> x <|> pure x
+optionally p = _optionally p . BLACK
+
+_optionally :: Parser a -> Defunc WQ b -> Parser b
+_optionally p x = p *> _pure x <|> _pure x
 
 optional :: Parser a -> Parser ()
-optional = flip optionally (code ())
+optional = flip _optionally UNIT
 
 option :: WQ a -> Parser a -> Parser a
 option x p = p <|> pure x

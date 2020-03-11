@@ -14,7 +14,6 @@ coinsNeeded = fst . getConst3 . cata3 (Const3 . alg)
     algCatch (k1, _) (k2, _) = (min k1 k2, False)
 
     alg :: M q o (Const3 (Int, Bool)) xs r a -> (Int, Bool)
-    --alg Halt                               = (0, False)
     alg Ret                                = (0, False)
     alg (Push _ (Const3 k))                = (fst k, False)
     alg (Pop k)                            = getConst3 k
@@ -24,9 +23,7 @@ coinsNeeded = fst . getConst3 . cata3 (Const3 . alg)
     alg (Jump _)                           = (0, False)
     alg Empt                               = (0, True)
     alg (Commit k)                         = getConst3 k
-    alg (SoftFork p q)                     = algCatch (getConst3 p) (getConst3 q)
-    alg (HardFork p q)                     = algCatch (getConst3 p) (getConst3 q)
-    alg (Attempt k)                        = getConst3 k
+    alg (Catch k h)                        = algCatch (getConst3 k) (getConst3 h)
     alg (Tell k)                           = getConst3 k
     alg (Seek k)                           = getConst3 k
     alg (Case p q)                         = algCatch (getConst3 p) (getConst3 q)
@@ -41,6 +38,8 @@ coinsNeeded = fst . getConst3 . cata3 (Const3 . alg)
     alg (Put _ k)                          = getConst3 k
     alg (LogEnter _ k)                     = getConst3 k
     alg (LogExit _ k)                      = getConst3 k
+    alg (Handler (Parsec h))               = getConst3 h
+    alg (Handler _)                        = (0, False)
     alg (MetaM (AddCoins n) (Const3 k))    = k
     alg (MetaM (FreeCoins n) (Const3 k))   = (n, snd k)
     alg (MetaM (RefundCoins n) (Const3 k)) = (max (fst k - n) 0, snd k) -- These were refunded, so deduct

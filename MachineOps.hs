@@ -104,19 +104,19 @@ modifyΣ σ f =
 
 class FailureOps o where
   setupHandler :: [Code (H s o a)] -> Code o
-               -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
+               -> (Code o -> Code (Unboxed o -> ST s (Maybe a)))
                -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
   raise :: [Code (H s o a)] -> Code (Unboxed o -> ST s (Maybe a))
 
-#define deriveFailureOps(_o)                                      \
-instance FailureOps _o where                                      \
-{                                                                 \
-  setupHandler [] o h k = k [h (raise @_o []) o];                 \
-  setupHandler hs o h k = [||                                     \
-    let handler ((!o#) :: Unboxed _o) = $$(h (raise @_o hs) o) o# \
-    in $$(k ([||handler||]:hs)) ||];                              \
-  raise [] = [||\(!o#) -> return Nothing :: ST s (Maybe a)||];    \
-  raise (h:_) = h;                                                \
+#define deriveFailureOps(_o)                                   \
+instance FailureOps _o where                                   \
+{                                                              \
+  setupHandler [] o h k = k [h o];                             \
+  setupHandler hs o h k = [||                                  \
+    let handler ((!o#) :: Unboxed _o) = $$(h o) o#             \
+    in $$(k ([||handler||]:hs)) ||];                           \
+  raise [] = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]; \
+  raise (h:_) = h;                                             \
 };
 inputInstances(deriveFailureOps)
 

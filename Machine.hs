@@ -257,17 +257,6 @@ execCommit (Exec k) = k <&> \m γ -> m (γ {hs = tail (hs γ)})
 execCatch :: (?ops :: InputOps s o, FailureOps o) => Exec s o xs r a -> Exec s o (o ': xs) r a -> ExecMonad s o xs r a
 execCatch (Exec k) (Exec h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (\c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]) mk) k h
 
-#define deriveHardForkHandler(_o)       \
-instance HardForkHandler _o where       \
-{                                       \
-  hardForkHandler mq γ c = [||\(!o#) -> \
-      if $$same $$c ($$box o#) then     \
-        $$(mq (γ {o = [||$$box o#||]})) \
-      else $$(raise @_o (hs γ)) o#      \
-    ||]                                 \
-};
-inputInstances(deriveHardForkHandler)
-
 execTell :: Exec s o (o ': xs) r a -> ExecMonad s o xs r a
 execTell (Exec k) = k <&> \mk γ -> mk (γ {xs = QCons (o γ) (xs γ)})
 
@@ -377,11 +366,28 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     prelude    = [|| concat [indent, dir : name, dir : " (", show ($$offToInt $$offset), "): "] ||]
     caretSpace = [|| replicate (length $$prelude + $$offToInt $$offset - $$offToInt $$start) ' ' ||]
 
-execLogEnter :: (?ops :: InputOps s o, LogHandler o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
+execLogEnter :: (?ops :: InputOps s o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
 execLogEnter name (Exec mk) =
   liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(k γ)||]) 
     (local debugUp mk) 
     ask
+
+execLogExit :: (?ops :: InputOps s o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
+execLogExit name (Exec mk) = 
+  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||]) 
+    (local debugDown mk) 
+    ask
+
+#define deriveHardForkHandler(_o)       \
+instance HardForkHandler _o where       \
+{                                       \
+  hardForkHandler mq γ c = [||\(!o#) -> \
+      if $$same $$c ($$box o#) then     \
+        $$(mq (γ {o = [||$$box o#||]})) \
+      else $$(raise @_o (hs γ)) o#      \
+    ||]                                 \
+};
+inputInstances(deriveHardForkHandler)
 
 #define deriveLogHandler(_o)                                                                                      \
 instance LogHandler _o where                                                                                      \
@@ -391,12 +397,6 @@ instance LogHandler _o where                                                    
     ||]                                                                                                           \
 };
 inputInstances(deriveLogHandler)
-
-execLogExit :: (?ops :: InputOps s o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
-execLogExit name (Exec mk) = 
-  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||]) 
-    (local debugDown mk) 
-    ask
 
 execHandler :: (?ops :: InputOps s o, Handlers o) => Handler o (Exec s o) xs r a -> ExecMonad s o (o ': xs) r a
 execHandler (Parsec (Exec k)) = k <&> \mk γ -> let QCons c xs' = xs γ in [||$$(hardForkHandler mk (γ {xs = xs'}) c) ($$unbox $$(o γ))||]

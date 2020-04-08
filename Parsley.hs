@@ -135,7 +135,7 @@ infixl 3 <+>
 p <+> q = code Left <$> p <|> code Right <$> q
 
 sepBy :: Parser a -> Parser b -> Parser [a]
-sepBy p sep = sepBy1 p sep <|> pure EMPTY
+sepBy p sep = option EMPTY (sepBy1 p sep)
 
 sepBy1 :: Parser a -> Parser b -> Parser [a]
 sepBy1 p sep = p <:> many (sep *> p)

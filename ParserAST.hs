@@ -19,9 +19,7 @@ import Data.List                  (intercalate)
 newtype Parser a = Parser {unParser :: Fix (ParserF WQ) a}
 
 -- Core smart constructors
-pure :: WQ a -> Parser a
-pure = _pure . BLACK
-
+{-# INLINE _pure #-}
 _pure :: Defunc WQ a -> Parser a
 _pure = Parser . In . Pure
 
@@ -40,9 +38,7 @@ empty = Parser (In Empty)
 (<|>) :: Parser a -> Parser a -> Parser a
 Parser p <|> Parser q = Parser (In (p :<|>: q))
 
-satisfy :: WQ (Char -> Bool) -> Parser Char
-satisfy = _satisfy . BLACK
-
+{-# INLINE _satisfy #-}
 _satisfy :: Defunc WQ (Char -> Bool) -> Parser Char
 _satisfy = Parser . In . Satisfy
 

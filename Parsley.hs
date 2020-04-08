@@ -4,7 +4,11 @@
              TypeApplications,
              ScopedTypeVariables,
              FlexibleContexts,
-             PatternSynonyms #-}
+             FlexibleInstances,
+             FunctionalDependencies,
+             AllowAmbiguousTypes,
+             PatternSynonyms,
+             GADTs #-}
 module Parsley ( Parser, runParser, parseFromFile
                -- Functor
                , fmap, (<$>), (<$), ($>), (<&>), void
@@ -34,7 +38,7 @@ module Parsley ( Parser, runParser, parseFromFile
                , (<?|>), (>?>), (>??>), when, while, fromMaybeP
                , debug
                -- Expressions
-               , Level(..), precedence
+               , Level(..), Prec(..), precedence, monolith, infixL, infixR, prefix, postfix
                -- Template Haskell Utils
                , code, (>*<), makeQ, _code, _val, WQ, Lift
                -- Template Haskell Crap
@@ -44,7 +48,7 @@ module Parsley ( Parser, runParser, parseFromFile
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Input hiding               (PreparedInput(..))
-import ParserAST                  (Parser, pure, (<*>), (*>), (<*), empty, (<|>), branch, match, satisfy, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
+import ParserAST                  (Parser, (<*>), (*>), (<*), empty, (<|>), branch, match, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
 import Utils                      (code, Quapplicative(..), WQ, Code)
@@ -55,42 +59,50 @@ import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
 import Defunc                     (Defunc(CHAR, EQ_H, UNIT, APP, CONS, EMPTY, ID, FLIP, BLACK), pattern FLIP_H)
 
-{-# INLINE fmap #-}
-fmap :: WQ (a -> b) -> Parser a -> Parser b
-fmap = _fmap . BLACK
+class ParserOps rep where
+  pure :: rep a -> Parser a
+  satisfy :: rep (Char -> Bool) -> Parser Char
+  pfoldl :: ParserOps repk => rep (b -> a -> b) -> repk b -> Parser a -> Parser b
+  pfoldl1 :: ParserOps repk => rep (b -> a -> b) -> repk b -> Parser a -> Parser b
 
-{-# INLINE _fmap #-}
-_fmap :: Defunc WQ (a -> b) -> Parser a -> Parser b
-_fmap f = (_pure f <*>)
+instance ParserOps WQ where
+  pure = pure . BLACK
+  satisfy = satisfy . BLACK
+  pfoldl = pfoldl . BLACK
+  pfoldl1 = pfoldl1 . BLACK
 
-(<$>) :: WQ (a -> b) -> Parser a -> Parser b
+instance {-# INCOHERENT #-} x ~ Defunc WQ => ParserOps x where
+  pure = _pure
+  satisfy = _satisfy
+  pfoldl f k p = chainPost (pure k) (FLIP_H f <$> p)
+  pfoldl1 f k p = chainPost (f <$> pure k <*> p) (FLIP_H f <$> p)
+
+fmap :: ParserOps rep => rep (a -> b) -> Parser a -> Parser b
+fmap f = (pure f <*>)
+
+(<$>) :: ParserOps rep => rep (a -> b) -> Parser a -> Parser b
 (<$>) = fmap
 
 void :: Parser a -> Parser ()
 void p = p *> unit
 
-(<$) :: WQ b -> Parser a -> Parser b
+(<$) :: ParserOps rep => rep b -> Parser a -> Parser b
 x <$ p = p *> pure x
 
-($>) :: Parser a -> WQ b -> Parser b
+($>) :: ParserOps rep => Parser a -> rep b -> Parser b
 ($>) = flip (<$)
 
-(<&>) :: Parser a -> WQ (a -> b) -> Parser b
+(<&>) :: ParserOps rep => Parser a -> rep (a -> b) -> Parser b
 (<&>) = flip fmap
 
-{-# INLINE _liftA2 #-}
-_liftA2 :: Defunc WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
-_liftA2 f p q = _fmap f p <*> q
+liftA2 :: ParserOps rep => rep (a -> b -> c) -> Parser a -> Parser b -> Parser c
+liftA2 f p q = f <$> p <*> q
 
-{-# INLINE liftA2 #-}
-liftA2 :: WQ (a -> b -> c) -> Parser a -> Parser b -> Parser c
-liftA2 = _liftA2 . BLACK
-
-liftA3 :: WQ (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
+liftA3 :: ParserOps rep => rep (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
 liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
-many = _pfoldr CONS EMPTY
+many = pfoldr CONS EMPTY
 {-many p = newRegister (pure (code id)) (\r ->
     let go = modify r (code flip >*< code (.) <$> (code (:) <$> p)) *> go
          <|> (makeQ ($ []) [||\f -> f []||] <$> get r)
@@ -118,7 +130,7 @@ skipSome = skipManyN 1
 p <+> q = code Left <$> p <|> code Right <$> q
 
 sepBy :: Parser a -> Parser b -> Parser [a]
-sepBy p sep = sepBy1 p sep <|> _pure EMPTY
+sepBy p sep = sepBy1 p sep <|> pure EMPTY
 
 sepBy1 :: Parser a -> Parser b -> Parser [a]
 sepBy1 p sep = p <:> many (sep *> p)
@@ -130,7 +142,7 @@ endBy1 :: Parser a -> Parser b -> Parser [a]
 endBy1 p sep = some (p <* sep)
 
 manyTill :: Parser a -> Parser b -> Parser [a]
-manyTill p end = let go = end *> _pure EMPTY <|> p <:> go in go
+manyTill p end = let go = end $> EMPTY <|> p <:> go in go
 
 someTill :: Parser a -> Parser b -> Parser [a]
 someTill p end = notFollowedBy end *> (p <:> manyTill p end)
@@ -138,13 +150,13 @@ someTill p end = notFollowedBy end *> (p <:> manyTill p end)
 -- Additional Combinators
 {-# INLINE (<:>) #-}
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
-(<:>) = _liftA2 CONS
+(<:>) = liftA2 CONS
 
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
-(<**>) = _liftA2 (FLIP_H APP)
+(<**>) = liftA2 (FLIP_H APP)
 
 unit :: Parser ()
-unit = _pure UNIT
+unit = pure UNIT
 
 (<~>) :: Parser a -> Parser b -> Parser (a, b)
 (<~>) = liftA2 (code (,))
@@ -158,9 +170,9 @@ unit = _pure UNIT
 (>>) :: Parser a -> Parser b -> Parser b
 (>>) = (*>)
 
-  -- Auxillary functions
+-- Auxillary functions
 sequence :: [Parser a] -> Parser [a]
-sequence = foldr (<:>) (_pure EMPTY)
+sequence = foldr (<:>) (pure EMPTY)
 
 traverse :: (a -> Parser b) -> [a] -> Parser [b]
 traverse f = sequence . map f
@@ -194,17 +206,17 @@ between open close p = open *> p <* close
 
 -- Parsing Primitives
 char :: Char -> Parser Char
-char c = _satisfy (EQ_H (CHAR c)) *> _pure (CHAR c)
+char c = satisfy (EQ_H (CHAR c)) $> CHAR c
 
 item :: Parser Char
 item = satisfy (makeQ (const True) [|| const True ||])
 
 -- Composite Combinators
-optionally :: Parser a -> WQ b -> Parser b
+optionally :: ParserOps rep => Parser a -> rep b -> Parser b
 optionally p x = p $> x <|> pure x
 
 optional :: Parser a -> Parser ()
-optional = flip optionally (code ())
+optional = flip optionally UNIT
 
 option :: WQ a -> Parser a -> Parser a
 option x p = p <|> pure x
@@ -222,7 +234,7 @@ constp = (code const <$>)
 (<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
 cond <?|> (p, q) = branch (makeQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
 
-(>?>) :: Parser a -> WQ (a -> Bool) -> Parser a
+(>?>) :: ParserOps rep => Parser a -> rep (a -> Bool) -> Parser a
 p >?> f = p >??> pure f
 
 (>??>) :: Parser a -> Parser (a -> Bool) -> Parser a
@@ -241,7 +253,7 @@ while :: Parser Bool -> Parser ()
 while x = fix (when x)
 
 select :: Parser (Either a b) -> Parser (a -> b) -> Parser b
-select p q = branch p q (_pure ID)
+select p q = branch p q (pure ID)
 
 fromMaybeP :: Parser (Maybe a) -> Parser a -> Parser a
 fromMaybeP pm px = select (makeQ (maybe (Left ()) Right) [||maybe (Left ()) Right||] <$> pm) (constp px)
@@ -250,11 +262,17 @@ maybeP :: Parser a -> Parser (Maybe a)
 maybeP p = option (makeQ Nothing [||Nothing||]) (code Just <$> p)
 
 -- Iterative Parsers
+chainl1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (b -> a -> b) -> Parser b
+chainl1' f p op = chainPost (f <$> p) (FLIP <$> op <*> p)
+
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
-chainl1 p op = chainPost p (_fmap FLIP op <*> p)
+chainl1 = chainl1' ID
+
+chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
+chainr1' f p op = let go = p <**> ((FLIP <$> op <*> go) <|> pure f) in go
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
-chainr1 p op = let go = p <**> ((_fmap FLIP op <*> go) <|> _pure ID) in go
+chainr1 = chainr1' ID
 
 chainr :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
 chainr p op x = chainr1 p op <|> pure x
@@ -262,33 +280,50 @@ chainr p op x = chainr1 p op <|> pure x
 chainl :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
 chainl p op x = chainl1 p op <|> pure x
 
-_pfoldr :: Defunc WQ (a -> b -> b) -> Defunc WQ b -> Parser a -> Parser b
-_pfoldr f k p = chainPre (_fmap f p) (_pure k) 
+pfoldr :: (ParserOps repf, ParserOps repk) => repf (a -> b -> b) -> repk b -> Parser a -> Parser b
+pfoldr f k p = chainPre (f <$> p) (pure k)
 
-pfoldr :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
-pfoldr f k = _pfoldr (BLACK f) (BLACK k)
-
-pfoldl :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
-pfoldl f k p = chainPost (pure k) (_fmap (FLIP_H (BLACK f)) p)
-
-pfoldr1 :: WQ (a -> b -> b) -> WQ b -> Parser a -> Parser b
+pfoldr1 :: (ParserOps repf, ParserOps repk) => repf (a -> b -> b) -> repk b -> Parser a -> Parser b
 pfoldr1 f k p = f <$> p <*> pfoldr f k p
 
-pfoldl1 :: WQ (b -> a -> b) -> WQ b -> Parser a -> Parser b
-pfoldl1 f k p = chainPost (f <$> pure k <*> p) (_fmap (FLIP_H (BLACK f)) p)
+data Level a b = InfixL  [Parser (b -> a -> b)] (Defunc WQ (a -> b))
+               | InfixR  [Parser (a -> b -> b)] (Defunc WQ (a -> b))
+               | Prefix  [Parser (b -> b)]      (Defunc WQ (a -> b))
+               | Postfix [Parser (b -> b)]      (Defunc WQ (a -> b))
 
-data Level a = InfixL  [Parser (a -> a -> a)]
-             | InfixR  [Parser (a -> a -> a)]
-             | Prefix  [Parser (a -> a)]
-             | Postfix [Parser (a -> a)]
+class Monolith a b c where
+  infixL  :: [Parser (b -> a -> b)] -> c
+  infixR  :: [Parser (a -> b -> b)] -> c
+  prefix  :: [Parser (b -> b)]      -> c
+  postfix :: [Parser (b -> b)]      -> c
 
-precedence :: [Level a] -> Parser a -> Parser a
-precedence levels atom = foldl' convert atom levels
+instance x ~ a => Monolith x a (Level a a) where
+  infixL  = flip InfixL ID
+  infixR  = flip InfixR ID
+  prefix  = flip Prefix ID
+  postfix = flip Postfix ID
+
+instance {-# INCOHERENT #-} x ~ (WQ (a -> b) -> Level a b) => Monolith a b x where
+  infixL  ops = InfixL ops . BLACK
+  infixR  ops = InfixR ops . BLACK
+  prefix  ops = Prefix ops . BLACK
+  postfix ops = Postfix ops . BLACK
+
+data Prec a b where
+  NoLevel :: Prec a a
+  Level :: Level a b -> Prec b c -> Prec a c
+
+monolith :: [Level a a] -> Prec a a
+monolith = foldr Level NoLevel
+
+precedence :: Prec a b -> Parser a -> Parser b
+precedence NoLevel atom = atom
+precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
   where
-    convert x (InfixL ops)  = chainl1 x (choice ops)
-    convert x (InfixR ops)  = chainr1 x (choice ops)
-    convert x (Prefix ops)  = chainPre (choice ops) x
-    convert x (Postfix ops) = chainPost x (choice ops)
+    level (InfixL ops wrap) atom  = chainl1' wrap atom (choice ops)
+    level (InfixR ops wrap) atom  = chainr1' wrap atom (choice ops)
+    level (Prefix ops wrap) atom  = chainPre (choice ops) (fmap wrap atom)
+    level (Postfix ops wrap) atom = chainPost (fmap wrap atom) (choice ops)
 
 runParser :: forall input a rep. (Input input rep, Ops rep) => Parser a -> Code (input -> Maybe a)
 runParser p = [||\input -> runST $$(exec (prepare @input @rep [||input||]) (compile p))||]

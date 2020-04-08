@@ -38,6 +38,8 @@ optimise (Match (In Empty) _ _ def)                     = def
 optimise (Match p _ qs (In Empty))
   | all (\case {In Empty -> True; _ -> False}) qs = optimise (p :*>: In Empty)
 -- APPLICATIVE OPTIMISATION
+-- Identity Law: pure id <*> u                          = u
+optimise (In (Pure ID) :<*>: u)                         = u
 -- Homomorphism Law: pure f <*> pure x                  = pure (f x)
 optimise (In (Pure f) :<*>: In (Pure x))                = In (Pure (APP_H f x))
 -- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law

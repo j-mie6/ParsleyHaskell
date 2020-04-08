@@ -26,8 +26,8 @@ showi = show
 deriving instance Lift Pred
 
 pred :: Parser Pred
-pred = precedence [ Prefix [token "!" $> code Not]
-                  , InfixR [token "&&" $> code And]] 
+pred = precedence (monolith [ prefix [token "!" $> code Not]
+                            , infixR [token "&&" $> code And]])
                   ( token "t" $> code T
                 <|> token "f" $> code F)
 
@@ -109,24 +109,24 @@ javascript = whitespace *> many element <* eof
     condExpr :: Parser JSExpr'
     condExpr = liftA2 (code jsCondExprBuild) expr' (maybeP ((symbol '?' *> asgn) <~> (symbol ':' *> asgn)))
     expr' :: Parser JSExpr'
-    expr' = precedence
-      [ Prefix  [ operator "--" $> code jsDec, operator "++" $> code jsInc
+    expr' = precedence (monolith
+      [ prefix  [ operator "--" $> code jsDec, operator "++" $> code jsInc
                 , operator "-" $> code jsNeg, operator "+" $> code jsPlus
                 , operator "~" $> code jsBitNeg, operator "!" $> code jsNot ]
-      , Postfix [ operator "--" $> code jsDec, operator "++" $> code jsInc ]
-      , InfixL  [ operator "*" $> code JSMul, operator "/" $> code JSDiv
+      , postfix [ operator "--" $> code jsDec, operator "++" $> code jsInc ]
+      , infixL  [ operator "*" $> code JSMul, operator "/" $> code JSDiv
                 , operator "%" $> code JSMod ]
-      , InfixL  [ operator "+" $> code JSAdd, operator "-" $> code JSSub ]
-      , InfixL  [ operator "<<" $> code JSShl, operator ">>" $> code JSShr ]
-      , InfixL  [ operator "<=" $> code JSLe, operator "<" $> code JSLt
+      , infixL  [ operator "+" $> code JSAdd, operator "-" $> code JSSub ]
+      , infixL  [ operator "<<" $> code JSShl, operator ">>" $> code JSShr ]
+      , infixL  [ operator "<=" $> code JSLe, operator "<" $> code JSLt
                 , operator ">=" $> code JSGe, operator ">" $> code JSGt ]
-      , InfixL  [ operator "==" $> code JSEq, operator "!=" $> code JSNe ]
-      , InfixL  [ try (operator "&") $> code JSBitAnd ]
-      , InfixL  [ operator "^" $> code JSBitXor ]
-      , InfixL  [ try (operator "|") $> code JSBitOr ]
-      , InfixL  [ operator "&&" $> code JSAnd ]
-      , InfixL  [ operator "||" $> code JSOr ]
-      ]
+      , infixL  [ operator "==" $> code JSEq, operator "!=" $> code JSNe ]
+      , infixL  [ try (operator "&") $> code JSBitAnd ]
+      , infixL  [ operator "^" $> code JSBitXor ]
+      , infixL  [ try (operator "|") $> code JSBitOr ]
+      , infixL  [ operator "&&" $> code JSAnd ]
+      , infixL  [ operator "||" $> code JSOr ]
+      ])
       (code JSUnary <$> memOrCon)
     memOrCon :: Parser JSUnary
     memOrCon = keyword "delete" *> (code JSDel <$> member)

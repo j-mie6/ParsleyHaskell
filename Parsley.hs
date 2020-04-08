@@ -80,18 +80,22 @@ instance {-# INCOHERENT #-} x ~ Defunc WQ => ParserOps x where
 fmap :: ParserOps rep => rep (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
 
+infixl 4 <$>
 (<$>) :: ParserOps rep => rep (a -> b) -> Parser a -> Parser b
 (<$>) = fmap
 
 void :: Parser a -> Parser ()
 void p = p *> unit
 
+infixl 4 <$
 (<$) :: ParserOps rep => rep b -> Parser a -> Parser b
 x <$ p = p *> pure x
 
+infixl 4 $>
 ($>) :: ParserOps rep => Parser a -> rep b -> Parser b
 ($>) = flip (<$)
 
+infixl 4 <&>
 (<&>) :: ParserOps rep => Parser a -> rep (a -> b) -> Parser b
 (<&>) = flip fmap
 
@@ -126,6 +130,7 @@ skipManyN n p = foldr (const (p *>)) (skipMany p) [1..n]
 skipSome :: Parser a -> Parser ()
 skipSome = skipManyN 1
 
+infixl 3 <+>
 (<+>) :: Parser a -> Parser b -> Parser (Either a b)
 p <+> q = code Left <$> p <|> code Right <$> q
 
@@ -149,24 +154,30 @@ someTill p end = notFollowedBy end *> (p <:> manyTill p end)
 
 -- Additional Combinators
 {-# INLINE (<:>) #-}
+infixl 4 <:>
 (<:>) :: Parser a -> Parser [a] -> Parser [a]
 (<:>) = liftA2 CONS
 
+infixl 4 <**>
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
 (<**>) = liftA2 (FLIP_H APP)
 
 unit :: Parser ()
 unit = pure UNIT
 
+infixl 4 <~>
 (<~>) :: Parser a -> Parser b -> Parser (a, b)
 (<~>) = liftA2 (code (,))
 
+infixl 4 <~
 (<~) :: Parser a -> Parser b -> Parser a
 (<~) = (<*)
 
+infixl 4 ~>
 (~>) :: Parser a -> Parser b -> Parser b
 (~>) = (*>)
 
+infixl 1 >>
 (>>) :: Parser a -> Parser b -> Parser b
 (>>) = (*>)
 
@@ -218,7 +229,7 @@ optionally p x = p $> x <|> pure x
 optional :: Parser a -> Parser ()
 optional = flip optionally UNIT
 
-option :: WQ a -> Parser a -> Parser a
+option :: ParserOps rep => rep a -> Parser a -> Parser a
 option x p = p <|> pure x
 
 choice :: [Parser a] -> Parser a
@@ -231,18 +242,22 @@ bool x y False = y
 constp :: Parser a -> Parser (b -> a)
 constp = (code const <$>)
 
+infixl 4 <?|>
 (<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
 cond <?|> (p, q) = branch (makeQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
 
+infixl 4 >?>
 (>?>) :: ParserOps rep => Parser a -> rep (a -> Bool) -> Parser a
 p >?> f = p >??> pure f
 
+infixl 4 >??>
 (>??>) :: Parser a -> Parser (a -> Bool) -> Parser a
 px >??> pf = select (liftA2 (makeQ g qg) pf px) empty
   where
     g f x = if f x then Right x else Left ()
     qg = [||\f x -> if f x then Right x else Left ()||]
 
+infixl 1 ||=
 (||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
 p ||= f = match [minBound..maxBound] p f empty
 
@@ -269,16 +284,16 @@ chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 = chainl1' ID
 
 chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
-chainr1' f p op = let go = p <**> ((FLIP <$> op <*> go) <|> pure f) in go
+chainr1' f p op = let go = p <**> (option f (FLIP <$> op <*> go)) in go
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainr1 = chainr1' ID
 
-chainr :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
-chainr p op x = chainr1 p op <|> pure x
+chainr :: ParserOps rep => Parser a -> Parser (a -> a -> a) -> rep a -> Parser a
+chainr p op x = option x (chainr1 p op)
 
-chainl :: Parser a -> Parser (a -> a -> a) -> WQ a -> Parser a
-chainl p op x = chainl1 p op <|> pure x
+chainl :: ParserOps rep => Parser a -> Parser (a -> a -> a) -> rep a -> Parser a
+chainl p op x = option x (chainl1 p op)
 
 pfoldr :: (ParserOps repf, ParserOps repk) => repf (a -> b -> b) -> repk b -> Parser a -> Parser b
 pfoldr f k p = chainPre (f <$> p) (pure k)
@@ -322,37 +337,11 @@ precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
   where
     level (InfixL ops wrap) atom  = chainl1' wrap atom (choice ops)
     level (InfixR ops wrap) atom  = chainr1' wrap atom (choice ops)
-    level (Prefix ops wrap) atom  = chainPre (choice ops) (fmap wrap atom)
-    level (Postfix ops wrap) atom = chainPost (fmap wrap atom) (choice ops)
+    level (Prefix ops wrap) atom  = chainPre (choice ops) (wrap <$> atom)
+    level (Postfix ops wrap) atom = chainPost (wrap <$> atom) (choice ops)
 
 runParser :: forall input a rep. (Input input rep, Ops rep) => Parser a -> Code (input -> Maybe a)
 runParser p = [||\input -> runST $$(exec (prepare @input @rep [||input||]) (compile p))||]
 
 parseFromFile :: Parser a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]
-
--- Fixities
--- Functor
-infixl 4 <$>
-infixl 4 <$
-infixl 4 $>
-infixl 4 <&>
--- Applicative
---infixl 4 <*>
---infixl 4 <*
---infixl 4 *>
-infixl 4 <**>
-infixl 4 <:>
--- Monoidal
-infixl 4 <~>
-infixl 4 <~
-infixl 4 ~>
--- Alternative
---infixl 3 <|>
-infixl 3 <+>
--- Selective
-infixl 4 >?>
-infixl 4 <?|>
--- "Monadic"
-infixl 1 ||=
-infixl 1 >>

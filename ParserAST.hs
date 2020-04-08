@@ -23,18 +23,22 @@ newtype Parser a = Parser {unParser :: Fix (ParserF WQ) a}
 _pure :: Defunc WQ a -> Parser a
 _pure = Parser . In . Pure
 
+infixl 4 <*>
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
 Parser p <*> Parser q = Parser (In (p :<*>: q))
 
+infixl 4 <*
 (<*) :: Parser a -> Parser b -> Parser a
 Parser p <* Parser q = Parser (In (p :<*: q))
 
+infixl 4 *>
 (*>) :: Parser a -> Parser b -> Parser b
 Parser p *> Parser q = Parser (In (p :*>: q))
 
 empty :: Parser a
 empty = Parser (In Empty)
 
+infixl 3 <|>
 (<|>) :: Parser a -> Parser a -> Parser a
 Parser p <|> Parser q = Parser (In (p :<|>: q))
 
@@ -65,14 +69,6 @@ chainPost (Parser p) (Parser op) = Parser (In (ChainPost p op))
 
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (Debug name p))
-
--- Fixities
--- Applicative
-infixl 4 <*>
-infixl 4 <*
-infixl 4 *>
--- Alternative
-infixl 3 <|>
 
 -- Core datatype
 data ParserF (q :: * -> *) (k :: * -> *) (a :: *) where

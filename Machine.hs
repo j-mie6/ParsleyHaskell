@@ -133,18 +133,14 @@ run :: Exec s o xs r a -> Γ s o xs r a -> Ctx s o a -> Code (ST s (Maybe a))
 run (Exec m) γ ctx = runReader m ctx γ
 
 type Ops o = (Handlers o, KOps o, FailureOps o, JoinBuilder o, FailureOps o, RecBuilder o)
-type Handlers o = (HardForkHandler o, SoftForkHandler o, AttemptHandler o, ChainHandler o, LogHandler o)
+type Handlers o = (HardForkHandler o, ChainHandler o, LogHandler o)
 class FailureOps o => HardForkHandler o where
-  hardForkHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> Code (ST s (Maybe a))) -> Γ s o xs ks a -> Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a))
-class FailureOps o => SoftForkHandler o where
-  softForkHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> Code (ST s (Maybe a))) -> Γ s o xs ks a -> Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a))
-class FailureOps o => AttemptHandler o where
-  attemptHandler :: (?ops :: InputOps s o) => Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a))
+  hardForkHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> Code (ST s (Maybe a))) -> Γ s o xs ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
 class FailureOps o => ChainHandler o where
   chainHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> Code (ST s (Maybe a))) -> Code (STRefU s Int)
-               -> Γ s o xs ks a -> Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a))
+               -> Γ s o xs ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
 class FailureOps o => LogHandler o where
-  logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a))
+  logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
 
 exec :: (Quapplicative q, Ops o) => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding q o a)) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
@@ -199,9 +195,7 @@ readyExec = cata3 (Exec . alg)
     alg (Sat p k)           = execSat p k
     alg Empt                = execEmpt
     alg (Commit k)          = execCommit k
-    alg (HardFork p q)      = execHardFork p q
-    alg (SoftFork p q)      = execSoftFork p q
-    alg (Attempt k)         = execAttempt k
+    alg (Catch k h)         = execCatch k h
     alg (Tell k)            = execTell k
     alg (Seek k)            = execSeek k
     alg (Case p q)          = execCase p q
@@ -216,6 +210,7 @@ readyExec = cata3 (Exec . alg)
     alg (Put σ k)           = execPut σ k
     alg (LogEnter name k)   = execLogEnter name k
     alg (LogExit name k)    = execLogExit name k
+    alg (Handler h)         = execHandler h
     alg (MetaM m k)         = execMeta m k
 
 execRet :: (?ops :: InputOps s o, KOps o) => ExecMonad s o (x ': xs) x a
@@ -259,33 +254,19 @@ execEmpt = return $! raiseΓ
 execCommit :: Exec s o xs r a -> ExecMonad s o xs r a
 execCommit (Exec k) = k <&> \m γ -> m (γ {hs = tail (hs γ)})
 
-execHardFork :: (?ops :: InputOps s o, HardForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> ExecMonad s o xs r a
-execHardFork (Exec p) (Exec q) = liftM2 (\mp mq γ -> setupHandlerΓ γ (hardForkHandler mq γ) mp) p q
+execCatch :: (?ops :: InputOps s o, FailureOps o) => Exec s o xs r a -> Exec s o (o ': xs) r a -> ExecMonad s o xs r a
+execCatch (Exec k) (Exec h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (\c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]) mk) k h
 
-#define deriveHardForkHandler(_o)         \
-instance HardForkHandler _o where         \
-{                                         \
-  hardForkHandler mq γ h c = [||\(!o#) -> \
-      if $$same $$c ($$box o#) then       \
-        $$(mq (γ {o = [||$$box o#||]}))   \
-      else $$h o#                         \
-    ||]                                   \
+#define deriveHardForkHandler(_o)       \
+instance HardForkHandler _o where       \
+{                                       \
+  hardForkHandler mq γ c = [||\(!o#) -> \
+      if $$same $$c ($$box o#) then     \
+        $$(mq (γ {o = [||$$box o#||]})) \
+      else $$(raise @_o (hs γ)) o#      \
+    ||]                                 \
 };
 inputInstances(deriveHardForkHandler)
-
-execSoftFork :: (?ops :: InputOps s o, SoftForkHandler o, JoinBuilder o) => Exec s o xs r a -> Exec s o xs r a -> ExecMonad s o xs r a
-execSoftFork (Exec p) (Exec q) = liftM2 (\mp mq γ -> setupHandlerΓ γ (softForkHandler mq γ) mp) p q
-
-#define deriveSoftForkHandler(_o) \
-instance SoftForkHandler _o where { softForkHandler mq γ h c = [||\_ -> $$(mq (γ {o = c}))||] };
-inputInstances(deriveSoftForkHandler)
-
-execAttempt :: (?ops :: InputOps s o, AttemptHandler o) => Exec s o xs r a -> ExecMonad s o xs r a
-execAttempt (Exec k) = k <&> \mk γ -> setupHandlerΓ γ attemptHandler mk
-
-#define deriveAttemptHandler(_o) \
-instance AttemptHandler _o where { attemptHandler h c = [||\_ -> $$h ($$unbox $$c)||] };
-inputInstances(deriveAttemptHandler)
 
 execTell :: Exec s o (o ': xs) r a -> ExecMonad s o xs r a
 execTell (Exec k) = k <&> \mk γ -> mk (γ {xs = QCons (o γ) (xs γ)})
@@ -334,13 +315,13 @@ execChainInit σ l μ (Exec k) =
 #define deriveChainHandler(_o)              \
 instance ChainHandler _o where              \
 {                                           \
-  chainHandler mk cref γ h _ = [||\(!o#) -> \
+  chainHandler mk cref γ _ = [||\(!o#) ->   \
       do                                    \
       {                                     \
         c <- $$readCRef $$cref;             \
         if $$same c ($$box o#) then         \
           $$(mk (γ {o = [|| $$box o# ||]})) \
-        else $$h o#                         \
+        else $$(raise @_o (hs γ)) o#        \
       } ||]                                 \
 };
 inputInstances(deriveChainHandler)
@@ -398,16 +379,16 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
 
 execLogEnter :: (?ops :: InputOps s o, LogHandler o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
 execLogEnter name (Exec mk) =
-  liftM2 (\k ctx γ -> (setupHandlerΓ γ (logHandler name ctx γ) (\γ' -> [|| trace $$(preludeString name '>' γ ctx "") $$(k γ')||]))) 
+  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(k γ)||]) 
     (local debugUp mk) 
     ask
 
-#define deriveLogHandler(_o)                                                                     \
-instance LogHandler _o where                                                                     \
-{                                                                                                \
-  logHandler name ctx γ h _ = [||\(!o#) ->                                                       \
-      trace $$(preludeString name '<' (γ {o = [||$$box o#||]}) ctx (color Red " Fail")) ($$h o#) \
-    ||]                                                                                          \
+#define deriveLogHandler(_o)                                                                                      \
+instance LogHandler _o where                                                                                      \
+{                                                                                                                 \
+  logHandler name ctx γ _ = [||\(!o#) ->                                                                          \
+      trace $$(preludeString name '<' (γ {o = [||$$box o#||]}) ctx (color Red " Fail")) ($$(raise @_o (hs γ)) o#) \
+    ||]                                                                                                           \
 };
 inputInstances(deriveLogHandler)
 
@@ -416,6 +397,10 @@ execLogExit name (Exec mk) =
   liftM2 (\k ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||]) 
     (local debugDown mk) 
     ask
+
+execHandler :: (?ops :: InputOps s o, Handlers o) => Handler o (Exec s o) xs r a -> ExecMonad s o (o ': xs) r a
+execHandler (Parsec (Exec k)) = k <&> \mk γ -> let QCons c xs' = xs γ in [||$$(hardForkHandler mk (γ {xs = xs'}) c) ($$unbox $$(o γ))||]
+execHandler (Log msg) = asks $ \ctx γ -> let QCons c xs' = xs γ in [||$$(logHandler msg ctx γ c) ($$unbox $$(o γ))||]
 
 execMeta :: (?ops :: InputOps s o, FailureOps o) => MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
 execMeta (AddCoins coins) (Exec k) = 
@@ -427,7 +412,7 @@ execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
 execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
 
 setupHandlerΓ :: FailureOps o => Γ s o xs r a 
-              -> (Code (H s o a) -> Code o -> Code (Unboxed o -> ST s (Maybe a)))
+              -> (Code o -> Code (Unboxed o -> ST s (Maybe a)))
               -> (Γ s o xs r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
 setupHandlerΓ γ h k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
 

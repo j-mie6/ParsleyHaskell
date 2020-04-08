@@ -7,7 +7,8 @@
              KindSignatures,
              ScopedTypeVariables,
              GeneralizedNewtypeDeriving,
-             PatternSynonyms #-}
+             PatternSynonyms,
+             StandaloneDeriving #-}
 module MachineAST where
 
 import Indexed           (IFunctor3, Fix3(In3), Const3(..), imap3, cata3)
@@ -38,9 +39,8 @@ data M q o (k :: [*] -> * -> * -> *) (xs :: [*]) (r :: *) (a :: *) where
   Jump      :: MVar x -> M q o k '[] x a
   Empt      :: M q o k xs r a
   Commit    :: k xs r a -> M q o k xs r a
-  HardFork  :: k xs r a -> k xs r a -> M q o k xs r a --TODO: Deprecate
-  SoftFork  :: k xs r a -> k xs r a -> M q o k xs r a --TODO: Deprecate
-  Attempt   :: k xs r a -> M q o k xs r a             --TODO: Deprecate
+  Catch     :: k xs r a -> k (o ': xs) r a -> M q o k xs r a
+  Handler   :: Handler o k xs r a -> M q o k (o ': xs) r a
   Tell      :: k (o ': xs) r a -> M q o k xs r a
   Seek      :: k xs r a -> M q o k (o ': xs) r a
   Case      :: k (x ': xs) r a -> k (y ': xs) r a -> M q o k (Either x y ': xs) r a
@@ -56,6 +56,11 @@ data M q o (k :: [*] -> * -> * -> *) (xs :: [*]) (r :: *) (a :: *) where
   LogEnter  :: String -> k xs r a -> M q o k xs r a
   LogExit   :: String -> k xs r a -> M q o k xs r a
   MetaM     :: MetaM -> k xs r a -> M q o k xs r a
+
+data Handler o (k :: [*] -> * -> * -> *) (xs :: [*]) (r :: *) (a :: *) where
+  Parsec :: k xs r a -> Handler o k xs r a
+  Log :: String -> Handler o k xs r a
+deriving instance Show (Handler o (Const3 String) xs r a)
 
 data MetaM where
   AddCoins    :: Int -> MetaM
@@ -91,9 +96,8 @@ instance IFunctor3 (M q o) where
   imap3 f (Jump μ)            = Jump μ
   imap3 f Empt                = Empt
   imap3 f (Commit k)          = Commit (f k)
-  imap3 f (SoftFork p q)      = SoftFork (f p) (f q)
-  imap3 f (HardFork p q)      = HardFork (f p) (f q)
-  imap3 f (Attempt k)         = Attempt (f k)
+  imap3 f (Catch p h)         = Catch (f p) (f h)
+  imap3 f (Handler h)         = Handler (imap3 f h)
   imap3 f (Tell k)            = Tell (f k)
   imap3 f (Seek k)            = Seek (f k)
   imap3 f (Case p q)          = Case (f p) (f q)
@@ -110,37 +114,42 @@ instance IFunctor3 (M q o) where
   imap3 f (LogExit name k)    = LogExit name (f k)
   imap3 f (MetaM m k)         = MetaM m (f k)
 
+instance IFunctor3 (Handler o) where
+  imap3 f (Parsec k) = Parsec (f k)
+  imap3 f (Log msg) = Log msg 
+
 instance Show (Machine o a) where show = show . getMachine
 instance Show (Fix3 (M q o) xs r a) where
   show x = let Const3 s = cata3 alg x in s where
     alg :: forall i j. M q o (Const3 String) i j a -> Const3 String i j a
     alg Ret                 = Const3 $ "Ret"
-    alg (Call μ k)          = Const3 $ "(Call " ++ show μ ++ " " ++ getConst3 k ++ ")"
+    alg (Call μ k)          = Const3 $ "(Call " ++ show μ ++ " " ++ show k ++ ")"
     alg (Jump μ)            = Const3 $ "(Jump " ++ show μ ++ ")"
-    alg (Push x k)          = Const3 $ "(Push " ++ show x ++ " " ++ getConst3 k ++ ")"
-    alg (Pop k)             = Const3 $ "(Pop " ++ getConst3 k ++ ")"
-    alg (Lift2 f k)         = Const3 $ "(Lift2 " ++ show f ++ " " ++ getConst3 k ++ ")"
-    alg (Sat f k)           = Const3 $ "(Sat " ++ show f ++ " " ++ getConst3 k ++ ")"
+    alg (Push x k)          = Const3 $ "(Push " ++ show x ++ " " ++ show k ++ ")"
+    alg (Pop k)             = Const3 $ "(Pop " ++ show k ++ ")"
+    alg (Lift2 f k)         = Const3 $ "(Lift2 " ++ show f ++ " " ++ show k ++ ")"
+    alg (Sat f k)           = Const3 $ "(Sat " ++ show f ++ " " ++ show k ++ ")"
     alg Empt                = Const3 $ "Empt"
-    alg (Commit k)          = Const3 $ "(Commit " ++ getConst3 k ++ ")"
-    alg (SoftFork p q)      = Const3 $ "(SoftFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
-    alg (HardFork p q)      = Const3 $ "(HardFork " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
-    alg (Attempt k)         = Const3 $ "(Try " ++ getConst3 k ++ ")"
-    alg (Tell k)            = Const3 $ "(Tell " ++ getConst3 k ++ ")"
-    alg (Seek k)            = Const3 $ "(Seek " ++ getConst3 k ++ ")"
-    alg (Case p q)          = Const3 $ "(Case " ++ getConst3 p ++ " " ++ getConst3 q ++ ")"
-    alg (Choices fs ks def) = Const3 $ "(Choices " ++ show fs ++ " [" ++ intercalate ", " (map getConst3 ks) ++ "] " ++ getConst3 def ++ ")"
+    alg (Commit k)          = Const3 $ "(Commit " ++ show k ++ ")"
+    alg (Catch p h)         = Const3 $ "(Catch " ++ show p ++ " " ++ show h ++ ")"
+    alg (Handler h)         = Const3 $ "(Handler " ++ show h ++ ")"
+    alg (Tell k)            = Const3 $ "(Tell " ++ show k ++ ")"
+    alg (Seek k)            = Const3 $ "(Seek " ++ show k ++ ")"
+    alg (Case p q)          = Const3 $ "(Case " ++ show p ++ " " ++ show q ++ ")"
+    alg (Choices fs ks def) = Const3 $ "(Choices " ++ show fs ++ " [" ++ intercalate ", " (map show ks) ++ "] " ++ show def ++ ")"
     alg (ChainIter σ μ)     = Const3 $ "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
-    alg (ChainInit σ m μ k) = Const3 $ "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ getConst3 m ++ " " ++ getConst3 k ++ "}"
+    alg (ChainInit σ m μ k) = Const3 $ "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ show m ++ " " ++ show k ++ "}"
     alg (Join φ)            = Const3 $ show φ
-    alg (MkJoin φ p k)      = Const3 $ "(let " ++ show φ ++ " = " ++ getConst3 p ++ " in " ++ getConst3 k ++ ")"
-    alg (Swap k)            = Const3 $ "(Swap " ++ getConst3 k ++ ")"
-    alg (Make σ k)          = Const3 $ "(Make " ++ show σ ++ " " ++ getConst3 k ++ ")"
-    alg (Get σ k)           = Const3 $ "(Get " ++ show σ ++ " " ++ getConst3 k ++ ")"
-    alg (Put σ k)           = Const3 $ "(Put " ++ show σ ++ " " ++ getConst3 k ++ ")"
-    alg (LogEnter _ k)      = Const3 $ getConst3 k
-    alg (LogExit _ k)       = Const3 $ getConst3 k
-    alg (MetaM m k)         = Const3 $ "[" ++ show m ++ "] " ++ getConst3 k
+    alg (MkJoin φ p k)      = Const3 $ "(let " ++ show φ ++ " = " ++ show p ++ " in " ++ show k ++ ")"
+    alg (Swap k)            = Const3 $ "(Swap " ++ show k ++ ")"
+    alg (Make σ k)          = Const3 $ "(Make " ++ show σ ++ " " ++ show k ++ ")"
+    alg (Get σ k)           = Const3 $ "(Get " ++ show σ ++ " " ++ show k ++ ")"
+    alg (Put σ k)           = Const3 $ "(Put " ++ show σ ++ " " ++ show k ++ ")"
+    alg (LogEnter _ k)      = Const3 $ show k
+    alg (LogExit _ k)       = Const3 $ show k
+    alg (MetaM m k)         = Const3 $ "[" ++ show m ++ "] " ++ show k
+
+instance Show (Const3 String xs r a) where show = getConst3
 
 instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
 instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ

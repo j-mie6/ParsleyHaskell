@@ -9,7 +9,7 @@
 module CodeGenerator (codeGen) where
 
 import ParserAST                  (ParserF(..), MetaP(..))
-import MachineAST                 (M(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
+import MachineAST                 (M(..), Handler(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
 import MachineAnalyser            (coinsNeeded)
 import Indexed                    (IFunctor, Fix, Fix3(In3), Cofree(..), imap, histo, extract, (|>))
 import Utils                      (code, Quapplicative((>*<)))
@@ -51,6 +51,9 @@ pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
 pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
+rollbackHandler :: Fix3 (M q o) (o : xs) r a
+rollbackHandler = In3 (Seek (In3 Empt))
+
 peephole :: Quapplicative q => ParserF q (Cofree (ParserF q) (CodeGen q o b)) a -> Maybe (CodeGen q o b a)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In3 (_Fmap f m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
@@ -59,22 +62,22 @@ peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
 peephole (TryOrElse p q) = Just $ CodeGen $ \m -> -- FIXME!
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     fmap (binder . In3 . SoftFork pc) (freshΦ (runCodeGen q φ))
+     fmap (binder . In3 . Catch pc . In3 . Seek) (freshΦ (runCodeGen q φ))
 peephole ((_ :< ((Try (p :< _)) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (In3 (Pop (In3 (Push x φ))))))
-     fmap (binder . In3 . SoftFork pc) (freshΦ (runCodeGen q φ))
+     fmap (binder . In3 . Catch pc . In3 . Seek) (freshΦ (runCodeGen q φ))
 peephole (MetaP RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m -> 
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
      qc <- freshΦ (runCodeGen q φ)
-     return $! binder (In3 (HardFork pc qc))
+     return $! binder (In3 (Catch pc (In3 (Handler (Parsec qc)))))
 peephole (MetaP RequiresCut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m -> 
   do μ <- askM
      σ <- freshΣ
      opc <- freshM (runCodeGen op (In3 (_Fmap (FLIP_H COMPOSE) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
      pc <- freshM (runCodeGen p (In3 (_App m)))
-     return $! In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ (addCoins (coinsNeeded pc) pc))))))))
+     return $! In3 (Push ID (In3 (Make σ (In3 (ChainInit σ opc μ (In3 (Get σ (addCoins (coinsNeeded pc) pc))))))))
 peephole (MetaP RequiresCut (_ :< ChainPost (p :< _) (op :< _))) = Just $ CodeGen $ \m -> 
   do μ <- askM
      σ <- freshΣ
@@ -87,7 +90,7 @@ peephole (MetaP Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m ->
      opc <- freshM (runCodeGen op (In3 (_Fmap (FLIP_H COMPOSE) (In3 (_Modify σ (In3 (ChainIter σ μ)))))))
      let nop = coinsNeeded opc
      pc <- freshM (runCodeGen p (In3 (_App m)))
-     return $! In3 (Push (code id) (In3 (Make σ (In3 (ChainInit σ (addCoins nop opc) μ (In3 (Get σ (addCoins (coinsNeeded pc) pc))))))))
+     return $! In3 (Push ID (In3 (Make σ (In3 (ChainInit σ (addCoins nop opc) μ (In3 (Get σ (addCoins (coinsNeeded pc) pc))))))))
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
@@ -106,8 +109,8 @@ direct (p :<|>: q) m =
      let nq = coinsNeeded qc
      let dp = np - (min np nq)
      let dq = nq - (min np nq)
-     return $! binder (In3 (HardFork (addCoins dp pc) (addCoins dq qc)))
-direct (Try p)       m = do fmap (In3 . Attempt) (runCodeGen p (deadCommitOptimisation m))
+     return $! binder (In3 (Catch (addCoins dp pc) (In3 (Handler (Parsec (addCoins dq qc))))))
+direct (Try p)       m = do fmap (In3 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 direct (LookAhead p) m = 
   do n <- fmap coinsNeeded (runCodeGen p (In3 Empt)) -- Dodgy hack, but oh well
      fmap (In3 . Tell) (runCodeGen p (In3 (Swap (In3 (Seek (refundCoins n m))))))
@@ -115,7 +118,7 @@ direct (NotFollowedBy p) m =
   do pc <- runCodeGen p (In3 (Pop (In3 (Seek (In3 (Commit (In3 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
-     return $! In3 (SoftFork (addCoins (max (np - nm) 0) (In3 (Tell pc))) (In3 (Push UNIT m)))
+     return $! In3 (Catch (addCoins (max (np - nm) 0) (In3 (Tell pc))) (In3 (Seek (In3 (Push UNIT m)))))
 direct (Branch b p q) m = 
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In3 (Swap (In3 (_App φ)))))
@@ -145,7 +148,7 @@ direct (ChainPost p op) m =
      opc <- freshM (runCodeGen op (In3 (_Modify σ (In3 (ChainIter σ μ)))))
      let nop = coinsNeeded opc
      freshM (runCodeGen p (In3 (Make σ (In3 (ChainInit σ (addCoins nop opc) μ (In3 (Get σ m)))))))
-direct (Debug name p) m = do fmap (In3 . LogEnter name) (runCodeGen p (In3 (LogExit name m)))
+direct (Debug name p) m = do fmap (In3 . LogEnter name . In3 . flip Catch (In3 (Handler (Log name)))) (runCodeGen p (In3 (LogExit name m)))
 direct (MetaP Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
 
 tailCallOptimise :: MVar x -> Fix3 (M q o) (x ': xs) r a -> Fix3 (M q o) xs r a
@@ -155,8 +158,8 @@ tailCallOptimise μ k         = In3 (Call μ k)
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret or Halt
 -- However, I'm not yet sure about the interactions with try yet...
 deadCommitOptimisation :: Fix3 (M q o) xs r a -> Fix3 (M q o) xs r a
-deadCommitOptimisation (In3 Ret)  = In3 Ret
-deadCommitOptimisation m          = In3 (Commit m)
+deadCommitOptimisation (In3 Ret) = In3 Ret
+deadCommitOptimisation m         = In3 (Commit m)
 
 -- Refactor with asks
 askM :: CodeGenStack (MVar a)

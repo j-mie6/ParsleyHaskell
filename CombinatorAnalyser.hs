@@ -7,7 +7,7 @@ module CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, Anal
 
 import ParserAST                  (ParserF(..), MetaP(..))
 import MachineAST                 (IMVar, MVar(..), IΣVar)
-import Indexed                    (Fix(..), Cofree(..), Const1(..), imap, cata, histo, extract, (|>), (:*:)(..), (/\), ifst, isnd)
+import Indexed                    (Fix(..), Const1(..), imap, cata, zygo, (:*:)(..), (/\), ifst, isnd)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
 import Control.Monad.State.Strict (State, get, put, evalState)
@@ -24,7 +24,7 @@ data AnalysisFlags = AnalysisFlags {
 emptyFlags = AnalysisFlags False
 
 analyse :: AnalysisFlags -> Fix (ParserF q) a -> Fix (ParserF q) a
-analyse flags = cutAnalysis (letBound flags) {-terminationAnalysis-}
+analyse flags = cutAnalysis (letBound flags) {-. terminationAnalysis-}
 
 data Compliance k = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
 
@@ -68,7 +68,7 @@ biliftA2 :: (a -> b -> c) -> (x -> y -> z) -> (a, x) -> (b, y) -> (c, z)
 biliftA2 f g (x1, y1) (x2, y2) = (f x1 x2, g y1 y2)
 
 cutAnalysis :: Bool -> Fix (ParserF q) a -> Fix (ParserF q) a
-cutAnalysis letBound = fst . ($ letBound) . cutOut . ifst . cata ((CutAnalysis . alg) /\ (compliance . imap isnd))
+cutAnalysis letBound = fst . ($ letBound) . cutOut . zygo (CutAnalysis . alg) compliance
   where
     mkCut True = In . MetaP Cut
     mkCut False = id

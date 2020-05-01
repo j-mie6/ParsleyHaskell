@@ -45,8 +45,7 @@ extract (x :< _) = x
 instance IFunctor f => IFunctor (Cofree f) where
   imap f (x :< xs) = f x :< imap (imap f) xs
 
-histo :: forall f a i. IFunctor f => (forall j. f (Cofree f a) j -> a j)
-                                  -> Fix f i -> a i
+histo :: IFunctor f => (forall j. f (Cofree f a) j -> a j) -> Fix f i -> a i
 histo alg = extract . cata (alg >>= (:<))
 
 data (f :*: g) i = f i :*: g i
@@ -56,6 +55,12 @@ ifst :: (f :*: g) i -> f i
 ifst (x :*: _) = x
 isnd :: (f :*: g) i -> g i
 isnd (_ :*: y) = y
+
+mutu :: IFunctor f => (forall j. f (a :*: b) j -> a j) -> (forall j. f (a :*: b) j -> b j) -> Fix f i -> (a :*: b) i
+mutu algl algr = cata (algl /\ algr)
+
+zygo :: IFunctor f => (forall j. f (a :*: b) j -> a j) -> (forall j. f b j -> b j) -> Fix f i -> a i
+zygo alg aux = ifst . mutu alg (aux . imap isnd)
 
 class                         Chain r k         where (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
 instance {-# OVERLAPPABLE #-} Chain a a         where (|>) = liftA2 (flip fromMaybe)

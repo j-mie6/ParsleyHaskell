@@ -18,6 +18,7 @@
 module MachineOps where
 
 import Utils              (Code)
+import Indexed            (Nat(..))
 import Control.Monad.ST   (ST)
 import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.STRef.Unboxed (STRefU)
@@ -37,6 +38,10 @@ derivation(Text)
 data QList xs where
   QNil :: QList '[]
   QCons :: Code x -> QList xs -> QList (x ': xs)
+
+data Vec n a where
+  VNil :: Vec Zero a
+  VCons :: Code a -> Vec n a -> Vec (Succ n) a
 
 type H s o a = Unboxed o -> ST s (Maybe a)
 data InputOps s o = InputOps { _more       :: Code (o -> Bool)
@@ -63,7 +68,7 @@ box        :: (?ops :: InputOps s o) => Code (Unboxed o -> o)
 box        = _box        ?ops
 newCRef    :: (?ops :: InputOps s o) => Code (o -> ST s (STRefU s Int))
 newCRef    = _newCRef    ?ops
-readCRef   :: (?ops :: InputOps s o) => Code (STRefU s Int -> ST s o) 
+readCRef   :: (?ops :: InputOps s o) => Code (STRefU s Int -> ST s o)
 readCRef   = _readCRef   ?ops
 writeCRef  :: (?ops :: InputOps s o) => Code (STRefU s Int -> o -> ST s ())
 writeCRef  = _writeCRef  ?ops
@@ -121,10 +126,10 @@ instance FailureOps _o where                                   \
 inputInstances(deriveFailureOps)
 
 -- RIP Dream :(
-{-$(let derive _o = [d| 
+{-$(let derive _o = [d|
         instance FailureOps _o where
           setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]
-          raise ops = [||\(H hs) (!o) -> case hs of 
+          raise ops = [||\(H hs) (!o) -> case hs of
               SNil -> return Nothing
               h:::_ -> h ($$(_unbox ops) o)
             ||]
@@ -134,7 +139,7 @@ runConcrete :: forall s o a x. (?ops :: InputOps s o, FailureOps o) => [Code (H 
 runConcrete hs m ret o = [||$$m $$ret ($$unbox $$o) $! $$(raise @o hs)||]
 
 sat :: (?ops :: InputOps s o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
-sat o p good bad = [|| 
-  let !(# c, o' #) = $$next $$o 
-  in if $$p c then $$(good [|| o' ||] [|| c ||]) 
+sat o p good bad = [||
+  let !(# c, o' #) = $$next $$o
+  in if $$p c then $$(good [|| o' ||] [|| c ||])
               else $$bad ||]

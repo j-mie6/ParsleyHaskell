@@ -24,7 +24,7 @@ module Machine where
 import MachineOps
 import MachineAST
 import Input                      (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString, Stream)
-import Indexed                    (Fix3, cata3)
+import Indexed                    (Fix4, cata4, Nat(..))
 import Utils                      (code, Code, Quapplicative(_code))
 import Defunc                     (Defunc, genDefunc2)
 import Data.Functor               ((<&>))
@@ -145,7 +145,7 @@ class FailureOps o => LogHandler o where
 exec :: (Quapplicative q, Ops o) => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding q o a)) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
   do let !(PreparedInput next more same offset box unbox newCRef readCRef writeCRef shiftLeft shiftRight toInt) = $$input
-     $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||] 
+     $$(let ?ops = InputOps [||more||] [||next||] [||same||] [||box||] [||unbox||] [||newCRef||] [||readCRef||] [||writeCRef||] [||shiftLeft||] [||shiftRight||] [||toInt||]
         in scopeBindings ms
              nameLet
              QAbsExec
@@ -177,7 +177,7 @@ scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
     makeNames = DMap.traverseWithKey (\_ v -> Const <$> newName (nameOf v))
     generateBindings names = traverse makeDecl . DMap.toList
       where
-        makeDecl (k :=> v) = 
+        makeDecl (k :=> v) =
           do let Const name = names DMap.! k
              body <- unTypeQ (letBuilder v (package names))
              return (FunD name [Clause [] (NormalB body) []])
@@ -271,8 +271,8 @@ execCase (Exec p) (Exec q) = liftM2 (\mp mq γ ->
     Right y  -> $$(mq (γ {xs = QCons [||y||] xs'}))||]) p q
 
 execChoices :: forall x y xs r a s o q. (?ops :: InputOps s o, JoinBuilder o, Quapplicative q) => [q (x -> Bool)] -> [Exec s o xs r a] -> Exec s o xs r a -> ExecMonad s o (x ': xs) r a
-execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'})) 
-  def 
+execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
+  def
   (forM ks (\(Exec k) -> k))
   where
     go :: Code x -> [q (x -> Bool)] -> [Γ s o xs r a -> Code (ST s (Maybe a))] -> (Γ s o xs r a -> Code (ST s (Maybe a))) -> Γ s o xs r a -> Code (ST s (Maybe a))
@@ -368,14 +368,14 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
 
 execLogEnter :: (?ops :: InputOps s o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
 execLogEnter name (Exec mk) =
-  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(k γ)||]) 
-    (local debugUp mk) 
+  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(k γ)||])
+    (local debugUp mk)
     ask
 
 execLogExit :: (?ops :: InputOps s o) => String -> Exec s o xs r a -> ExecMonad s o xs r a
-execLogExit name (Exec mk) = 
-  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||]) 
-    (local debugDown mk) 
+execLogExit name (Exec mk) =
+  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||])
+    (local debugDown mk)
     ask
 
 #define deriveHardForkHandler(_o)       \
@@ -403,7 +403,7 @@ execHandler (Parsec (Exec k)) = k <&> \mk γ -> let QCons c xs' = xs γ in [||$$
 execHandler (Log msg) = asks $ \ctx γ -> let QCons c xs' = xs γ in [||$$(logHandler msg ctx γ c) ($$unbox $$(o γ))||]
 
 execMeta :: (?ops :: InputOps s o, FailureOps o) => MetaM -> Exec s o xs r a -> ExecMonad s o xs r a
-execMeta (AddCoins coins) (Exec k) = 
+execMeta (AddCoins coins) (Exec k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
@@ -411,7 +411,7 @@ execMeta (FreeCoins coins) (Exec k) = local (giveCoins coins) k
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
 execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
 
-setupHandlerΓ :: FailureOps o => Γ s o xs r a 
+setupHandlerΓ :: FailureOps o => Γ s o xs r a
               -> (Code o -> Code (Unboxed o -> ST s (Maybe a)))
               -> (Γ s o xs r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
 setupHandlerΓ γ h k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
@@ -442,8 +442,8 @@ class RecBuilder o where
             -> [Code (H s o a)] -> Code o -> Code (ST s (Maybe a))
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a
             -> Exec s o '[] r a
-            -> Code ((r -> Unboxed o -> ST s (Maybe a)) -> Unboxed o 
-                                                        -> (Unboxed o -> ST s (Maybe a)) 
+            -> Code ((r -> Unboxed o -> ST s (Maybe a)) -> Unboxed o
+                                                        -> (Unboxed o -> ST s (Maybe a))
                                                         -> ST s (Maybe a))
 
 #define deriveRecBuilder(_o)                                                          \

@@ -13,20 +13,22 @@ module Indexed where
 import Control.Applicative ((<|>), liftA2)
 import Data.Maybe          (fromMaybe)
 
+data Nat = Zero | Succ Nat
+
 class IFunctor (f :: (* -> *) -> * -> *) where
   imap :: (forall j. a j -> b j) -> f a i -> f b i
 
-class IFunctor3 (f :: ([*] -> * -> * -> *) -> [*] -> * -> * -> *) where
-  imap3 :: (forall i' j'. a i' j' x -> b i' j' x) -> f a i j x -> f b i j x
+class IFunctor4 (f :: ([*] -> Nat -> * -> * -> *) -> [*] -> Nat -> * -> * -> *) where
+  imap4 :: (forall i' j'. a i' j' k' x -> b i' j' k' x) -> f a i j k x -> f b i j k x
 
 newtype Fix f a = In (f (Fix f) a)
-newtype Fix3 f i j k = In3 (f (Fix3 f) i j k)
+newtype Fix4 f i j k l = In4 (f (Fix3 f) i j k l)
 
 inop :: Fix f a -> f (Fix f) a
 inop (In x) = x
 
-inop3 :: Fix3 f i j k -> f (Fix3 f) i j k
-inop3 (In3 x) = x
+inop4 :: Fix4 f i j k l -> f (Fix3 f) i j k l
+inop4 (In4 x) = x
 
 cata :: IFunctor f => (forall j. f a j -> a j) -> Fix f i -> a i
 cata alg (In x)  = alg (imap (cata alg) x)
@@ -35,8 +37,8 @@ cata' :: IFunctor f => (forall j. Fix f j -> f a j -> a j)
                     -> Fix f i -> a i
 cata' alg i@(In x) = alg i (imap (cata' alg) x)
 
-cata3 :: IFunctor3 f => (forall i' j'. f a i' j' x -> a i' j' x) -> Fix3 f i j x -> a i j x
-cata3 alg (In3 x)  = alg (imap3 (cata3 alg) x)
+cata4 :: IFunctor4 f => (forall i' j' k'. f a i' j' k' x -> a i' j' k' x) -> Fix4 f i j k x -> a i j k x
+cata4 alg (In4 x)  = alg (imap4 (cata4 alg) x)
 
 data Cofree f a i = a i :< f (Cofree f a) i
 extract :: Cofree f a i -> a i
@@ -68,7 +70,7 @@ data Tag t f k a = Tag {tag :: t, tagged :: f k a}
 instance IFunctor f => IFunctor (Tag t f) where
   imap f (Tag t k) = Tag t (imap f k)
 
-data Unit3 i j k = Unit3
-newtype Const3 a i j k = Const3 {getConst3 :: a}
+data Unit4 i j k l = Unit4
+newtype Const4 a i j k l = Const4 {getConst4 :: a}
 
 

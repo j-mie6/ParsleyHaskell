@@ -247,7 +247,7 @@ infixl 4 <?|>
 cond <?|> (p, q) = branch (makeQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
 
 filteredBy :: ParserOps rep => Parser a -> rep (a -> Bool) -> Parser a
-filteredBy = p >??> pure f
+filteredBy p f = p >??> pure f
 
 infixl 4 >?>
 (>?>) :: ParserOps rep => Parser a -> rep (a -> Bool) -> Parser a

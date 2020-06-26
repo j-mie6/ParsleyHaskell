@@ -19,15 +19,15 @@ class IFunctor (f :: (* -> *) -> * -> *) where
   imap :: (forall j. a j -> b j) -> f a i -> f b i
 
 class IFunctor4 (f :: ([*] -> Nat -> * -> * -> *) -> [*] -> Nat -> * -> * -> *) where
-  imap4 :: (forall i' j'. a i' j' k' x -> b i' j' k' x) -> f a i j k x -> f b i j k x
+  imap4 :: (forall i' j' k'. a i' j' k' x -> b i' j' k' x) -> f a i j k x -> f b i j k x
 
 newtype Fix f a = In (f (Fix f) a)
-newtype Fix4 f i j k l = In4 (f (Fix3 f) i j k l)
+newtype Fix4 f i j k l = In4 (f (Fix4 f) i j k l)
 
 inop :: Fix f a -> f (Fix f) a
 inop (In x) = x
 
-inop4 :: Fix4 f i j k l -> f (Fix3 f) i j k l
+inop4 :: Fix4 f i j k l -> f (Fix4 f) i j k l
 inop4 (In4 x) = x
 
 cata :: IFunctor f => (forall j. f a j -> a j) -> Fix f i -> a i

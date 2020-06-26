@@ -18,6 +18,7 @@
 module MachineOps where
 
 import Utils              (Code)
+import Indexed            (Nat(..))
 import Control.Monad.ST   (ST)
 import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.STRef.Unboxed (STRefU)
@@ -37,6 +38,10 @@ derivation(Text)
 data QList xs where
   QNil :: QList '[]
   QCons :: Code x -> QList xs -> QList (x ': xs)
+
+data Vec n a where
+  VNil :: Vec Zero a
+  VCons :: Code a -> Vec n a -> Vec (Succ n) a
 
 type H s o a = Unboxed o -> ST s (Maybe a)
 data InputOps s o = InputOps { _more       :: Code (o -> Bool)
@@ -63,7 +68,7 @@ box        :: (?ops :: InputOps s o) => Code (Unboxed o -> o)
 box        = _box        ?ops
 newCRef    :: (?ops :: InputOps s o) => Code (o -> ST s (STRefU s Int))
 newCRef    = _newCRef    ?ops
-readCRef   :: (?ops :: InputOps s o) => Code (STRefU s Int -> ST s o) 
+readCRef   :: (?ops :: InputOps s o) => Code (STRefU s Int -> ST s o)
 readCRef   = _readCRef   ?ops
 writeCRef  :: (?ops :: InputOps s o) => Code (STRefU s Int -> o -> ST s ())
 writeCRef  = _writeCRef  ?ops
@@ -84,8 +89,8 @@ tailQ (QCons x xs) = xs
 headQ :: QList (x ': xs) -> Code x
 headQ (QCons x xs) = x
 
-noreturn :: forall s r x (o# :: TYPE r) a. x -> o# -> ST s (Maybe a)
-noreturn x = error "Machine is only permitted return-by-failure"
+raise :: forall o s a. [Code (H s o a)] -> Code (H s o a)
+raise = head
 
 {-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
@@ -102,11 +107,23 @@ modifyΣ σ f =
   do !x <- readΣ σ
      writeΣ σ (f $! x)
 
+class ReturnOps o where
+  halt :: Code (a -> Unboxed o -> ST s (Maybe a))
+  noreturn :: Code (r -> Unboxed o -> ST s (Maybe a))
+
+#define deriveReturnOps(_o)                                       \
+instance ReturnOps _o where                                       \
+{                                                                 \
+  halt = [||\x o# -> return $! Just x||];                         \
+  noreturn = [||\x o# -> error "Return is not permitted here"||]; \
+};
+inputInstances(deriveReturnOps)
+
 class FailureOps o where
   setupHandler :: [Code (H s o a)] -> Code o
                -> (Code o -> Code (Unboxed o -> ST s (Maybe a)))
                -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
-  raise :: [Code (H s o a)] -> Code (Unboxed o -> ST s (Maybe a))
+  fatal :: Code (H s o a)
 
 #define deriveFailureOps(_o)                                   \
 instance FailureOps _o where                                   \
@@ -115,26 +132,25 @@ instance FailureOps _o where                                   \
   setupHandler hs o h k = [||                                  \
     let handler ((!o#) :: Unboxed _o) = $$(h o) o#             \
     in $$(k ([||handler||]:hs)) ||];                           \
-  raise [] = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]; \
-  raise (h:_) = h;                                             \
+  fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||];    \
 };
 inputInstances(deriveFailureOps)
 
 -- RIP Dream :(
-{-$(let derive _o = [d| 
+{-$(let derive _o = [d|
         instance FailureOps _o where
           setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]
-          raise ops = [||\(H hs) (!o) -> case hs of 
+          raise ops = [||\(H hs) (!o) -> case hs of
               SNil -> return Nothing
               h:::_ -> h ($$(_unbox ops) o)
             ||]
         |] in traverse derive inputTypes)-}
 
-runConcrete :: forall s o a x. (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
-runConcrete hs m ret o = [||$$m $$ret ($$unbox $$o) $! $$(raise @o hs)||]
+runConcrete :: (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
+runConcrete (h:_) m ret o = [||$$m $$ret ($$unbox $$o) $! $$h||]
 
 sat :: (?ops :: InputOps s o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
-sat o p good bad = [|| 
-  let !(# c, o' #) = $$next $$o 
-  in if $$p c then $$(good [|| o' ||] [|| c ||]) 
+sat o p good bad = [||
+  let !(# c, o' #) = $$next $$o
+  in if $$p c then $$(good [|| o' ||] [|| c ||])
               else $$bad ||]

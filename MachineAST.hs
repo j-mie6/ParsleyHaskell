@@ -19,48 +19,49 @@ import Safe.Coerce       (coerce)
 import Data.List         (intercalate)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 
-newtype Machine o a = Machine { getMachine :: Fix3 (M WQ o) '[] a a }
+type One = Succ Zero
+newtype Machine o a = Machine { getMachine :: Fix4 (M WQ o) '[] One a a }
 newtype ΣVar (a :: *) = ΣVar IΣVar
 newtype MVar (a :: *) = MVar IMVar
 newtype ΦVar (a :: *) = ΦVar IΦVar
 newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
-newtype LetBinding q o a x = LetBinding (Fix3 (M q o) '[] x a)
+newtype LetBinding q o a x = LetBinding (Fix4 (M q o) '[] One x a)
 instance Show (LetBinding q o a x) where show (LetBinding m) = show m
 
 data M q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
-  Ret       :: M q o k '[x] (Succ Zero) x a
-  Push      :: Defunc q x -> k (x ': xs) n r a -> M q o k xs n r a
-  Pop       :: k xs n r a -> M q o k (x ': xs) n r a
-  Lift2     :: Defunc q (x -> y -> z) -> k (z ': xs) n r a -> M q o k (y ': x ': xs) n r a
-  Sat       :: Defunc q (Char -> Bool) -> k (Char ': xs) n r a -> M q o k xs n r a
-  Call      :: MVar x -> k (x ': xs) (Succ n) r a -> M q o k xs (Succ n) r a
+  Ret       :: M q o k '[x] n x a
+  Push      :: Defunc q x -> k (x : xs) n r a -> M q o k xs n r a
+  Pop       :: k xs n r a -> M q o k (x : xs) n r a
+  Lift2     :: Defunc q (x -> y -> z) -> k (z : xs) n r a -> M q o k (y : x : xs) n r a
+  Sat       :: Defunc q (Char -> Bool) -> k (Char : xs) (Succ n) r a -> M q o k xs (Succ n) r a
+  Call      :: MVar x -> k (x : xs) (Succ n) r a -> M q o k xs (Succ n) r a
   Jump      :: MVar x -> M q o k '[] (Succ n) x a
   Empt      :: M q o k xs (Succ n) r a
   Commit    :: k xs n r a -> M q o k xs (Succ n) r a
-  Catch     :: k xs (Succ n) r a -> k (o ': xs) r a -> M q o k xs r a
-  Handler   :: Handler o k xs n r a -> M q o k (o ': xs) n r a
-  Tell      :: k (o ': xs) n r a -> M q o k xs n r a
-  Seek      :: k xs n r a -> M q o k (o ': xs) n r a
-  Case      :: k (x ': xs) n r a -> k (y ': xs) n r a -> M q o k (Either x y ': xs) n r a
-  Choices   :: [Defunc q (x -> Bool)] -> [k xs n r a] -> k xs n r a -> M q o k (x ': xs) n r a
+  Catch     :: k xs (Succ n) r a -> k (o : xs) n r a -> M q o k xs n r a
+  Handler   :: Handler o k xs n r a -> M q o k (o : xs) n r a
+  Tell      :: k (o : xs) n r a -> M q o k xs n r a
+  Seek      :: k xs n r a -> M q o k (o : xs) n r a
+  Case      :: k (x : xs) n r a -> k (y : xs) n r a -> M q o k (Either x y : xs) n r a
+  Choices   :: [Defunc q (x -> Bool)] -> [k xs n r a] -> k xs n r a -> M q o k (x : xs) n r a
   ChainIter :: ΣVar x -> MVar x -> M q o k '[] (Succ n) x a
   ChainInit :: ΣVar x -> k '[] (Succ n) x a -> MVar x -> k xs n r a -> M q o k xs n r a
-  Join      :: ΦVar x -> M q o k (x ': xs) n r a
-  MkJoin    :: ΦVar x -> k (x ': xs) n r a -> k xs n r a -> M q o k xs n r a
-  Swap      :: k (x ': y ': xs) n r a -> M q o k (y ': x ': xs) n r a
-  Make      :: ΣVar x -> k xs n r a -> M q o k (x ': xs) n r a
-  Get       :: ΣVar x -> k (x ': xs) n r a -> M q o k xs n r a
-  Put       :: ΣVar x -> k xs n r a -> M q o k (x ': xs) n r a
+  Join      :: ΦVar x -> M q o k (x : xs) n r a
+  MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> M q o k xs n r a
+  Swap      :: k (x : y : xs) n r a -> M q o k (y : x : xs) n r a
+  Make      :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
+  Get       :: ΣVar x -> k (x : xs) n r a -> M q o k xs n r a
+  Put       :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
   LogEnter  :: String -> k xs n r a -> M q o k xs n r a
   LogExit   :: String -> k xs n r a -> M q o k xs n r a
   MetaM     :: MetaM -> k xs n r a -> M q o k xs n r a
 
 data Handler o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
-  Parsec :: k xs r a -> Handler o k xs r a
-  Log :: String -> Handler o k xs r a
-deriving instance Show (Handler o (Const3 String) xs r a)
+  Parsec :: k xs n r a -> Handler o k xs n r a
+  Log :: String -> Handler o k xs n r a
+deriving instance Show (Handler o (Const4 String) xs n r a)
 
 data MetaM where
   AddCoins    :: Int -> MetaM
@@ -68,23 +69,23 @@ data MetaM where
   RefundCoins :: Int -> MetaM
   DrainCoins  :: Int -> MetaM
 
-mkCoin :: (Int -> MetaM) -> Int -> Fix3 (M q o) xs r a -> Fix3 (M q o) xs r a
+mkCoin :: (Int -> MetaM) -> Int -> Fix4 (M q o) xs n r a -> Fix4 (M q o) xs n r a
 mkCoin meta 0 = id
-mkCoin meta n = In3 . MetaM (meta n)
+mkCoin meta n = In4 . MetaM (meta n)
 
 addCoins = mkCoin AddCoins
 freeCoins = mkCoin FreeCoins
 refundCoins = mkCoin RefundCoins
 drainCoins = mkCoin DrainCoins
 
-_App :: Fix3 (M q o) (y ': xs) r a -> M q o (Fix3 (M q o)) (x ': (x -> y) ': xs) r a
+_App :: Fix4 (M q o) (y : xs) n r a -> M q o (Fix4 (M q o)) (x : (x -> y) : xs) n r a
 _App m = Lift2 APP m
 
-_Fmap :: Defunc q (x -> y) -> Fix3 (M q o) (y ': xs) r a -> M q o (Fix3 (M q o)) (x ': xs) r a
-_Fmap f m = Push f (In3 (Lift2 (FLIP_H APP) m))
+_Fmap :: Defunc q (x -> y) -> Fix4 (M q o) (y : xs) n r a -> M q o (Fix4 (M q o)) (x : xs) n r a
+_Fmap f m = Push f (In4 (Lift2 (FLIP_H APP) m))
 
-_Modify :: ΣVar x -> Fix3 (M q o) xs r a -> M q o (Fix3 (M q o)) ((x -> x) ': xs) r a
-_Modify σ m = Get σ (In3 (_App (In3 (Put σ m))))
+_Modify :: ΣVar x -> Fix4 (M q o) xs n r a -> M q o (Fix4 (M q o)) ((x -> x) : xs) n r a
+_Modify σ m = Get σ (In4 (_App (In4 (Put σ m))))
 
 instance IFunctor4 (M q o) where
   imap4 f Ret                 = Ret
@@ -121,7 +122,7 @@ instance IFunctor4 (Handler o) where
 instance Show (Machine o a) where show = show . getMachine
 instance Show (Fix4 (M q o) xs n r a) where
   show x = let Const4 s = cata4 alg x in s where
-    alg :: forall i j. M q o (Const4 String) i j k a -> Const4 String i j k a
+    alg :: forall i j k. M q o (Const4 String) i j k a -> Const4 String i j k a
     alg Ret                 = Const4 $ "Ret"
     alg (Call μ k)          = Const4 $ "(Call " ++ show μ ++ " " ++ show k ++ ")"
     alg (Jump μ)            = Const4 $ "(Jump " ++ show μ ++ ")"

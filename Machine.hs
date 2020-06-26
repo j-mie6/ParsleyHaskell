@@ -66,10 +66,10 @@ derivation(Text)
     concrete machine. As such, continuations are only required to
     demand the values of X and o, with all other values closed over
     during suspension. -}
-data Γ s o xs r a = Γ { xs    :: QList xs
-                      , ret   :: Code (r -> Unboxed o -> ST s (Maybe a))
-                      , o     :: Code o
-                      , hs    :: [Code (Unboxed o -> ST s (Maybe a))] }
+data Γ s o xs n r a = Γ { xs    :: QList xs
+                        , ret   :: Code (r -> Unboxed o -> ST s (Maybe a))
+                        , o     :: Code o
+                        , hs    :: Vec n (Code (Unboxed o -> ST s (Maybe a))) }
 
 newtype QSTRef s x = QSTRef (Code (STRef s x))
 newtype QORef s = QORef (Code (STRefU s Int))
@@ -128,20 +128,20 @@ liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
 
 newtype MissingDependency = MissingDependency IMVar
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
-type ExecMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs r a -> Code (ST s (Maybe a)))
+type ExecMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 newtype Exec s o xs n r a = Exec { unExec :: ExecMonad s o xs n r a }
-run :: Exec s o xs n r a -> Γ s o xs r a -> Ctx s o a -> Code (ST s (Maybe a))
+run :: Exec s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
 run (Exec m) γ ctx = runReader m ctx γ
 
 type Ops o = (Handlers o, KOps o, FailureOps o, JoinBuilder o, RecBuilder o, ReturnOps o)
 type Handlers o = (HardForkHandler o, ChainHandler o, LogHandler o)
 class FailureOps o => HardForkHandler o where
-  hardForkHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> Code (ST s (Maybe a))) -> Γ s o xs ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
+  hardForkHandler :: (?ops :: InputOps s o) => (Γ s o xs (Succ n) ks a -> Code (ST s (Maybe a))) -> Γ s o xs (Succ n) ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
 class FailureOps o => ChainHandler o where
-  chainHandler :: (?ops :: InputOps s o) => (Γ s o xs ks a -> Code (ST s (Maybe a))) -> Code (STRefU s Int)
-               -> Γ s o xs ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
+  chainHandler :: (?ops :: InputOps s o) => (Γ s o xs (Succ n) ks a -> Code (ST s (Maybe a))) -> Code (STRefU s Int)
+               -> Γ s o xs (Succ n) ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
 class FailureOps o => LogHandler o where
-  logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
+  logHandler :: (?ops :: InputOps s o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
 
 exec :: forall q s o a. (Quapplicative q, Ops o) => Code (PreparedInput (Rep o) s o (Unboxed o)) -> (Machine o a, DMap MVar (LetBinding q o a)) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
@@ -151,7 +151,7 @@ exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
              nameLet
              QAbsExec
              (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyExec k))
-             (\names -> run (readyExec m) (Γ QNil (halt @o) [||offset||] [fatal @o]) (emptyCtx {μs = names})))
+             (\names -> run (readyExec m) (Γ QNil (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx {μs = names})))
   ||]
 
 missingDependency :: MVar x -> MissingDependency
@@ -214,7 +214,7 @@ readyExec = cata4 (Exec . alg)
     alg (Handler h)         = execHandler h
     alg (MetaM m k)         = execMeta m k
 
-execRet :: (?ops :: InputOps s o, KOps o) => ExecMonad s o (x ': xs) (Succ Zero) x a
+execRet :: (?ops :: InputOps s o, KOps o) => ExecMonad s o (x ': xs) n x a
 execRet = return $! resume
 
 execCall :: (?ops :: InputOps s o, FailureOps o, KOps o) => MVar x -> Exec s o (x ': xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
@@ -253,7 +253,7 @@ execEmpt :: (?ops :: InputOps s o, FailureOps o) => ExecMonad s o xs (Succ n) r 
 execEmpt = return $! raiseΓ
 
 execCommit :: Exec s o xs n r a -> ExecMonad s o xs (Succ n) r a
-execCommit (Exec k) = k <&> \m γ -> m (γ {hs = tail (hs γ)})
+execCommit (Exec k) = k <&> \m γ -> let VCons _ hs' = hs γ in m (γ {hs = hs'})
 
 execCatch :: (?ops :: InputOps s o, FailureOps o) => Exec s o xs (Succ n) r a -> Exec s o (o ': xs) n r a -> ExecMonad s o xs n r a
 execCatch (Exec k) (Exec h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (\c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]) mk) k h
@@ -276,7 +276,7 @@ execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ i
   def
   (forM ks (\(Exec k) -> k))
   where
-    go :: Code x -> [q (x -> Bool)] -> [Γ s o xs r a -> Code (ST s (Maybe a))] -> (Γ s o xs r a -> Code (ST s (Maybe a))) -> Γ s o xs r a -> Code (ST s (Maybe a))
+    go :: Code x -> [q (x -> Bool)] -> [Γ s o xs n r a -> Code (ST s (Maybe a))] -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (ST s (Maybe a))
     go _ [] [] def γ = def γ
     go x (f:fs) (mk:mks) def γ = [||
         if $$(_code f) $$x then $$(mk γ)
@@ -293,8 +293,8 @@ execChainIter σ μ =
        ||]
 
 execChainInit :: (?ops :: InputOps s o, ChainHandler o, RecBuilder o, ReturnOps o)
-              => ΣVar x -> Exec s o '[] (Succ n) x a -> MVar x -> Exec s o xs n r a
-              -> ExecMonad s o xs n r a
+              => ΣVar x -> Exec s o '[] (Succ (Succ n)) x a -> MVar x -> Exec s o xs (Succ n) r a
+              -> ExecMonad s o xs (Succ n) r a
 execChainInit σ l μ (Exec k) =
   do mk <- k
      asks $! \ctx γ@(Γ xs ks o _) -> [||
@@ -350,7 +350,7 @@ execPut σ (Exec k) =
           $$(mk (γ {xs = xs'}))
        ||]
 
-preludeString :: (?ops :: InputOps s o) => String -> Char -> Γ s o xs r a -> Ctx s o a -> String -> Code String
+preludeString :: (?ops :: InputOps s o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset     = o γ
@@ -404,7 +404,7 @@ execHandler :: (?ops :: InputOps s o, Handlers o) => Handler o (Exec s o) xs n r
 execHandler (Parsec (Exec k)) = k <&> \mk γ -> let QCons c xs' = xs γ in [||$$(hardForkHandler mk (γ {xs = xs'}) c) ($$unbox $$(o γ))||]
 execHandler (Log msg) = asks $ \ctx γ -> let QCons c xs' = xs γ in [||$$(logHandler msg ctx γ c) ($$unbox $$(o γ))||]
 
-execMeta :: (?ops :: InputOps s o, FailureOps o) => MetaM -> Exec s o xs n r a -> ExecMonad s o xs n r a
+execMeta :: (?ops :: InputOps s o, FailureOps o) => MetaM n -> Exec s o xs n r a -> ExecMonad s o xs n r a
 execMeta (AddCoins coins) (Exec k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
@@ -413,13 +413,13 @@ execMeta (FreeCoins coins) (Exec k) = local (giveCoins coins) k
 execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
 execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
 
-setupHandlerΓ :: FailureOps o => Γ s o xs r a
+setupHandlerΓ :: FailureOps o => Γ s o xs n r a
               -> (Code o -> Code (Unboxed o -> ST s (Maybe a)))
-              -> (Γ s o xs r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+              -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
 setupHandlerΓ γ h k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
 
-raiseΓ :: (?ops :: InputOps s o) => Γ s o xs r a -> Code (ST s (Maybe a))
-raiseΓ γ = let h:_ = hs γ in [|| $$h ($$unbox $$(o γ)) ||]
+raiseΓ :: (?ops :: InputOps s o) => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
+raiseΓ γ = let VCons h _ = hs γ in [|| $$h ($$unbox $$(o γ)) ||]
 
 class RecBuilder o => JoinBuilder o where
   setupJoinPoint :: (?ops :: InputOps s o) => ΦVar x -> Exec s o (x ': xs) n r a
@@ -442,9 +442,9 @@ class RecBuilder o where
   buildIter :: (?ops :: InputOps s o, ReturnOps o)
             => Ctx s o a -> MVar x -> ΣVar x -> Exec s o '[] (Succ n) x a
             -> Code (STRefU s Int)
-            -> [Code (H s o a)] -> Code o -> Code (ST s (Maybe a))
+            -> Vec (Succ n) (Code (H s o a)) -> Code o -> Code (ST s (Maybe a))
   buildRec  :: (?ops :: InputOps s o) => Ctx s o a
-            -> Exec s o '[] (Succ n) r a
+            -> Exec s o '[] One r a
             -> Code ((r -> Unboxed o -> ST s (Maybe a)) -> Unboxed o
                                                         -> (Unboxed o -> ST s (Maybe a))
                                                         -> ST s (Maybe a))
@@ -462,11 +462,11 @@ instance RecBuilder _o where                                                    
         loop ($$unbox $$o)                                                            \
       } ||];                                                                          \
   buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                             \
-    $$(run k (Γ QNil [||ret||] [||$$bx o#||] [[||h||]]) ctx) ||]                      \
+    $$(run k (Γ QNil [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||]           \
 };
 inputInstances(deriveRecBuilder)
 
-emitLengthCheck :: (?ops :: InputOps s o, FailureOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs r a -> Code (ST s (Maybe a))
+emitLengthCheck :: (?ops :: InputOps s o, FailureOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ _   = good
 emitLengthCheck 1 good bad γ = [|| if $$more $$(o γ) then $$good else $$bad ||]
 emitLengthCheck n good bad γ = [||
@@ -474,8 +474,8 @@ emitLengthCheck n good bad γ = [||
   else $$bad ||]
 
 class KOps o where
-  suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) r a -> Code (ST s (Maybe a))) -> Γ s o xs r a -> Code (x -> Unboxed o -> ST s (Maybe a))
-  resume :: (?ops :: InputOps s o) => Γ s o (x ': xs) x a -> Code (ST s (Maybe a))
+  suspend :: (?ops :: InputOps s o) => (Γ s o (x ': xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (x -> Unboxed o -> ST s (Maybe a))
+  resume :: (?ops :: InputOps s o) => Γ s o (x ': xs) n x a -> Code (ST s (Maybe a))
 
 #define deriveKOps(_o)                                                                         \
 instance KOps _o where                                                                         \

@@ -41,7 +41,7 @@ data QList xs where
 
 data Vec n a where
   VNil :: Vec Zero a
-  VCons :: Code a -> Vec n a -> Vec (Succ n) a
+  VCons :: a -> Vec n a -> Vec (Succ n) a
 
 type H s o a = Unboxed o -> ST s (Maybe a)
 data InputOps s o = InputOps { _more       :: Code (o -> Bool)
@@ -89,8 +89,8 @@ tailQ (QCons x xs) = xs
 headQ :: QList (x ': xs) -> Code x
 headQ (QCons x xs) = x
 
-raise :: forall o s a. [Code (H s o a)] -> Code (H s o a)
-raise = head
+raise :: forall o n s a. Vec (Succ n) (Code (H s o a)) -> Code (H s o a)
+raise (VCons h _) = h
 
 {-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
@@ -120,19 +120,18 @@ instance ReturnOps _o where                                       \
 inputInstances(deriveReturnOps)
 
 class FailureOps o where
-  setupHandler :: [Code (H s o a)] -> Code o
+  setupHandler :: Vec n (Code (H s o a)) -> Code o
                -> (Code o -> Code (Unboxed o -> ST s (Maybe a)))
-               -> ([Code (H s o a)] -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+               -> (Vec (Succ n) (Code (H s o a)) -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
   fatal :: Code (H s o a)
 
-#define deriveFailureOps(_o)                                   \
-instance FailureOps _o where                                   \
-{                                                              \
-  setupHandler [] o h k = k [h o];                             \
-  setupHandler hs o h k = [||                                  \
-    let handler ((!o#) :: Unboxed _o) = $$(h o) o#             \
-    in $$(k ([||handler||]:hs)) ||];                           \
-  fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||];    \
+#define deriveFailureOps(_o)                                \
+instance FailureOps _o where                                \
+{                                                           \
+  setupHandler hs o h k = [||                               \
+    let handler ((!o#) :: Unboxed _o) = $$(h o) o#          \
+    in $$(k (VCons [||handler||] hs)) ||];                  \
+  fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]; \
 };
 inputInstances(deriveFailureOps)
 
@@ -146,8 +145,8 @@ inputInstances(deriveFailureOps)
             ||]
         |] in traverse derive inputTypes)-}
 
-runConcrete :: (?ops :: InputOps s o, FailureOps o) => [Code (H s o a)] -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
-runConcrete (h:_) m ret o = [||$$m $$ret ($$unbox $$o) $! $$h||]
+runConcrete :: (?ops :: InputOps s o, FailureOps o) => Vec (Succ n) (Code (H s o a)) -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
+runConcrete (VCons h _) m ret o = [||$$m $$ret ($$unbox $$o) $! $$h||]
 
 sat :: (?ops :: InputOps s o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
 sat o p good bad = [||

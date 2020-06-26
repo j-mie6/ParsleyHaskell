@@ -46,8 +46,8 @@ data M q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :
   Seek      :: k xs n r a -> M q o k (o : xs) n r a
   Case      :: k (x : xs) n r a -> k (y : xs) n r a -> M q o k (Either x y : xs) n r a
   Choices   :: [Defunc q (x -> Bool)] -> [k xs n r a] -> k xs n r a -> M q o k (x : xs) n r a
-  ChainIter :: ΣVar x -> MVar x -> M q o k '[] (Succ n) x a
-  ChainInit :: ΣVar x -> k '[] (Succ n) x a -> MVar x -> k xs n r a -> M q o k xs n r a
+  ChainIter :: ΣVar x -> MVar x -> M q o k '[] (Succ n) x a -- TODO This is kinda wrong, it ignores the handler, so it should be n, but relies on runConcrete...
+  ChainInit :: ΣVar x -> k '[] (Succ (Succ n)) x a -> MVar x -> k xs (Succ n) r a -> M q o k xs (Succ n) r a
   Join      :: ΦVar x -> M q o k (x : xs) n r a
   MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> M q o k xs n r a
   Swap      :: k (x : y : xs) n r a -> M q o k (y : x : xs) n r a
@@ -56,20 +56,20 @@ data M q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :
   Put       :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
   LogEnter  :: String -> k xs n r a -> M q o k xs n r a
   LogExit   :: String -> k xs n r a -> M q o k xs n r a
-  MetaM     :: MetaM -> k xs n r a -> M q o k xs n r a
+  MetaM     :: MetaM n -> k xs n r a -> M q o k xs n r a
 
 data Handler o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
-  Parsec :: k xs n r a -> Handler o k xs n r a
-  Log :: String -> Handler o k xs n r a
+  Parsec :: k xs (Succ n) r a -> Handler o k xs (Succ n) r a
+  Log :: String -> Handler o k xs (Succ n) r a
 deriving instance Show (Handler o (Const4 String) xs n r a)
 
-data MetaM where
-  AddCoins    :: Int -> MetaM
-  FreeCoins   :: Int -> MetaM
-  RefundCoins :: Int -> MetaM
-  DrainCoins  :: Int -> MetaM
+data MetaM (n :: Nat) where
+  AddCoins    :: Int -> MetaM (Succ n)
+  FreeCoins   :: Int -> MetaM n
+  RefundCoins :: Int -> MetaM n
+  DrainCoins  :: Int -> MetaM (Succ n)
 
-mkCoin :: (Int -> MetaM) -> Int -> Fix4 (M q o) xs n r a -> Fix4 (M q o) xs n r a
+mkCoin :: (Int -> MetaM n) -> Int -> Fix4 (M q o) xs n r a -> Fix4 (M q o) xs n r a
 mkCoin meta 0 = id
 mkCoin meta n = In4 . MetaM (meta n)
 
@@ -156,7 +156,7 @@ instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
 instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ
 instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
 
-instance Show MetaM where
+instance Show (MetaM n) where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"
   show (RefundCoins n) = "Refund " ++ show n ++ " coins"
   show (DrainCoins n)    = "Using " ++ show n ++ " coins"

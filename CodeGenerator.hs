@@ -9,7 +9,7 @@
 module CodeGenerator (codeGen) where
 
 import ParserAST                  (ParserF(..), MetaP(..))
-import MachineAST                 (M(..), Handler(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
+import MachineAST                 (M(..), Handler(..), MetaM(..), IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), One, _Fmap, _App, _Modify, addCoins, refundCoins, drainCoins, freeCoins)
 import MachineAnalyser            (coinsNeeded)
 import Indexed                    (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Utils                      (code, Quapplicative((>*<)))
@@ -36,7 +36,7 @@ newtype CodeGen q o b a =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (M q o) (a : xs) (Succ n) r b -> CodeGenStack (Fix4 (M q o) xs (Succ n) r b)}
 
 -- TODO, ensure that let-bound parsers do not use finalise to add coins!
-codeGen :: Quapplicative q => Bool -> Fix (ParserF q) a -> IMVar -> IΣVar -> (Fix4 (M q o) '[] (Succ Zero) a b, IΣVar)
+codeGen :: Quapplicative q => Bool -> Fix (ParserF q) a -> IMVar -> IΣVar -> (Fix4 (M q o) '[] One a b, IΣVar)
 codeGen letBound p μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = finalise (histo alg p)
@@ -174,7 +174,7 @@ freshM = mapVFreshT newScope
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
-makeΦ :: Fix4 (M q o) (x ': xs) n r a -> CodeGenStack (Fix4 (M q o) xs n r a -> Fix4 (M q o) xs n r a, Fix4 (M q o) (x : xs) n r a)
+makeΦ :: Fix4 (M q o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (M q o) xs (Succ n) r a -> Fix4 (M q o) xs (Succ n) r a, Fix4 (M q o) (x : xs) (Succ n) r a)
 makeΦ m | elidable m = return $! (id, m)
   where
     -- This is double-φ optimisation:   If a φ-node points directly to another φ-node, then it can be elided

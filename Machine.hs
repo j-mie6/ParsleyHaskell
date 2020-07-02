@@ -26,8 +26,8 @@ import MachineOps
 import MachineAST
 import Input                      (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Indexed                    (Fix4, cata4, Nat(..))
-import Utils                      (code, Code, Quapplicative(_code))
-import Defunc                     (Defunc, genDefunc1, genDefunc2)
+import Utils                      (code, Code, Quapplicative)
+import Defunc                     (DefuncM, genDefuncM, genDefuncM1, genDefuncM2)
 import Data.Functor               ((<&>))
 import Control.Monad              (forM, join, liftM2)
 import Control.Monad.ST           (ST)
@@ -134,9 +134,7 @@ run :: Exec s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a)
 run (Exec m) γ ctx = runReader m ctx γ
 
 type Ops o = (Handlers o, KOps o, FailureOps o, JoinBuilder o, RecBuilder o, ReturnOps o)
-type Handlers o = (HardForkHandler o, ChainHandler o, LogHandler o)
-class FailureOps o => HardForkHandler o where
-  hardForkHandler :: (?ops :: InputOps s o) => (Γ s o xs (Succ n) ks a -> Code (ST s (Maybe a))) -> Γ s o xs (Succ n) ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
+type Handlers o = (ChainHandler o, LogHandler o)
 class FailureOps o => ChainHandler o where
   chainHandler :: (?ops :: InputOps s o) => (Γ s o xs (Succ n) ks a -> Code (ST s (Maybe a))) -> Code (STRefU s Int)
                -> Γ s o xs (Succ n) ks a -> Code o -> Code (Unboxed o -> ST s (Maybe a))
@@ -211,7 +209,6 @@ readyExec = cata4 (Exec . alg)
     alg (Put σ k)           = execPut σ k
     alg (LogEnter name k)   = execLogEnter name k
     alg (LogExit name k)    = execLogExit name k
-    alg (Handler h)         = execHandler h
     alg (MetaM m k)         = execMeta m k
 
 execRet :: (?ops :: InputOps s o, KOps o) => ExecMonad s o (x ': xs) n x a
@@ -227,16 +224,16 @@ execJump μ =
   do !(QAbsExec m) <- askM μ
      return $! \γ@Γ{..} -> runConcrete hs m ret o
 
-execPush :: Quapplicative q => q x -> Exec s o (x ': xs) n r a -> ExecMonad s o xs n r a
-execPush x (Exec k) = k <&> \m γ -> m (γ {xs = QCons (_code x) (xs γ)})
+execPush :: (?ops :: InputOps s o, Quapplicative q) => DefuncM q o x -> Exec s o (x ': xs) n r a -> ExecMonad s o xs n r a
+execPush x (Exec k) = k <&> \m γ -> m (γ {xs = QCons (genDefuncM x) (xs γ)})
 
 execPop :: Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
 execPop (Exec k) = k <&> \m γ -> m (γ {xs = tailQ (xs γ)})
 
-execLift2 :: Quapplicative q => Defunc q (x -> y -> z) -> Exec s o (z ': xs) n r a -> ExecMonad s o (y ': x ': xs) n r a
-execLift2 f (Exec k) = k <&> \m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefunc2 f x y) xs'})
+execLift2 :: (?ops :: InputOps s o, Quapplicative q) => DefuncM q o (x -> y -> z) -> Exec s o (z ': xs) n r a -> ExecMonad s o (y ': x ': xs) n r a
+execLift2 f (Exec k) = k <&> \m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefuncM2 f x y) xs'})
 
-execSat :: (?ops :: InputOps s o, FailureOps o, Quapplicative q) => q (Char -> Bool) -> Exec s o (Char ': xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
+execSat :: (?ops :: InputOps s o, FailureOps o, Quapplicative q) => DefuncM q o (Char -> Bool) -> Exec s o (Char ': xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
 execSat p (Exec k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -244,7 +241,7 @@ execSat p (Exec k) = do
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
-    readChar bad k γ@Γ{..} = sat o (_code p) (\o c -> k (γ {xs = QCons c xs, o = o})) bad
+    readChar bad k γ@Γ{..} = sat o (genDefuncM p) (\o c -> k (γ {xs = QCons c xs, o = o})) bad
     maybeEmitCheck Nothing mk γ = readChar (raiseΓ γ) mk γ
     maybeEmitCheck (Just n) mk γ =
       [|| let bad' = $$(raiseΓ γ) in $$(emitLengthCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
@@ -271,15 +268,15 @@ execCase (Exec p) (Exec q) = liftM2 (\mp mq γ ->
     Left x -> $$(mp (γ {xs = QCons [||x||] xs'}))
     Right y  -> $$(mq (γ {xs = QCons [||y||] xs'}))||]) p q
 
-execChoices :: forall x y xs n r a s o q. (?ops :: InputOps s o, JoinBuilder o, Quapplicative q) => [Defunc q (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
+execChoices :: forall x y xs n r a s o q. (?ops :: InputOps s o, Quapplicative q) => [DefuncM q o (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
 execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
   def
   (forM ks (\(Exec k) -> k))
   where
-    go :: Code x -> [Defunc q (x -> Bool)] -> [Γ s o xs n r a -> Code (ST s (Maybe a))] -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+    go :: Code x -> [DefuncM q o (x -> Bool)] -> [Γ s o xs n r a -> Code (ST s (Maybe a))] -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (ST s (Maybe a))
     go _ [] [] def γ = def γ
     go x (f:fs) (mk:mks) def γ = [||
-        if $$(genDefunc1 f x) then $$(mk γ)
+        if $$(genDefuncM1 f x) then $$(mk γ)
         else $$(go x fs mks def γ)
       ||]
 
@@ -368,9 +365,9 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     prelude    = [|| concat [indent, dir : name, dir : " (", show ($$offToInt $$offset), "): "] ||]
     caretSpace = [|| replicate (length $$prelude + $$offToInt $$offset - $$offToInt $$start) ' ' ||]
 
-execLogEnter :: (?ops :: InputOps s o) => String -> Exec s o xs n r a -> ExecMonad s o xs n r a
+execLogEnter :: (?ops :: InputOps s o, LogHandler o) => String -> Exec s o xs (Succ (Succ n)) r a -> ExecMonad s o xs (Succ n) r a
 execLogEnter name (Exec mk) =
-  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(k γ)||])
+  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(setupHandlerΓ γ (logHandler name ctx γ) k)||])
     (local debugUp mk)
     ask
 
@@ -380,17 +377,6 @@ execLogExit name (Exec mk) =
     (local debugDown mk)
     ask
 
-#define deriveHardForkHandler(_o)       \
-instance HardForkHandler _o where       \
-{                                       \
-  hardForkHandler mq γ c = [||\(!o#) -> \
-      if $$same $$c ($$box o#) then     \
-        $$(mq (γ {o = [||$$box o#||]})) \
-      else $$(raise @_o (hs γ)) o#      \
-    ||]                                 \
-};
-inputInstances(deriveHardForkHandler)
-
 #define deriveLogHandler(_o)                                                                                      \
 instance LogHandler _o where                                                                                      \
 {                                                                                                                 \
@@ -399,10 +385,6 @@ instance LogHandler _o where                                                    
     ||]                                                                                                           \
 };
 inputInstances(deriveLogHandler)
-
-execHandler :: (?ops :: InputOps s o, Handlers o) => Handler o (Exec s o) xs n r a -> ExecMonad s o (o ': xs) n r a
-execHandler (Parsec (Exec k)) = k <&> \mk γ -> let QCons c xs' = xs γ in [||$$(hardForkHandler mk (γ {xs = xs'}) c) ($$unbox $$(o γ))||]
-execHandler (Log msg) = asks $ \ctx γ -> let QCons c xs' = xs γ in [||$$(logHandler msg ctx γ c) ($$unbox $$(o γ))||]
 
 execMeta :: (?ops :: InputOps s o, FailureOps o) => MetaM n -> Exec s o xs n r a -> ExecMonad s o xs n r a
 execMeta (AddCoins coins) (Exec k) =

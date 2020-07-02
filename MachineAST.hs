@@ -13,7 +13,7 @@ module MachineAST where
 
 import Indexed           (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
 import Utils             (WQ(..))
-import Defunc            (Defunc(APP, ID), pattern FLIP_H)
+import Defunc            (Defunc(APP, ID), DefuncM(USER), pattern FLIP_H)
 import Data.Word         (Word64)
 import Safe.Coerce       (coerce)
 import Data.List         (intercalate)
@@ -32,20 +32,19 @@ instance Show (LetBinding q o a x) where show (LetBinding m) = show m
 
 data M q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
   Ret       :: M q o k '[x] n x a
-  Push      :: Defunc q x -> k (x : xs) n r a -> M q o k xs n r a
+  Push      :: DefuncM q o x -> k (x : xs) n r a -> M q o k xs n r a
   Pop       :: k xs n r a -> M q o k (x : xs) n r a
-  Lift2     :: Defunc q (x -> y -> z) -> k (z : xs) n r a -> M q o k (y : x : xs) n r a
-  Sat       :: Defunc q (Char -> Bool) -> k (Char : xs) (Succ n) r a -> M q o k xs (Succ n) r a
+  Lift2     :: DefuncM q o (x -> y -> z) -> k (z : xs) n r a -> M q o k (y : x : xs) n r a
+  Sat       :: DefuncM q o (Char -> Bool) -> k (Char : xs) (Succ n) r a -> M q o k xs (Succ n) r a
   Call      :: MVar x -> k (x : xs) (Succ n) r a -> M q o k xs (Succ n) r a
   Jump      :: MVar x -> M q o k '[] (Succ n) x a
   Empt      :: M q o k xs (Succ n) r a
   Commit    :: k xs n r a -> M q o k xs (Succ n) r a
   Catch     :: k xs (Succ n) r a -> k (o : xs) n r a -> M q o k xs n r a
-  Handler   :: Handler o k xs n r a -> M q o k (o : xs) n r a
   Tell      :: k (o : xs) n r a -> M q o k xs n r a
   Seek      :: k xs n r a -> M q o k (o : xs) n r a
   Case      :: k (x : xs) n r a -> k (y : xs) n r a -> M q o k (Either x y : xs) n r a
-  Choices   :: [Defunc q (x -> Bool)] -> [k xs n r a] -> k xs n r a -> M q o k (x : xs) n r a
+  Choices   :: [DefuncM q o (x -> Bool)] -> [k xs n r a] -> k xs n r a -> M q o k (x : xs) n r a
   ChainIter :: ΣVar x -> MVar x -> M q o k '[] (Succ n) x a -- TODO This is kinda wrong, it ignores the handler, so it should be n, but relies on runConcrete...
   ChainInit :: ΣVar x -> k '[] (Succ (Succ n)) x a -> MVar x -> k xs (Succ n) r a -> M q o k xs (Succ n) r a
   Join      :: ΦVar x -> M q o k (x : xs) n r a
@@ -54,14 +53,9 @@ data M q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :
   Make      :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
   Get       :: ΣVar x -> k (x : xs) n r a -> M q o k xs n r a
   Put       :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
-  LogEnter  :: String -> k xs n r a -> M q o k xs n r a
+  LogEnter  :: String -> k xs (Succ (Succ n)) r a -> M q o k xs (Succ n) r a
   LogExit   :: String -> k xs n r a -> M q o k xs n r a
   MetaM     :: MetaM n -> k xs n r a -> M q o k xs n r a
-
-data Handler o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
-  Parsec :: k xs (Succ n) r a -> Handler o k xs (Succ n) r a
-  Log :: String -> Handler o k xs (Succ n) r a
-deriving instance Show (Handler o (Const4 String) xs n r a)
 
 data MetaM (n :: Nat) where
   AddCoins    :: Int -> MetaM (Succ n)
@@ -79,17 +73,17 @@ refundCoins = mkCoin RefundCoins
 drainCoins = mkCoin DrainCoins
 
 _App :: Fix4 (M q o) (y : xs) n r a -> M q o (Fix4 (M q o)) (x : (x -> y) : xs) n r a
-_App m = Lift2 APP m
+_App m = Lift2 (USER APP) m
 
-_Fmap :: Defunc q (x -> y) -> Fix4 (M q o) (y : xs) n r a -> M q o (Fix4 (M q o)) (x : xs) n r a
-_Fmap f m = Push f (In4 (Lift2 (FLIP_H APP) m))
+_Fmap :: DefuncM q o (x -> y) -> Fix4 (M q o) (y : xs) n r a -> M q o (Fix4 (M q o)) (x : xs) n r a
+_Fmap f m = Push f (In4 (Lift2 (USER (FLIP_H APP)) m))
 
 _Modify :: ΣVar x -> Fix4 (M q o) xs n r a -> M q o (Fix4 (M q o)) ((x -> x) : xs) n r a
 _Modify σ m = Get σ (In4 (_App (In4 (Put σ m))))
 
 -- This this is a nice little trick to get this instruction to generate optimised code
 _If :: Fix4 (M q o) xs n r a -> Fix4 (M q o) xs n r a -> M q o (Fix4 (M q o)) (Bool : xs) n r a
-_If t e = Choices [ID] [t] e
+_If t e = Choices [USER ID] [t] e
 
 instance IFunctor4 (M q o) where
   imap4 f Ret                 = Ret
@@ -102,7 +96,6 @@ instance IFunctor4 (M q o) where
   imap4 f Empt                = Empt
   imap4 f (Commit k)          = Commit (f k)
   imap4 f (Catch p h)         = Catch (f p) (f h)
-  imap4 f (Handler h)         = Handler (imap4 f h)
   imap4 f (Tell k)            = Tell (f k)
   imap4 f (Seek k)            = Seek (f k)
   imap4 f (Case p q)          = Case (f p) (f q)
@@ -119,10 +112,6 @@ instance IFunctor4 (M q o) where
   imap4 f (LogExit name k)    = LogExit name (f k)
   imap4 f (MetaM m k)         = MetaM m (f k)
 
-instance IFunctor4 (Handler o) where
-  imap4 f (Parsec k) = Parsec (f k)
-  imap4 f (Log msg) = Log msg
-
 instance Show (Machine o a) where show = show . getMachine
 instance Show (Fix4 (M q o) xs n r a) where
   show x = let Const4 s = cata4 alg x in s where
@@ -137,7 +126,6 @@ instance Show (Fix4 (M q o) xs n r a) where
     alg Empt                = Const4 $ "Empt"
     alg (Commit k)          = Const4 $ "(Commit " ++ show k ++ ")"
     alg (Catch p h)         = Const4 $ "(Catch " ++ show p ++ " " ++ show h ++ ")"
-    alg (Handler h)         = Const4 $ "(Handler " ++ show h ++ ")"
     alg (Tell k)            = Const4 $ "(Tell " ++ show k ++ ")"
     alg (Seek k)            = Const4 $ "(Seek " ++ show k ++ ")"
     alg (Case p q)          = Const4 $ "(Case " ++ show p ++ " " ++ show q ++ ")"

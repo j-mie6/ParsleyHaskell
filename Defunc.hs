@@ -3,10 +3,11 @@
              GADTs,
              UndecidableInstances,
              TypeApplications,
-             ScopedTypeVariables #-}
+             ScopedTypeVariables,
+             ImplicitParams #-}
 module Defunc where
 import Utils (WQ(..), Code, Quapplicative(..))
-import LiftPlugin (LiftTo, code)
+import MachineOps (InputOps, same)
 
 data Defunc q a where
   APP     :: Defunc q ((a -> b) -> a -> b)
@@ -35,6 +36,10 @@ instance Quapplicative q => Quapplicative (Defunc q) where
   _val UNIT        = ()
   _val (BLACK f)   = _val f
   _code = genDefunc
+
+data DefuncM q o a where
+  USER :: Defunc q a -> DefuncM q o a
+  SAME :: DefuncM q o (o -> o -> Bool)
 
 pattern COMPOSE_H :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) => Defunc q x -> Defunc q y -> Defunc q z
 pattern COMPOSE_H f g = APP_H (APP_H COMPOSE f) g
@@ -74,7 +79,19 @@ genDefunc2 (FLIP_H f) qx qy  = genDefunc2 f qy qx
 genDefunc2 CONS       qx qxs = [|| $$qx : $$qxs ||]
 genDefunc2 f          qx qy  = [|| $$(genDefunc f) $$qx $$qy ||]
 
-instance Show (Defunc a q) where
+genDefuncM :: (?ops :: InputOps s o, Quapplicative q) => DefuncM q o a -> Code a
+genDefuncM (USER x) = genDefunc x
+genDefuncM SAME     = same
+
+genDefuncM1 :: (?ops :: InputOps s o, Quapplicative q) => DefuncM q o (a -> b) -> Code a -> Code b
+genDefuncM1 (USER f) qx = genDefunc1 f qx
+genDefuncM1 f qx        = [|| $$(genDefuncM f) $$qx ||]
+
+genDefuncM2 :: (?ops :: InputOps s o, Quapplicative q) => DefuncM q o (a -> b -> c) -> Code a -> Code b -> Code c
+genDefuncM2 (USER f) qx qy = genDefunc2 f qx qy
+genDefuncM2 f qx qy        = [|| $$(genDefuncM f) $$qx $$qy ||]
+
+instance Show (Defunc q a) where
   show APP = "($)"
   show COMPOSE = "(.)"
   show FLIP = "flip"
@@ -88,3 +105,7 @@ instance Show (Defunc a q) where
   show CONS = "(:)"
   show UNIT = "()"
   show _ = "x"
+
+instance Show (DefuncM q o a) where
+  show (USER x) = show x
+  show SAME = "same"

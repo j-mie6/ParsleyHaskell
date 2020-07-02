@@ -19,30 +19,30 @@ import Data.List                  (intercalate)
 newtype Parser a = Parser {unParser :: Fix (ParserF WQ) a}
 
 -- Core smart constructors
-pure :: WQ a -> Parser a
-pure = _pure . BLACK
-
+{-# INLINE _pure #-}
 _pure :: Defunc WQ a -> Parser a
 _pure = Parser . In . Pure
 
+infixl 4 <*>
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
 Parser p <*> Parser q = Parser (In (p :<*>: q))
 
+infixl 4 <*
 (<*) :: Parser a -> Parser b -> Parser a
 Parser p <* Parser q = Parser (In (p :<*: q))
 
+infixl 4 *>
 (*>) :: Parser a -> Parser b -> Parser b
 Parser p *> Parser q = Parser (In (p :*>: q))
 
 empty :: Parser a
 empty = Parser (In Empty)
 
+infixl 3 <|>
 (<|>) :: Parser a -> Parser a -> Parser a
 Parser p <|> Parser q = Parser (In (p :<|>: q))
 
-satisfy :: WQ (Char -> Bool) -> Parser Char
-satisfy = _satisfy . BLACK
-
+{-# INLINE _satisfy #-}
 _satisfy :: Defunc WQ (Char -> Bool) -> Parser Char
 _satisfy = Parser . In . Satisfy
 
@@ -55,8 +55,10 @@ notFollowedBy = Parser . In . NotFollowedBy . unParser
 try :: Parser a -> Parser a
 try = Parser . In . Try . unParser
 
-match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> EQ_H (code v)) vs) (map (unParser . f) vs) def))
+_conditional :: [(Defunc WQ (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+_conditional cs (Parser p) (Parser def) =
+  let (fs, qs) = unzip cs
+  in Parser (In (Match p fs (map unParser qs) def))
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (Branch c p q))
@@ -69,14 +71,6 @@ chainPost (Parser p) (Parser op) = Parser (In (ChainPost p op))
 
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (Debug name p))
-
--- Fixities
--- Applicative
-infixl 4 <*>
-infixl 4 <*
-infixl 4 *>
--- Alternative
-infixl 3 <|>
 
 -- Core datatype
 data ParserF (q :: * -> *) (k :: * -> *) (a :: *) where

@@ -38,6 +38,8 @@ optimise (Match (In Empty) _ _ def)                     = def
 optimise (Match p _ qs (In Empty))
   | all (\case {In Empty -> True; _ -> False}) qs = optimise (p :*>: In Empty)
 -- APPLICATIVE OPTIMISATION
+-- Identity Law: pure id <*> u                          = u
+optimise (In (Pure ID) :<*>: u)                         = u
 -- Homomorphism Law: pure f <*> pure x                  = pure (f x)
 optimise (In (Pure f) :<*>: In (Pure x))                = In (Pure (APP_H f x))
 -- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law
@@ -101,8 +103,8 @@ optimise (NotFollowedBy (In (LookAhead p)))             = optimise (NotFollowedB
 optimise (LookAhead (In (NotFollowedBy p)))             = In (NotFollowedBy p)
 -- Transparency Law: notFollowedBy (try p <|> q)        = notFollowedBy p *> notFollowedBy q
 optimise (NotFollowedBy (In (In (Try p) :<|>: q)))      = optimise (optimise (NotFollowedBy p) :*>: optimise (NotFollowedBy q))
--- Distributivity Law: lookAhead p <|> lookAhead q      = lookAhead (p <|> q)
-optimise (In (LookAhead p) :<|>: In (LookAhead q))      = optimise (LookAhead (optimise (p :<|>: q)))
+-- Distributivity Law: lookAhead p <|> lookAhead q      = lookAhead (try p <|> q)
+optimise (In (LookAhead p) :<|>: In (LookAhead q))      = optimise (LookAhead (optimise (In (Try p) :<|>: q)))
 -- Interchange Law: lookAhead (p $> x)                  = lookAhead p $> x
 optimise (LookAhead (In (p :$>: x)))                    = optimise (optimise (LookAhead p) :$>: x)
 -- Interchange law: lookAhead (f <$> p)                 = f <$> lookAhead p

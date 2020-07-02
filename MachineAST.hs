@@ -13,7 +13,7 @@ module MachineAST where
 
 import Indexed           (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
 import Utils             (WQ(..))
-import Defunc            (Defunc(APP), pattern FLIP_H)
+import Defunc            (Defunc(APP, ID), pattern FLIP_H)
 import Data.Word         (Word64)
 import Safe.Coerce       (coerce)
 import Data.List         (intercalate)
@@ -86,6 +86,10 @@ _Fmap f m = Push f (In4 (Lift2 (FLIP_H APP) m))
 
 _Modify :: ΣVar x -> Fix4 (M q o) xs n r a -> M q o (Fix4 (M q o)) ((x -> x) : xs) n r a
 _Modify σ m = Get σ (In4 (_App (In4 (Put σ m))))
+
+-- This this is a nice little trick to get this instruction to generate optimised code
+_If :: Fix4 (M q o) xs n r a -> Fix4 (M q o) xs n r a -> M q o (Fix4 (M q o)) (Bool : xs) n r a
+_If t e = Choices [ID] [t] e
 
 instance IFunctor4 (M q o) where
   imap4 f Ret                 = Ret

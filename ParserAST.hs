@@ -55,8 +55,10 @@ notFollowedBy = Parser . In . NotFollowedBy . unParser
 try :: Parser a -> Parser a
 try = Parser . In . Try . unParser
 
-match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-match vs (Parser p) f (Parser def) = Parser (In (Match p (map (\v -> EQ_H (code v)) vs) (map (unParser . f) vs) def))
+_conditional :: [(Defunc WQ (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+_conditional cs (Parser p) (Parser def) =
+  let (fs, qs) = unzip cs
+  in Parser (In (Match p fs (map unParser qs) def))
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (Branch c p q))

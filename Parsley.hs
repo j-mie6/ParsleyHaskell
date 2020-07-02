@@ -19,7 +19,7 @@ module Parsley ( Parser, runParser, parseFromFile
                -- Monoidal
                , unit, (<~>), (<~), (~>)
                -- Selective
-               , branch, select, match
+               , branch, select, match, conditional, predicate
                -- "Monadic"
                , (||=), (>>)
                -- Primitives
@@ -41,14 +41,12 @@ module Parsley ( Parser, runParser, parseFromFile
                , Level(..), Prec(..), precedence, monolith, infixL, infixR, prefix, postfix
                -- Template Haskell Utils
                , code, (>*<), makeQ, _code, _val, WQ, Lift
-               -- Template Haskell Crap
-               , bool
                , module Input
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Input hiding               (PreparedInput(..))
-import ParserAST                  (Parser, (<*>), (*>), (<*), empty, (<|>), branch, match, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
+import ParserAST                  (Parser, (<*>), (*>), (<*), empty, (<|>), branch, _conditional, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
 import Utils                      (code, Quapplicative(..), WQ, Code)
@@ -62,18 +60,21 @@ import Defunc                     (Defunc(CHAR, EQ_H, UNIT, APP, CONS, EMPTY, ID
 class ParserOps rep where
   pure :: rep a -> Parser a
   satisfy :: rep (Char -> Bool) -> Parser Char
+  conditional :: [(rep (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
   pfoldl :: ParserOps repk => rep (b -> a -> b) -> repk b -> Parser a -> Parser b
   pfoldl1 :: ParserOps repk => rep (b -> a -> b) -> repk b -> Parser a -> Parser b
 
 instance ParserOps WQ where
   pure = pure . BLACK
   satisfy = satisfy . BLACK
+  conditional cs p def = conditional (map (\(f, t) -> (BLACK f, t)) cs) p def
   pfoldl = pfoldl . BLACK
   pfoldl1 = pfoldl1 . BLACK
 
 instance {-# INCOHERENT #-} x ~ Defunc WQ => ParserOps x where
   pure = _pure
   satisfy = _satisfy
+  conditional = _conditional
   pfoldl f k p = chainPost (pure k) (FLIP_H f <$> p)
   pfoldl1 f k p = chainPost (f <$> pure k <*> p) (FLIP_H f <$> p)
 
@@ -235,16 +236,15 @@ option x p = p <|> pure x
 choice :: [Parser a] -> Parser a
 choice = foldr (<|>) empty
 
-bool :: a -> a -> Bool -> a
-bool x y True  = x
-bool x y False = y
-
 constp :: Parser a -> Parser (b -> a)
 constp = (code const <$>)
 
 infixl 4 <?|>
 (<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
-cond <?|> (p, q) = branch (makeQ (bool (Left ()) (Right ())) [||bool (Left ()) (Right ())||] <$> cond) (constp p) (constp q)
+cond <?|> (p, q) = predicate ID cond p q
+
+predicate :: ParserOps rep => rep (a -> Bool) -> Parser a -> Parser b -> Parser b -> Parser b
+predicate cond p t e = conditional [(cond, t)] p e
 
 filteredBy :: ParserOps rep => Parser a -> rep (a -> Bool) -> Parser a
 filteredBy p f = p >??> pure f
@@ -259,6 +259,9 @@ px >??> pf = select (liftA2 (makeQ g qg) pf px) empty
   where
     g f x = if f x then Right x else Left ()
     qg = [||\f x -> if f x then Right x else Left ()||]
+
+match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
+match vs p f = _conditional (map (\v -> (EQ_H (code v), f v)) vs) p
 
 infixl 1 ||=
 (||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b

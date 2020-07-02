@@ -27,7 +27,7 @@ import MachineAST
 import Input                      (PreparedInput(..), Rep, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Indexed                    (Fix4, cata4, Nat(..))
 import Utils                      (code, Code, Quapplicative(_code))
-import Defunc                     (Defunc, genDefunc2)
+import Defunc                     (Defunc, genDefunc1, genDefunc2)
 import Data.Functor               ((<&>))
 import Control.Monad              (forM, join, liftM2)
 import Control.Monad.ST           (ST)
@@ -271,15 +271,15 @@ execCase (Exec p) (Exec q) = liftM2 (\mp mq γ ->
     Left x -> $$(mp (γ {xs = QCons [||x||] xs'}))
     Right y  -> $$(mq (γ {xs = QCons [||y||] xs'}))||]) p q
 
-execChoices :: forall x y xs n r a s o q. (?ops :: InputOps s o, JoinBuilder o, Quapplicative q) => [q (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
+execChoices :: forall x y xs n r a s o q. (?ops :: InputOps s o, JoinBuilder o, Quapplicative q) => [Defunc q (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
 execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
   def
   (forM ks (\(Exec k) -> k))
   where
-    go :: Code x -> [q (x -> Bool)] -> [Γ s o xs n r a -> Code (ST s (Maybe a))] -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+    go :: Code x -> [Defunc q (x -> Bool)] -> [Γ s o xs n r a -> Code (ST s (Maybe a))] -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (ST s (Maybe a))
     go _ [] [] def γ = def γ
     go x (f:fs) (mk:mks) def γ = [||
-        if $$(_code f) $$x then $$(mk γ)
+        if $$(genDefunc1 f x) then $$(mk γ)
         else $$(go x fs mks def γ)
       ||]
 

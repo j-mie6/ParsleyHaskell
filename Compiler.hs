@@ -6,9 +6,9 @@
              MagicHash,
              FlexibleContexts,
              MultiWayIf,
-             FlexibleInstances, 
-             MultiParamTypeClasses, 
-             UndecidableInstances, 
+             FlexibleInstances,
+             MultiParamTypeClasses,
+             UndecidableInstances,
              AllowAmbiguousTypes,
              ScopedTypeVariables #-}
 module Compiler(compile) where
@@ -86,11 +86,11 @@ findLets p = (lets, recs)
     lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
 
 findLetsAlg :: Tag ParserName (ParserF q) LetFinder a -> LetFinder a
-findLetsAlg p = LetFinder $ do 
+findLetsAlg p = LetFinder $ do
   let name = tag p
   let q = tagged p
   addPred name
-  ifSeen name 
+  ifSeen name
     (do addRec name)
     (ifNotProcessedBefore name
       (do addName name (case q of
@@ -111,9 +111,9 @@ findLetsAlg p = LetFinder $ do
 
 newtype LetInserter q a =
   LetInserter {
-      runLetInserter :: HFreshT IMVar 
+      runLetInserter :: HFreshT IMVar
                         (State ( HashMap ParserName IMVar
-                               , DMap MVar (Fix (ParserF q)))) 
+                               , DMap MVar (Fix (ParserF q))))
                         (Fix (ParserF q) a)
     }
 letInsertion :: Quapplicative q => HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName (ParserF q)) a -> (Fix (ParserF q) a, DMap MVar (Fix (ParserF q)), IMVar)
@@ -201,7 +201,7 @@ showM = show . fst . compile
 liftA4 :: Applicative f => (a -> b -> c -> d -> e) -> f a -> f b -> f c -> f d -> f e
 liftA4 f u v w x = liftA3 f u v w <*> x
 
-instance Eq ParserName where 
+instance Eq ParserName where
   (ParserName n) == (ParserName m) = eqStableName (StableName n) (StableName m)
 instance Hashable ParserName where
   hash (ParserName n) = hashStableName (StableName n)

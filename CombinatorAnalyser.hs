@@ -60,7 +60,7 @@ compliance (ChainPost p NonComp)    = seqCompliance p Comp
 compliance (ChainPost p op)         = seqCompliance p NonComp
 compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
 compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
-compliance (MetaP _ c)              = c 
+compliance (MetaP _ c)              = c
 
 newtype CutAnalysis q a = CutAnalysis {cutOut :: Bool -> (Fix (ParserF q) a, Bool)}
 
@@ -91,8 +91,8 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . zygo (CutAnalysis . alg) co
     alg (Let r μ p) cut = (mkCut (not cut) (In (Let r μ (fst (cutOut (ifst p) True)))), False) -- If there is no cut, we generate a piggy for the continuation
     alg (Try p) _ = fmap (const False) $ rewrap Try False (ifst p)
     alg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (requiresCut (In (fst (cutOut p True) :<|>: fst (cutOut q False))), True)
-    alg (p :<|>: q) cut = 
-      let (q', handled) = cutOut (ifst q) cut 
+    alg (p :<|>: q) cut =
+      let (q', handled) = cutOut (ifst q) cut
       in (In (fst (cutOut (ifst p) False) :<|>: q'), handled)
     alg (l :<*>: r) cut = seqAlg (:<*>:) cut (ifst l) (ifst r)
     alg (l :<*: r) cut = seqAlg (:<*:) cut (ifst l) (ifst r)
@@ -100,19 +100,19 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . zygo (CutAnalysis . alg) co
     alg (LookAhead p) cut = rewrap LookAhead cut (ifst p)
     alg (NotFollowedBy p) _ = fmap (const False) $ rewrap NotFollowedBy False (ifst p)
     alg (Debug msg p) cut = rewrap (Debug msg) cut (ifst p)
-    alg (ChainPre (op :*: NonComp) p) _ = 
+    alg (ChainPre (op :*: NonComp) p) _ =
       let (op', _) = cutOut op True
           (p', _) = cutOut (ifst p) False
       in (requiresCut (In (ChainPre op' p')), True)
-    alg (ChainPre op p) cut = 
+    alg (ChainPre op p) cut =
       let (op', _) = cutOut (ifst op) False
           (p', handled) = cutOut (ifst p) cut
       in (mkCut (not cut) (In (ChainPre op' p')), handled)
-    alg (ChainPost p (op :*: NonComp)) cut = 
+    alg (ChainPost p (op :*: NonComp)) cut =
       let (p', _) = cutOut (ifst p) cut
           (op', _) = cutOut op True
       in (requiresCut (In (ChainPost p' op')), True)
-    alg (ChainPost p op) cut = 
+    alg (ChainPost p op) cut =
       let (p', handled) = cutOut (ifst p) cut
           (op', _) = cutOut (ifst op) False
       in (mkCut (cut && handled) (In (ChainPost p' op')), handled)
@@ -121,7 +121,7 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . zygo (CutAnalysis . alg) co
           (p', handled') = cutOut (ifst p) (cut && not handled)
           (q', handled'') = cutOut (ifst q) (cut && not handled)
       in (In (Branch b' p' q'), handled || (handled' && handled''))
-    alg (Match p f qs def) cut = 
+    alg (Match p f qs def) cut =
       let (p', handled) = cutOut (ifst p) cut
           (def', handled') = cutOut (ifst def) (cut && not handled)
           (qs', handled'') = foldr (\q -> biliftA2 (:) (&&) (cutOut (ifst q) (cut && not handled))) ([], handled') qs

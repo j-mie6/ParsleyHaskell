@@ -3,11 +3,10 @@
              GADTs,
              UndecidableInstances,
              TypeApplications,
-             ScopedTypeVariables,
-             ImplicitParams #-}
+             ScopedTypeVariables #-}
 module Defunc where
 import Utils (WQ(..), Code, Quapplicative(..))
-import MachineOps (InputOps, same)
+import Input (PositionOps(same))
 
 data Defunc q a where
   APP     :: Defunc q ((a -> b) -> a -> b)
@@ -79,15 +78,15 @@ genDefunc2 (FLIP_H f) qx qy  = genDefunc2 f qy qx
 genDefunc2 CONS       qx qxs = [|| $$qx : $$qxs ||]
 genDefunc2 f          qx qy  = [|| $$(genDefunc f) $$qx $$qy ||]
 
-genDefuncM :: (?ops :: InputOps s o, Quapplicative q) => DefuncM q o a -> Code a
+genDefuncM :: (PositionOps o, Quapplicative q) => DefuncM q o a -> Code a
 genDefuncM (USER x) = genDefunc x
 genDefuncM SAME     = same
 
-genDefuncM1 :: (?ops :: InputOps s o, Quapplicative q) => DefuncM q o (a -> b) -> Code a -> Code b
+genDefuncM1 :: (PositionOps o, Quapplicative q) => DefuncM q o (a -> b) -> Code a -> Code b
 genDefuncM1 (USER f) qx = genDefunc1 f qx
 genDefuncM1 f qx        = [|| $$(genDefuncM f) $$qx ||]
 
-genDefuncM2 :: (?ops :: InputOps s o, Quapplicative q) => DefuncM q o (a -> b -> c) -> Code a -> Code b -> Code c
+genDefuncM2 :: (PositionOps o, Quapplicative q) => DefuncM q o (a -> b -> c) -> Code a -> Code b -> Code c
 genDefuncM2 (USER f) qx qy = genDefunc2 f qx qy
 genDefuncM2 f qx qy        = [|| $$(genDefuncM f) $$qx $$qy ||]
 

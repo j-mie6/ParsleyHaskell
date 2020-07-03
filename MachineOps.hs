@@ -5,7 +5,6 @@
              TypeOperators,
              BangPatterns,
              MagicHash,
-             UnboxedTuples,
              TemplateHaskell,
              TypeSynonymInstances,
              RankNTypes,
@@ -24,7 +23,7 @@ import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.STRef.Unboxed (STRefU)
 import GHC.Exts           (TYPE)
 import Safe.Coerce        (coerce)
-import Input              (Rep, Unboxed, OffWith, UnpackedLazyByteString, Stream)
+import Input              (BoxOps(unbox), InputOps, next, Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Data.Text          (Text)
 import Data.Void          (Void)
 
@@ -44,42 +43,8 @@ data Vec n a where
   VCons :: a -> Vec n a -> Vec (Succ n) a
 
 type H s o a = Unboxed o -> ST s (Maybe a)
-data InputOps s o = InputOps { _more       :: Code (o -> Bool)
-                             , _next       :: Code (o -> (# Char, o #))
-                             , _same       :: Code (o -> o -> Bool)
-                             , _box        :: Code (Unboxed o -> o)
-                             , _unbox      :: Code (o -> Unboxed o)
-                             , _newCRef    :: Code (o -> ST s (STRefU s Int))
-                             , _readCRef   :: Code (STRefU s Int -> ST s o)
-                             , _writeCRef  :: Code (STRefU s Int -> o -> ST s ())
-                             , _shiftLeft  :: Code (o -> Int -> o)
-                             , _shiftRight :: Code (o -> Int -> o)
-                             , _offToInt   :: Code (o -> Int) }
 
-more       :: (?ops :: InputOps s o) => Code (o -> Bool)
-more       = _more       ?ops
-next       :: (?ops :: InputOps s o) => Code (o -> (# Char, o #))
-next       = _next       ?ops
-same       :: (?ops :: InputOps s o) => Code (o -> o -> Bool)
-same       = _same       ?ops
-unbox      :: (?ops :: InputOps s o) => Code (o -> Unboxed o)
-unbox      = _unbox      ?ops
-box        :: (?ops :: InputOps s o) => Code (Unboxed o -> o)
-box        = _box        ?ops
-newCRef    :: (?ops :: InputOps s o) => Code (o -> ST s (STRefU s Int))
-newCRef    = _newCRef    ?ops
-readCRef   :: (?ops :: InputOps s o) => Code (STRefU s Int -> ST s o)
-readCRef   = _readCRef   ?ops
-writeCRef  :: (?ops :: InputOps s o) => Code (STRefU s Int -> o -> ST s ())
-writeCRef  = _writeCRef  ?ops
-shiftLeft  :: (?ops :: InputOps s o) => Code (o -> Int -> o)
-shiftLeft  = _shiftLeft  ?ops
-shiftRight :: (?ops :: InputOps s o) => Code (o -> Int -> o)
-shiftRight = _shiftRight ?ops
-offToInt   :: (?ops :: InputOps s o) => Code (o -> Int)
-offToInt   = _offToInt   ?ops
-
-type AbsExec s o a x = (x -> Unboxed o -> ST s (Maybe a)) -> Unboxed o -> (Unboxed o -> ST s (Maybe a)) -> ST s (Maybe a)
+type AbsExec s o a x = (x -> Unboxed o -> ST s (Maybe a)) -> Unboxed o -> H s o a -> ST s (Maybe a)
 newtype QAbsExec s o a x = QAbsExec (Code (AbsExec s o a x))
 newtype QJoin s o a x = QJoin (Code (x -> Unboxed  o -> ST s (Maybe a)))
 
@@ -119,9 +84,9 @@ instance ReturnOps _o where                                       \
 };
 inputInstances(deriveReturnOps)
 
-class FailureOps o where
+class BoxOps o => FailureOps o where
   setupHandler :: Vec n (Code (H s o a)) -> Code o
-               -> (Code o -> Code (Unboxed o -> ST s (Maybe a)))
+               -> (Code o -> Code (H s o a))
                -> (Vec (Succ n) (Code (H s o a)) -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
   fatal :: Code (H s o a)
 
@@ -138,18 +103,18 @@ inputInstances(deriveFailureOps)
 -- RIP Dream :(
 {-$(let derive _o = [d|
         instance FailureOps _o where
-          setupHandler ops hs !o !h !k = k [|| pushH (\(!o#) -> $$h $$hs o# ($$(_unbox ops) $$o)) $$hs ||]
-          raise ops = [||\(H hs) (!o) -> case hs of
-              SNil -> return Nothing
-              h:::_ -> h ($$(_unbox ops) o)
+          setupHandler hs o h k = [||
+              let handler ((!o#) :: Unboxed _o) = $$(h o) o#
+              in $$(k (VCons [||handler||] hs))
             ||]
-        |] in traverse derive inputTypes)-}
+          fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]
+        |] in traverse derive representationTypes)-}
 
-runConcrete :: (?ops :: InputOps s o, FailureOps o) => Vec (Succ n) (Code (H s o a)) -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
+runConcrete :: BoxOps o => Vec (Succ n) (Code (H s o a)) -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
 runConcrete (VCons h _) m ret o = [||$$m $$ret ($$unbox $$o) $! $$h||]
 
-sat :: (?ops :: InputOps s o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
-sat o p good bad = [||
-  let !(# c, o' #) = $$next $$o
-  in if $$p c then $$(good [|| o' ||] [|| c ||])
-              else $$bad ||]
+sat :: (?ops :: InputOps o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
+sat o p good bad = next o $ \qc qo' -> [||
+    if $$p $$qc then $$(good qo' qc)
+                else $$bad
+  ||]

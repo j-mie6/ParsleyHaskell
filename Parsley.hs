@@ -45,7 +45,7 @@ module Parsley ( Parser, runParser, parseFromFile
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
-import Input hiding               (PreparedInput(..))
+import Input                      (Input(..), Rep, Text16(..), CharList(..), Stream)
 import ParserAST                  (Parser, (<*>), (*>), (<*), empty, (<|>), branch, _conditional, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
@@ -55,7 +55,7 @@ import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
-import Defunc                     (Defunc(CHAR, EQ_H, UNIT, APP, CONS, EMPTY, ID, FLIP, BLACK), pattern FLIP_H)
+import Defunc                     (Defunc(..), pattern FLIP_H)
 
 class ParserOps rep where
   pure :: rep a -> Parser a
@@ -346,8 +346,8 @@ precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
     level (Prefix ops wrap) atom  = chainPre (choice ops) (wrap <$> atom)
     level (Postfix ops wrap) atom = chainPost (wrap <$> atom) (choice ops)
 
-runParser :: forall input a rep. (Input input rep, Ops rep) => Parser a -> Code (input -> Maybe a)
-runParser p = [||\input -> runST $$(exec (prepare @input @rep [||input||]) (compile p))||]
+runParser :: forall input a. (Input input, Ops (Rep input)) => Parser a -> Code (input -> Maybe a)
+runParser p = [||\input -> runST $$(exec @(Rep input) (prepare @input [||input||]) (compile @a @(Rep input) p))||]
 
 parseFromFile :: Parser a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

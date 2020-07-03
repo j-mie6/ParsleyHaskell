@@ -8,7 +8,7 @@
              TypeFamilies,
              PolyKinds,
              DataKinds,
-             FunctionalDependencies,
+             ImplicitParams,
              TypeFamilyDependencies #-}
 module Input where
 
@@ -24,64 +24,64 @@ import GHC.ForeignPtr           (ForeignPtr(..), ForeignPtrContents)
 import Control.Monad.ST         (ST)
 import Data.STRef               (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.STRef.Unboxed       (STRefU, newSTRefU, readSTRefU, writeSTRefU)
+import Language.Haskell.TH      (Q, Type)
 import qualified Data.Text                     as Text (length, index)
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
---import Language.Haskell.TH      (Q, Type)
 
-data PreparedInput r s rep (urep :: TYPE r) = PreparedInput {-next-}       (rep -> (# Char, rep #))
-                                                            {-more-}       (rep -> Bool)
-                                                            {-same-}       (rep -> rep -> Bool)
-                                                            {-init-}       rep
-                                                            {-box-}        (urep -> rep)
-                                                            {-unbox-}      (rep -> urep)
-                                                            {-newCRef-}    (rep -> ST s (STRefU s Int))
-                                                            {-readCRef-}   (STRefU s Int -> ST s rep)
-                                                            {-writeCRef-}  (STRefU s Int -> rep -> ST s ())
-                                                            {-shiftLeft-}  (rep -> Int -> rep)
-                                                            {-shiftRight-} (rep -> Int -> rep)
-                                                            {-offToInt-}   (rep -> Int)
+{- Auxillary Representation -}
+{- This requires GHC 8.10.1 - might be a while till we get there?
+   Indeed, 8.10.1 would allow us to basically remove box and unbox I think
+type InputDependant rep = (# {-next-} rep -> (# Char, rep #)
+                           , {-more-} rep -> Bool
+                           , {-init-} rep
+                           #)
+-}
+
+data InputDependant rep = InputDependant {-next-} (rep -> (# Char, rep #))
+                                         {-more-} (rep -> Bool)
+                                         {-init-} rep
+
+{- Typeclasses -}
+class Input input where
+  prepare :: Code input -> Code (InputDependant (Rep input))
+
+class PositionOps rep where
+  same :: Code (rep -> rep -> Bool)
+  shiftRight :: Code (rep -> Int -> rep)
+
+class BoxOps rep where
+  box   :: Code (Unboxed rep -> rep)
+  unbox :: Code (rep -> Unboxed rep)
+
+class ORefOps rep where
+  newORef   :: Code (rep -> ST s (STRefU s Int))
+  readORef  :: Code (STRefU s Int -> ST s rep)
+  writeORef :: Code (STRefU s Int -> rep -> ST s ())
+
+class LogOps rep where
+  shiftLeft :: Code (rep -> Int -> rep)
+  offToInt  :: Code (rep -> Int)
+
+data InputOps rep = InputOps { _more       :: Code (rep -> Bool)
+                             , _next       :: Code (rep -> (# Char, rep #))
+                             }
+more :: (?ops :: InputOps rep) => Code (rep -> Bool)
+more = _more ?ops
+next :: (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code r) -> Code r
+next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
+
+{- Input Types -}
 newtype Text16 = Text16 Text
-newtype CacheText = CacheText Text
+--newtype CacheText = CacheText Text
 newtype CharList = CharList String
 data Stream = {-# UNPACK #-} !Char :> Stream
 
 nomore :: Stream
 nomore = '\0' :> nomore
 
-{-inputTypes :: [Q Type]
-inputTypes = [[t|Int|], [t|OffWith s|], [t|Text|]]-}
-
-data OffWith s = OffWith {-# UNPACK #-} !Int s
-
-offWith :: s -> OffWith s
-offWith s = OffWith 0 s
-
-offWithBox :: (# Int#, s #) -> OffWith s
-offWithBox (# i#, s #) = OffWith (I# i#) s
-
-offWithUnbox :: OffWith s -> (# Int#, s #)
-offWithUnbox (OffWith (I# i#) s) = (# i#, s #)
-
-offWithSame :: OffWith s -> OffWith s -> Bool
-offWithSame (OffWith i _) (OffWith j _) = i == j
-
-offWithToInt :: OffWith s -> Int
-offWithToInt (OffWith i _) = i
-
-data OffWithStreamAnd s = OffWithStreamAnd {-# UNPACK #-} !Int !Stream s
-
-offWithStreamAnd :: s -> OffWithStreamAnd s
-offWithStreamAnd s = OffWithStreamAnd 0 nomore s
-
-offWithStreamAndBox :: (# Int#, Stream, s #) -> OffWithStreamAnd s
-offWithStreamAndBox (# i#, ss, s #) = OffWithStreamAnd (I# i#) ss s
-
-offWithStreamAndUnbox :: OffWithStreamAnd s -> (# Int#, Stream, s #)
-offWithStreamAndUnbox (OffWithStreamAnd (I# i#) ss s) = (# i#, ss, s #)
-
-offWithStreamAndToInt :: OffWithStreamAnd s -> Int
-offWithStreamAndToInt (OffWithStreamAnd i _ _) = i
-
+{- Representation Types -}
+data OffWith ts = OffWith {-# UNPACK #-} !Int ts
+data OffWithStreamAnd ts = OffWithStreamAnd {-# UNPACK #-} !Int !Stream ts
 data UnpackedLazyByteString = UnpackedLazyByteString
   {-# UNPACK #-} !Int
   !Addr#
@@ -90,61 +90,137 @@ data UnpackedLazyByteString = UnpackedLazyByteString
   {-# UNPACK #-} !Int
   Lazy.ByteString
 
+representationTypes :: [Q Type]
+representationTypes = [[t|Int|], [t|OffWith [Char]|], [t|OffWith Stream|], [t|UnpackedLazyByteString|], [t|Text|]]
+
+offWith :: ts -> OffWith ts
+offWith ts = OffWith 0 ts
+
 {-# INLINE emptyUnpackedLazyByteString #-}
 emptyUnpackedLazyByteString :: Int -> UnpackedLazyByteString
 emptyUnpackedLazyByteString i = UnpackedLazyByteString i nullAddr# (error "nullForeignPtr") 0 0 Lazy.Empty
 
-type family Rep rep where
-  Rep Int = IntRep
-  Rep Text = LiftedRep
-  Rep UnpackedLazyByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
-  Rep (OffWith s) = 'TupleRep '[IntRep, LiftedRep]
-  Rep (OffWithStreamAnd s) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
-  Rep (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
+{- Representation Mappings -}
+type family Rep input where
+  Rep [Char] = Int
+  Rep (UArray Int Char) = Int
+  Rep Text16 = Int
+  Rep ByteString = Int
+  Rep CharList = OffWith String
+  Rep Text = Text
+  --Rep CacheText = (Text, Stream)
+  Rep Lazy.ByteString = UnpackedLazyByteString
+  --Rep Lazy.ByteString = OffWith Lazy.ByteString
+  Rep Stream = OffWith Stream
 
-type family Unboxed rep = (urep :: TYPE (Rep rep)) | urep -> rep where
+type family RepKind rep where
+  RepKind Int = IntRep
+  RepKind Text = LiftedRep
+  RepKind UnpackedLazyByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
+  RepKind (OffWith _) = 'TupleRep '[IntRep, LiftedRep]
+  RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
+  RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
+
+type family Unboxed rep = (urep :: TYPE (RepKind rep)) | urep -> rep where
   Unboxed Int = Int#
   Unboxed Text = Text
   Unboxed UnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)
-  Unboxed (OffWith s) = (# Int#, s #)
-  Unboxed (OffWithStreamAnd s) = (# Int#, Stream, s #)
+  Unboxed (OffWith ts) = (# Int#, ts #)
+  Unboxed (OffWithStreamAnd ts) = (# Int#, Stream, ts #)
   Unboxed (Text, Stream) = (# Text, Stream #)
 
-class Input input rep | input -> rep where
-  prepare :: Code input -> Code (PreparedInput (Rep rep) s rep (Unboxed rep))
+{- Generic Representation Operations -}
+offWithSame :: Code (OffWith ts -> OffWith ts -> Bool)
+offWithSame = [||\(OffWith i _) (OffWith j _) -> i == j||]
 
-instance Input [Char] Int where
+offWithShiftRight :: Code (Int -> ts -> ts) -> Code (OffWith ts -> Int -> OffWith ts)
+offWithShiftRight drop = [||\(OffWith o ts) i -> OffWith (o + i) ($$drop i ts)||]
+
+offWithNewORef :: Code (OffWith ts -> ST s (STRefU s Int))
+offWithNewORef = [||\(OffWith i _) -> newSTRefU i||]
+
+offWithWriteORef :: Code (STRefU s Int -> OffWith ts -> ST s ())
+offWithWriteORef = [||\ref (OffWith i _) -> writeSTRefU ref i||]
+
+offWithReadORef :: Code ts -> Code (STRefU s Int -> ST s (OffWith ts))
+offWithReadORef empty = [||\ref -> fmap (\i -> OffWith i $$empty) (readSTRefU ref)||]
+
+{-offWithStreamAnd :: ts -> OffWithStreamAnd ts
+offWithStreamAnd ts = OffWithStreamAnd 0 nomore ts
+
+offWithStreamAndBox :: (# Int#, Stream, ts #) -> OffWithStreamAnd ts
+offWithStreamAndBox (# i#, ss, ts #) = OffWithStreamAnd (I# i#) ss ts
+
+offWithStreamAndUnbox :: OffWithStreamAnd ts -> (# Int#, Stream, ts #)
+offWithStreamAndUnbox (OffWithStreamAnd (I# i#) ss ts) = (# i#, ss, ts #)
+
+offWithStreamAndToInt :: OffWithStreamAnd ts -> Int
+offWithStreamAndToInt (OffWithStreamAnd i _ _) = i-}
+
+dropStream :: Int -> Stream -> Stream
+dropStream 0 cs = cs
+dropStream n (_ :> cs) = dropStream (n-1) cs
+
+textShiftRight :: Text -> Int -> Text
+textShiftRight (Text arr off unconsumed) i = go i off unconsumed
+  where
+    go 0 off' unconsumed' = Text arr off' unconsumed'
+    go n off' unconsumed'
+      | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0
+                          in go (n-1) (off'+d) (unconsumed'-d)
+      | otherwise = Text arr off' unconsumed'
+
+textShiftLeft :: Text -> Int -> Text
+textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
+  where
+    go 0 off' unconsumed' = Text arr off' unconsumed'
+    go n off' unconsumed'
+      | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
+      | otherwise = Text arr off' unconsumed'
+
+byteStringShiftRight :: UnpackedLazyByteString -> Int -> UnpackedLazyByteString
+byteStringShiftRight !(UnpackedLazyByteString i addr# final off size cs) j
+  | j < size  = UnpackedLazyByteString (i + j) addr# final (off + j) (size - j) cs
+  | otherwise = case cs of
+    Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> byteStringShiftRight (UnpackedLazyByteString (i + size) addr'# final' off' size' cs') (j - size)
+    Lazy.Empty -> emptyUnpackedLazyByteString (i + size)
+
+byteStringShiftLeft :: UnpackedLazyByteString -> Int -> UnpackedLazyByteString
+byteStringShiftLeft (UnpackedLazyByteString i addr# final off size cs) j =
+  let d = min off j
+  in UnpackedLazyByteString (i - d) addr# final (off - d) (size + d) cs
+
+{- INSTANCES -}
+-- Input Instances
+instance Input [Char] where
   prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 
-instance Input (UArray Int Char) Int where
+instance Input (UArray Int Char) where
   prepare qinput = [||
       let UArray _ _ size input# = $$qinput
           next i@(I# i#) = (# C# (indexWideCharArray# input# i#), I# (i# +# 1#) #)
-          o << i = max (o - i) 0
-      in PreparedInput next (< size) (==) 0 (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
+      in InputDependant next (< size) 0
     ||]
 
-instance Input Text16 Int where
+instance Input Text16 where
   prepare qinput = [||
       let Text16 (Text arr off size) = $$qinput
           arr# = aBA arr
           next i@(I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), I# (i# +# 1#) #)
-          o << i = max (o - i) 0
-      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
+      in InputDependant next (< size) off
     ||]
 
-instance Input ByteString Int where
+instance Input ByteString where
   prepare qinput = [||
       let PS (ForeignPtr addr# final) off size = $$qinput
           next i@(I# i#) =
             case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of
                 _ -> (# C# (chr# (word2Int# x)), i + 1 #)
-          o << i = max (o - i) 0
-      in PreparedInput next (< size) (==) off (\i# -> I# i#) (\(I# i#) -> i#) newSTRefU readSTRefU writeSTRefU (<<) (+) id
+      in InputDependant next (< size) off
     ||]
 
-instance Input CharList (OffWith String) where
+instance Input CharList where
   prepare qinput = [||
       let CharList input = $$qinput
           next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
@@ -152,38 +228,123 @@ instance Input CharList (OffWith String) where
           more (OffWith i _) = i < size
           --more (OffWith _ []) = False
           --more _              = True
-          OffWith o cs >> i = OffWith (o + i) (drop i cs)
-          newCRef (OffWith i _) = newSTRefU i
-          readCRef ref = fmap (\i -> OffWith i []) (readSTRefU ref)
-          writeCRef ref (OffWith i _) = writeSTRefU ref i
-      in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newCRef readCRef writeCRef const (>>) offWithToInt
+      in InputDependant next more (offWith input)
     ||]
 
-instance Input Text Text where
+instance Input Text where
   prepare qinput = [||
-      let input = $$qinput
-          next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off+d) (unconsumed-d) #)
+      let next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off+d) (unconsumed-d) #)
           more (Text _ _ unconsumed) = unconsumed > 0
-          same (Text _ i _) (Text _ j _) = i == j
-          (Text arr off unconsumed) << i = go i off unconsumed
-            where
-              go 0 off' unconsumed' = Text arr off' unconsumed'
-              go n off' unconsumed'
-                | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
-                | otherwise = Text arr off' unconsumed'
-          (Text arr off unconsumed) >> i = go i off unconsumed
-            where
-              go 0 off' unconsumed' = Text arr off' unconsumed'
-              go n off' unconsumed'
-                | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
-                | otherwise = Text arr off' unconsumed'
-          toInt (Text arr off unconsumed) = div off 2
-          newCRef (Text _ i _) = newSTRefU i
-          readCRef ref = fmap (\i -> Text empty i 0) (readSTRefU ref)
-          writeCRef ref (Text _ i _) = writeSTRefU ref i
-      in PreparedInput next more same input id id newCRef readCRef writeCRef (<<) (>>) toInt
+      in InputDependant next more $$qinput
     ||]
 
+instance Input Lazy.ByteString where
+  prepare qinput = [||
+      let next (UnpackedLazyByteString i addr# final off@(I# off#) size cs) =
+            case readWord8OffAddr# addr# off# realWorld# of
+              (# s', x #) -> case touch# final s' of
+                _ -> (# C# (chr# (word2Int# x)),
+                    if size /= 1 then UnpackedLazyByteString (i+1) addr# final (off+1) (size-1) cs
+                    else case cs of
+                      Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> UnpackedLazyByteString (i+1) addr'# final' off' size' cs'
+                      Lazy.Empty -> emptyUnpackedLazyByteString (i+1)
+                  #)
+          more (UnpackedLazyByteString _ _ _ _ 0 _) = False
+          more _ = True
+          initial = case $$qinput of
+            Lazy.Chunk (PS (ForeignPtr addr# final) off size) cs -> UnpackedLazyByteString 0 addr# final off size cs
+            Lazy.Empty -> emptyUnpackedLazyByteString 0
+      in InputDependant next more initial
+    ||]
+
+instance Input Stream where
+  prepare qinput = [||
+      let next (OffWith o (c :> cs)) = (# c, OffWith (o + 1) cs #)
+      in InputDependant next (const True) (offWith $$qinput)
+    ||]
+
+-- PositionOps Instances
+instance PositionOps Int where
+  same = [||(==) @Int||]
+  shiftRight = [||(+) @Int||]
+
+instance PositionOps (OffWith String) where
+  same = offWithSame
+  shiftRight = offWithShiftRight [||drop||]
+
+instance PositionOps (OffWith Stream) where
+  same = offWithSame
+  shiftRight = offWithShiftRight [||dropStream||]
+
+instance PositionOps Text where
+  same = [||\(Text _ i _) (Text _ j _) -> i == j||]
+  shiftRight = [||textShiftRight||]
+
+instance PositionOps UnpackedLazyByteString where
+  same = [||\(UnpackedLazyByteString i _ _ _ _ _) (UnpackedLazyByteString j _ _ _ _ _) -> i == j||]
+  shiftRight = [||byteStringShiftRight||]
+
+-- BoxOps Instances
+instance BoxOps Int where
+  box = [||\i# -> I# i#||]
+  unbox = [||\(I# i#) -> i#||]
+
+instance BoxOps (OffWith ts) where
+  box = [||\(# i#, ts #) -> OffWith (I# i#) ts||]
+  unbox = [||\(OffWith (I# i#) ts) -> (# i#, ts #)||]
+
+instance BoxOps Text where
+  box = [||id||]
+  unbox = [||id||]
+
+instance BoxOps UnpackedLazyByteString where
+  box = [||\(!(# i#, addr#, final, off#, size#, cs #)) -> UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs||]
+  unbox = [||\(UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs) -> (# i#, addr#, final, off#, size#, cs #)||]
+
+-- ORefOps Instances
+instance ORefOps Int where
+  newORef = [||newSTRefU||]
+  readORef = [||readSTRefU||]
+  writeORef = [||writeSTRefU||]
+
+instance ORefOps (OffWith String) where
+  newORef = offWithNewORef
+  readORef = offWithReadORef [||[]||]
+  writeORef = offWithWriteORef
+
+instance ORefOps (OffWith Stream) where
+  newORef = offWithNewORef
+  readORef = offWithReadORef [||nomore||]
+  writeORef = offWithWriteORef
+
+instance ORefOps Text where
+  newORef = [||\(Text _ i _) -> newSTRefU i||]
+  readORef = [||\ref -> fmap (\i -> Text empty i 0) (readSTRefU ref)||]
+  writeORef = [||\ref (Text _ i _) -> writeSTRefU ref i||]
+
+instance ORefOps UnpackedLazyByteString where
+  newORef = [||\o -> newSTRefU ($$offToInt o)||]
+  readORef = [||\ref -> fmap emptyUnpackedLazyByteString (readSTRefU ref)||]
+  writeORef = [||\ref o -> writeSTRefU ref ($$offToInt o)||]
+
+-- LogOps Instances
+instance LogOps Int where
+  shiftLeft = [||\o i -> max (o - i) 0||]
+  offToInt = [||id||]
+
+instance LogOps (OffWith ts) where
+  shiftLeft = [||const||]
+  offToInt = [||\(OffWith i _) -> i||]
+
+instance LogOps Text where
+  shiftLeft = [||textShiftLeft||]
+  offToInt = [||\(Text arr off unconsumed) -> div off 2||]
+
+instance LogOps UnpackedLazyByteString where
+  shiftLeft = [||byteStringShiftLeft||]
+  offToInt = [||\(UnpackedLazyByteString i _ _ _ _ _) -> i||]
+
+{- Old Instances -}
 {-instance Input CacheText (Text, Stream) where
   prepare qinput = [||
       let (CacheText input) = $$qinput
@@ -209,47 +370,11 @@ instance Input Text Text where
           readCRef ref = fmap (\i -> (Text empty i 0, nomore)) (readSTRefU ref)
           writeCRef ref (Text _ i _, _) = writeSTRefU ref i
       in PreparedInput next more same (input, nomore) box unbox newCRef readCRef writeCRef s(<<) (>>) toInt
-    ||]-}
-
-instance Input Lazy.ByteString UnpackedLazyByteString where
-  prepare qinput = [||
-      let input = $$qinput
-          next (UnpackedLazyByteString i addr# final off@(I# off#) size cs) =
-            case readWord8OffAddr# addr# off# realWorld# of
-              (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# x)),
-                    if size /= 1 then UnpackedLazyByteString (i+1) addr# final (off+1) (size-1) cs
-                    else case cs of
-                      Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> UnpackedLazyByteString (i+1) addr'# final' off' size' cs'
-                      Lazy.Empty -> emptyUnpackedLazyByteString (i+1)
-                  #)
-          more (UnpackedLazyByteString _ _ _ _ 0 _) = False
-          more _ = True
-          same (UnpackedLazyByteString i _ _ _ _ _) (UnpackedLazyByteString j _ _ _ _ _) = i == j
-          UnpackedLazyByteString i addr# final off size cs << j =
-            let d = min off j
-            in UnpackedLazyByteString (i - d) addr# final (off - d) (size + d) cs
-          (!(UnpackedLazyByteString i addr# final off size cs)) >> j
-            | j < size  = UnpackedLazyByteString (i + j) addr# final (off + j) (size - j) cs
-            | otherwise = case cs of
-              Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> UnpackedLazyByteString (i + size) addr'# final' off' size' cs' >> (j - size)
-              Lazy.Empty -> emptyUnpackedLazyByteString (i + size)
-          initial = case input of
-            Lazy.Chunk (PS (ForeignPtr addr# final) off size) cs -> UnpackedLazyByteString 0 addr# final off size cs
-            Lazy.Empty -> emptyUnpackedLazyByteString 0
-          box !(# i#, addr#, final, off#, size#, cs #) = UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs
-          unbox (UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs) = (# i#, addr#, final, off#, size#, cs #)
-          newCRef o = newSTRefU (toInt o)
-          readCRef ref = fmap emptyUnpackedLazyByteString (readSTRefU ref)
-          writeCRef ref o = writeSTRefU ref (toInt o)
-          toInt (UnpackedLazyByteString i _ _ _ _ _) = i
-      in PreparedInput next more same initial box unbox newCRef readCRef writeCRef (<<) (>>) toInt
     ||]
 
-{-instance Input Lazy.ByteString (OffWith Lazy.ByteString) where
+instance Input Lazy.ByteString (OffWith Lazy.ByteString) where
   prepare qinput = [||
-      let input = $$qinput
-          next (OffWith i (Lazy.Chunk (PS ptr@(ForeignPtr addr# final) off@(I# off#) size) cs)) =
+      let next (OffWith i (Lazy.Chunk (PS ptr@(ForeignPtr addr# final) off@(I# off#) size) cs)) =
             case readWord8OffAddr# addr# off# realWorld# of
               (# s', x #) -> case touch# final s' of
                 _ -> (# C# (chr# (word2Int# x)), OffWith (i+1) (if size == 1 then cs
@@ -264,22 +389,6 @@ instance Input Lazy.ByteString UnpackedLazyByteString where
           OffWith o (Lazy.Chunk (PS ptr off size) cs) >> i
             | i < size  = OffWith (o + i) (Lazy.Chunk (PS ptr (off + i) (size - i)) cs)
             | otherwise = OffWith (o + size) cs >> (i - size)
-          newCRef (OffWith i _) = newSTRefU i
           readCRef ref = fmap (\i -> OffWith i Lazy.Empty) (readSTRefU ref)
-          writeCRef ref (OffWith i _) = writeSTRefU ref i
-      in PreparedInput next more offWithSame (offWith input) offWithBox offWithUnbox newCRef readCRef writeCRef (<<) (>>) offWithToInt
+      in PreparedInput next more offWithSame (offWith $$qinput) offWithBox offWithUnbox offWithNewORef readCRef offWithWriteORef (<<) (>>) offWithToInt
     ||]-}
-
-instance Input Stream (OffWith Stream) where
-  prepare qinput = [||
-      let input = $$qinput
-          next (OffWith o (c :> cs)) = (# c, OffWith (o + 1) cs #)
-          (OffWith o cs) >> i = OffWith (o + i) (sdrop i cs)
-            where
-              sdrop 0 cs = cs
-              sdrop n (_ :> cs) = sdrop (n-1) cs
-          newCRef (OffWith i _) = newSTRefU i
-          readCRef ref = fmap (\i -> OffWith i nomore) (readSTRefU ref)
-          writeCRef ref (OffWith i _) = writeSTRefU ref i
-      in PreparedInput next (const True) offWithSame (offWith input) offWithBox offWithUnbox newCRef readCRef writeCRef const (>>) offWithToInt
-    ||]

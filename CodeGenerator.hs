@@ -80,20 +80,20 @@ peephole (MetaP RequiresCut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen
      σ <- freshΣ
      opc <- freshM (runCodeGen op (In4 (_Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      pc <- freshM (runCodeGen p (In4 (_App m)))
-     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter opc μ (In4 (Get σ (addCoins (coinsNeeded pc) pc))))))))
+     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ opc (parsecHandler (In4 (Get σ (addCoins (coinsNeeded pc) pc)))))))))
 peephole (MetaP RequiresCut (_ :< ChainPost (p :< _) (op :< _))) = Just $ CodeGen $ \m ->
   do μ <- askM
      σ <- freshΣ
      let nm = coinsNeeded m
      opc <- freshM (runCodeGen op (In4 (_Modify σ (In4 (Jump μ)))))
-     freshM (runCodeGen p (In4 (Make σ (In4 (Iter opc μ (In4 (Get σ (addCoins nm m))))))))
+     freshM (runCodeGen p (In4 (Make σ (In4 (Iter μ opc (parsecHandler (In4 (Get σ (addCoins nm m)))))))))
 peephole (MetaP Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m ->
   do μ <- askM
      σ <- freshΣ
      opc <- freshM (runCodeGen op (In4 (_Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      let nop = coinsNeeded opc
      pc <- freshM (runCodeGen p (In4 (_App m)))
-     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter (addCoins nop opc) μ (In4 (Get σ (addCoins (coinsNeeded pc) pc))))))))
+     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (Get σ (addCoins (coinsNeeded pc) pc)))))))))
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
@@ -144,13 +144,13 @@ direct (ChainPre op p) m =
      opc <- freshM (runCodeGen op (In4 (_Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      let nop = coinsNeeded opc
      pc <- freshM (runCodeGen p (In4 (_App m)))
-     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter (addCoins nop opc) μ (In4 (Get σ pc)))))))
+     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (Get σ pc))))))))
 direct (ChainPost p op) m =
   do μ <- askM
      σ <- freshΣ
      opc <- freshM (runCodeGen op (In4 (_Modify σ (In4 (Jump μ)))))
      let nop = coinsNeeded opc
-     freshM (runCodeGen p (In4 (Make σ (In4 (Iter (addCoins nop opc) μ (In4 (Get σ m)))))))
+     freshM (runCodeGen p (In4 (Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (Get σ m))))))))
 direct (Debug name p) m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 direct (MetaP Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
 

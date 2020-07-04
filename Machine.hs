@@ -128,12 +128,7 @@ newtype Exec s o xs n r a = Exec { unExec :: ExecMonad s o xs n r a }
 run :: Exec s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
 run (Exec m) γ ctx = runReader m ctx γ
 
-type Ops o = (Handlers o, KOps o, FailureOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
-type Handlers o = (ChainHandler o, LogHandler o)
-class PositionOps o => ChainHandler o where
-  chainHandler :: (Γ s o xs (Succ n) ks a -> Code (ST s (Maybe a))) -> Γ s o xs (Succ n) ks a -> Code o -> Code (H s o a)
-class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where
-  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (H s o a)
+type Ops o = (LogHandler o, KOps o, FailureOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
 exec :: forall o q s a. (Quapplicative q, Ops o) => Code (InputDependant o) -> (Machine o a, DMap MVar (LetBinding q o a)) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
@@ -193,7 +188,7 @@ readyExec = cata4 (Exec . alg)
     alg (Seek k)            = execSeek k
     alg (Case p q)          = execCase p q
     alg (Choices fs ks def) = execChoices fs ks def
-    alg (Iter l μ k)        = execIter l μ k
+    alg (Iter μ l k)        = execIter μ l k
     alg (Join φ)            = execJoin φ
     alg (MkJoin φ p k)      = execMkJoin φ p k
     alg (Swap k)            = execSwap k
@@ -204,10 +199,10 @@ readyExec = cata4 (Exec . alg)
     alg (LogExit name k)    = execLogExit name k
     alg (MetaM m k)         = execMeta m k
 
-execRet :: KOps o => ExecMonad s o (x ': xs) n x a
+execRet :: KOps o => ExecMonad s o (x : xs) n x a
 execRet = return $! resume
 
-execCall :: KOps o => MVar x -> Exec s o (x ': xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
+execCall :: KOps o => MVar x -> Exec s o (x : xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
 execCall μ (Exec k) =
   do !(QAbsExec m) <- askM μ
      k <&> \mk γ@Γ{..} -> runConcrete hs m (suspend mk γ) o
@@ -217,16 +212,16 @@ execJump μ =
   do !(QAbsExec m) <- askM μ
      return $! \γ@Γ{..} -> runConcrete hs m ret o
 
-execPush :: (PositionOps o, Quapplicative q) => DefuncM q o x -> Exec s o (x ': xs) n r a -> ExecMonad s o xs n r a
+execPush :: (PositionOps o, Quapplicative q) => DefuncM q o x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a
 execPush x (Exec k) = k <&> \m γ -> m (γ {xs = QCons (genDefuncM x) (xs γ)})
 
-execPop :: Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
+execPop :: Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execPop (Exec k) = k <&> \m γ -> m (γ {xs = tailQ (xs γ)})
 
-execLift2 :: (PositionOps o, Quapplicative q) => DefuncM q o (x -> y -> z) -> Exec s o (z ': xs) n r a -> ExecMonad s o (y ': x ': xs) n r a
+execLift2 :: (PositionOps o, Quapplicative q) => DefuncM q o (x -> y -> z) -> Exec s o (z : xs) n r a -> ExecMonad s o (y : x : xs) n r a
 execLift2 f (Exec k) = k <&> \m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefuncM2 f x y) xs'})
 
-execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, Quapplicative q) => DefuncM q o (Char -> Bool) -> Exec s o (Char ': xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
+execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, Quapplicative q) => DefuncM q o (Char -> Bool) -> Exec s o (Char : xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
 execSat p (Exec k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -245,23 +240,23 @@ execEmpt = return $! raiseΓ
 execCommit :: Exec s o xs n r a -> ExecMonad s o xs (Succ n) r a
 execCommit (Exec k) = k <&> \m γ -> let VCons _ hs' = hs γ in m (γ {hs = hs'})
 
-execCatch :: (?ops :: InputOps o, BoxOps o) => Exec s o xs (Succ n) r a -> Exec s o (o ': xs) n r a -> ExecMonad s o xs n r a
+execCatch :: (?ops :: InputOps o, BoxOps o) => Exec s o xs (Succ n) r a -> Exec s o (o : xs) n r a -> ExecMonad s o xs n r a
 execCatch (Exec k) (Exec h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (\c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]) mk) k h
 
-execTell :: Exec s o (o ': xs) n r a -> ExecMonad s o xs n r a
+execTell :: Exec s o (o : xs) n r a -> ExecMonad s o xs n r a
 execTell (Exec k) = k <&> \mk γ -> mk (γ {xs = QCons (o γ) (xs γ)})
 
-execSeek :: Exec s o xs n r a -> ExecMonad s o (o ': xs) n r a
+execSeek :: Exec s o xs n r a -> ExecMonad s o (o : xs) n r a
 execSeek (Exec k) = k <&> \mk γ -> let QCons o xs' = xs γ in mk (γ {xs = xs', o=o})
 
-execCase :: JoinBuilder o => Exec s o (x ': xs) n r a -> Exec s o (y ': xs) n r a -> ExecMonad s o (Either x y ': xs) n r a
+execCase :: JoinBuilder o => Exec s o (x : xs) n r a -> Exec s o (y : xs) n r a -> ExecMonad s o (Either x y : xs) n r a
 execCase (Exec p) (Exec q) = liftM2 (\mp mq γ ->
   let QCons e xs' = xs γ
   in [||case $$e of
     Left x -> $$(mp (γ {xs = QCons [||x||] xs'}))
     Right y  -> $$(mq (γ {xs = QCons [||y||] xs'}))||]) p q
 
-execChoices :: (PositionOps o, Quapplicative q) => [DefuncM q o (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
+execChoices :: (PositionOps o, Quapplicative q) => [DefuncM q o (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
   def
   (forM ks (\(Exec k) -> k))
@@ -272,46 +267,31 @@ execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ i
         else $$(go x fs mks def γ)
       ||]
 
-execIter :: (ChainHandler o, RecBuilder o, ReturnOps o)
-         => Exec s o '[] One Void a -> MVar Void -> Exec s o xs (Succ n) r a
-         -> ExecMonad s o xs (Succ n) r a
-execIter l μ (Exec k) =
-  do mk <- k
-     asks $! \ctx γ@(Γ xs ks o _) -> buildIter ctx μ l (chainHandler mk γ) o
+execIter :: (RecBuilder o, ReturnOps o)
+         => MVar Void -> Exec s o '[] One Void a -> Exec s o (o : xs) n r a
+         -> ExecMonad s o xs n r a
+execIter μ l (Exec h) =
+  do mh <- h
+     asks $! \ctx γ -> buildIter ctx μ l (\c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]) (o γ)
 
-{-
-Our current goal is to eliminate this handler
-
--}
-#define deriveChainHandler(_o)                       \
-instance ChainHandler _o where                       \
-{                                                    \
-  chainHandler mk γ c = let bx = box in [||\(!o#) -> \
-      if $$same $$c ($$bx o#) then                   \
-        $$(mk (γ {o = [|| $$bx o# ||]}))             \
-      else $$(raise @_o (hs γ)) o#                   \
-    ||]                                              \
-};
-inputInstances(deriveChainHandler)
-
-execJoin :: BoxOps o => ΦVar x -> ExecMonad s o (x ': xs) n r a
+execJoin :: BoxOps o => ΦVar x -> ExecMonad s o (x : xs) n r a
 execJoin φ =
   do QJoin k <- asks ((DMap.! φ) . φs)
      return $! \γ -> [|| $$k $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]
 
-execMkJoin :: JoinBuilder o => ΦVar x -> Exec s o (x ': xs) n r a -> Exec s o xs n r a -> ExecMonad s o xs n r a
+execMkJoin :: JoinBuilder o => ΦVar x -> Exec s o (x : xs) n r a -> Exec s o xs n r a -> ExecMonad s o xs n r a
 execMkJoin φ p (Exec k) = setupJoinPoint φ p k
 
-execSwap :: Exec s o (x ': y ': xs) n r a -> ExecMonad s o (y ': x ': xs) n r a
+execSwap :: Exec s o (x : y : xs) n r a -> ExecMonad s o (y : x : xs) n r a
 execSwap (Exec k) = k <&> (\mk γ -> mk (γ {xs = let QCons y (QCons x xs') = xs γ in QCons x (QCons y xs')}))
 
-execMake :: ΣVar x -> Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
+execMake :: ΣVar x -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execMake σ k = asks $! \ctx γ -> let QCons x xs' = xs γ in [||
                   do ref <- newΣ $$x
                      $$(run k (γ {xs = xs'}) (insertΣ σ [||ref||] ctx))
                 ||]
 
-execGet :: ΣVar x -> Exec s o (x ': xs) n r a -> ExecMonad s o xs n r a
+execGet :: ΣVar x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a
 execGet σ (Exec k) =
   do !(QSTRef ref) <- askΣ σ
      k <&> \mk γ -> [||
@@ -319,7 +299,7 @@ execGet σ (Exec k) =
           $$(mk (γ {xs = QCons [||x||] (xs γ)}))
        ||]
 
-execPut :: ΣVar x -> Exec s o xs n r a -> ExecMonad s o (x ': xs) n r a
+execPut :: ΣVar x -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execPut σ (Exec k) =
   do !(QSTRef ref) <- askΣ σ
      k <&> \mk γ -> let QCons x xs' = xs γ in [||
@@ -357,6 +337,9 @@ execLogExit name (Exec mk) =
     (local debugDown mk)
     ask
 
+class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where
+  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (H s o a)
+
 #define deriveLogHandler(_o)                                                                                      \
 instance LogHandler _o where                                                                                      \
 {                                                                                                                 \
@@ -384,7 +367,7 @@ raiseΓ :: BoxOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
 raiseΓ γ = let VCons h _ = hs γ in [|| $$h ($$unbox $$(o γ)) ||]
 
 class BoxOps o => JoinBuilder o where
-  setupJoinPoint :: ΦVar x -> Exec s o (x ': xs) n r a -> ExecMonad s o xs n r a -> ExecMonad s o xs n r a
+  setupJoinPoint :: ΦVar x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a -> ExecMonad s o xs n r a
 
 #define deriveJoinBuilder(_o)                                      \
 instance JoinBuilder _o where                                      \
@@ -430,8 +413,8 @@ emitLengthCheck n good bad γ = [||
   else $$bad ||]
 
 class BoxOps o => KOps o where
-  suspend :: (Γ s o (x ': xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
-  resume :: Γ s o (x ': xs) n x a -> Code (ST s (Maybe a))
+  suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
+  resume :: Γ s o (x : xs) n x a -> Code (ST s (Maybe a))
 
 #define deriveKOps(_o)                                                                         \
 instance KOps _o where                                                                         \

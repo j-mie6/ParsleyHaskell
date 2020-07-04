@@ -46,7 +46,7 @@ data M q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :
   Seek     :: k xs n r a -> M q o k (o : xs) n r a
   Case     :: k (x : xs) n r a -> k (y : xs) n r a -> M q o k (Either x y : xs) n r a
   Choices  :: [DefuncM q o (x -> Bool)] -> [k xs n r a] -> k xs n r a -> M q o k (x : xs) n r a
-  Iter     :: k '[] One Void a -> MVar Void -> k xs (Succ n) r a -> M q o k xs (Succ n) r a
+  Iter     :: MVar Void -> k '[] One Void a -> k (o : xs) n r a -> M q o k xs n r a
   Join     :: ΦVar x -> M q o k (x : xs) n r a
   MkJoin   :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> M q o k xs n r a
   Swap     :: k (x : y : xs) n r a -> M q o k (y : x : xs) n r a
@@ -100,7 +100,7 @@ instance IFunctor4 (M q o) where
   imap4 f (Seek k)            = Seek (f k)
   imap4 f (Case p q)          = Case (f p) (f q)
   imap4 f (Choices fs ks def) = Choices fs (map f ks) (f def)
-  imap4 f (Iter l μ k)        = Iter (f l) μ (f k)
+  imap4 f (Iter μ l h)        = Iter μ (f l) (f h)
   imap4 f (Join φ)            = Join φ
   imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
@@ -129,7 +129,7 @@ instance Show (Fix4 (M q o) xs n r a) where
     alg (Seek k)            = Const4 $ "(Seek " ++ show k ++ ")"
     alg (Case p q)          = Const4 $ "(Case " ++ show p ++ " " ++ show q ++ ")"
     alg (Choices fs ks def) = Const4 $ "(Choices " ++ show fs ++ " [" ++ intercalate ", " (map show ks) ++ "] " ++ show def ++ ")"
-    alg (Iter m μ k)        = Const4 $ "{Iter " ++ show μ ++ " " ++ show m ++ " " ++ show k ++ "}"
+    alg (Iter μ l h)        = Const4 $ "{Iter " ++ show μ ++ " " ++ show l ++ " " ++ show h ++ "}"
     alg (Join φ)            = Const4 $ show φ
     alg (MkJoin φ p k)      = Const4 $ "(let " ++ show φ ++ " = " ++ show p ++ " in " ++ show k ++ ")"
     alg (Swap k)            = Const4 $ "(Swap " ++ show k ++ ")"

@@ -120,10 +120,8 @@ some :: Parser a -> Parser [a]
 some = manyN 1
 
 skipMany :: Parser a -> Parser ()
---skipMany = pfoldr (code const >*< ID) UNIT
---skipMany = pfoldl (code const) UNIT
--- New implementation is stateless, so should work better!
-skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
+--skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
+skipMany = pfoldl (code const) UNIT
 
 skipManyN :: Int -> Parser a -> Parser ()
 skipManyN n p = foldr (const (p *>)) (skipMany p) [1..n]

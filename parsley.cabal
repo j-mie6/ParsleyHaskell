@@ -73,6 +73,7 @@ executable benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010
   ghc-options:         -rtsopts -fplugin=LiftPlugin -fno-spec-constr
+  --fplugin=DumpCore
 
 executable playground
   build-depends:       base >=4.10 && <5,
@@ -91,7 +92,7 @@ executable playground
   main-is:             Playground.hs
   default-language:    Haskell2010
   ghc-options:         -rtsopts -fplugin=LiftPlugin -fno-spec-constr
-  ---fplugin=DumpCore -ddump-ds -ddump-simpl -ddump-to-file 
+  ---fplugin=DumpCore -ddump-ds -ddump-simpl -ddump-to-file
   ---dverbose-core2core -drule-check =defunctionalised
 
 library

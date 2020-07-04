@@ -393,19 +393,19 @@ class BoxOps o => RecBuilder o where
             -> Exec s o '[] One r a
             -> Code (AbsExec s o a r)
 
-#define deriveRecBuilder(_o)                                                      \
-instance RecBuilder _o where                                                      \
-{                                                                                 \
-  buildIter ctx μ l h o = let bx = box in [||                                     \
-      let loop !o# =                                                              \
-        let handler = $$(h [||$$bx o#||]) in                                      \
-        $$(let ctx' = insertM μ [||\_ (!o#) _ -> loop o#||] ctx;                  \
-               γ = Γ QNil (noreturn @_o) [||$$bx o#||] (VCons [||handler||] VNil) \
-           in run l γ (voidCoins ctx'))                                           \
-      in loop ($$unbox $$o)                                                       \
-    ||];                                                                          \
-  buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                         \
-    $$(run k (Γ QNil [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||]       \
+#define deriveRecBuilder(_o)                                                    \
+instance RecBuilder _o where                                                    \
+{                                                                               \
+  buildIter ctx μ l h o = let bx = box in [||                                   \
+      let handler !o# = $$(h [||$$bx o#||]);                                    \
+          loop !o# =                                                            \
+        $$(run l                                                                \
+            (Γ QNil (noreturn @_o) [||$$bx o#||] (VCons [||handler o#||] VNil)) \
+            (voidCoins (insertM μ [||\_ (!o#) _ -> loop o#||] ctx)))            \
+      in loop ($$unbox $$o)                                                     \
+    ||];                                                                        \
+  buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                       \
+    $$(run k (Γ QNil [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||]     \
 };
 inputInstances(deriveRecBuilder)
 

@@ -3,7 +3,7 @@
              StandaloneDeriving,
              DeriveAnyClass,
              DeriveGeneric,
-             DataKinds, 
+             DataKinds,
              TypeOperators,
              TypeFamilies,
              FlexibleContexts,
@@ -44,10 +44,9 @@ main :: IO ()
 main = do
   --input <- readFile "inputs/big.js"
   --print (Happys.Javascript.runParser Happys.Javascript.javascript input)
-  attoParse AttoparsecParsers.javascript <$> Data.Text.IO.readFile "inputs/fibonacci.js" >>= print
-  attoParse AttoparsecParsers.javascript <$> Data.Text.IO.readFile "inputs/heapsort.js" >>= print
-  attoParse AttoparsecParsers.javascript <$> Data.Text.IO.readFile "inputs/game.js" >>= print
-  defaultMain [ {-regex
+  print (iterbenchP "abababababab")
+  print (iterbenchP "abababababa")
+  defaultMain [ {-iterbench
               , -}javascript
               , brainfuck
               , nandlang
@@ -60,6 +59,16 @@ eofP = $$(Parsley.runParser Parsley.eof)
 eof :: Benchmark
 eof = env (return ("", "a")) $ \(~(yay, nay)) -> bgroup "eof" [ bench "yay" $ nf eofP yay, bench "nay" $ nf eofP "nay"]
 
+-- Iter bench (skipMany)
+iterbenchP :: String -> Maybe ()
+iterbenchP = $$(Parsley.runParser (Parsley.skipMany (Parsley.string "ab")))
+
+iterbench :: Benchmark
+iterbench = env (return (concat (replicate 100_000 "ab"), take 199_000 (concat (replicate 100_000 "ab")))) $ \(~(good, bad)) ->
+  bgroup "iterbench" [ bench "good" $ nf iterbenchP good
+                     , bench "bad" $ nf iterbenchP bad
+                     ]
+
 -- Regex Wars 2019
 regexP :: ByteString -> Maybe Bool
 regexP = $$(Parsley.runParser ParsleyParsers.regex)
@@ -67,11 +76,11 @@ regexP = $$(Parsley.runParser ParsleyParsers.regex)
 regex :: Benchmark
 regex = env (return ( Data.ByteString.Char8.pack (concat (replicate 1000 "ab"))
                     , Data.ByteString.Char8.pack (concat (replicate 10_000 "ab"))
-                    , Data.ByteString.Char8.pack (concat (replicate 100_000 "ab")))) $ \(~(i1, i2, i3)) -> 
-          bgroup "regex" [ bench "regex 1000" $ nf regexP i1
-                         , bench "regex 10000" $ nf regexP i2
-                         , bench "regex 100000" $ nf regexP i3
-                         ]
+                    , Data.ByteString.Char8.pack (concat (replicate 100_000 "ab")))) $ \(~(i1, i2, i3)) ->
+  bgroup "regex" [ bench "regex 1000" $ nf regexP i1
+                  , bench "regex 10000" $ nf regexP i2
+                  , bench "regex 100000" $ nf regexP i3
+                  ]
 
 -- BrainFuck Benchmark
 deriving instance Generic BrainFuckOp
@@ -128,7 +137,7 @@ deriving instance NFData JSExpr'
 deriving instance NFData JSUnary
 deriving instance NFData JSMember
 deriving instance NFData JSCons
-deriving instance NFData JSAtom 
+deriving instance NFData JSAtom
 
 jsParsleyT :: Text -> Maybe JSProgram
 jsParsleyT = $$(Parsley.runParser ParsleyParsers.javascript)

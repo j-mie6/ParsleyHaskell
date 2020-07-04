@@ -13,7 +13,8 @@
              ScopedTypeVariables,
              FlexibleInstances,
              AllowAmbiguousTypes,
-             TypeApplications #-}
+             TypeApplications,
+             ConstrainedClassMethods #-}
 module MachineOps where
 
 import Utils              (Code)
@@ -23,7 +24,7 @@ import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.STRef.Unboxed (STRefU)
 import GHC.Exts           (TYPE)
 import Safe.Coerce        (coerce)
-import Input              (BoxOps(unbox), InputOps, next, Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
+import Input              (BoxOps(..), InputOps, next, Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Data.Text          (Text)
 import Data.Void          (Void)
 
@@ -94,23 +95,21 @@ instance ReturnOps _o where                                       \
 };
 inputInstances(deriveReturnOps)
 
-class FailureOps o where
+class HandlerOps o where
+  buildHandler :: BoxOps o => (Code o -> Code o -> Code (ST s (Maybe a))) -> Code o -> Code (H s o a)
   fatal :: Code (H s o a)
 
-#define deriveFailureOps(_o)                                \
-instance FailureOps _o where                                \
+#define deriveHandlerOps(_o)                                \
+instance HandlerOps _o where                                \
 {                                                           \
+  buildHandler h c = [||\o# -> $$(h c [||$$box o#||])||];   \
   fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]; \
 };
-inputInstances(deriveFailureOps)
+inputInstances(deriveHandlerOps) -- \c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]
 
 -- RIP Dream :(
 {-$(let derive _o = [d|
-        instance FailureOps _o where
-          setupHandler hs o h k = [||
-              let handler ((!o#) :: Unboxed _o) = $$(h o) o#
-              in $$(k (VCons [||handler||] hs))
-            ||]
+        instance HandlerOps _o where
           fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]
         |] in traverse derive representationTypes)-}
 

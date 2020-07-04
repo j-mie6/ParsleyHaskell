@@ -108,7 +108,7 @@ liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
 many = pfoldr CONS EMPTY
-{-many p = newRegister (pure (code id)) (\r ->
+{-many p = newRegister (pure ID) (\r ->
     let go = modify r (code flip >*< code (.) <$> (code (:) <$> p)) *> go
          <|> (makeQ ($ []) [||\f -> f []||] <$> get r)
     in go)-}
@@ -120,8 +120,8 @@ some :: Parser a -> Parser [a]
 some = manyN 1
 
 skipMany :: Parser a -> Parser ()
---skipMany = pfoldr (code const >*< code id) (code ())
---skipMany = pfoldl (code const) (code ())
+--skipMany = pfoldr (code const >*< ID) UNIT
+--skipMany = pfoldl (code const) UNIT
 -- New implementation is stateless, so should work better!
 skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
 

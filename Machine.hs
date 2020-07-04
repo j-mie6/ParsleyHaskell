@@ -128,7 +128,7 @@ newtype Exec s o xs n r a = Exec { unExec :: ExecMonad s o xs n r a }
 run :: Exec s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
 run (Exec m) γ ctx = runReader m ctx γ
 
-type Ops o = (LogHandler o, KOps o, FailureOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
+type Ops o = (LogHandler o, KOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
 exec :: forall o q s a. (Quapplicative q, Ops o) => Code (InputDependant o) -> (Machine o a, DMap MVar (LetBinding q o a)) -> Code (ST s (Maybe a))
 exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
@@ -240,8 +240,8 @@ execEmpt = return $! raiseΓ
 execCommit :: Exec s o xs n r a -> ExecMonad s o xs (Succ n) r a
 execCommit (Exec k) = k <&> \m γ -> let VCons _ hs' = hs γ in m (γ {hs = hs'})
 
-execCatch :: (?ops :: InputOps o, BoxOps o) => Exec s o xs (Succ n) r a -> Exec s o (o : xs) n r a -> ExecMonad s o xs n r a
-execCatch (Exec k) (Exec h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (\c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]) mk) k h
+execCatch :: (?ops :: InputOps o, BoxOps o, HandlerOps o) => Exec s o xs (Succ n) r a -> Exec s o (o : xs) n r a -> ExecMonad s o xs n r a
+execCatch (Exec k) (Exec h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (buildHandlerΓ γ mh) mk) k h
 
 execTell :: Exec s o (o : xs) n r a -> ExecMonad s o xs n r a
 execTell (Exec k) = k <&> \mk γ -> mk (γ {xs = QCons (o γ) (xs γ)})
@@ -267,12 +267,10 @@ execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ i
         else $$(go x fs mks def γ)
       ||]
 
-execIter :: (RecBuilder o, ReturnOps o)
+execIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
          => MVar Void -> Exec s o '[] One Void a -> Exec s o (o : xs) n r a
          -> ExecMonad s o xs n r a
-execIter μ l (Exec h) =
-  do mh <- h
-     asks $! \ctx γ -> buildIter ctx μ l (\c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]) (o γ)
+execIter μ l (Exec h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandlerΓ γ mh) (o γ)) h ask
 
 execJoin :: BoxOps o => ΦVar x -> ExecMonad s o (x : xs) n r a
 execJoin φ =
@@ -280,7 +278,7 @@ execJoin φ =
      return $! \γ -> [|| $$k $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]
 
 execMkJoin :: JoinBuilder o => ΦVar x -> Exec s o (x : xs) n r a -> Exec s o xs n r a -> ExecMonad s o xs n r a
-execMkJoin φ p (Exec k) = setupJoinPoint φ p k
+execMkJoin = setupJoinPoint
 
 execSwap :: Exec s o (x : y : xs) n r a -> ExecMonad s o (y : x : xs) n r a
 execSwap (Exec k) = k <&> (\mk γ -> mk (γ {xs = let QCons y (QCons x xs') = xs γ in QCons x (QCons y xs')}))
@@ -363,16 +361,22 @@ setupHandlerΓ :: Γ s o xs n r a
               -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
 setupHandlerΓ γ h k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
 
+buildHandlerΓ :: (BoxOps o, HandlerOps o)
+              => Γ s o xs n r a
+              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
+              -> Code o -> Code (H s o a)
+buildHandlerΓ γ h = buildHandler (\c o -> h (γ {xs = QCons c (xs γ), o = o}))
+
 raiseΓ :: BoxOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
 raiseΓ γ = let VCons h _ = hs γ in [|| $$h ($$unbox $$(o γ)) ||]
 
 class BoxOps o => JoinBuilder o where
-  setupJoinPoint :: ΦVar x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a -> ExecMonad s o xs n r a
+  setupJoinPoint :: ΦVar x -> Exec s o (x : xs) n r a -> Exec s o xs n r a -> ExecMonad s o xs n r a
 
 #define deriveJoinBuilder(_o)                                      \
 instance JoinBuilder _o where                                      \
 {                                                                  \
-  setupJoinPoint φ (Exec k) mx =                                   \
+  setupJoinPoint φ (Exec k) (Exec mx) =                            \
     liftM2 (\mk ctx γ -> [||                                       \
       let join x !(o# :: Unboxed _o) =                             \
         $$(mk (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) \

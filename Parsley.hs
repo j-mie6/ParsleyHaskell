@@ -109,8 +109,8 @@ liftA3 f p q r = f <$> p <*> q <*> r
 many :: Parser a -> Parser [a]
 many = pfoldr CONS EMPTY
 {-many p = newRegister (pure ID) (\r ->
-    let go = modify r (code flip >*< code (.) <$> (code (:) <$> p)) *> go
-         <|> (makeQ ($ []) [||\f -> f []||] <$> get r)
+    let go = modify r (COMPOSE_H (FLIP_H COMPOSE) CONS <$> p) *> go
+         <|> (APP_H (FLIP_H APP) EMPTY <$> get r)
     in go)-}
 
 manyN :: Int -> Parser a -> Parser [a]

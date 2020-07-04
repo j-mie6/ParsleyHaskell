@@ -15,6 +15,7 @@ import Indexed           (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..
 import Utils             (WQ(..))
 import Defunc            (Defunc(APP, ID), DefuncM(USER), pattern FLIP_H)
 import Data.Word         (Word64)
+import Data.Void         (Void)
 import Safe.Coerce       (coerce)
 import Data.List         (intercalate)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
@@ -31,31 +32,30 @@ newtype LetBinding q o a x = LetBinding (Fix4 (M q o) '[] One x a)
 instance Show (LetBinding q o a x) where show (LetBinding m) = show m
 
 data M q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
-  Ret       :: M q o k '[x] n x a
-  Push      :: DefuncM q o x -> k (x : xs) n r a -> M q o k xs n r a
-  Pop       :: k xs n r a -> M q o k (x : xs) n r a
-  Lift2     :: DefuncM q o (x -> y -> z) -> k (z : xs) n r a -> M q o k (y : x : xs) n r a
-  Sat       :: DefuncM q o (Char -> Bool) -> k (Char : xs) (Succ n) r a -> M q o k xs (Succ n) r a
-  Call      :: MVar x -> k (x : xs) (Succ n) r a -> M q o k xs (Succ n) r a
-  Jump      :: MVar x -> M q o k '[] (Succ n) x a
-  Empt      :: M q o k xs (Succ n) r a
-  Commit    :: k xs n r a -> M q o k xs (Succ n) r a
-  Catch     :: k xs (Succ n) r a -> k (o : xs) n r a -> M q o k xs n r a
-  Tell      :: k (o : xs) n r a -> M q o k xs n r a
-  Seek      :: k xs n r a -> M q o k (o : xs) n r a
-  Case      :: k (x : xs) n r a -> k (y : xs) n r a -> M q o k (Either x y : xs) n r a
-  Choices   :: [DefuncM q o (x -> Bool)] -> [k xs n r a] -> k xs n r a -> M q o k (x : xs) n r a
-  ChainIter :: ΣVar x -> MVar x -> M q o k '[] (Succ n) x a -- TODO This is kinda wrong, it ignores the handler, so it should be n, but relies on runConcrete...
-  ChainInit :: ΣVar x -> k '[] (Succ (Succ n)) x a -> MVar x -> k xs (Succ n) r a -> M q o k xs (Succ n) r a
-  Join      :: ΦVar x -> M q o k (x : xs) n r a
-  MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> M q o k xs n r a
-  Swap      :: k (x : y : xs) n r a -> M q o k (y : x : xs) n r a
-  Make      :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
-  Get       :: ΣVar x -> k (x : xs) n r a -> M q o k xs n r a
-  Put       :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
-  LogEnter  :: String -> k xs (Succ (Succ n)) r a -> M q o k xs (Succ n) r a
-  LogExit   :: String -> k xs n r a -> M q o k xs n r a
-  MetaM     :: MetaM n -> k xs n r a -> M q o k xs n r a
+  Ret      :: M q o k '[x] n x a
+  Push     :: DefuncM q o x -> k (x : xs) n r a -> M q o k xs n r a
+  Pop      :: k xs n r a -> M q o k (x : xs) n r a
+  Lift2    :: DefuncM q o (x -> y -> z) -> k (z : xs) n r a -> M q o k (y : x : xs) n r a
+  Sat      :: DefuncM q o (Char -> Bool) -> k (Char : xs) (Succ n) r a -> M q o k xs (Succ n) r a
+  Call     :: MVar x -> k (x : xs) (Succ n) r a -> M q o k xs (Succ n) r a
+  Jump     :: MVar x -> M q o k '[] (Succ n) x a
+  Empt     :: M q o k xs (Succ n) r a
+  Commit   :: k xs n r a -> M q o k xs (Succ n) r a
+  Catch    :: k xs (Succ n) r a -> k (o : xs) n r a -> M q o k xs n r a
+  Tell     :: k (o : xs) n r a -> M q o k xs n r a
+  Seek     :: k xs n r a -> M q o k (o : xs) n r a
+  Case     :: k (x : xs) n r a -> k (y : xs) n r a -> M q o k (Either x y : xs) n r a
+  Choices  :: [DefuncM q o (x -> Bool)] -> [k xs n r a] -> k xs n r a -> M q o k (x : xs) n r a
+  Iter     :: k '[] One Void a -> MVar Void -> k xs (Succ n) r a -> M q o k xs (Succ n) r a
+  Join     :: ΦVar x -> M q o k (x : xs) n r a
+  MkJoin   :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> M q o k xs n r a
+  Swap     :: k (x : y : xs) n r a -> M q o k (y : x : xs) n r a
+  Make     :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
+  Get      :: ΣVar x -> k (x : xs) n r a -> M q o k xs n r a
+  Put      :: ΣVar x -> k xs n r a -> M q o k (x : xs) n r a
+  LogEnter :: String -> k xs (Succ (Succ n)) r a -> M q o k xs (Succ n) r a
+  LogExit  :: String -> k xs n r a -> M q o k xs n r a
+  MetaM    :: MetaM n -> k xs n r a -> M q o k xs n r a
 
 data MetaM (n :: Nat) where
   AddCoins    :: Int -> MetaM (Succ n)
@@ -100,8 +100,7 @@ instance IFunctor4 (M q o) where
   imap4 f (Seek k)            = Seek (f k)
   imap4 f (Case p q)          = Case (f p) (f q)
   imap4 f (Choices fs ks def) = Choices fs (map f ks) (f def)
-  imap4 f (ChainIter σ μ)     = ChainIter σ μ
-  imap4 f (ChainInit σ l μ k) = ChainInit σ (f l) μ (f k)
+  imap4 f (Iter l μ k)        = Iter (f l) μ (f k)
   imap4 f (Join φ)            = Join φ
   imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
@@ -130,8 +129,7 @@ instance Show (Fix4 (M q o) xs n r a) where
     alg (Seek k)            = Const4 $ "(Seek " ++ show k ++ ")"
     alg (Case p q)          = Const4 $ "(Case " ++ show p ++ " " ++ show q ++ ")"
     alg (Choices fs ks def) = Const4 $ "(Choices " ++ show fs ++ " [" ++ intercalate ", " (map show ks) ++ "] " ++ show def ++ ")"
-    alg (ChainIter σ μ)     = Const4 $ "(ChainIter " ++ show σ ++ " " ++ show μ ++ ")"
-    alg (ChainInit σ m μ k) = Const4 $ "{ChainInit " ++ show σ ++ " " ++ show μ ++ " " ++ show m ++ " " ++ show k ++ "}"
+    alg (Iter m μ k)        = Const4 $ "{Iter " ++ show μ ++ " " ++ show m ++ " " ++ show k ++ "}"
     alg (Join φ)            = Const4 $ show φ
     alg (MkJoin φ p k)      = Const4 $ "(let " ++ show φ ++ " = " ++ show p ++ " in " ++ show k ++ ")"
     alg (Swap k)            = Const4 $ "(Swap " ++ show k ++ ")"

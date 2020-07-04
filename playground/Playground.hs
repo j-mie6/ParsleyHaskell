@@ -56,6 +56,9 @@ javascript = const (return Nothing)-- $$(Parsley.parseFromFile Parsers.javascrip
 defuncTest :: String -> Maybe (Maybe Int)
 defuncTest = $$(Parsley.runParser Parsers.defuncTest)
 
+manyTest :: String -> Maybe String
+manyTest = $$(Parsley.runParser Parsers.manyTest)
+
 --boom :: String -> Maybe String
 --boom = $$(Parsley.runParser Parsers.failure)
 
@@ -69,8 +72,14 @@ main =
      print (nfb "a")
      print (nfb "ab")
      print (nfb "c")-}
-  do javascript "inputs/fibonacci.js" >>= print
-     javascript "inputs/heapsort.js" >>= print
-     javascript "inputs/game.js" >>= print
-     javascript "inputs/big.js" >>= print
+  do --javascript "inputs/fibonacci.js" >>= print
+     --javascript "inputs/heapsort.js" >>= print
+     --javascript "inputs/game.js" >>= print
+     --javascript "inputs/big.js" >>= print
+     print (manyTest "")
+     print (manyTest "ab")
+     print (manyTest "abab")
+     print (manyTest "ababc")
+     print (manyTest "ababa")
+     print (manyTest "ababac")
      return ()

@@ -21,9 +21,6 @@ import Data.Text.Internal       (Text(..))
 import Data.Text.Unsafe         (iter, Iter(..), iter_, reverseIter_)
 import Data.ByteString.Internal (ByteString(..))
 import GHC.ForeignPtr           (ForeignPtr(..), ForeignPtrContents)
-import Control.Monad.ST         (ST)
-import Data.STRef               (STRef, newSTRef, readSTRef, writeSTRef)
-import Data.STRef.Unboxed       (STRefU, newSTRefU, readSTRefU, writeSTRefU)
 import Language.Haskell.TH      (Q, Type)
 import qualified Data.Text                     as Text (length, index)
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
@@ -52,11 +49,6 @@ class PositionOps rep where
 class BoxOps rep where
   box   :: Code (Unboxed rep -> rep)
   unbox :: Code (rep -> Unboxed rep)
-
-class ORefOps rep where
-  newORef   :: Code (rep -> ST s (STRefU s Int))
-  readORef  :: Code (STRefU s Int -> ST s rep)
-  writeORef :: Code (STRefU s Int -> rep -> ST s ())
 
 class LogOps rep where
   shiftLeft :: Code (rep -> Int -> rep)
@@ -93,8 +85,8 @@ data UnpackedLazyByteString = UnpackedLazyByteString
 representationTypes :: [Q Type]
 representationTypes = [[t|Int|], [t|OffWith [Char]|], [t|OffWith Stream|], [t|UnpackedLazyByteString|], [t|Text|]]
 
-offWith :: ts -> OffWith ts
-offWith ts = OffWith 0 ts
+offWith :: Code (ts -> OffWith ts)
+offWith = [||OffWith 0||]
 
 {-# INLINE emptyUnpackedLazyByteString #-}
 emptyUnpackedLazyByteString :: Int -> UnpackedLazyByteString
@@ -135,15 +127,6 @@ offWithSame = [||\(OffWith i _) (OffWith j _) -> i == j||]
 
 offWithShiftRight :: Code (Int -> ts -> ts) -> Code (OffWith ts -> Int -> OffWith ts)
 offWithShiftRight drop = [||\(OffWith o ts) i -> OffWith (o + i) ($$drop i ts)||]
-
-offWithNewORef :: Code (OffWith ts -> ST s (STRefU s Int))
-offWithNewORef = [||\(OffWith i _) -> newSTRefU i||]
-
-offWithWriteORef :: Code (STRefU s Int -> OffWith ts -> ST s ())
-offWithWriteORef = [||\ref (OffWith i _) -> writeSTRefU ref i||]
-
-offWithReadORef :: Code ts -> Code (STRefU s Int -> ST s (OffWith ts))
-offWithReadORef empty = [||\ref -> fmap (\i -> OffWith i $$empty) (readSTRefU ref)||]
 
 {-offWithStreamAnd :: ts -> OffWithStreamAnd ts
 offWithStreamAnd ts = OffWithStreamAnd 0 nomore ts
@@ -228,7 +211,7 @@ instance Input CharList where
           more (OffWith i _) = i < size
           --more (OffWith _ []) = False
           --more _              = True
-      in InputDependant next more (offWith input)
+      in InputDependant next more ($$offWith input)
     ||]
 
 instance Input Text where
@@ -260,7 +243,7 @@ instance Input Lazy.ByteString where
 instance Input Stream where
   prepare qinput = [||
       let next (OffWith o (c :> cs)) = (# c, OffWith (o + 1) cs #)
-      in InputDependant next (const True) (offWith $$qinput)
+      in InputDependant next (const True) ($$offWith $$qinput)
     ||]
 
 -- PositionOps Instances
@@ -300,32 +283,6 @@ instance BoxOps Text where
 instance BoxOps UnpackedLazyByteString where
   box = [||\(!(# i#, addr#, final, off#, size#, cs #)) -> UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs||]
   unbox = [||\(UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs) -> (# i#, addr#, final, off#, size#, cs #)||]
-
--- ORefOps Instances
-instance ORefOps Int where
-  newORef = [||newSTRefU||]
-  readORef = [||readSTRefU||]
-  writeORef = [||writeSTRefU||]
-
-instance ORefOps (OffWith String) where
-  newORef = offWithNewORef
-  readORef = offWithReadORef [||[]||]
-  writeORef = offWithWriteORef
-
-instance ORefOps (OffWith Stream) where
-  newORef = offWithNewORef
-  readORef = offWithReadORef [||nomore||]
-  writeORef = offWithWriteORef
-
-instance ORefOps Text where
-  newORef = [||\(Text _ i _) -> newSTRefU i||]
-  readORef = [||\ref -> fmap (\i -> Text empty i 0) (readSTRefU ref)||]
-  writeORef = [||\ref (Text _ i _) -> writeSTRefU ref i||]
-
-instance ORefOps UnpackedLazyByteString where
-  newORef = [||\o -> newSTRefU ($$offToInt o)||]
-  readORef = [||\ref -> fmap emptyUnpackedLazyByteString (readSTRefU ref)||]
-  writeORef = [||\ref o -> writeSTRefU ref ($$offToInt o)||]
 
 -- LogOps Instances
 instance LogOps Int where

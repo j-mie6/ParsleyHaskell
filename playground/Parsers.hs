@@ -30,6 +30,9 @@ cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac"
 defuncTest :: Parser (Maybe Int)
 defuncTest = code Just <$> (code (+) <$> (item $> code 1) <*> (item $> code 8))
 
+manyTest :: Parser [Char]
+manyTest = many (string "ab" $> (code 'c'))
+
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")
 
@@ -198,11 +201,11 @@ numbers = natFloat
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
 
     fraction :: Parser [Char]
-    fraction = ([(:) (code '.')]) <$> (char '.' 
+    fraction = ([(:) (code '.')]) <$> (char '.'
             *> some (oneOf ['0'..'9']))
 
     exponent' :: Parser [Char]
-    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE" 
+    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE"
              *> (((code (:) <$> oneOf "+-") <|> pure (code id))
              <*> (code show <$> decimal)))
 
@@ -342,11 +345,11 @@ javascript = whitespace *> many element <* eof
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
 
     fraction :: Parser [Char]
-    fraction = ([(:) (code '.')]) <$> (char '.' 
+    fraction = ([(:) (code '.')]) <$> (char '.'
             *> some (oneOf ['0'..'9']))
 
     exponent' :: Parser [Char]
-    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE" 
+    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE"
              *> (((code (:) <$> oneOf "+-") <|> pure (code id))
              <*> (code show <$> decimal)))
 

@@ -43,10 +43,12 @@ data Vec n a where
   VCons :: a -> Vec n a -> Vec (Succ n) a
 
 type H s o a = Unboxed o -> ST s (Maybe a)
+type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
 
-type AbsExec s o a x = (x -> Unboxed o -> ST s (Maybe a)) -> Unboxed o -> H s o a -> ST s (Maybe a)
+-- TODO Rename this
+type AbsExec s o a x = Cont s o a x -> Unboxed o -> H s o a -> ST s (Maybe a)
 newtype QAbsExec s o a x = QAbsExec (Code (AbsExec s o a x))
-newtype QJoin s o a x = QJoin (Code (x -> Unboxed  o -> ST s (Maybe a)))
+newtype QJoin s o a x = QJoin (Code (Cont s o a x))
 
 tailQ :: QList (x ': xs) -> QList xs
 tailQ (QCons x xs) = xs
@@ -56,6 +58,14 @@ headQ (QCons x xs) = x
 
 raise :: forall o n s a. Vec (Succ n) (Code (H s o a)) -> Code (H s o a)
 raise (VCons h _) = h
+
+setupHandler :: Vec n (Code (H s o a)) -> Code o
+             -> (Code o -> Code (H s o a))
+             -> (Vec (Succ n) (Code (H s o a)) -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+setupHandler hs o h k = [||
+    let handler = $$(h o)
+    in $$(k (VCons [||handler||] hs))
+  ||]
 
 {-# INLINE newΣ #-}
 newΣ :: x -> ST s (STRef s x)
@@ -73,8 +83,8 @@ modifyΣ σ f =
      writeΣ σ (f $! x)
 
 class ReturnOps o where
-  halt :: Code (a -> Unboxed o -> ST s (Maybe a))
-  noreturn :: Code (r -> Unboxed o -> ST s (Maybe a))
+  halt :: Code (Cont s o a a)
+  noreturn :: Code (Cont s o a Void)
 
 #define deriveReturnOps(_o)                                       \
 instance ReturnOps _o where                                       \
@@ -84,18 +94,12 @@ instance ReturnOps _o where                                       \
 };
 inputInstances(deriveReturnOps)
 
-class BoxOps o => FailureOps o where
-  setupHandler :: Vec n (Code (H s o a)) -> Code o
-               -> (Code o -> Code (H s o a))
-               -> (Vec (Succ n) (Code (H s o a)) -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+class FailureOps o where
   fatal :: Code (H s o a)
 
 #define deriveFailureOps(_o)                                \
 instance FailureOps _o where                                \
 {                                                           \
-  setupHandler hs o h k = [||                               \
-    let handler ((!o#) :: Unboxed _o) = $$(h o) o#          \
-    in $$(k (VCons [||handler||] hs)) ||];                  \
   fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]; \
 };
 inputInstances(deriveFailureOps)
@@ -110,7 +114,8 @@ inputInstances(deriveFailureOps)
           fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]
         |] in traverse derive representationTypes)-}
 
-runConcrete :: BoxOps o => Vec (Succ n) (Code (H s o a)) -> Code (AbsExec s o a x) -> Code (x -> Unboxed o -> ST s (Maybe a)) -> Code o -> Code (ST s (Maybe a))
+-- TODO Rename
+runConcrete :: BoxOps o => Vec (Succ n) (Code (H s o a)) -> Code (AbsExec s o a x) -> Code (Cont s o a x) -> Code o -> Code (ST s (Maybe a))
 runConcrete (VCons h _) m ret o = [||$$m $$ret ($$unbox $$o) $! $$h||]
 
 sat :: (?ops :: InputOps o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))

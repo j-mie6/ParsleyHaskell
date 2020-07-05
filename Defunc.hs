@@ -5,23 +5,24 @@
              TypeApplications,
              ScopedTypeVariables #-}
 module Defunc where
+
 import Utils (WQ(..), Code, Quapplicative(..))
 import Input (PositionOps(same))
 
-data Defunc q a where
-  APP     :: Defunc q ((a -> b) -> a -> b)
-  COMPOSE :: Defunc q ((b -> c) -> (a -> b) -> (a -> c))
-  FLIP    :: Defunc q ((a -> b -> c) -> b -> a -> c)
-  APP_H   :: Defunc q (a -> b) -> Defunc q a -> Defunc q b
-  EQ_H    :: Eq a => Defunc q a -> Defunc q (a -> Bool)
-  CHAR    :: Char -> Defunc q Char
-  ID      :: Defunc q (a -> a)
-  CONS    :: Defunc q (a -> [a] -> [a])
-  EMPTY   :: Defunc q [a]
-  UNIT    :: Defunc q ()
-  BLACK   :: q a -> Defunc q a
+data DefuncUser q a where
+  APP     :: DefuncUser q ((a -> b) -> a -> b)
+  COMPOSE :: DefuncUser q ((b -> c) -> (a -> b) -> (a -> c))
+  FLIP    :: DefuncUser q ((a -> b -> c) -> b -> a -> c)
+  APP_H   :: DefuncUser q (a -> b) -> DefuncUser q a -> DefuncUser q b
+  EQ_H    :: Eq a => DefuncUser q a -> DefuncUser q (a -> Bool)
+  CHAR    :: Char -> DefuncUser q Char
+  ID      :: DefuncUser q (a -> a)
+  CONS    :: DefuncUser q (a -> [a] -> [a])
+  EMPTY   :: DefuncUser q [a]
+  UNIT    :: DefuncUser q ()
+  BLACK   :: q a -> DefuncUser q a
 
-instance Quapplicative q => Quapplicative (Defunc q) where
+instance Quapplicative q => Quapplicative (DefuncUser q) where
   makeQ x qx       = BLACK (makeQ x qx)
   _val APP         = ($)
   _val COMPOSE     = (.)
@@ -36,61 +37,61 @@ instance Quapplicative q => Quapplicative (Defunc q) where
   _val (BLACK f)   = _val f
   _code = genDefunc
 
-data DefuncM q o a where
-  USER :: Defunc q a -> DefuncM q o a
-  SAME :: DefuncM q o (o -> o -> Bool)
+data Defunc q o a where
+  USER :: DefuncUser q a -> Defunc q o a
+  SAME :: Defunc q o (o -> o -> Bool)
 
-pattern COMPOSE_H :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) => Defunc q x -> Defunc q y -> Defunc q z
+pattern COMPOSE_H :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) => DefuncUser q x -> DefuncUser q y -> DefuncUser q z
 pattern COMPOSE_H f g = APP_H (APP_H COMPOSE f) g
-pattern FLIP_H :: () => ((x -> y) ~ ((a -> b -> c) -> b -> a -> c)) => Defunc q x -> Defunc q y
+pattern FLIP_H :: () => ((x -> y) ~ ((a -> b -> c) -> b -> a -> c)) => DefuncUser q x -> DefuncUser q y
 pattern FLIP_H f      = APP_H FLIP f
 
-genDefunc :: forall q a. Quapplicative q => Defunc q a -> Code a
-genDefunc APP             = [|| \f x -> f x ||]
-genDefunc COMPOSE         = [|| \f g x -> f (g x) ||]
-genDefunc FLIP            = [|| \f x y -> f y x ||]
-genDefunc (COMPOSE_H f g) = [|| \x -> $$(genDefunc1 (COMPOSE_H f g) [||x||]) ||]
-genDefunc (FLIP_H f)      = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
-genDefunc (APP_H f x)     = genDefunc2 @q APP (genDefunc f) (genDefunc x)
-genDefunc (CHAR c)        = [|| c ||]
-genDefunc (EQ_H x)        = [|| \y -> $$(genDefunc x) == y ||]
-genDefunc ID              = [|| \x -> x ||]
-genDefunc CONS            = [|| \x xs -> x : xs ||]
-genDefunc EMPTY           = [|| [] ||]
-genDefunc UNIT            = [|| () ||]
-genDefunc (BLACK f)       = _code f
+genDefuncUser :: forall q a. Quapplicative q => DefuncUser q a -> Code a
+genDefuncUser APP             = [|| \f x -> f x ||]
+genDefuncUser COMPOSE         = [|| \f g x -> f (g x) ||]
+genDefuncUser FLIP            = [|| \f x y -> f y x ||]
+genDefuncUser (COMPOSE_H f g) = [|| \x -> $$(genDefunc1 (COMPOSE_H f g) [||x||]) ||]
+genDefuncUser (FLIP_H f)      = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
+genDefuncUser (APP_H f x)     = genDefunc2 @q APP (genDefuncUser f) (genDefuncUser x)
+genDefuncUser (CHAR c)        = [|| c ||]
+genDefuncUser (EQ_H x)        = [|| \y -> $$(genDefuncUser x) == y ||]
+genDefuncUser ID              = [|| \x -> x ||]
+genDefuncUser CONS            = [|| \x xs -> x : xs ||]
+genDefuncUser EMPTY           = [|| [] ||]
+genDefuncUser UNIT            = [|| () ||]
+genDefuncUser (BLACK f)       = _code f
 
-genDefunc1 :: Quapplicative q => Defunc q (a -> b) -> Code a -> Code b
-genDefunc1 APP             qf = [|| \x -> $$qf x ||]
-genDefunc1 COMPOSE         qf = [|| \g x -> $$qf (g x) ||]
-genDefunc1 FLIP            qf = [|| \x y -> $$qf y x ||]
-genDefunc1 (COMPOSE_H f g) qx = [|| $$(genDefunc1 f (genDefunc1 g qx)) ||]
-genDefunc1 (FLIP_H f)      qx = [|| \y -> $$(genDefunc2 (FLIP_H f) qx [||y||]) ||]
-genDefunc1 (EQ_H x)        qy = [|| $$qy == $$(genDefunc x) ||]
-genDefunc1 ID              qx = qx
-genDefunc1 f               qx = [|| $$(genDefunc f) $$qx ||]
+genDefuncUser1 :: Quapplicative q => DefuncUser q (a -> b) -> Code a -> Code b
+genDefuncUser1 APP             qf = [|| \x -> $$qf x ||]
+genDefuncUser1 COMPOSE         qf = [|| \g x -> $$qf (g x) ||]
+genDefuncUser1 FLIP            qf = [|| \x y -> $$qf y x ||]
+genDefuncUser1 (COMPOSE_H f g) qx = [|| $$(genDefuncUser1 f (genDefuncUser1 g qx)) ||]
+genDefuncUser1 (FLIP_H f)      qx = [|| \y -> $$(genDefuncUser2 (FLIP_H f) qx [||y||]) ||]
+genDefuncUser1 (EQ_H x)        qy = [|| $$qy == $$(genDefuncUser x) ||]
+genDefuncUser1 ID              qx = qx
+genDefuncUser1 f               qx = [|| $$(genDefuncUser f) $$qx ||]
 
-genDefunc2 :: Quapplicative q => Defunc q (a -> b -> c) -> Code a -> Code b -> Code c
-genDefunc2 APP        qf qx  = [|| $$qf $$qx ||]
-genDefunc2 COMPOSE    qf qg  = [|| \x -> $$qf ($$qg x) ||]
-genDefunc2 FLIP       qf qx  = [|| \y -> $$qf y $$qx ||]
-genDefunc2 (FLIP_H f) qx qy  = genDefunc2 f qy qx
-genDefunc2 CONS       qx qxs = [|| $$qx : $$qxs ||]
-genDefunc2 f          qx qy  = [|| $$(genDefunc f) $$qx $$qy ||]
+genDefuncUser2 :: Quapplicative q => DefuncUser q (a -> b -> c) -> Code a -> Code b -> Code c
+genDefuncUser2 APP        qf qx  = [|| $$qf $$qx ||]
+genDefuncUser2 COMPOSE    qf qg  = [|| \x -> $$qf ($$qg x) ||]
+genDefuncUser2 FLIP       qf qx  = [|| \y -> $$qf y $$qx ||]
+genDefuncUser2 (FLIP_H f) qx qy  = genDefuncUser2 f qy qx
+genDefuncUser2 CONS       qx qxs = [|| $$qx : $$qxs ||]
+genDefuncUser2 f          qx qy  = [|| $$(genDefuncUser f) $$qx $$qy ||]
 
-genDefuncM :: (PositionOps o, Quapplicative q) => DefuncM q o a -> Code a
-genDefuncM (USER x) = genDefunc x
-genDefuncM SAME     = same
+genDefunc :: (PositionOps o, Quapplicative q) => Defunc q o a -> Code a
+genDefunc (USER x) = genDefuncUser x
+genDefunc SAME     = same
 
-genDefuncM1 :: (PositionOps o, Quapplicative q) => DefuncM q o (a -> b) -> Code a -> Code b
-genDefuncM1 (USER f) qx = genDefunc1 f qx
-genDefuncM1 f qx        = [|| $$(genDefuncM f) $$qx ||]
+genDefunc1 :: (PositionOps o, Quapplicative q) => Defunc q o (a -> b) -> Code a -> Code b
+genDefunc1 (USER f) qx = genDefuncUser1 f qx
+genDefunc1 f qx        = [|| $$(genDefunc f) $$qx ||]
 
-genDefuncM2 :: (PositionOps o, Quapplicative q) => DefuncM q o (a -> b -> c) -> Code a -> Code b -> Code c
-genDefuncM2 (USER f) qx qy = genDefunc2 f qx qy
-genDefuncM2 f qx qy        = [|| $$(genDefuncM f) $$qx $$qy ||]
+genDefunc2 :: (PositionOps o, Quapplicative q) => Defunc q o (a -> b -> c) -> Code a -> Code b -> Code c
+genDefunc2 (USER f) qx qy = genDefuncUser2 f qx qy
+genDefunc2 f qx qy        = [|| $$(genDefunc f) $$qx $$qy ||]
 
-instance Show (Defunc q a) where
+instance Show (DefuncUser q a) where
   show APP = "($)"
   show COMPOSE = "(.)"
   show FLIP = "flip"
@@ -105,6 +106,6 @@ instance Show (Defunc q a) where
   show UNIT = "()"
   show _ = "x"
 
-instance Show (DefuncM q o a) where
+instance Show (Defunc q o a) where
   show (USER x) = show x
   show SAME = "same"

@@ -46,9 +46,8 @@ data Vec n a where
 type H s o a = Unboxed o -> ST s (Maybe a)
 type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
 
--- TODO Rename this
-type AbsExec s o a x = Cont s o a x -> Unboxed o -> H s o a -> ST s (Maybe a)
-newtype QAbsExec s o a x = QAbsExec (Code (AbsExec s o a x))
+type SubRoutine s o a x = Cont s o a x -> Unboxed o -> H s o a -> ST s (Maybe a)
+newtype QSubRoutine s o a x = QSubRoutine (Code (SubRoutine s o a x))
 newtype QJoin s o a x = QJoin (Code (Cont s o a x))
 
 tailQ :: QList (x ': xs) -> QList xs
@@ -113,9 +112,8 @@ inputInstances(deriveHandlerOps) -- \c -> [||\o# -> $$(mh (γ {xs = QCons c (xs 
           fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]
         |] in traverse derive representationTypes)-}
 
--- TODO Rename
-runConcrete :: BoxOps o => Vec (Succ n) (Code (H s o a)) -> Code (AbsExec s o a x) -> Code (Cont s o a x) -> Code o -> Code (ST s (Maybe a))
-runConcrete (VCons h _) m ret o = [||$$m $$ret ($$unbox $$o) $! $$h||]
+callWithContinuation :: BoxOps o => QSubRoutine s o a x -> Code (Cont s o a x) -> Code o -> Vec (Succ n) (Code (H s o a)) -> Code (ST s (Maybe a))
+callWithContinuation (QSubRoutine sub) ret o (VCons h _) = [||$$sub $$ret ($$unbox $$o) $! $$h||]
 
 sat :: (?ops :: InputOps o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
 sat o p good bad = next o $ \qc qo' -> [||

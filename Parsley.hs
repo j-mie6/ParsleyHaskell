@@ -46,7 +46,7 @@ module Parsley ( Parser, runParser, parseFromFile
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Input                      (Input(..), Rep, Text16(..), CharList(..), Stream)
-import ParserAST                  (Parser, (<*>), (*>), (<*), empty, (<|>), branch, _conditional, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
+import CombinatorAST              (Parser, (<*>), (*>), (<*), empty, (<|>), branch, _conditional, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
 import Compiler                   (compile)
 import Machine                    (exec, Ops)
 import Utils                      (code, Quapplicative(..), WQ, Code)
@@ -55,7 +55,7 @@ import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
-import Defunc                     (Defunc(..), pattern FLIP_H)
+import Defunc                     (DefuncUser(..), pattern FLIP_H)
 
 class ParserOps rep where
   pure :: rep a -> Parser a
@@ -71,7 +71,7 @@ instance ParserOps WQ where
   pfoldl = pfoldl . BLACK
   pfoldl1 = pfoldl1 . BLACK
 
-instance {-# INCOHERENT #-} x ~ Defunc WQ => ParserOps x where
+instance {-# INCOHERENT #-} x ~ DefuncUser WQ => ParserOps x where
   pure = _pure
   satisfy = _satisfy
   conditional = _conditional
@@ -305,10 +305,10 @@ pfoldr f k p = chainPre (f <$> p) (pure k)
 pfoldr1 :: (ParserOps repf, ParserOps repk) => repf (a -> b -> b) -> repk b -> Parser a -> Parser b
 pfoldr1 f k p = f <$> p <*> pfoldr f k p
 
-data Level a b = InfixL  [Parser (b -> a -> b)] (Defunc WQ (a -> b))
-               | InfixR  [Parser (a -> b -> b)] (Defunc WQ (a -> b))
-               | Prefix  [Parser (b -> b)]      (Defunc WQ (a -> b))
-               | Postfix [Parser (b -> b)]      (Defunc WQ (a -> b))
+data Level a b = InfixL  [Parser (b -> a -> b)] (DefuncUser WQ (a -> b))
+               | InfixR  [Parser (a -> b -> b)] (DefuncUser WQ (a -> b))
+               | Prefix  [Parser (b -> b)]      (DefuncUser WQ (a -> b))
+               | Postfix [Parser (b -> b)]      (DefuncUser WQ (a -> b))
 
 class Monolith a b c where
   infixL  :: [Parser (b -> a -> b)] -> c

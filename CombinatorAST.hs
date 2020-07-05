@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TemplateHaskell #-}
-module ParserAST where
+module CombinatorAST where
 
 import Indexed                    (IFunctor, Fix(In), Const1(..), imap, cata)
 import MachineAST                 (IMVar, MVar(..), IΣVar(..))
@@ -16,11 +16,11 @@ import Defunc
 import Data.List                  (intercalate)
 
 -- Parser wrapper type
-newtype Parser a = Parser {unParser :: Fix (ParserF WQ) a}
+newtype Parser a = Parser {unParser :: Fix (Combinator WQ) a}
 
 -- Core smart constructors
 {-# INLINE _pure #-}
-_pure :: Defunc WQ a -> Parser a
+_pure :: DefuncUser WQ a -> Parser a
 _pure = Parser . In . Pure
 
 infixl 4 <*>
@@ -43,7 +43,7 @@ infixl 3 <|>
 Parser p <|> Parser q = Parser (In (p :<|>: q))
 
 {-# INLINE _satisfy #-}
-_satisfy :: Defunc WQ (Char -> Bool) -> Parser Char
+_satisfy :: DefuncUser WQ (Char -> Bool) -> Parser Char
 _satisfy = Parser . In . Satisfy
 
 lookAhead :: Parser a -> Parser a
@@ -55,7 +55,7 @@ notFollowedBy = Parser . In . NotFollowedBy . unParser
 try :: Parser a -> Parser a
 try = Parser . In . Try . unParser
 
-_conditional :: [(Defunc WQ (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+_conditional :: [(DefuncUser WQ (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
 _conditional cs (Parser p) (Parser def) =
   let (fs, qs) = unzip cs
   in Parser (In (Match p fs (map unParser qs) def))
@@ -73,50 +73,50 @@ debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (Debug name p))
 
 -- Core datatype
-data ParserF (q :: * -> *) (k :: * -> *) (a :: *) where
-  Pure          :: Defunc q a -> ParserF q k a
-  Satisfy       :: Defunc q (Char -> Bool) -> ParserF q k Char
-  (:<*>:)       :: k (a -> b) -> k a -> ParserF q k b
-  (:*>:)        :: k a -> k b -> ParserF q k b
-  (:<*:)        :: k a -> k b -> ParserF q k a
-  (:<|>:)       :: k a -> k a -> ParserF q k a
-  Empty         :: ParserF q k a
-  Try           :: k a -> ParserF q k a
-  LookAhead     :: k a -> ParserF q k a
-  Let           :: Bool -> MVar a -> k a -> ParserF q k a
-  NotFollowedBy :: k a -> ParserF q k ()
-  Branch        :: k (Either a b) -> k (a -> c) -> k (b -> c) -> ParserF q k c
-  Match         :: k a -> [Defunc q (a -> Bool)] -> [k b] -> k b -> ParserF q k b
-  ChainPre      :: k (a -> a) -> k a -> ParserF q k a
-  ChainPost     :: k a -> k (a -> a) -> ParserF q k a
-  Debug         :: String -> k a -> ParserF q k a
-  MetaP         :: MetaP -> k a -> ParserF q k a
+data Combinator (q :: * -> *) (k :: * -> *) (a :: *) where
+  Pure           :: DefuncUser q a -> Combinator q k a
+  Satisfy        :: DefuncUser q (Char -> Bool) -> Combinator q k Char
+  (:<*>:)        :: k (a -> b) -> k a -> Combinator q k b
+  (:*>:)         :: k a -> k b -> Combinator q k b
+  (:<*:)         :: k a -> k b -> Combinator q k a
+  (:<|>:)        :: k a -> k a -> Combinator q k a
+  Empty          :: Combinator q k a
+  Try            :: k a -> Combinator q k a
+  LookAhead      :: k a -> Combinator q k a
+  Let            :: Bool -> MVar a -> k a -> Combinator q k a
+  NotFollowedBy  :: k a -> Combinator q k ()
+  Branch         :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Combinator q k c
+  Match          :: k a -> [DefuncUser q (a -> Bool)] -> [k b] -> k b -> Combinator q k b
+  ChainPre       :: k (a -> a) -> k a -> Combinator q k a
+  ChainPost      :: k a -> k (a -> a) -> Combinator q k a
+  Debug          :: String -> k a -> Combinator q k a
+  MetaCombinator :: MetaCombinator -> k a -> Combinator q k a
 
-data MetaP where
-  Cut :: MetaP
-  RequiresCut :: MetaP
+data MetaCombinator where
+  Cut         :: MetaCombinator
+  RequiresCut :: MetaCombinator
 
 -- Instances
-instance IFunctor (ParserF q) where
-  imap _ (Pure x)            = Pure x
-  imap _ (Satisfy p)         = Satisfy p
-  imap f (p :<*>: q)         = f p :<*>: f q
-  imap f (p :*>: q)          = f p :*>: f q
-  imap f (p :<*: q)          = f p :<*: f q
-  imap f (p :<|>: q)         = f p :<|>: f q
-  imap _ Empty               = Empty
-  imap f (Try p)             = Try (f p)
-  imap f (LookAhead p)       = LookAhead (f p)
-  imap f (Let r v p)         = Let r v (f p)
-  imap f (NotFollowedBy p)   = NotFollowedBy (f p)
-  imap f (Branch b p q)      = Branch (f b) (f p) (f q)
-  imap f (Match p fs qs d)   = Match (f p) fs (map f qs) (f d)
-  imap f (ChainPre op p)     = ChainPre (f op) (f p)
-  imap f (ChainPost p op)    = ChainPost (f p) (f op)
-  imap f (Debug name p)      = Debug name (f p)
-  imap f (MetaP m p)         = MetaP m (f p)
+instance IFunctor (Combinator q) where
+  imap _ (Pure x)             = Pure x
+  imap _ (Satisfy p)          = Satisfy p
+  imap f (p :<*>: q)          = f p :<*>: f q
+  imap f (p :*>: q)           = f p :*>: f q
+  imap f (p :<*: q)           = f p :<*: f q
+  imap f (p :<|>: q)          = f p :<|>: f q
+  imap _ Empty                = Empty
+  imap f (Try p)              = Try (f p)
+  imap f (LookAhead p)        = LookAhead (f p)
+  imap f (Let r v p)          = Let r v (f p)
+  imap f (NotFollowedBy p)    = NotFollowedBy (f p)
+  imap f (Branch b p q)       = Branch (f b) (f p) (f q)
+  imap f (Match p fs qs d)    = Match (f p) fs (map f qs) (f d)
+  imap f (ChainPre op p)      = ChainPre (f op) (f p)
+  imap f (ChainPost p op)     = ChainPost (f p) (f op)
+  imap f (Debug name p)       = Debug name (f p)
+  imap f (MetaCombinator m p) = MetaCombinator m (f p)
 
-instance Show (Fix (ParserF q) a) where
+instance Show (Fix (Combinator q) a) where
   show = getConst1 . cata (Const1 . alg)
     where
       alg (Pure x)                                  = "(pure " ++ show x ++ ")"
@@ -136,8 +136,8 @@ instance Show (Fix (ParserF q) a) where
       alg (ChainPre (Const1 op) (Const1 p))         = concat ["(chainPre ", op, " ", p, ")"]
       alg (ChainPost (Const1 p) (Const1 op))        = concat ["(chainPost ", p, " ", op, ")"]
       alg (Debug _ (Const1 p))                      = p
-      alg (MetaP m (Const1 p))                      = concat [p, " [", show m, "]"]
+      alg (MetaCombinator m (Const1 p))             = concat [p, " [", show m, "]"]
 
-instance Show MetaP where
+instance Show MetaCombinator where
   show Cut = "coins after"
   show RequiresCut = "requires cut"

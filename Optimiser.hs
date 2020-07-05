@@ -6,17 +6,17 @@
 module Optimiser (optimise) where
 
 import Prelude hiding ((<$>))
-import ParserAST (ParserF(..))
-import Indexed   (Fix(In))
-import Utils     (code, Quapplicative(..))
-import Defunc    (Defunc(..), pattern FLIP_H, pattern COMPOSE_H)
+import CombinatorAST (Combinator(..))
+import Indexed       (Fix(In))
+import Utils         (code, Quapplicative(..))
+import Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H)
 
 pattern f :<$>: p = In (Pure f) :<*>: p
 pattern p :$>: x = p :*>: In (Pure x)
 pattern x :<$: p = In (Pure x) :<*: p
 pattern LiftA2 f p q = In (f :<$>: p) :<*>: q
 
-optimise :: Quapplicative q => ParserF q (Fix (ParserF q)) a -> Fix (ParserF q) a
+optimise :: Quapplicative q => Combinator q (Fix (Combinator q)) a -> Fix (Combinator q) a
 -- DESTRUCTIVE OPTIMISATION
 -- Right Absorption Law: empty <*> u                    = empty
 optimise (In Empty :<*>: _)                             = In Empty
@@ -164,7 +164,7 @@ optimise p                                               = In p
 
 -- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p
 
-(>?>) :: Quapplicative q => Fix (ParserF q) a -> q (a -> Bool) -> Fix (ParserF q) a
+(>?>) :: Quapplicative q => Fix (Combinator q) a -> q (a -> Bool) -> Fix (Combinator q) a
 p >?> f = In (Branch (In (makeQ g qg :<$>: p)) (In Empty) (In (Pure ID)))
   where
     g x = if _val f x then Right x else Left ()

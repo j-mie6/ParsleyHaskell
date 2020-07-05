@@ -22,11 +22,11 @@
 module Machine where
 
 import MachineOps
-import MachineAST
+import Instructions
 import Input                      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Indexed                    (Fix4, cata4, Nat(..))
 import Utils                      (code, Code, Quapplicative)
-import Defunc                     (DefuncM, genDefuncM, genDefuncM1, genDefuncM2)
+import Defunc                     (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Data.Functor               ((<&>))
 import Data.Void                  (Void)
 import Control.Monad              (forM, join, liftM2)
@@ -36,7 +36,6 @@ import Control.Exception          (Exception, throw)
 import Data.STRef                 (STRef)
 import Data.STRef.Unboxed         (STRefU)
 import Queue                      (Queue, enqueue, dequeue)
-import Data.Map.Strict            (Map)
 import Data.Dependent.Map         (DMap, DSum(..))
 import Data.GADT.Compare          (GCompare)
 import Debug.Trace                (trace)
@@ -45,7 +44,6 @@ import Data.Text                  (Text)
 import Data.Functor.Const         (Const(..), getConst)
 import Language.Haskell.TH        (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
-import qualified Data.Map.Strict    as Map  ((!), insert, empty)
 import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, toList, traverseWithKey)
 import qualified Queue                      (empty, size, null, foldr)
 
@@ -56,23 +54,13 @@ derivation((OffWith Stream))       \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
 
-{- A key property of the pure semantics of the machine states that
-    at the end of the execution of a machine, all the stacks shall
-    be empty. This also holds true of any recursive machines, for
-    obvious reasons. In the concrete machine, however, it is not
-    entirely necessary for this invariant to be obeyed: indeed the
-    stacks that would have otherwise been passed to the continuation
-    in the pure semantics were available to the caller in the
-    concrete machine. As such, continuations are only required to
-    demand the values of X and o, with all other values closed over
-    during suspension. -}
 data Γ s o xs n r a = Γ { xs    :: QList xs
                         , ret   :: Code (Cont s o a r)
                         , o     :: Code o
                         , hs    :: Vec n (Code (H s o a)) }
 
 newtype QSTRef s x = QSTRef (Code (STRef s x))
-data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
+data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
                      , debugLevel :: Int
@@ -81,8 +69,8 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QAbsExec s o a)
 emptyCtx :: Ctx s o a
 emptyCtx = Ctx DMap.empty DMap.empty DMap.empty 0 0 Queue.empty
 
-insertM :: MVar x -> Code (AbsExec s o a x) -> Ctx s o a -> Ctx s o a
-insertM μ q ctx = ctx {μs = DMap.insert μ (QAbsExec q) (μs ctx)}
+insertSub :: MVar x -> Code (SubRoutine s o a x) -> Ctx s o a -> Ctx s o a
+insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q) (μs ctx)}
 
 insertΦ :: ΦVar x -> Code (Cont s o a x) -> Ctx s o a -> Ctx s o a
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
@@ -126,19 +114,19 @@ newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
 type ExecMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 newtype Exec s o xs n r a = Exec { unExec :: ExecMonad s o xs n r a }
 run :: Exec s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
-run (Exec m) γ ctx = runReader m ctx γ
+run = flip . runReader . unExec
 
 type Ops o = (LogHandler o, KOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
-exec :: forall o q s a. (Quapplicative q, Ops o) => Code (InputDependant o) -> (Machine o a, DMap MVar (LetBinding q o a)) -> Code (ST s (Maybe a))
-exec input (Machine !m, ms) = trace ("EXECUTING: " ++ show m) [||
+exec :: forall o q s a. (Quapplicative q, Ops o) => Code (InputDependant o) -> (Program o a, DMap MVar (LetBinding q o a)) -> Code (ST s (Maybe a))
+exec input (Program !p, fs) = trace ("EXECUTING: " ++ show p) [||
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
-        in scopeBindings ms
+        in scopeBindings fs
              nameLet
-             QAbsExec
+             QSubRoutine
              (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyExec k))
-             (\names -> run (readyExec m) (Γ QNil (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx {μs = names})))
+             (\names -> run (readyExec p) (Γ QNil (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx {μs = names})))
   ||]
 
 missingDependency :: MVar x -> MissingDependency
@@ -170,10 +158,10 @@ scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
              body <- unTypeQ (letBuilder v (package names))
              return (FunD name [Clause [] (NormalB body) []])
 
-readyExec :: (?ops :: InputOps o, Ops o, Quapplicative q) => Fix4 (M q o) xs n r a -> Exec s o xs n r a
+readyExec :: (?ops :: InputOps o, Ops o, Quapplicative q) => Fix4 (Instr q o) xs n r a -> Exec s o xs n r a
 readyExec = cata4 (Exec . alg)
   where
-    alg :: (?ops :: InputOps o, Ops o, Quapplicative q) => M q o (Exec s o) xs n r a -> ExecMonad s o xs n r a
+    alg :: (?ops :: InputOps o, Ops o, Quapplicative q) => Instr q o (Exec s o) xs n r a -> ExecMonad s o xs n r a
     alg Ret                 = execRet
     alg (Call μ k)          = execCall μ k
     alg (Jump μ)            = execJump μ
@@ -200,17 +188,13 @@ readyExec = cata4 (Exec . alg)
     alg (MetaM m k)         = execMeta m k
 
 execRet :: KOps o => ExecMonad s o (x : xs) n x a
-execRet = return $! resume
+execRet = return $! ret >>= resume
 
 execCall :: KOps o => MVar x -> Exec s o (x : xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
-execCall μ (Exec k) =
-  do !(QAbsExec m) <- askM μ
-     k <&> \mk γ@Γ{..} -> runConcrete hs m (suspend mk γ) o
+execCall μ (Exec k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) o hs) k (askSub μ)
 
 execJump :: BoxOps o => MVar x -> ExecMonad s o '[] (Succ n) x a
-execJump μ =
-  do !(QAbsExec m) <- askM μ
-     return $! \γ@Γ{..} -> runConcrete hs m ret o
+execJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub ret o hs
 
 execPush :: (PositionOps o, Quapplicative q) => DefuncM q o x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a
 execPush x (Exec k) = k <&> \m γ -> m (γ {xs = QCons (genDefuncM x) (xs γ)})
@@ -238,7 +222,7 @@ execEmpt :: BoxOps o => ExecMonad s o xs (Succ n) r a
 execEmpt = return $! raiseΓ
 
 execCommit :: Exec s o xs n r a -> ExecMonad s o xs (Succ n) r a
-execCommit (Exec k) = k <&> \m γ -> let VCons _ hs' = hs γ in m (γ {hs = hs'})
+execCommit (Exec k) = k <&> \mk γ -> let VCons _ hs' = hs γ in mk (γ {hs = hs'})
 
 execCatch :: (?ops :: InputOps o, BoxOps o, HandlerOps o) => Exec s o xs (Succ n) r a -> Exec s o (o : xs) n r a -> ExecMonad s o xs n r a
 execCatch (Exec k) (Exec h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (buildHandlerΓ γ mh) mk) k h
@@ -259,7 +243,7 @@ execCase (Exec p) (Exec q) = liftM2 (\mp mq γ ->
 execChoices :: (PositionOps o, Quapplicative q) => [DefuncM q o (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
   def
-  (forM ks (\(Exec k) -> k))
+  (forM ks unExec)
   where
     go _ [] [] def γ = def γ
     go x (f:fs) (mk:mks) def γ = [||
@@ -272,10 +256,10 @@ execIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
          -> ExecMonad s o xs n r a
 execIter μ l (Exec h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandlerΓ γ mh) (o γ)) h ask
 
-execJoin :: BoxOps o => ΦVar x -> ExecMonad s o (x : xs) n r a
+execJoin :: KOps o => ΦVar x -> ExecMonad s o (x : xs) n r a
 execJoin φ =
   do QJoin k <- asks ((DMap.! φ) . φs)
-     return $! \γ -> [|| $$k $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]
+     return $! resume k
 
 execMkJoin :: JoinBuilder o => ΦVar x -> Exec s o (x : xs) n r a -> Exec s o xs n r a -> ExecMonad s o xs n r a
 execMkJoin = setupJoinPoint
@@ -285,24 +269,24 @@ execSwap (Exec k) = k <&> (\mk γ -> mk (γ {xs = let QCons y (QCons x xs') = xs
 
 execMake :: ΣVar x -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execMake σ k = asks $! \ctx γ -> let QCons x xs' = xs γ in [||
-                  do ref <- newΣ $$x
-                     $$(run k (γ {xs = xs'}) (insertΣ σ [||ref||] ctx))
-                ||]
+    do ref <- newΣ $$x
+       $$(run k (γ {xs = xs'}) (insertΣ σ [||ref||] ctx))
+  ||]
 
 execGet :: ΣVar x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a
 execGet σ (Exec k) =
   do !(QSTRef ref) <- askΣ σ
      k <&> \mk γ -> [||
-       do x <- readΣ $$ref
-          $$(mk (γ {xs = QCons [||x||] (xs γ)}))
+         do x <- readΣ $$ref
+            $$(mk (γ {xs = QCons [||x||] (xs γ)}))
        ||]
 
 execPut :: ΣVar x -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execPut σ (Exec k) =
   do !(QSTRef ref) <- askΣ σ
      k <&> \mk γ -> let QCons x xs' = xs γ in [||
-       do writeΣ $$ref $$x
-          $$(mk (γ {xs = xs'}))
+         do writeΣ $$ref $$x
+            $$(mk (γ {xs = xs'}))
        ||]
 
 preludeString :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
@@ -376,11 +360,11 @@ class BoxOps o => JoinBuilder o where
 #define deriveJoinBuilder(_o)                                      \
 instance JoinBuilder _o where                                      \
 {                                                                  \
-  setupJoinPoint φ (Exec k) (Exec mx) =                            \
+  setupJoinPoint φ (Exec k) mx =                                   \
     liftM2 (\mk ctx γ -> [||                                       \
       let join x !(o# :: Unboxed _o) =                             \
         $$(mk (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) \
-      in $$(run (Exec mx) γ (insertΦ φ [||join||] ctx))            \
+      in $$(run mx γ (insertΦ φ [||join||] ctx))                   \
     ||]) (local voidCoins k) ask                                   \
 };
 inputInstances(deriveJoinBuilder)
@@ -391,7 +375,7 @@ class BoxOps o => RecBuilder o where
             -> (Code o -> Code (H s o a)) -> Code o -> Code (ST s (Maybe a))
   buildRec  :: Ctx s o a
             -> Exec s o '[] One r a
-            -> Code (AbsExec s o a r)
+            -> Code (SubRoutine s o a r)
 
 #define deriveRecBuilder(_o)                                                    \
 instance RecBuilder _o where                                                    \
@@ -401,7 +385,7 @@ instance RecBuilder _o where                                                    
           loop !o# =                                                            \
         $$(run l                                                                \
             (Γ QNil (noreturn @_o) [||$$bx o#||] (VCons [||handler o#||] VNil)) \
-            (voidCoins (insertM μ [||\_ (!o#) _ -> loop o#||] ctx)))            \
+            (voidCoins (insertSub μ [||\_ (!o#) _ -> loop o#||] ctx)))            \
       in loop ($$unbox $$o)                                                     \
     ||];                                                                        \
   buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                       \
@@ -418,18 +402,18 @@ emitLengthCheck n good bad γ = [||
 
 class BoxOps o => KOps o where
   suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
-  resume :: Γ s o (x : xs) n x a -> Code (ST s (Maybe a))
+  resume :: Code (Cont s o a x) -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
 
 #define deriveKOps(_o)                                                                         \
 instance KOps _o where                                                                         \
 {                                                                                              \
   suspend m γ = [|| \x (!o#) -> $$(m (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) ||]; \
-  resume γ = [|| $$(ret γ) $$(headQ (xs γ)) ($$unbox $$(o γ)) ||]                              \
+  resume k γ = let QCons x _ = xs γ in [|| $$k $$x ($$unbox $$(o γ)) ||]                       \
 };
 inputInstances(deriveKOps)
 
-askM :: MonadReader (Ctx s o a) m => MVar x -> m (QAbsExec s o a x)
-askM μ = do
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
+askSub μ = do
   mexec <- asks (((DMap.lookup μ) . μs))
   case mexec of
     Just exec -> return $! exec

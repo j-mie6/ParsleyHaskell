@@ -5,7 +5,8 @@
              TemplateHaskell,
              PolyKinds,
              KindSignatures,
-             PatternSynonyms #-}
+             PatternSynonyms,
+             ScopedTypeVariables #-}
 module Instructions where
 
 import Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
@@ -13,7 +14,7 @@ import Utils       (WQ(..))
 import Defunc      (DefuncUser(APP, ID), Defunc(USER), pattern FLIP_H)
 import Data.Void   (Void)
 import Data.List   (intercalate)
-import Identifiers (IMVar, MVar, IΣVar)
+import Identifiers (MVar, ΦVar, ΣVar)
 
 type One = Succ Zero
 newtype Program o a = Program { getProgram :: Fix4 (Instr WQ o) '[] One a a }

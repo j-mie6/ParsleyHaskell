@@ -112,10 +112,10 @@ liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
 
 newtype MissingDependency = MissingDependency IMVar
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
-type ExecMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
-newtype Exec s o xs n r a = Exec { unExec :: ExecMonad s o xs n r a }
-run :: Exec s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
-run = flip . runReader . unExec
+type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
+newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
+run :: Machine s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
+run = flip . runReader . getMachine
 
 type Ops o = (LogHandler o, KOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
@@ -126,8 +126,8 @@ exec input (Program !p, fs) = trace ("EXECUTING: " ++ show p) [||
         in scopeBindings fs
              nameLet
              QSubRoutine
-             (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyExec k))
-             (\names -> run (readyExec p) (Γ QNil (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx {μs = names})))
+             (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyMachine k))
+             (\names -> run (readyMachine p) (Γ QNil (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx {μs = names})))
   ||]
 
 missingDependency :: MVar x -> MissingDependency
@@ -137,11 +137,11 @@ dependencyOf (MissingDependency v) = MVar v
 outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
 outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 
-nameLet :: LetBinding q o a x -> String
-nameLet _ = "rec"
+nameLet :: MVar x -> LetBinding q o a x -> String
+nameLet (MVar (IMVar i)) _ = "sub" ++ show i
 
 scopeBindings :: GCompare key => DMap key named
-                              -> (forall a. named a -> String)
+                              -> (forall a. key a -> named a -> String)
                               -> (forall x. Code ((x -> y) -> z) -> q x)
                               -> (forall x. named x -> DMap key q -> Code ((x -> y) -> z))
                               -> (DMap key q -> Code a)
@@ -151,7 +151,7 @@ scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
      LetE <$> generateBindings names bindings <*> unTypeQ (scoped (package names))
   where
     package = DMap.map (wrap . unsafeTExpCoerce . return . VarE . getConst)
-    makeNames = DMap.traverseWithKey (\_ v -> Const <$> newName (nameOf v))
+    makeNames = DMap.traverseWithKey (\k v -> Const <$> newName (nameOf k v))
     generateBindings names = traverse makeDecl . DMap.toList
       where
         makeDecl (k :=> v) =
@@ -159,10 +159,10 @@ scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
              body <- unTypeQ (letBuilder v (package names))
              return (FunD name [Clause [] (NormalB body) []])
 
-readyExec :: (?ops :: InputOps o, Ops o, Quapplicative q) => Fix4 (Instr q o) xs n r a -> Exec s o xs n r a
-readyExec = cata4 (Exec . alg)
+readyMachine :: (?ops :: InputOps o, Ops o, Quapplicative q) => Fix4 (Instr q o) xs n r a -> Machine s o xs n r a
+readyMachine = cata4 (Machine . alg)
   where
-    alg :: (?ops :: InputOps o, Ops o, Quapplicative q) => Instr q o (Exec s o) xs n r a -> ExecMonad s o xs n r a
+    alg :: (?ops :: InputOps o, Ops o, Quapplicative q) => Instr q o (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = execRet
     alg (Call μ k)          = execCall μ k
     alg (Jump μ)            = execJump μ
@@ -188,26 +188,26 @@ readyExec = cata4 (Exec . alg)
     alg (LogExit name k)    = execLogExit name k
     alg (MetaInstr m k)     = execMeta m k
 
-execRet :: KOps o => ExecMonad s o (x : xs) n x a
+execRet :: KOps o => MachineMonad s o (x : xs) n x a
 execRet = return $! ret >>= resume
 
-execCall :: KOps o => MVar x -> Exec s o (x : xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
-execCall μ (Exec k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) o hs) k (askSub μ)
+execCall :: KOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+execCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) o hs) k (askSub μ)
 
-execJump :: BoxOps o => MVar x -> ExecMonad s o '[] (Succ n) x a
+execJump :: BoxOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
 execJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub ret o hs
 
-execPush :: (PositionOps o, Quapplicative q) => Defunc q o x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a
-execPush x (Exec k) = k <&> \m γ -> m (γ {xs = QCons (genDefunc x) (xs γ)})
+execPush :: (PositionOps o, Quapplicative q) => Defunc q o x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
+execPush x (Machine k) = k <&> \m γ -> m (γ {xs = QCons (genDefunc x) (xs γ)})
 
-execPop :: Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
-execPop (Exec k) = k <&> \m γ -> m (γ {xs = tailQ (xs γ)})
+execPop :: Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+execPop (Machine k) = k <&> \m γ -> m (γ {xs = tailQ (xs γ)})
 
-execLift2 :: (PositionOps o, Quapplicative q) => Defunc q o (x -> y -> z) -> Exec s o (z : xs) n r a -> ExecMonad s o (y : x : xs) n r a
-execLift2 f (Exec k) = k <&> \m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefunc2 f x y) xs'})
+execLift2 :: (PositionOps o, Quapplicative q) => Defunc q o (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
+execLift2 f (Machine k) = k <&> \m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefunc2 f x y) xs'})
 
-execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, Quapplicative q) => Defunc q o (Char -> Bool) -> Exec s o (Char : xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
-execSat p (Exec k) = do
+execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, Quapplicative q) => Defunc q o (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+execSat p (Machine k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
   if | bankrupt -> maybeEmitCheck (Just 1) <$> k
@@ -219,32 +219,32 @@ execSat p (Exec k) = do
     maybeEmitCheck (Just n) mk γ =
       [|| let bad' = $$(raiseΓ γ) in $$(emitLengthCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
 
-execEmpt :: BoxOps o => ExecMonad s o xs (Succ n) r a
+execEmpt :: BoxOps o => MachineMonad s o xs (Succ n) r a
 execEmpt = return $! raiseΓ
 
-execCommit :: Exec s o xs n r a -> ExecMonad s o xs (Succ n) r a
-execCommit (Exec k) = k <&> \mk γ -> let VCons _ hs' = hs γ in mk (γ {hs = hs'})
+execCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
+execCommit (Machine k) = k <&> \mk γ -> let VCons _ hs' = hs γ in mk (γ {hs = hs'})
 
-execCatch :: (?ops :: InputOps o, BoxOps o, HandlerOps o) => Exec s o xs (Succ n) r a -> Exec s o (o : xs) n r a -> ExecMonad s o xs n r a
-execCatch (Exec k) (Exec h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (buildHandlerΓ γ mh) mk) k h
+execCatch :: (?ops :: InputOps o, BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
+execCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (buildHandlerΓ γ mh) mk) k h
 
-execTell :: Exec s o (o : xs) n r a -> ExecMonad s o xs n r a
-execTell (Exec k) = k <&> \mk γ -> mk (γ {xs = QCons (o γ) (xs γ)})
+execTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
+execTell (Machine k) = k <&> \mk γ -> mk (γ {xs = QCons (o γ) (xs γ)})
 
-execSeek :: Exec s o xs n r a -> ExecMonad s o (o : xs) n r a
-execSeek (Exec k) = k <&> \mk γ -> let QCons o xs' = xs γ in mk (γ {xs = xs', o=o})
+execSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
+execSeek (Machine k) = k <&> \mk γ -> let QCons o xs' = xs γ in mk (γ {xs = xs', o=o})
 
-execCase :: JoinBuilder o => Exec s o (x : xs) n r a -> Exec s o (y : xs) n r a -> ExecMonad s o (Either x y : xs) n r a
-execCase (Exec p) (Exec q) = liftM2 (\mp mq γ ->
+execCase :: JoinBuilder o => Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
+execCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
   let QCons e xs' = xs γ
   in [||case $$e of
     Left x -> $$(mp (γ {xs = QCons [||x||] xs'}))
     Right y  -> $$(mq (γ {xs = QCons [||y||] xs'}))||]) p q
 
-execChoices :: (PositionOps o, Quapplicative q) => [Defunc q o (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
-execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
+execChoices :: (PositionOps o, Quapplicative q) => [Defunc q o (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+execChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
   def
-  (forM ks unExec)
+  (forM ks getMachine)
   where
     go _ [] [] def γ = def γ
     go x (f:fs) (mk:mks) def γ = [||
@@ -253,37 +253,37 @@ execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ i
       ||]
 
 execIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
-         => MVar Void -> Exec s o '[] One Void a -> Exec s o (o : xs) n r a
-         -> ExecMonad s o xs n r a
-execIter μ l (Exec h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandlerΓ γ mh) (o γ)) h ask
+         => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
+         -> MachineMonad s o xs n r a
+execIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandlerΓ γ mh) (o γ)) h ask
 
-execJoin :: KOps o => ΦVar x -> ExecMonad s o (x : xs) n r a
+execJoin :: KOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
 execJoin φ =
   do QJoin k <- asks ((DMap.! φ) . φs)
      return $! resume k
 
-execMkJoin :: JoinBuilder o => ΦVar x -> Exec s o (x : xs) n r a -> Exec s o xs n r a -> ExecMonad s o xs n r a
+execMkJoin :: JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 execMkJoin = setupJoinPoint
 
-execSwap :: Exec s o (x : y : xs) n r a -> ExecMonad s o (y : x : xs) n r a
-execSwap (Exec k) = k <&> (\mk γ -> mk (γ {xs = let QCons y (QCons x xs') = xs γ in QCons x (QCons y xs')}))
+execSwap :: Machine s o (x : y : xs) n r a -> MachineMonad s o (y : x : xs) n r a
+execSwap (Machine k) = k <&> (\mk γ -> mk (γ {xs = let QCons y (QCons x xs') = xs γ in QCons x (QCons y xs')}))
 
-execMake :: ΣVar x -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
+execMake :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 execMake σ k = asks $! \ctx γ -> let QCons x xs' = xs γ in [||
     do ref <- newΣ $$x
        $$(run k (γ {xs = xs'}) (insertΣ σ [||ref||] ctx))
   ||]
 
-execGet :: ΣVar x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a
-execGet σ (Exec k) =
+execGet :: ΣVar x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
+execGet σ (Machine k) =
   do !(QSTRef ref) <- askΣ σ
      k <&> \mk γ -> [||
          do x <- readΣ $$ref
             $$(mk (γ {xs = QCons [||x||] (xs γ)}))
        ||]
 
-execPut :: ΣVar x -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
-execPut σ (Exec k) =
+execPut :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+execPut σ (Machine k) =
   do !(QSTRef ref) <- askΣ σ
      k <&> \mk γ -> let QCons x xs' = xs γ in [||
          do writeΣ $$ref $$x
@@ -308,14 +308,14 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     prelude    = [|| concat [indent, dir : name, dir : " (", show ($$offToInt $$offset), "): "] ||]
     caretSpace = [|| replicate (length $$prelude + $$offToInt $$offset - $$offToInt $$start) ' ' ||]
 
-execLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Exec s o xs (Succ (Succ n)) r a -> ExecMonad s o xs (Succ n) r a
-execLogEnter name (Exec mk) =
+execLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
+execLogEnter name (Machine mk) =
   liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(setupHandlerΓ γ (logHandler name ctx γ) k)||])
     (local debugUp mk)
     ask
 
-execLogExit :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Exec s o xs n r a -> ExecMonad s o xs n r a
-execLogExit name (Exec mk) =
+execLogExit :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Machine s o xs n r a -> MachineMonad s o xs n r a
+execLogExit name (Machine mk) =
   liftM2 (\k ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||])
     (local debugDown mk)
     ask
@@ -332,14 +332,14 @@ instance LogHandler _o where                                                    
 };
 inputInstances(deriveLogHandler)
 
-execMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o) => MetaInstr n -> Exec s o xs n r a -> ExecMonad s o xs n r a
-execMeta (AddCoins coins) (Exec k) =
+execMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+execMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
-execMeta (FreeCoins coins) (Exec k) = local (giveCoins coins) k
-execMeta (RefundCoins coins) (Exec k) = local (giveCoins coins) k
-execMeta (DrainCoins coins) (Exec k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
+execMeta (FreeCoins coins) (Machine k) = local (giveCoins coins) k
+execMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
+execMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
 
 setupHandlerΓ :: Γ s o xs n r a
               -> (Code o -> Code (H s o a))
@@ -356,12 +356,12 @@ raiseΓ :: BoxOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
 raiseΓ γ = let VCons h _ = hs γ in [|| $$h ($$unbox $$(o γ)) ||]
 
 class BoxOps o => JoinBuilder o where
-  setupJoinPoint :: ΦVar x -> Exec s o (x : xs) n r a -> Exec s o xs n r a -> ExecMonad s o xs n r a
+  setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 
 #define deriveJoinBuilder(_o)                                      \
 instance JoinBuilder _o where                                      \
 {                                                                  \
-  setupJoinPoint φ (Exec k) mx =                                   \
+  setupJoinPoint φ (Machine k) mx =                                   \
     liftM2 (\mk ctx γ -> [||                                       \
       let join x !(o# :: Unboxed _o) =                             \
         $$(mk (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) \
@@ -372,10 +372,10 @@ inputInstances(deriveJoinBuilder)
 
 class BoxOps o => RecBuilder o where
   buildIter :: ReturnOps o
-            => Ctx s o a -> MVar Void -> Exec s o '[] One Void a
+            => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
             -> (Code o -> Code (H s o a)) -> Code o -> Code (ST s (Maybe a))
   buildRec  :: Ctx s o a
-            -> Exec s o '[] One r a
+            -> Machine s o '[] One r a
             -> Code (SubRoutine s o a r)
 
 #define deriveRecBuilder(_o)                                                    \
@@ -415,10 +415,10 @@ inputInstances(deriveKOps)
 
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
 askSub μ = do
-  mexec <- asks (((DMap.lookup μ) . μs))
-  case mexec of
-    Just exec -> return $! exec
-    Nothing   -> throw (missingDependency μ)
+  msub <- asks (((DMap.lookup μ) . μs))
+  case msub of
+    Just sub -> return $! sub
+    Nothing  -> throw (missingDependency μ)
 
 askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (QSTRef s x)
 askΣ σ = do

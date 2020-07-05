@@ -7,7 +7,6 @@
              MagicHash,
              TemplateHaskell,
              TypeSynonymInstances,
-             RankNTypes,
              CPP,
              ImplicitParams,
              ScopedTypeVariables,

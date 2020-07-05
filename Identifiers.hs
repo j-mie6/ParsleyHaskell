@@ -1,3 +1,5 @@
+{-# LANGUAGE KindSignatures,
+             GeneralizedNewtypeDeriving #-}
 module Identifiers where
 
 import Data.Word         (Word64)

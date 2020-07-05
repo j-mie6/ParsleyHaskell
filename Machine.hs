@@ -23,6 +23,7 @@ module Machine where
 
 import MachineOps
 import Instructions
+import Identifiers
 import Input                      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Indexed                    (Fix4, cata4, Nat(..))
 import Utils                      (code, Code, Quapplicative)
@@ -185,7 +186,7 @@ readyExec = cata4 (Exec . alg)
     alg (Put σ k)           = execPut σ k
     alg (LogEnter name k)   = execLogEnter name k
     alg (LogExit name k)    = execLogExit name k
-    alg (MetaM m k)         = execMeta m k
+    alg (MetaInstr m k)     = execMeta m k
 
 execRet :: KOps o => ExecMonad s o (x : xs) n x a
 execRet = return $! ret >>= resume
@@ -196,16 +197,16 @@ execCall μ (Exec k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (su
 execJump :: BoxOps o => MVar x -> ExecMonad s o '[] (Succ n) x a
 execJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub ret o hs
 
-execPush :: (PositionOps o, Quapplicative q) => DefuncM q o x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a
-execPush x (Exec k) = k <&> \m γ -> m (γ {xs = QCons (genDefuncM x) (xs γ)})
+execPush :: (PositionOps o, Quapplicative q) => Defunc q o x -> Exec s o (x : xs) n r a -> ExecMonad s o xs n r a
+execPush x (Exec k) = k <&> \m γ -> m (γ {xs = QCons (genDefunc x) (xs γ)})
 
 execPop :: Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execPop (Exec k) = k <&> \m γ -> m (γ {xs = tailQ (xs γ)})
 
-execLift2 :: (PositionOps o, Quapplicative q) => DefuncM q o (x -> y -> z) -> Exec s o (z : xs) n r a -> ExecMonad s o (y : x : xs) n r a
-execLift2 f (Exec k) = k <&> \m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefuncM2 f x y) xs'})
+execLift2 :: (PositionOps o, Quapplicative q) => Defunc q o (x -> y -> z) -> Exec s o (z : xs) n r a -> ExecMonad s o (y : x : xs) n r a
+execLift2 f (Exec k) = k <&> \m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefunc2 f x y) xs'})
 
-execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, Quapplicative q) => DefuncM q o (Char -> Bool) -> Exec s o (Char : xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
+execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, Quapplicative q) => Defunc q o (Char -> Bool) -> Exec s o (Char : xs) (Succ n) r a -> ExecMonad s o xs (Succ n) r a
 execSat p (Exec k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -213,7 +214,7 @@ execSat p (Exec k) = do
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
-    readChar bad k γ@Γ{..} = sat o (genDefuncM p) (\o c -> k (γ {xs = QCons c xs, o = o})) bad
+    readChar bad k γ@Γ{..} = sat o (genDefunc p) (\o c -> k (γ {xs = QCons c xs, o = o})) bad
     maybeEmitCheck Nothing mk γ = readChar (raiseΓ γ) mk γ
     maybeEmitCheck (Just n) mk γ =
       [|| let bad' = $$(raiseΓ γ) in $$(emitLengthCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
@@ -240,14 +241,14 @@ execCase (Exec p) (Exec q) = liftM2 (\mp mq γ ->
     Left x -> $$(mp (γ {xs = QCons [||x||] xs'}))
     Right y  -> $$(mq (γ {xs = QCons [||y||] xs'}))||]) p q
 
-execChoices :: (PositionOps o, Quapplicative q) => [DefuncM q o (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
+execChoices :: (PositionOps o, Quapplicative q) => [Defunc q o (x -> Bool)] -> [Exec s o xs n r a] -> Exec s o xs n r a -> ExecMonad s o (x : xs) n r a
 execChoices fs ks (Exec def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
   def
   (forM ks unExec)
   where
     go _ [] [] def γ = def γ
     go x (f:fs) (mk:mks) def γ = [||
-        if $$(genDefuncM1 f x) then $$(mk γ)
+        if $$(genDefunc1 f x) then $$(mk γ)
         else $$(go x fs mks def γ)
       ||]
 
@@ -331,7 +332,7 @@ instance LogHandler _o where                                                    
 };
 inputInstances(deriveLogHandler)
 
-execMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o) => MetaM n -> Exec s o xs n r a -> ExecMonad s o xs n r a
+execMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o) => MetaInstr n -> Exec s o xs n r a -> ExecMonad s o xs n r a
 execMeta (AddCoins coins) (Exec k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k

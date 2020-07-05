@@ -9,7 +9,8 @@
 module CodeGenerator (codeGen) where
 
 import CombinatorAST              (Combinator(..), MetaCombinator(..))
-import Instructions               (Instr(..), MetaInstr, IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), One, _Fmap, _App, _Modify, _If, addCoins, refundCoins, drainCoins, freeCoins)
+import Instructions               (Instr(..), MetaInstr, One, _Fmap, _App, _Modify, _If, addCoins, refundCoins, drainCoins, freeCoins)
+import Identifiers                (IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import InstructionAnalyser        (coinsNeeded)
 import Indexed                    (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Utils                      (code, Quapplicative((>*<)))

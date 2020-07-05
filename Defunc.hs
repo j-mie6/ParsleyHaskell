@@ -35,7 +35,7 @@ instance Quapplicative q => Quapplicative (DefuncUser q) where
   _val EMPTY       = []
   _val UNIT        = ()
   _val (BLACK f)   = _val f
-  _code = genDefunc
+  _code = genDefuncUser
 
 data Defunc q o a where
   USER :: DefuncUser q a -> Defunc q o a
@@ -50,9 +50,9 @@ genDefuncUser :: forall q a. Quapplicative q => DefuncUser q a -> Code a
 genDefuncUser APP             = [|| \f x -> f x ||]
 genDefuncUser COMPOSE         = [|| \f g x -> f (g x) ||]
 genDefuncUser FLIP            = [|| \f x y -> f y x ||]
-genDefuncUser (COMPOSE_H f g) = [|| \x -> $$(genDefunc1 (COMPOSE_H f g) [||x||]) ||]
-genDefuncUser (FLIP_H f)      = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
-genDefuncUser (APP_H f x)     = genDefunc2 @q APP (genDefuncUser f) (genDefuncUser x)
+genDefuncUser (COMPOSE_H f g) = [|| \x -> $$(genDefuncUser1 (COMPOSE_H f g) [||x||]) ||]
+genDefuncUser (FLIP_H f)      = [|| \x -> $$(genDefuncUser1 (FLIP_H f) [||x||]) ||]
+genDefuncUser (APP_H f x)     = genDefuncUser2 @q APP (genDefuncUser f) (genDefuncUser x)
 genDefuncUser (CHAR c)        = [|| c ||]
 genDefuncUser (EQ_H x)        = [|| \y -> $$(genDefuncUser x) == y ||]
 genDefuncUser ID              = [|| \x -> x ||]

@@ -5,29 +5,18 @@
              TemplateHaskell,
              PolyKinds,
              KindSignatures,
-             ScopedTypeVariables,
-             GeneralizedNewtypeDeriving,
-             PatternSynonyms,
-             StandaloneDeriving #-}
+             PatternSynonyms #-}
 module Instructions where
 
-import Indexed           (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
-import Utils             (WQ(..))
-import Defunc            (DefuncUser(APP, ID), Defunc(USER), pattern FLIP_H)
-import Data.Word         (Word64)
-import Data.Void         (Void)
-import Safe.Coerce       (coerce)
-import Data.List         (intercalate)
-import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
+import Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
+import Utils       (WQ(..))
+import Defunc      (DefuncUser(APP, ID), Defunc(USER), pattern FLIP_H)
+import Data.Void   (Void)
+import Data.List   (intercalate)
+import Identifiers (IMVar, MVar, IΣVar)
 
 type One = Succ Zero
 newtype Program o a = Program { getProgram :: Fix4 (Instr WQ o) '[] One a a }
-newtype ΣVar (a :: *) = ΣVar IΣVar
-newtype MVar (a :: *) = MVar IMVar
-newtype ΦVar (a :: *) = ΦVar IΦVar
-newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum, Show)
-newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum, Show)
-newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum, Show)
 newtype LetBinding q o a x = LetBinding (Fix4 (Instr q o) '[] One x a)
 instance Show (LetBinding q o a x) where show (LetBinding m) = show m
 
@@ -75,7 +64,7 @@ drainCoins = mkCoin DrainCoins
 _App :: Fix4 (Instr q o) (y : xs) n r a -> Instr q o (Fix4 (Instr q o)) (x : (x -> y) : xs) n r a
 _App m = Lift2 (USER APP) m
 
-_Fmap :: DefuncInstr q o (x -> y) -> Fix4 (Instr q o) (y : xs) n r a -> Instr q o (Fix4 (Instr q o)) (x : xs) n r a
+_Fmap :: Defunc q o (x -> y) -> Fix4 (Instr q o) (y : xs) n r a -> Instr q o (Fix4 (Instr q o)) (x : xs) n r a
 _Fmap f m = Push f (In4 (Lift2 (USER (FLIP_H APP)) m))
 
 _Modify :: ΣVar x -> Fix4 (Instr q o) xs n r a -> Instr q o (Fix4 (Instr q o)) ((x -> x) : xs) n r a
@@ -111,7 +100,7 @@ instance IFunctor4 (Instr q o) where
   imap4 f (LogExit name k)    = LogExit name (f k)
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
 
-instance Show (Machine o a) where show = show . getMachine
+instance Show (Program o a) where show = show . getProgram
 instance Show (Fix4 (Instr q o) xs n r a) where
   show x = let Const4 s = cata4 alg x in s where
     alg :: forall i j k. Instr q o (Const4 String) i j k a -> Const4 String i j k a
@@ -142,44 +131,7 @@ instance Show (Fix4 (Instr q o) xs n r a) where
 
 instance Show (Const4 String xs n r a) where show = getConst4
 
-instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
-instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ
-instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
-
 instance Show (MetaInstr n) where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"
   show (RefundCoins n) = "Refund " ++ show n ++ " coins"
   show (DrainCoins n)    = "Using " ++ show n ++ " coins"
-
-instance GEq ΣVar where
-  geq (ΣVar u) (ΣVar v)
-    | u == v    = Just (coerce Refl)
-    | otherwise = Nothing
-
-instance GCompare ΣVar where
-  gcompare (ΣVar u) (ΣVar v) = case compare u v of
-    LT -> coerce GLT
-    EQ -> coerce GEQ
-    GT -> coerce GGT
-
-instance GEq ΦVar where
-  geq (ΦVar u) (ΦVar v)
-    | u == v    = Just (coerce Refl)
-    | otherwise = Nothing
-
-instance GCompare ΦVar where
-  gcompare (ΦVar u) (ΦVar v) = case compare u v of
-    LT -> coerce GLT
-    EQ -> coerce GEQ
-    GT -> coerce GGT
-
-instance GEq MVar where
-  geq (MVar u) (MVar v)
-    | u == v    = Just (coerce Refl)
-    | otherwise = Nothing
-
-instance GCompare MVar where
-  gcompare (MVar u) (MVar v) = case compare u v of
-    LT -> coerce GLT
-    EQ -> coerce GEQ
-    GT -> coerce GGT

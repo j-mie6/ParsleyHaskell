@@ -9,7 +9,7 @@ import Prelude hiding ((<$>))
 import CombinatorAST (Combinator(..))
 import Indexed       (Fix(In))
 import Utils         (code, Quapplicative(..))
-import Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H)
+import Defunc        (DefuncUser(..), pattern FLIP_H, pattern COMPOSE_H)
 
 pattern f :<$>: p = In (Pure f) :<*>: p
 pattern p :$>: x = p :*>: In (Pure x)

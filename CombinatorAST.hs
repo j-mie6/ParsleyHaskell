@@ -9,7 +9,7 @@
 module CombinatorAST where
 
 import Indexed                    (IFunctor, Fix(In), Const1(..), imap, cata)
-import MachineAST                 (IMVar, MVar(..), IΣVar(..))
+import Instructions               (IMVar, MVar(..), IΣVar(..))
 import Utils                      (WQ, code)
 import Language.Haskell.TH.Syntax (Lift)
 import Defunc

@@ -6,7 +6,7 @@
 module CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
 
 import CombinatorAST              (Combinator(..), MetaCombinator(..))
-import MachineAST                 (IMVar, MVar(..), IΣVar)
+import Identifiers                (IMVar, MVar(..), IΣVar)
 import Indexed                    (Fix(..), Const1(..), imap, cata, zygo, (:*:)(..), (/\), ifst, isnd)
 import Control.Applicative        (liftA2)
 import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)

@@ -10,9 +10,9 @@
              DataKinds,
              ImplicitParams,
              TypeFamilyDependencies #-}
-module Input where
+module Parsley.Machine.Input where
 
-import Utils                    (Code)
+import Parsley.Common.Utils     (Code)
 import Data.Array.Base          (UArray(..), listArray)
 import GHC.Prim                 (Int#, Addr#, ByteArray#, nullAddr#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
 import GHC.Exts                 (Int(..), Char(..), TYPE, RuntimeRep(..))

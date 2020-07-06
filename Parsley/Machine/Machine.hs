@@ -19,15 +19,15 @@
              InstanceSigs,
              MultiWayIf,
              ConstrainedClassMethods #-}
-module Machine where
+module Parsley.Machine.Machine where
 
-import MachineOps
-import Instructions
-import Identifiers
-import Input                      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
-import Indexed                    (Fix4, cata4, Nat(..))
-import Utils                      (code, Code, Quapplicative)
-import Defunc                     (Defunc, genDefunc, genDefunc1, genDefunc2)
+import Parsley.Machine.MachineOps
+import Parsley.Machine.Instructions
+import Parsley.Common.Identifiers
+import Parsley.Machine.Input      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
+import Parsley.Common.Indexed     (Fix4, cata4, Nat(..))
+import Parsley.Common.Utils       (Code, Quapplicative)
+import Parsley.Common.Defunc      (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Data.Functor               ((<&>))
 import Data.Void                  (Void)
 import Control.Monad              (forM, join, liftM2)
@@ -36,7 +36,7 @@ import Control.Monad.Reader       (ask, asks, local, Reader, runReader, MonadRea
 import Control.Exception          (Exception, throw)
 import Data.STRef                 (STRef)
 import Data.STRef.Unboxed         (STRefU)
-import Queue                      (Queue, enqueue, dequeue)
+import Parsley.Common.Queue       (Queue, enqueue, dequeue)
 import Data.Dependent.Map         (DMap, DSum(..))
 import Data.GADT.Compare          (GCompare)
 import Debug.Trace                (trace)
@@ -45,8 +45,8 @@ import Data.Text                  (Text)
 import Data.Functor.Const         (Const(..), getConst)
 import Language.Haskell.TH        (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
-import qualified Data.Dependent.Map as DMap ((!), insert, empty, lookup, map, toList, traverseWithKey)
-import qualified Queue                      (empty, size, null, foldr)
+import qualified Data.Dependent.Map as DMap    ((!), insert, empty, lookup, map, toList, traverseWithKey)
+import qualified Parsley.Common.Queue as Queue (empty, size, null, foldr)
 
 #define inputInstances(derivation) \
 derivation(Int)                    \

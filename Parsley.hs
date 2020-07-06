@@ -41,21 +41,20 @@ module Parsley ( Parser, runParser, parseFromFile
                , Level(..), Prec(..), precedence, monolith, infixL, infixR, prefix, postfix
                -- Template Haskell Utils
                , code, (>*<), makeQ, _code, _val, WQ, Lift
-               , module Input
+               , module Parsley.Machine.Input
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
-import Input                      (Input(..), Rep, Text16(..), CharList(..), Stream)
-import CombinatorAST              (Parser, (<*>), (*>), (<*), empty, (<|>), branch, _conditional, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
-import Compiler                   (compile)
-import Machine                    (exec, Ops)
-import Utils                      (code, Quapplicative(..), WQ, Code)
+import Parsley.Machine.Input      (Input(..), Rep, Text16(..), CharList(..), Stream)
+import Parsley.Frontend           (compile, Parser, (<*>), (*>), (<*), empty, (<|>), branch, _conditional, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
+import Parsley.Machine.Machine    (exec, Ops)
+import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
 import Data.Function              (fix)
 import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
-import Defunc                     (DefuncUser(..), pattern FLIP_H)
+import Parsley.Common.Defunc      (DefuncUser(..), pattern FLIP_H)
 
 class ParserOps rep where
   pure :: rep a -> Parser a

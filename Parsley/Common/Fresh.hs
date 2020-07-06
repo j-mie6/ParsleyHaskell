@@ -5,7 +5,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
 
-module Fresh ( VFreshT, HFreshT, VFresh, HFresh, runFreshT, runFresh, evalFreshT, execFreshT, MonadFresh(..), construct, mapVFreshT ) where
+module Parsley.Common.Fresh ( VFreshT, HFreshT, VFresh, HFresh, runFreshT, runFresh, evalFreshT, execFreshT, MonadFresh(..), construct, mapVFreshT ) where
 import Control.Applicative    (liftA2)
 import Control.Monad.Identity (Identity, runIdentity)
 import Control.Monad.Fix      (MonadFix(..))
@@ -36,14 +36,14 @@ execFreshT m init = snd <$> runFreshT m init
 -- Fresh type
 type HFresh x = HFreshT x Identity
 type VFresh x = VFreshT x Identity
-newtype VFreshT x m a = VFreshT (FreshT x m a) deriving (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m) 
-newtype HFreshT x m a = HFreshT (FreshT x m a) deriving (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m) 
+newtype VFreshT x m a = VFreshT (FreshT x m a) deriving (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m)
+newtype HFreshT x m a = HFreshT (FreshT x m a) deriving (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m)
 newtype FreshT x m a = FreshT {unFreshT :: x -> x -> m (a, x, x)}
-                        
+
 instance Monad n => RunFreshT x n (FreshT x n) where
-  runFreshT k init = 
+  runFreshT k init =
     do (x, cur, max) <- unFreshT k init init
-       return $! (x, max) 
+       return $! (x, max)
 
 runFresh :: (Monad m, RunFreshT x Identity m) => m a -> x -> (a, x)
 runFresh mx = runIdentity . runFreshT mx

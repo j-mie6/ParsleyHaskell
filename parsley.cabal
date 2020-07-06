@@ -100,7 +100,29 @@ library
   exposed-modules:     Parsley
 
   -- Modules included in this library but not exported.
-  other-modules:       Compiler, Indexed, Machine, MachineOps, Utils, Optimiser, CombinatorAnalyser, InstructionAnalyser, CombinatorAST, Instructions, CodeGenerator, Fresh, Input, Defunc, Queue, Identifiers
+  other-modules:       Parsley.Common,
+                       Parsley.Common.Defunc,
+                       Parsley.Common.Fresh,
+                       Parsley.Common.Identifiers,
+                       Parsley.Common.Indexed,
+                       Parsley.Common.Queue,
+                       Parsley.Common.Utils,
+
+                       Parsley.Frontend,
+                       Parsley.Frontend.CombinatorAnalyser,
+                       Parsley.Frontend.CombinatorAST,
+                       Parsley.Frontend.Compiler,
+                       Parsley.Frontend.Optimiser,
+
+                       Parsley.Backend,
+                       Parsley.Backend.CodeGenerator,
+                       Parsley.Backend.InstructionAnalyser,
+
+                       Parsley.Machine,
+                       Parsley.Machine.Input,
+                       Parsley.Machine.Instructions,
+                       Parsley.Machine.Machine,
+                       Parsley.Machine.MachineOps
 
   -- LANGUAGE extensions used by modules in this package.
   other-extensions:    TemplateHaskell
@@ -114,7 +136,6 @@ library
                        dump-core,
                        ghc-prim,
                        unboxed-ref,
-                       safe-coerce,
                        template-haskell,
                        containers,
                        dependent-map,

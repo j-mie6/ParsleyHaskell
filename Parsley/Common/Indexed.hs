@@ -8,7 +8,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeOperators #-}
-module Indexed where
+module Parsley.Common.Indexed where
 
 import Control.Applicative ((<|>), liftA2)
 import Data.Maybe          (fromMaybe)

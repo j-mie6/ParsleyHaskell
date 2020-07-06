@@ -3,13 +3,13 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
-module Optimiser (optimise) where
+module Parsley.Frontend.Optimiser (optimise) where
 
 import Prelude hiding ((<$>))
-import CombinatorAST (Combinator(..))
-import Indexed       (Fix(In))
-import Utils         (code, Quapplicative(..))
-import Defunc        (DefuncUser(..), pattern FLIP_H, pattern COMPOSE_H)
+import Parsley.Frontend.CombinatorAST (Combinator(..))
+import Parsley.Common.Indexed         (Fix(In))
+import Parsley.Common.Utils           (code, Quapplicative(..))
+import Parsley.Common.Defunc          (DefuncUser(..), pattern FLIP_H, pattern COMPOSE_H)
 
 pattern f :<$>: p = In (Pure f) :<*>: p
 pattern p :$>: x = p :*>: In (Pure x)

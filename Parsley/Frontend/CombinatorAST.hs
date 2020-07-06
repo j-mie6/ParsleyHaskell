@@ -6,13 +6,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TemplateHaskell #-}
-module CombinatorAST where
+module Parsley.Frontend.CombinatorAST where
 
-import Indexed                    (IFunctor, Fix(In), Const1(..), imap, cata)
-import Identifiers                (IMVar, MVar(..), IΣVar(..))
-import Utils                      (WQ, code)
+import Parsley.Common.Indexed     (IFunctor, Fix(In), Const1(..), imap, cata)
+import Parsley.Common.Identifiers (IMVar, MVar(..), IΣVar(..))
+import Parsley.Common.Utils       (WQ, code)
 import Language.Haskell.TH.Syntax (Lift)
-import Defunc
+import Parsley.Common.Defunc
 import Data.List                  (intercalate)
 
 -- Parser wrapper type

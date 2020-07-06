@@ -14,18 +14,17 @@
              AllowAmbiguousTypes,
              TypeApplications,
              ConstrainedClassMethods #-}
-module MachineOps where
+module Parsley.Machine.MachineOps where
 
-import Utils              (Code)
-import Indexed            (Nat(..))
-import Control.Monad.ST   (ST)
-import Data.STRef         (STRef, writeSTRef, readSTRef, newSTRef)
-import Data.STRef.Unboxed (STRefU)
-import GHC.Exts           (TYPE)
-import Safe.Coerce        (coerce)
-import Input              (BoxOps(..), InputOps, next, Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
-import Data.Text          (Text)
-import Data.Void          (Void)
+import Parsley.Common.Utils   (Code)
+import Parsley.Common.Indexed (Nat(..))
+import Control.Monad.ST       (ST)
+import Data.STRef             (STRef, writeSTRef, readSTRef, newSTRef)
+import Data.STRef.Unboxed     (STRefU)
+import GHC.Exts               (TYPE)
+import Parsley.Machine.Input  (BoxOps(..), InputOps, next, Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
+import Data.Text              (Text)
+import Data.Void              (Void)
 
 #define inputInstances(derivation) \
 derivation(Int)                    \

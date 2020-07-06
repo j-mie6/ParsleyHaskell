@@ -1,5 +1,5 @@
 {-# LANGUAGE ViewPatterns #-}
-module Queue (Queue, empty, enqueue, dequeue, null, size, foldr) where
+module Parsley.Common.Queue (Queue, empty, enqueue, dequeue, null, size, foldr) where
 
 import Prelude hiding (null, foldr)
 import qualified Prelude (foldr)
@@ -35,4 +35,4 @@ foldr :: (a -> b -> b) -> b -> Queue a -> b
 foldr f k = Prelude.foldr f k . toList
 
 instance Show a => Show (Queue a) where
-  show = show . toList 
+  show = show . toList

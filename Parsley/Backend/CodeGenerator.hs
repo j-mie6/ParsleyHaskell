@@ -6,24 +6,24 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
-module CodeGenerator (codeGen) where
+module Parsley.Backend.CodeGenerator (codeGen) where
 
-import CombinatorAST              (Combinator(..), MetaCombinator(..))
-import Instructions               (Instr(..), MetaInstr, One, _Fmap, _App, _Modify, _If, addCoins, refundCoins, drainCoins, freeCoins)
-import Identifiers                (IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
-import InstructionAnalyser        (coinsNeeded)
-import Indexed                    (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
-import Utils                      (code, Quapplicative((>*<)))
-import Defunc                     (DefuncUser(BLACK, COMPOSE, UNIT, ID), Defunc(USER, SAME), pattern FLIP_H)
-import Control.Applicative        (liftA2)
-import Control.Monad.Reader       (Reader, ask, asks, runReader, local, MonadReader)
-import Control.Monad.State.Strict (State, get, modify', runState, MonadState)
-import Fresh                      (VFreshT, HFresh, runFreshT, runFresh, evalFreshT, construct, MonadFresh(..), mapVFreshT)
-import Control.Monad.Trans        (lift)
-import Data.Set                   (Set)
-import Data.Maybe                 (isJust)
-import Debug.Trace                (traceShow, trace)
-import Data.Void                  (Void)
+import Parsley.Frontend.CombinatorAST      (Combinator(..), MetaCombinator(..))
+import Parsley.Machine.Instructions        (Instr(..), MetaInstr, One, _Fmap, _App, _Modify, _If, addCoins, refundCoins, drainCoins, freeCoins)
+import Parsley.Common.Identifiers          (IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
+import Parsley.Backend.InstructionAnalyser (coinsNeeded)
+import Parsley.Common.Indexed              (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
+import Parsley.Common.Utils                (code, Quapplicative((>*<)))
+import Parsley.Common.Defunc               (DefuncUser(BLACK, COMPOSE, UNIT, ID), Defunc(USER, SAME), pattern FLIP_H)
+import Control.Applicative                 (liftA2)
+import Control.Monad.Reader                (Reader, ask, asks, runReader, local, MonadReader)
+import Control.Monad.State.Strict          (State, get, modify', runState, MonadState)
+import Parsley.Common.Fresh                (VFreshT, HFresh, runFreshT, runFresh, evalFreshT, construct, MonadFresh(..), mapVFreshT)
+import Control.Monad.Trans                 (lift)
+import Data.Set                            (Set)
+import Data.Maybe                          (isJust)
+import Debug.Trace                         (traceShow, trace)
+import Data.Void                           (Void)
 import qualified Data.Set as Set
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a

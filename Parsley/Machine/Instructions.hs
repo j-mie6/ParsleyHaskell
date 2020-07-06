@@ -7,14 +7,14 @@
              KindSignatures,
              PatternSynonyms,
              ScopedTypeVariables #-}
-module Instructions where
+module Parsley.Machine.Instructions where
 
-import Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
-import Utils       (WQ(..))
-import Defunc      (DefuncUser(APP, ID), Defunc(USER), pattern FLIP_H)
-import Data.Void   (Void)
-import Data.List   (intercalate)
-import Identifiers (MVar, ΦVar, ΣVar)
+import Parsley.Common.Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
+import Parsley.Common.Utils       (WQ(..))
+import Parsley.Common.Defunc      (DefuncUser(APP, ID), Defunc(USER), pattern FLIP_H)
+import Data.Void                  (Void)
+import Data.List                  (intercalate)
+import Parsley.Common.Identifiers (MVar, ΦVar, ΣVar)
 
 type One = Succ Zero
 newtype Program o a = Program { getProgram :: Fix4 (Instr WQ o) '[] One a a }

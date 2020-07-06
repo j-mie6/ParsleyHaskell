@@ -4,10 +4,10 @@
              UndecidableInstances,
              TypeApplications,
              ScopedTypeVariables #-}
-module Defunc where
+module Parsley.Common.Defunc where
 
-import Utils (WQ(..), Code, Quapplicative(..))
-import Input (PositionOps(same))
+import Parsley.Common.Utils (WQ(..), Code, Quapplicative(..))
+import Parsley.Machine.Input (PositionOps(same))
 
 data DefuncUser q a where
   APP     :: DefuncUser q ((a -> b) -> a -> b)

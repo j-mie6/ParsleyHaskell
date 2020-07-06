@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell,
              FlexibleInstances,
              UndecidableInstances #-}
-module Utils (code, WQ(..), Code, Quapplicative(..)) where
+module Parsley.Common.Utils (code, WQ(..), Code, Quapplicative(..)) where
 
 import LiftPlugin (LiftTo, code)
 import Language.Haskell.TH (TExpQ)

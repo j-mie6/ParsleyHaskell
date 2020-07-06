@@ -3,18 +3,17 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeOperators #-}
-module CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
+module Parsley.Frontend.CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
 
-import CombinatorAST              (Combinator(..), MetaCombinator(..))
-import Identifiers                (IMVar, MVar(..), IΣVar)
-import Indexed                    (Fix(..), Const1(..), imap, cata, zygo, (:*:)(..), (/\), ifst, isnd)
-import Control.Applicative        (liftA2)
-import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
-import Control.Monad.State.Strict (State, get, put, evalState)
-import Data.Map.Strict            (Map)
-import Data.Set                   (Set)
-import Data.Monoid                ((<>))
-import Safe.Coerce                (coerce)
+import Parsley.Frontend.CombinatorAST (Combinator(..), MetaCombinator(..))
+import Parsley.Common.Identifiers     (IMVar, MVar(..))
+import Parsley.Common.Indexed         (Fix(..), Const1(..), imap, cata, zygo, (:*:)(..), (/\), ifst, isnd)
+import Control.Applicative            (liftA2)
+import Control.Monad.Reader           (ReaderT, ask, runReaderT, local)
+import Control.Monad.State.Strict     (State, get, put, evalState)
+import Data.Map.Strict                (Map)
+import Data.Set                       (Set)
+import Data.Monoid                    ((<>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
@@ -27,6 +26,12 @@ analyse :: AnalysisFlags -> Fix (Combinator q) a -> Fix (Combinator q) a
 analyse flags = cutAnalysis (letBound flags) {-. terminationAnalysis-}
 
 data Compliance k = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
+
+coerce :: Compliance a -> Compliance b
+coerce DomComp  = DomComp
+coerce NonComp  = NonComp
+coerce Comp     = Comp
+coerce FullPure = FullPure
 
 seqCompliance :: Compliance a -> Compliance b -> Compliance c
 seqCompliance c FullPure = coerce c

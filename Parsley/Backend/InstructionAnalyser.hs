@@ -1,8 +1,8 @@
 {-# LANGUAGE GADTs #-}
-module InstructionAnalyser where
+module Parsley.Backend.InstructionAnalyser where
 
-import Instructions
-import Indexed
+import Parsley.Machine.Instructions
+import Parsley.Common.Indexed
 
 coinsNeeded :: Fix4 (Instr q o) xs n r a -> Int
 coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)

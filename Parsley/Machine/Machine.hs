@@ -119,7 +119,7 @@ run = flip . runReader . getMachine
 
 type Ops o = (LogHandler o, KOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
-exec :: forall o q s a. Ops o => Code (InputDependant o) -> (Program o a, DMap MVar (LetBinding q o a)) -> Code (ST s (Maybe a))
+exec :: forall o s a. Ops o => Code (InputDependant o) -> (Program o a, DMap MVar (LetBinding o a)) -> Code (ST s (Maybe a))
 exec input (Program !p, fs) = trace ("EXECUTING: " ++ show p) [||
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
@@ -137,7 +137,7 @@ dependencyOf (MissingDependency v) = MVar v
 outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
 outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 
-nameLet :: MVar x -> LetBinding q o a x -> String
+nameLet :: MVar x -> LetBinding o a x -> String
 nameLet (MVar i) _ = "sub" ++ show i
 
 scopeBindings :: GCompare key => DMap key named
@@ -159,10 +159,10 @@ scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
              body <- unTypeQ (letBuilder v (package names))
              return (FunD name [Clause [] (NormalB body) []])
 
-readyMachine :: (?ops :: InputOps o, Ops o) => Fix4 (Instr q o) xs n r a -> Machine s o xs n r a
+readyMachine :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
 readyMachine = cata4 (Machine . alg)
   where
-    alg :: (?ops :: InputOps o, Ops o) => Instr q o (Machine s o) xs n r a -> MachineMonad s o xs n r a
+    alg :: (?ops :: InputOps o, Ops o) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = execRet
     alg (Call μ k)          = execCall μ k
     alg (Jump μ)            = execJump μ
@@ -197,16 +197,16 @@ execCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub 
 execJump :: BoxOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
 execJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub retCont input handlers
 
-execPush :: Defunc q x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
+execPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 execPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op (genDefunc x) (operands γ)})
 
 execPop :: Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 execPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ in xs})
 
-execLift2 :: Defunc q (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
+execLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 execLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (genDefunc2 f x y) xs})
 
-execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Defunc q (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 execSat p (Machine k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -241,7 +241,7 @@ execCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
     Left x -> $$(mp (γ {operands = Op [||x||] xs}))
     Right y  -> $$(mq (γ {operands = Op [||y||] xs}))||]) p q
 
-execChoices :: [Defunc q (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+execChoices :: [Defunc (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 execChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands γ in go x fs mks mdef (γ {operands = xs}))
   def
   (forM ks getMachine)

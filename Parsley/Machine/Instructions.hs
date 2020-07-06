@@ -17,35 +17,35 @@ import Data.List                  (intercalate)
 import Parsley.Common.Identifiers (MVar, ΦVar, ΣVar)
 
 type One = Succ Zero
-newtype Program o a = Program { getProgram :: Fix4 (Instr WQ o) '[] One a a }
-newtype LetBinding q o a x = LetBinding (Fix4 (Instr q o) '[] One x a)
-instance Show (LetBinding q o a x) where show (LetBinding m) = show m
+newtype Program o a = Program { getProgram :: Fix4 (Instr o) '[] One a a }
+newtype LetBinding o a x = LetBinding (Fix4 (Instr o) '[] One x a)
+instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
-data Instr q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
-  Ret       :: Instr q o k '[x] n x a
-  Push      :: Defunc q x -> k (x : xs) n r a -> Instr q o k xs n r a
-  Pop       :: k xs n r a -> Instr q o k (x : xs) n r a
-  Lift2     :: Defunc q (x -> y -> z) -> k (z : xs) n r a -> Instr q o k (y : x : xs) n r a
-  Sat       :: Defunc q (Char -> Bool) -> k (Char : xs) (Succ n) r a -> Instr q o k xs (Succ n) r a
-  Call      :: MVar x -> k (x : xs) (Succ n) r a -> Instr q o k xs (Succ n) r a
-  Jump      :: MVar x -> Instr q o k '[] (Succ n) x a
-  Empt      :: Instr q o k xs (Succ n) r a
-  Commit    :: k xs n r a -> Instr q o k xs (Succ n) r a
-  Catch     :: k xs (Succ n) r a -> k (o : xs) n r a -> Instr q o k xs n r a
-  Tell      :: k (o : xs) n r a -> Instr q o k xs n r a
-  Seek      :: k xs n r a -> Instr q o k (o : xs) n r a
-  Case      :: k (x : xs) n r a -> k (y : xs) n r a -> Instr q o k (Either x y : xs) n r a
-  Choices   :: [Defunc q (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr q o k (x : xs) n r a
-  Iter      :: MVar Void -> k '[] One Void a -> k (o : xs) n r a -> Instr q o k xs n r a
-  Join      :: ΦVar x -> Instr q o k (x : xs) n r a
-  MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr q o k xs n r a
-  Swap      :: k (x : y : xs) n r a -> Instr q o k (y : x : xs) n r a
-  Make      :: ΣVar x -> k xs n r a -> Instr q o k (x : xs) n r a
-  Get       :: ΣVar x -> k (x : xs) n r a -> Instr q o k xs n r a
-  Put       :: ΣVar x -> k xs n r a -> Instr q o k (x : xs) n r a
-  LogEnter  :: String -> k xs (Succ (Succ n)) r a -> Instr q o k xs (Succ n) r a
-  LogExit   :: String -> k xs n r a -> Instr q o k xs n r a
-  MetaInstr :: MetaInstr n -> k xs n r a -> Instr q o k xs n r a
+data Instr o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
+  Ret       :: Instr o k '[x] n x a
+  Push      :: Defunc x -> k (x : xs) n r a -> Instr o k xs n r a
+  Pop       :: k xs n r a -> Instr o k (x : xs) n r a
+  Lift2     :: Defunc (x -> y -> z) -> k (z : xs) n r a -> Instr o k (y : x : xs) n r a
+  Sat       :: Defunc (Char -> Bool) -> k (Char : xs) (Succ n) r a -> Instr o k xs (Succ n) r a
+  Call      :: MVar x -> k (x : xs) (Succ n) r a -> Instr o k xs (Succ n) r a
+  Jump      :: MVar x -> Instr o k '[] (Succ n) x a
+  Empt      :: Instr o k xs (Succ n) r a
+  Commit    :: k xs n r a -> Instr o k xs (Succ n) r a
+  Catch     :: k xs (Succ n) r a -> k (o : xs) n r a -> Instr o k xs n r a
+  Tell      :: k (o : xs) n r a -> Instr o k xs n r a
+  Seek      :: k xs n r a -> Instr o k (o : xs) n r a
+  Case      :: k (x : xs) n r a -> k (y : xs) n r a -> Instr o k (Either x y : xs) n r a
+  Choices   :: [Defunc (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr o k (x : xs) n r a
+  Iter      :: MVar Void -> k '[] One Void a -> k (o : xs) n r a -> Instr o k xs n r a
+  Join      :: ΦVar x -> Instr o k (x : xs) n r a
+  MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr o k xs n r a
+  Swap      :: k (x : y : xs) n r a -> Instr o k (y : x : xs) n r a
+  Make      :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+  Get       :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
+  Put       :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+  LogEnter  :: String -> k xs (Succ (Succ n)) r a -> Instr o k xs (Succ n) r a
+  LogExit   :: String -> k xs n r a -> Instr o k xs n r a
+  MetaInstr :: MetaInstr n -> k xs n r a -> Instr o k xs n r a
 
 data MetaInstr (n :: Nat) where
   AddCoins    :: Int -> MetaInstr (Succ n)
@@ -53,7 +53,7 @@ data MetaInstr (n :: Nat) where
   RefundCoins :: Int -> MetaInstr n
   DrainCoins  :: Int -> MetaInstr (Succ n)
 
-mkCoin :: (Int -> MetaInstr n) -> Int -> Fix4 (Instr q o) xs n r a -> Fix4 (Instr q o) xs n r a
+mkCoin :: (Int -> MetaInstr n) -> Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 mkCoin meta 0 = id
 mkCoin meta n = In4 . MetaInstr (meta n)
 
@@ -62,20 +62,20 @@ freeCoins = mkCoin FreeCoins
 refundCoins = mkCoin RefundCoins
 drainCoins = mkCoin DrainCoins
 
-_App :: Fix4 (Instr q o) (y : xs) n r a -> Instr q o (Fix4 (Instr q o)) (x : (x -> y) : xs) n r a
+_App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
 _App m = Lift2 (USER APP) m
 
-_Fmap :: Defunc q (x -> y) -> Fix4 (Instr q o) (y : xs) n r a -> Instr q o (Fix4 (Instr q o)) (x : xs) n r a
+_Fmap :: Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
 _Fmap f m = Push f (In4 (Lift2 (USER (FLIP_H APP)) m))
 
-_Modify :: ΣVar x -> Fix4 (Instr q o) xs n r a -> Instr q o (Fix4 (Instr q o)) ((x -> x) : xs) n r a
+_Modify :: ΣVar x -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) ((x -> x) : xs) n r a
 _Modify σ m = Get σ (In4 (_App (In4 (Put σ m))))
 
 -- This this is a nice little trick to get this instruction to generate optimised code
-_If :: Fix4 (Instr q o) xs n r a -> Fix4 (Instr q o) xs n r a -> Instr q o (Fix4 (Instr q o)) (Bool : xs) n r a
+_If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) (Bool : xs) n r a
 _If t e = Choices [USER ID] [t] e
 
-instance IFunctor4 (Instr q o) where
+instance IFunctor4 (Instr o) where
   imap4 f Ret                 = Ret
   imap4 f (Push x k)          = Push x (f k)
   imap4 f (Pop k)             = Pop (f k)
@@ -102,9 +102,9 @@ instance IFunctor4 (Instr q o) where
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
 
 instance Show (Program o a) where show = show . getProgram
-instance Show (Fix4 (Instr q o) xs n r a) where
+instance Show (Fix4 (Instr o) xs n r a) where
   show x = let Const4 s = cata4 alg x in s where
-    alg :: forall i j k. Instr q o (Const4 String) i j k a -> Const4 String i j k a
+    alg :: forall i j k. Instr o (Const4 String) i j k a -> Const4 String i j k a
     alg Ret                 = Const4 $ "Ret"
     alg (Call μ k)          = Const4 $ "(Call " ++ show μ ++ " " ++ show k ++ ")"
     alg (Jump μ)            = Const4 $ "(Jump " ++ show μ ++ ")"

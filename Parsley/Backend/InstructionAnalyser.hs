@@ -4,7 +4,7 @@ module Parsley.Backend.InstructionAnalyser where
 import Parsley.Machine.Instructions
 import Parsley.Common.Indexed
 
-coinsNeeded :: Fix4 (Instr q o) xs n r a -> Int
+coinsNeeded :: Fix4 (Instr o) xs n r a -> Int
 coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
   where
     algCatch :: (Int, Bool) -> (Int, Bool) -> (Int, Bool)
@@ -12,7 +12,7 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
     algCatch (k1, True) k2 = k2
     algCatch (k1, _) (k2, _) = (min k1 k2, False)
 
-    alg :: Instr q o (Const4 (Int, Bool)) xs n r a -> (Int, Bool)
+    alg :: Instr o (Const4 (Int, Bool)) xs n r a -> (Int, Bool)
     alg Ret                                    = (0, False)
     alg (Push _ (Const4 k))                    = (fst k, False)
     alg (Pop k)                                = getConst4 k

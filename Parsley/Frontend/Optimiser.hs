@@ -148,9 +148,9 @@ optimise (Match (In (Pure x)) fs qs def)          = foldr (\(f, q) k -> if _val 
 optimise (Match p fs qs def)
   | all (\case {In (Pure _) -> True; _ -> False}) qs     = optimise (optimise (makeQ apply qapply :<$>: (p >?> (makeQ validate qvalidate))) :<|>: def)
     where apply x    = foldr (\(f, In (Pure y)) k -> if _val f x then _val y else k) (error "whoopsie") (zip fs qs)
-          qapply     = foldr (\(f, In (Pure y)) k -> [||\x -> if $$(_code f) x then $$(_code y) else $$k x||]) ([||const (error "whoopsie")||]) (zip fs qs)
+          qapply     = [||\x -> $$(foldr (\(f, In (Pure y)) k -> [||if $$(_code f) x then $$(_code y) else $$k||]) ([||error "whoopsie"||]) (zip fs qs))||]
           validate x = foldr (\f b -> _val f x || b) False fs
-          qvalidate  = foldr (\f k -> [||\x -> $$(_code f) x || $$k x||]) [||const False||] fs
+          qvalidate  = [||\x -> $$(foldr (\f k -> [||$$(_code f) x || $$k||]) [||False||] fs)||]
 -- Distributivity Law: f <$> match vs p g def            = match vs p ((f <$>) . g) (f <$> def)
 optimise (f :<$>: (In (Match p fs qs def)))              = In (Match p fs (map (optimise . (f :<$>:)) qs) (optimise (f :<$>: def)))
 -- Trivial let-bindings - NOTE: These will get moved when Let nodes no longer have the "source" in them

@@ -35,9 +35,9 @@ instance Quapplicative q => Quapplicative (DefuncUser q) where
   _val (BLACK f)   = _val f
   _code = genDefuncUser
 
-data Defunc q a where
-  USER :: DefuncUser q a -> Defunc q a
-  SAME :: PositionOps o => Defunc q (o -> o -> Bool)
+data Defunc a where
+  USER :: DefuncUser q a -> Defunc a
+  SAME :: PositionOps o => Defunc (o -> o -> Bool)
 
 pattern COMPOSE_H :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) => DefuncUser q x -> DefuncUser q y -> DefuncUser q z
 pattern COMPOSE_H f g = APP_H (APP_H COMPOSE f) g
@@ -77,15 +77,15 @@ genDefuncUser2 (FLIP_H f) qx qy  = genDefuncUser2 f qy qx
 genDefuncUser2 CONS       qx qxs = [|| $$qx : $$qxs ||]
 genDefuncUser2 f          qx qy  = [|| $$(genDefuncUser f) $$qx $$qy ||]
 
-genDefunc :: Defunc q a -> Code a
+genDefunc :: Defunc a -> Code a
 genDefunc (USER x) = genDefuncUser x
 genDefunc SAME     = same
 
-genDefunc1 :: Defunc q (a -> b) -> Code a -> Code b
+genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
 genDefunc1 (USER f) qx = genDefuncUser1 f qx
 genDefunc1 f qx        = [|| $$(genDefunc f) $$qx ||]
 
-genDefunc2 :: Defunc q (a -> b -> c) -> Code a -> Code b -> Code c
+genDefunc2 :: Defunc (a -> b -> c) -> Code a -> Code b -> Code c
 genDefunc2 (USER f) qx qy = genDefuncUser2 f qx qy
 genDefunc2 f qx qy        = [|| $$(genDefunc f) $$qx $$qy ||]
 
@@ -104,6 +104,6 @@ instance Show (DefuncUser q a) where
   show UNIT = "()"
   show _ = "x"
 
-instance Show (Defunc q a) where
+instance Show (Defunc a) where
   show (USER x) = show x
   show SAME = "same"

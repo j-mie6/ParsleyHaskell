@@ -1,11 +1,11 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE GADTs,
+             DataKinds,
+             TypeOperators,
+             RankNTypes,
+             FlexibleContexts,
+             TemplateHaskell,
+             PolyKinds,
+             PatternSynonyms #-}
 module Parsley.Backend.CodeGenerator (codeGen) where
 
 import Parsley.Frontend.CombinatorAST      (Combinator(..), MetaCombinator(..))

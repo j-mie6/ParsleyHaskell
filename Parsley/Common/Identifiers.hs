@@ -1,5 +1,6 @@
 {-# LANGUAGE KindSignatures,
-             GeneralizedNewtypeDeriving #-}
+             GeneralizedNewtypeDeriving,
+             DerivingStrategies #-}
 module Parsley.Common.Identifiers where
 
 import Data.Word         (Word64)
@@ -9,13 +10,13 @@ import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(.
 newtype ΣVar (a :: *) = ΣVar IΣVar
 newtype MVar (a :: *) = MVar IMVar
 newtype ΦVar (a :: *) = ΦVar IΦVar
-newtype IMVar = IMVar Word64 deriving (Ord, Eq, Num, Enum)
-newtype IΦVar = IΦVar Word64 deriving (Ord, Eq, Num, Enum)
-newtype IΣVar = IΣVar Word64 deriving (Ord, Eq, Num, Enum)
+newtype IMVar = IMVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show)
+newtype IΦVar = IΦVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show)
+newtype IΣVar = IΣVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show)
 
-instance Show (MVar a) where show (MVar (IMVar μ)) = "μ" ++ show μ
-instance Show (ΦVar a) where show (ΦVar (IΦVar φ)) = "φ" ++ show φ
-instance Show (ΣVar a) where show (ΣVar (IΣVar σ)) = "σ" ++ show σ
+instance Show (MVar a) where show (MVar μ) = "μ" ++ show μ
+instance Show (ΦVar a) where show (ΦVar φ) = "φ" ++ show φ
+instance Show (ΣVar a) where show (ΣVar σ) = "σ" ++ show σ
 
 instance GEq ΣVar where
   geq (ΣVar u) (ΣVar v)

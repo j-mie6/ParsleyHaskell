@@ -14,6 +14,7 @@ import Control.Monad.State.Strict     (State, get, put, evalState)
 import Data.Map.Strict                (Map)
 import Data.Set                       (Set)
 import Data.Monoid                    ((<>))
+import Data.Coerce                    (coerce)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
@@ -25,13 +26,7 @@ emptyFlags = AnalysisFlags False
 analyse :: AnalysisFlags -> Fix (Combinator q) a -> Fix (Combinator q) a
 analyse flags = cutAnalysis (letBound flags) {-. terminationAnalysis-}
 
-data Compliance k = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
-
-coerce :: Compliance a -> Compliance b
-coerce DomComp  = DomComp
-coerce NonComp  = NonComp
-coerce Comp     = Comp
-coerce FullPure = FullPure
+data Compliance (k :: *) = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
 
 seqCompliance :: Compliance a -> Compliance b -> Compliance c
 seqCompliance c FullPure = coerce c
@@ -65,7 +60,7 @@ compliance (ChainPost p NonComp)    = seqCompliance p Comp
 compliance (ChainPost p op)         = seqCompliance p NonComp
 compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
 compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
-compliance (MetaCombinator _ c)              = c
+compliance (MetaCombinator _ c)     = c
 
 newtype CutAnalysis q a = CutAnalysis {cutOut :: Bool -> (Fix (Combinator q) a, Bool)}
 

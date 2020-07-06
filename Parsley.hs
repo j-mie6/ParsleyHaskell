@@ -46,7 +46,7 @@ module Parsley ( Parser, runParser, parseFromFile
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Parsley.Machine.Input      (Input(..), Rep, Text16(..), CharList(..), Stream)
-import Parsley.Frontend           (compile, Parser, (<*>), (*>), (<*), empty, (<|>), branch, _conditional, lookAhead, notFollowedBy, try, chainPre, chainPost, debug, _satisfy, _pure)
+import Parsley.Frontend
 import Parsley.Machine.Machine    (exec, Ops)
 import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
 import Data.Function              (fix)

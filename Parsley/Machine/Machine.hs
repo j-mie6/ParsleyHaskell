@@ -55,12 +55,12 @@ derivation((OffWith Stream))       \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
 
-data Γ s o xs n r a = Γ { xs    :: QList xs
-                        , ret   :: Code (Cont s o a r)
-                        , o     :: Code o
-                        , hs    :: Vec n (Code (H s o a)) }
+data Γ s o xs n r a = Γ { operands :: OpStack xs
+                        , retCont  :: Code (Cont s o a r)
+                        , input    :: Code o
+                        , handlers :: HandlerStack n s o a }
 
-newtype QSTRef s x = QSTRef (Code (STRef s x))
+newtype QSTRef s x = QSTRef { unwrapRef :: Code (STRef s x) }
 data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (QSTRef s)
@@ -127,7 +127,7 @@ exec input (Program !p, fs) = trace ("EXECUTING: " ++ show p) [||
              nameLet
              QSubRoutine
              (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyMachine k))
-             (\names -> run (readyMachine p) (Γ QNil (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx {μs = names})))
+             (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx {μs = names})))
   ||]
 
 missingDependency :: MVar x -> MissingDependency
@@ -138,7 +138,7 @@ outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
 outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 
 nameLet :: MVar x -> LetBinding q o a x -> String
-nameLet (MVar (IMVar i)) _ = "sub" ++ show i
+nameLet (MVar i) _ = "sub" ++ show i
 
 scopeBindings :: GCompare key => DMap key named
                               -> (forall a. key a -> named a -> String)
@@ -189,22 +189,22 @@ readyMachine = cata4 (Machine . alg)
     alg (MetaInstr m k)     = execMeta m k
 
 execRet :: KOps o => MachineMonad s o (x : xs) n x a
-execRet = return $! ret >>= resume
+execRet = return $! retCont >>= resume
 
 execCall :: KOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-execCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) o hs) k (askSub μ)
+execCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) input handlers) k (askSub μ)
 
 execJump :: BoxOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
-execJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub ret o hs
+execJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub retCont input handlers
 
 execPush :: (PositionOps o, Quapplicative q) => Defunc q o x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
-execPush x (Machine k) = k <&> \m γ -> m (γ {xs = QCons (genDefunc x) (xs γ)})
+execPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op (genDefunc x) (operands γ)})
 
 execPop :: Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-execPop (Machine k) = k <&> \m γ -> m (γ {xs = tailQ (xs γ)})
+execPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ in xs})
 
 execLift2 :: (PositionOps o, Quapplicative q) => Defunc q o (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
-execLift2 f (Machine k) = k <&> \m γ -> m (γ {xs = let QCons y (QCons x xs') = xs γ in QCons (genDefunc2 f x y) xs'})
+execLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (genDefunc2 f x y) xs})
 
 execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, Quapplicative q) => Defunc q o (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 execSat p (Machine k) = do
@@ -214,35 +214,35 @@ execSat p (Machine k) = do
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
-    readChar bad k γ@Γ{..} = sat o (genDefunc p) (\o c -> k (γ {xs = QCons c xs, o = o})) bad
+    readChar bad k γ@Γ{..} = sat input (genDefunc p) (\c input' -> k (γ {operands = Op c operands, input = input'})) bad
     maybeEmitCheck Nothing mk γ = readChar (raiseΓ γ) mk γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad' = $$(raiseΓ γ) in $$(emitLengthCheck n (readChar [||bad'||] mk γ) [||bad'||] γ)||]
+      [|| let bad = $$(raiseΓ γ) in $$(emitLengthCheck n (readChar [||bad||] mk γ) [||bad||] γ)||]
 
 execEmpt :: BoxOps o => MachineMonad s o xs (Succ n) r a
 execEmpt = return $! raiseΓ
 
 execCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
-execCommit (Machine k) = k <&> \mk γ -> let VCons _ hs' = hs γ in mk (γ {hs = hs'})
+execCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
 execCatch :: (?ops :: InputOps o, BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 execCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (buildHandlerΓ γ mh) mk) k h
 
 execTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
-execTell (Machine k) = k <&> \mk γ -> mk (γ {xs = QCons (o γ) (xs γ)})
+execTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (input γ) (operands γ)})
 
 execSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
-execSeek (Machine k) = k <&> \mk γ -> let QCons o xs' = xs γ in mk (γ {xs = xs', o=o})
+execSeek (Machine k) = k <&> \mk γ -> let Op input xs = operands γ in mk (γ {operands = xs, input = input})
 
 execCase :: JoinBuilder o => Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
 execCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
-  let QCons e xs' = xs γ
+  let Op e xs = operands γ
   in [||case $$e of
-    Left x -> $$(mp (γ {xs = QCons [||x||] xs'}))
-    Right y  -> $$(mq (γ {xs = QCons [||y||] xs'}))||]) p q
+    Left x -> $$(mp (γ {operands = Op [||x||] xs}))
+    Right y  -> $$(mq (γ {operands = Op [||y||] xs}))||]) p q
 
 execChoices :: (PositionOps o, Quapplicative q) => [Defunc q o (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-execChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs γ in go x fs mks mdef (γ {xs = xs'}))
+execChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands γ in go x fs mks mdef (γ {operands = xs}))
   def
   (forM ks getMachine)
   where
@@ -255,7 +255,7 @@ execChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let QCons x xs' = xs �
 execIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
          => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
          -> MachineMonad s o xs n r a
-execIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandlerΓ γ mh) (o γ)) h ask
+execIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandlerΓ γ mh) (input γ)) h ask
 
 execJoin :: KOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
 execJoin φ =
@@ -266,34 +266,31 @@ execMkJoin :: JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine 
 execMkJoin = setupJoinPoint
 
 execSwap :: Machine s o (x : y : xs) n r a -> MachineMonad s o (y : x : xs) n r a
-execSwap (Machine k) = k <&> (\mk γ -> mk (γ {xs = let QCons y (QCons x xs') = xs γ in QCons x (QCons y xs')}))
+execSwap (Machine k) = k <&> (\mk γ -> mk (γ {operands = let Op y (Op x xs) = operands γ in Op x (Op y xs)}))
 
 execMake :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-execMake σ k = asks $! \ctx γ -> let QCons x xs' = xs γ in [||
+execMake σ k = asks $! \ctx γ -> let Op x xs = operands γ in [||
     do ref <- newΣ $$x
-       $$(run k (γ {xs = xs'}) (insertΣ σ [||ref||] ctx))
+       $$(run k (γ {operands = xs}) (insertΣ σ [||ref||] ctx))
   ||]
 
 execGet :: ΣVar x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
-execGet σ (Machine k) =
-  do !(QSTRef ref) <- askΣ σ
-     k <&> \mk γ -> [||
-         do x <- readΣ $$ref
-            $$(mk (γ {xs = QCons [||x||] (xs γ)}))
-       ||]
+execGet σ (Machine k) = liftM2 (\mk ref γ -> [||
+    do x <- readΣ $$ref
+       $$(mk (γ {operands = Op [||x||] (operands γ)}))
+  ||]) k (askΣ σ)
 
 execPut :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-execPut σ (Machine k) =
-  do !(QSTRef ref) <- askΣ σ
-     k <&> \mk γ -> let QCons x xs' = xs γ in [||
-         do writeΣ $$ref $$x
-            $$(mk (γ {xs = xs'}))
-       ||]
+execPut σ (Machine k) = liftM2 (\mk ref γ ->
+    let Op x xs = operands γ in [||
+    do writeΣ $$ref $$x
+       $$(mk (γ {operands = xs}))
+  ||]) k (askΣ σ)
 
 preludeString :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    offset     = o γ
+    offset     = input γ
     indent     = replicate (debugLevel ctx * 2) ' '
     start      = [|| $$shiftLeft $$offset 5 ||]
     end        = [|| $$shiftRight $$offset 5 ||]
@@ -321,14 +318,14 @@ execLogExit name (Machine mk) =
     ask
 
 class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where
-  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (H s o a)
+  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (Handler s o a)
 
-#define deriveLogHandler(_o)                                                                                      \
-instance LogHandler _o where                                                                                      \
-{                                                                                                                 \
-  logHandler name ctx γ _ = [||\(!o#) ->                                                                          \
-      trace $$(preludeString name '<' (γ {o = [||$$box o#||]}) ctx (color Red " Fail")) ($$(raise @_o (hs γ)) o#) \
-    ||]                                                                                                           \
+#define deriveLogHandler(_o)                                                                                                \
+instance LogHandler _o where                                                                                                \
+{                                                                                                                           \
+  logHandler name ctx γ _ = [||\(!o#) ->                                                                                    \
+      trace $$(preludeString name '<' (γ {input = [||$$box o#||]}) ctx (color Red " Fail")) ($$(raise @_o (handlers γ)) o#) \
+    ||]                                                                                                                     \
 };
 inputInstances(deriveLogHandler)
 
@@ -342,93 +339,94 @@ execMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
 execMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
 
 setupHandlerΓ :: Γ s o xs n r a
-              -> (Code o -> Code (H s o a))
+              -> (Code o -> Code (Handler s o a))
               -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
-setupHandlerΓ γ h k = setupHandler (hs γ) (o γ) h (\hs -> k (γ {hs = hs}))
+setupHandlerΓ γ h k = setupHandler (handlers γ) (input γ) h (\hs -> k (γ {handlers = hs}))
 
 buildHandlerΓ :: (BoxOps o, HandlerOps o)
               => Γ s o xs n r a
               -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
-              -> Code o -> Code (H s o a)
-buildHandlerΓ γ h = buildHandler (\c o -> h (γ {xs = QCons c (xs γ), o = o}))
+              -> Code o -> Code (Handler s o a)
+buildHandlerΓ γ h = buildHandler (\c o -> h (γ {operands = Op c (operands γ), input = o}))
 
 raiseΓ :: BoxOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
-raiseΓ γ = let VCons h _ = hs γ in [|| $$h ($$unbox $$(o γ)) ||]
+raiseΓ γ = let VCons h _ = handlers γ in [|| $$h ($$unbox $$(input γ)) ||]
 
 class BoxOps o => JoinBuilder o where
   setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 
-#define deriveJoinBuilder(_o)                                      \
-instance JoinBuilder _o where                                      \
-{                                                                  \
-  setupJoinPoint φ (Machine k) mx =                                   \
-    liftM2 (\mk ctx γ -> [||                                       \
-      let join x !(o# :: Unboxed _o) =                             \
-        $$(mk (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) \
-      in $$(run mx γ (insertΦ φ [||join||] ctx))                   \
-    ||]) (local voidCoins k) ask                                   \
+#define deriveJoinBuilder(_o)                                                   \
+instance JoinBuilder _o where                                                   \
+{                                                                               \
+  setupJoinPoint φ (Machine k) mx =                                             \
+    liftM2 (\mk ctx γ -> [||                                                    \
+      let join x !(o# :: Unboxed _o) =                                          \
+        $$(mk (γ {operands = Op [||x||] (operands γ), input = [||$$box o#||]})) \
+      in $$(run mx γ (insertΦ φ [||join||] ctx))                                \
+    ||]) (local voidCoins k) ask                                                \
 };
 inputInstances(deriveJoinBuilder)
 
 class BoxOps o => RecBuilder o where
   buildIter :: ReturnOps o
             => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-            -> (Code o -> Code (H s o a)) -> Code o -> Code (ST s (Maybe a))
+            -> (Code o -> Code (Handler s o a)) -> Code o -> Code (ST s (Maybe a))
   buildRec  :: Ctx s o a
             -> Machine s o '[] One r a
             -> Code (SubRoutine s o a r)
 
-#define deriveRecBuilder(_o)                                                    \
-instance RecBuilder _o where                                                    \
-{                                                                               \
-  buildIter ctx μ l h o = let bx = box in [||                                   \
-      let handler !o# = $$(h [||$$bx o#||]);                                    \
-          loop !o# =                                                            \
-        $$(run l                                                                \
-            (Γ QNil (noreturn @_o) [||$$bx o#||] (VCons [||handler o#||] VNil)) \
-            (voidCoins (insertSub μ [||\_ (!o#) _ -> loop o#||] ctx)))            \
-      in loop ($$unbox $$o)                                                     \
-    ||];                                                                        \
-  buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                       \
-    $$(run k (Γ QNil [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||]     \
+#define deriveRecBuilder(_o)                                                     \
+instance RecBuilder _o where                                                     \
+{                                                                                \
+  buildIter ctx μ l h o = let bx = box in [||                                    \
+      let handler !o# = $$(h [||$$bx o#||]);                                     \
+          loop !o# =                                                             \
+        $$(run l                                                                 \
+            (Γ Empty (noreturn @_o) [||$$bx o#||] (VCons [||handler o#||] VNil)) \
+            (voidCoins (insertSub μ [||\_ (!o#) _ -> loop o#||] ctx)))           \
+      in loop ($$unbox $$o)                                                      \
+    ||];                                                                         \
+  buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                        \
+    $$(run k (Γ Empty [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||]     \
 };
 inputInstances(deriveRecBuilder)
 
 emitLengthCheck :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ _   = good
-emitLengthCheck 1 good bad γ = [|| if $$more $$(o γ) then $$good else $$bad ||]
+emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$good else $$bad ||]
 emitLengthCheck n good bad γ = [||
-  if $$more ($$shiftRight $$(o γ) (n - 1)) then $$good
+  if $$more ($$shiftRight $$(input γ) (n - 1)) then $$good
   else $$bad ||]
 
 class BoxOps o => KOps o where
   suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
   resume :: Code (Cont s o a x) -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
 
-#define deriveKOps(_o)                                                                         \
-instance KOps _o where                                                                         \
-{                                                                                              \
-  suspend m γ = [|| \x (!o#) -> $$(m (γ {xs = QCons [||x||] (xs γ), o = [||$$box o#||]})) ||]; \
-  resume k γ = let QCons x _ = xs γ in [|| $$k $$x ($$unbox $$(o γ)) ||]                       \
+#define deriveKOps(_o)                                                          \
+instance KOps _o where                                                          \
+{                                                                               \
+  suspend m γ = [|| \x (!o#) -> $$(m (γ {operands = Op [||x||] (operands γ),    \
+                                         input = [||$$box o#||]})) ||];         \
+  resume k γ = let Op x _ = operands γ in [|| $$k $$x ($$unbox $$(input γ)) ||] \
 };
 inputInstances(deriveKOps)
 
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
 askSub μ = do
-  msub <- asks (((DMap.lookup μ) . μs))
+  msub <- asks (fmap unwrapSub . DMap.lookup μ . μs)
   case msub of
     Just sub -> return $! sub
     Nothing  -> throw (missingDependency μ)
 
-askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (QSTRef s x)
+askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (Code (STRef s x))
 askΣ σ = do
-  mref <- asks ((DMap.lookup σ) . σs)
+  mref <- asks (fmap unwrapRef . DMap.lookup σ . σs)
   case mref of
     Just ref -> return $! ref
     Nothing  -> throw (outOfScopeRegister σ)
 
-askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin s o a x)
-askΦ φ = asks ((DMap.! φ) . φs)
+askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (Cont s o a x))
+askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
 
 instance Show MissingDependency where show (MissingDependency (IMVar μ)) = "Dependency μ" ++ show μ ++ " has not been compiled"
 instance Exception MissingDependency

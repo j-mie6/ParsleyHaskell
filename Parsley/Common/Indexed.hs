@@ -70,10 +70,6 @@ instance {-# OVERLAPS #-}     Chain a (Maybe a) where (|>) = liftA2 (<|>)
 
 data Unit1 k = Unit
 newtype Const1 a k = Const1 {getConst1 :: a}
-data Tag t f k a = Tag {tag :: t, tagged :: f k a}
-
-instance IFunctor f => IFunctor (Tag t f) where
-  imap f (Tag t k) = Tag t (imap f k)
 
 data Unit4 i j k l = Unit4
 newtype Const4 a i j k l = Const4 {getConst4 :: a}

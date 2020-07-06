@@ -33,35 +33,31 @@ derivation((OffWith Stream))       \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
 
-data QList xs where
-  QNil :: QList '[]
-  QCons :: Code x -> QList xs -> QList (x ': xs)
+data OpStack xs where
+  Empty :: OpStack '[]
+  Op :: Code x -> OpStack xs -> OpStack (x ': xs)
 
 data Vec n a where
   VNil :: Vec Zero a
   VCons :: a -> Vec n a -> Vec (Succ n) a
 
-type H s o a = Unboxed o -> ST s (Maybe a)
+type HandlerStack n s o a = Vec n (Code (Handler s o a))
+
+type Handler s o a = Unboxed o -> ST s (Maybe a)
 type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
 
-type SubRoutine s o a x = Cont s o a x -> Unboxed o -> H s o a -> ST s (Maybe a)
-newtype QSubRoutine s o a x = QSubRoutine (Code (SubRoutine s o a x))
-newtype QJoin s o a x = QJoin (Code (Cont s o a x))
+type SubRoutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
+newtype QSubRoutine s o a x = QSubRoutine { unwrapSub :: Code (SubRoutine s o a x) }
+newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
 
-tailQ :: QList (x ': xs) -> QList xs
-tailQ (QCons x xs) = xs
-
-headQ :: QList (x ': xs) -> Code x
-headQ (QCons x xs) = x
-
-raise :: forall o n s a. Vec (Succ n) (Code (H s o a)) -> Code (H s o a)
+raise :: forall o n s a. Vec (Succ n) (Code (Handler s o a)) -> Code (Handler s o a)
 raise (VCons h _) = h
 
-setupHandler :: Vec n (Code (H s o a)) -> Code o
-             -> (Code o -> Code (H s o a))
-             -> (Vec (Succ n) (Code (H s o a)) -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
-setupHandler hs o h k = [||
-    let handler = $$(h o)
+setupHandler :: HandlerStack n s o a -> Code o
+             -> (Code o -> Code (Handler s o a))
+             -> (Vec (Succ n) (Code (Handler s o a)) -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+setupHandler hs input h k = [||
+    let handler = $$(h input)
     in $$(k (VCons [||handler||] hs))
   ||]
 
@@ -93,8 +89,8 @@ instance ReturnOps _o where                                       \
 inputInstances(deriveReturnOps)
 
 class HandlerOps o where
-  buildHandler :: BoxOps o => (Code o -> Code o -> Code (ST s (Maybe a))) -> Code o -> Code (H s o a)
-  fatal :: Code (H s o a)
+  buildHandler :: BoxOps o => (Code o -> Code o -> Code (ST s (Maybe a))) -> Code o -> Code (Handler s o a)
+  fatal :: Code (Handler s o a)
 
 #define deriveHandlerOps(_o)                                \
 instance HandlerOps _o where                                \
@@ -102,7 +98,7 @@ instance HandlerOps _o where                                \
   buildHandler h c = [||\o# -> $$(h c [||$$box o#||])||];   \
   fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]; \
 };
-inputInstances(deriveHandlerOps) -- \c -> [||\o# -> $$(mh (γ {xs = QCons c (xs γ), o = [||$$box o#||]}))||]
+inputInstances(deriveHandlerOps)
 
 -- RIP Dream :(
 {-$(let derive _o = [d|
@@ -110,11 +106,11 @@ inputInstances(deriveHandlerOps) -- \c -> [||\o# -> $$(mh (γ {xs = QCons c (xs 
           fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]
         |] in traverse derive representationTypes)-}
 
-callWithContinuation :: BoxOps o => QSubRoutine s o a x -> Code (Cont s o a x) -> Code o -> Vec (Succ n) (Code (H s o a)) -> Code (ST s (Maybe a))
-callWithContinuation (QSubRoutine sub) ret o (VCons h _) = [||$$sub $$ret ($$unbox $$o) $! $$h||]
+callWithContinuation :: BoxOps o => Code (SubRoutine s o a x) -> Code (Cont s o a x) -> Code o -> Vec (Succ n) (Code (Handler s o a)) -> Code (ST s (Maybe a))
+callWithContinuation sub ret input (VCons h _) = [||$$sub $$ret ($$unbox $$input) $! $$h||]
 
-sat :: (?ops :: InputOps o) => Code o -> Code (Char -> Bool) -> (Code o -> Code Char -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
-sat o p good bad = next o $ \qc qo' -> [||
-    if $$p $$qc then $$(good qo' qc)
+sat :: (?ops :: InputOps o) => Code o -> Code (Char -> Bool) -> ( Code Char -> Code o -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a))
+sat input p good bad = next input $ \qc qinput' -> [||
+    if $$p $$qc then $$(good qc qinput')
                 else $$bad
   ||]

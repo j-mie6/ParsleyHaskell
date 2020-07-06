@@ -10,7 +10,8 @@
              MultiParamTypeClasses,
              UndecidableInstances,
              AllowAmbiguousTypes,
-             ScopedTypeVariables #-}
+             ScopedTypeVariables,
+             KindSignatures #-}
 module Parsley.Frontend.Compiler(compile) where
 
 import Prelude hiding (pred)
@@ -20,7 +21,7 @@ import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(.
 import Parsley.Backend                     (codeGen)
 import Parsley.Machine.Instructions        (Program(..), LetBinding(..))
 import Parsley.Common.Identifiers          (IMVar, IΣVar, MVar(..))
-import Parsley.Common.Indexed              (Fix(In), cata, cata', Tag(..), imap)
+import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap))
 import Parsley.Common.Utils                (Quapplicative, WQ)
 import Control.Applicative                 (liftA, liftA2, liftA3)
 import Control.Monad                       (forM, forM_)
@@ -65,6 +66,7 @@ preprocess p =
   in letInsertion lets recs q
 
 data ParserName = forall a q. ParserName (StableName# (Fix (Combinator q) a))
+data Tag t f (k :: * -> *) a = Tag {tag :: t, tagged :: f k a}
 newtype Tagger q a = Tagger { runTagger :: Fix (Tag ParserName (Combinator q)) a }
 
 tagParser :: Fix (Combinator q) a -> Fix (Tag ParserName (Combinator q)) a
@@ -201,6 +203,9 @@ showM = show . fst . compile
 
 liftA4 :: Applicative f => (a -> b -> c -> d -> e) -> f a -> f b -> f c -> f d -> f e
 liftA4 f u v w x = liftA3 f u v w <*> x
+
+instance IFunctor f => IFunctor (Tag t f) where
+  imap f (Tag t k) = Tag t (imap f k)
 
 instance Eq ParserName where
   (ParserName n) == (ParserName m) = eqStableName (StableName n) (StableName m)

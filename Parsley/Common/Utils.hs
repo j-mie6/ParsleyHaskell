@@ -23,3 +23,10 @@ instance Quapplicative WQ where
   makeQ = WQ
   _code = __code
   _val = __val
+
+{- Possible when Code is a newtype - Thanks Matt
+instance Quapplicative Code where
+  makeQ _ = id
+  _val = error "Cannot extract value from Code"
+  _code = id
+-}

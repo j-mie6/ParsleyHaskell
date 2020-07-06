@@ -71,6 +71,7 @@ data Stream = {-# UNPACK #-} !Char :> Stream
 nomore :: Stream
 nomore = '\0' :> nomore
 
+
 {- Representation Types -}
 data OffWith ts = OffWith {-# UNPACK #-} !Int ts
 data OffWithStreamAnd ts = OffWithStreamAnd {-# UNPACK #-} !Int !Stream ts

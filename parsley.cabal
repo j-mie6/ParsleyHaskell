@@ -140,6 +140,7 @@ library
                        containers,
                        dependent-map,
                        dependent-sum,
+                       dependent-sum-template,
                        lift-plugin,
                        idioms-plugin,
                        pretty-terminal,

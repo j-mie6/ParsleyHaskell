@@ -13,7 +13,6 @@ import Parsley.Machine.Instructions        (Instr(..), MetaInstr, One, _Fmap, _A
 import Parsley.Common.Identifiers          (IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import Parsley.Backend.InstructionAnalyser (coinsNeeded)
 import Parsley.Common.Indexed              (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
-import Parsley.Common.Utils                (code, Quapplicative((>*<)))
 import Parsley.Common.Defunc               (DefuncUser(BLACK, COMPOSE, UNIT, ID), Defunc(USER, SAME), pattern FLIP_H)
 import Control.Applicative                 (liftA2)
 import Control.Monad.Reader                (Reader, ask, asks, runReader, local, MonadReader)
@@ -37,7 +36,7 @@ newtype CodeGen q o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr q o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr q o) xs (Succ n) r a)}
 
 -- TODO, ensure that let-bound parsers do not use finalise to add coins!
-codeGen :: Quapplicative q => Bool -> Fix (Combinator q) x -> IMVar -> IΣVar -> (Fix4 (Instr q o) '[] One x a, IΣVar)
+codeGen :: Bool -> Fix (Combinator q) x -> IMVar -> IΣVar -> (Fix4 (Instr q o) '[] One x a, IΣVar)
 codeGen letBound p μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = finalise (histo alg p)
@@ -58,7 +57,7 @@ rollbackHandler = In4 (Seek (In4 Empt))
 parsecHandler :: Fix4 (Instr q o) xs (Succ n) r a -> Fix4 (Instr q o) (o : xs) (Succ n) r a
 parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (_If k (In4 Empt))))))
 
-peephole :: Quapplicative q => Combinator q (Cofree (Combinator q) (CodeGen q o a)) x -> Maybe (CodeGen q o a x)
+peephole :: Combinator q (Cofree (Combinator q) (CodeGen q o a)) x -> Maybe (CodeGen q o a x)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (USER f) m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (In4 (Lift2 (USER f) m))
@@ -98,7 +97,7 @@ peephole (MetaCombinator Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGe
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
-direct :: Quapplicative q => Combinator q (CodeGen q o a) x -> Fix4 (Instr q o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr q o) xs (Succ n) r a)
+direct :: Combinator q (CodeGen q o a) x -> Fix4 (Instr q o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr q o) xs (Succ n) r a)
 direct (Pure x)      m = do return $! In4 (Push (USER x) m)
 direct (Satisfy p)   m = do return $! In4 (Sat (USER p) m)
 direct (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf pxc

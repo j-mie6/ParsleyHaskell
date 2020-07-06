@@ -16,7 +16,7 @@ pattern p :$>: x = p :*>: In (Pure x)
 pattern x :<$: p = In (Pure x) :<*: p
 pattern LiftA2 f p q = In (f :<$>: p) :<*>: q
 
-optimise :: Quapplicative q => Combinator q (Fix (Combinator q)) a -> Fix (Combinator q) a
+optimise :: Combinator (Fix Combinator) a -> Fix Combinator a
 -- DESTRUCTIVE OPTIMISATION
 -- Right Absorption Law: empty <*> u                    = empty
 optimise (In Empty :<*>: _)                             = In Empty
@@ -164,7 +164,7 @@ optimise p                                               = In p
 
 -- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p
 
-(>?>) :: Quapplicative q => Fix (Combinator q) a -> q (a -> Bool) -> Fix (Combinator q) a
+(>?>) :: Fix Combinator a -> DefuncUser (a -> Bool) -> Fix Combinator a
 p >?> f = In (Branch (In (makeQ g qg :<$>: p)) (In Empty) (In (Pure ID)))
   where
     g x = if _val f x then Right x else Left ()

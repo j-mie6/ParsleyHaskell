@@ -70,7 +70,7 @@ instance ParserOps WQ where
   pfoldl = pfoldl . BLACK
   pfoldl1 = pfoldl1 . BLACK
 
-instance {-# INCOHERENT #-} x ~ DefuncUser WQ => ParserOps x where
+instance {-# INCOHERENT #-} x ~ DefuncUser => ParserOps x where
   pure = _pure
   satisfy = _satisfy
   conditional = _conditional
@@ -304,10 +304,10 @@ pfoldr f k p = chainPre (f <$> p) (pure k)
 pfoldr1 :: (ParserOps repf, ParserOps repk) => repf (a -> b -> b) -> repk b -> Parser a -> Parser b
 pfoldr1 f k p = f <$> p <*> pfoldr f k p
 
-data Level a b = InfixL  [Parser (b -> a -> b)] (DefuncUser WQ (a -> b))
-               | InfixR  [Parser (a -> b -> b)] (DefuncUser WQ (a -> b))
-               | Prefix  [Parser (b -> b)]      (DefuncUser WQ (a -> b))
-               | Postfix [Parser (b -> b)]      (DefuncUser WQ (a -> b))
+data Level a b = InfixL  [Parser (b -> a -> b)] (DefuncUser (a -> b))
+               | InfixR  [Parser (a -> b -> b)] (DefuncUser (a -> b))
+               | Prefix  [Parser (b -> b)]      (DefuncUser (a -> b))
+               | Postfix [Parser (b -> b)]      (DefuncUser (a -> b))
 
 class Monolith a b c where
   infixL  :: [Parser (b -> a -> b)] -> c

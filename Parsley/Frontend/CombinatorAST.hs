@@ -10,17 +10,16 @@ module Parsley.Frontend.CombinatorAST where
 
 import Parsley.Common.Indexed     (IFunctor, Fix(In), Const1(..), imap, cata)
 import Parsley.Common.Identifiers (IMVar, MVar(..), IΣVar(..))
-import Parsley.Common.Utils       (WQ, code)
-import Language.Haskell.TH.Syntax (Lift)
+import Parsley.Common.Utils       (WQ, Quapplicative)
 import Parsley.Common.Defunc
 import Data.List                  (intercalate)
 
 -- Parser wrapper type
-newtype Parser a = Parser {unParser :: Fix (Combinator WQ) a}
+newtype Parser a = Parser {unParser :: Fix Combinator a}
 
 -- Core smart constructors
 {-# INLINE _pure #-}
-_pure :: DefuncUser WQ a -> Parser a
+_pure :: DefuncUser a -> Parser a
 _pure = Parser . In . Pure
 
 infixl 4 <*>
@@ -43,7 +42,7 @@ infixl 3 <|>
 Parser p <|> Parser q = Parser (In (p :<|>: q))
 
 {-# INLINE _satisfy #-}
-_satisfy :: DefuncUser WQ (Char -> Bool) -> Parser Char
+_satisfy :: DefuncUser (Char -> Bool) -> Parser Char
 _satisfy = Parser . In . Satisfy
 
 lookAhead :: Parser a -> Parser a
@@ -55,7 +54,7 @@ notFollowedBy = Parser . In . NotFollowedBy . unParser
 try :: Parser a -> Parser a
 try = Parser . In . Try . unParser
 
-_conditional :: [(DefuncUser WQ (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+_conditional :: [(DefuncUser (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
 _conditional cs (Parser p) (Parser def) =
   let (fs, qs) = unzip cs
   in Parser (In (Match p fs (map unParser qs) def))
@@ -73,31 +72,31 @@ debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (Debug name p))
 
 -- Core datatype
-data Combinator (q :: * -> *) (k :: * -> *) (a :: *) where
-  Pure           :: DefuncUser q a -> Combinator q k a
-  Satisfy        :: DefuncUser q (Char -> Bool) -> Combinator q k Char
-  (:<*>:)        :: k (a -> b) -> k a -> Combinator q k b
-  (:*>:)         :: k a -> k b -> Combinator q k b
-  (:<*:)         :: k a -> k b -> Combinator q k a
-  (:<|>:)        :: k a -> k a -> Combinator q k a
-  Empty          :: Combinator q k a
-  Try            :: k a -> Combinator q k a
-  LookAhead      :: k a -> Combinator q k a
-  Let            :: Bool -> MVar a -> k a -> Combinator q k a
-  NotFollowedBy  :: k a -> Combinator q k ()
-  Branch         :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Combinator q k c
-  Match          :: k a -> [DefuncUser q (a -> Bool)] -> [k b] -> k b -> Combinator q k b
-  ChainPre       :: k (a -> a) -> k a -> Combinator q k a
-  ChainPost      :: k a -> k (a -> a) -> Combinator q k a
-  Debug          :: String -> k a -> Combinator q k a
-  MetaCombinator :: MetaCombinator -> k a -> Combinator q k a
+data Combinator (k :: * -> *) (a :: *) where
+  Pure           :: DefuncUser a -> Combinator k a
+  Satisfy        :: DefuncUser (Char -> Bool) -> Combinator k Char
+  (:<*>:)        :: k (a -> b) -> k a -> Combinator k b
+  (:*>:)         :: k a -> k b -> Combinator k b
+  (:<*:)         :: k a -> k b -> Combinator k a
+  (:<|>:)        :: k a -> k a -> Combinator k a
+  Empty          :: Combinator k a
+  Try            :: k a -> Combinator k a
+  LookAhead      :: k a -> Combinator k a
+  Let            :: Bool -> MVar a -> k a -> Combinator k a
+  NotFollowedBy  :: k a -> Combinator k ()
+  Branch         :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Combinator k c
+  Match          :: k a -> [DefuncUser (a -> Bool)] -> [k b] -> k b -> Combinator k b
+  ChainPre       :: k (a -> a) -> k a -> Combinator k a
+  ChainPost      :: k a -> k (a -> a) -> Combinator k a
+  Debug          :: String -> k a -> Combinator k a
+  MetaCombinator :: MetaCombinator -> k a -> Combinator k a
 
 data MetaCombinator where
   Cut         :: MetaCombinator
   RequiresCut :: MetaCombinator
 
 -- Instances
-instance IFunctor (Combinator q) where
+instance IFunctor Combinator where
   imap _ (Pure x)             = Pure x
   imap _ (Satisfy p)          = Satisfy p
   imap f (p :<*>: q)          = f p :<*>: f q
@@ -116,7 +115,7 @@ instance IFunctor (Combinator q) where
   imap f (Debug name p)       = Debug name (f p)
   imap f (MetaCombinator m p) = MetaCombinator m (f p)
 
-instance Show (Fix (Combinator q) a) where
+instance Show (Fix Combinator a) where
   show = getConst1 . cata (Const1 . alg)
     where
       alg (Pure x)                                  = "(pure " ++ show x ++ ")"

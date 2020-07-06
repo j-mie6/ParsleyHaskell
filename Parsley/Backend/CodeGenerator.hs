@@ -37,7 +37,7 @@ newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
 -- TODO, ensure that let-bound parsers do not use finalise to add coins!
-codeGen :: PositionOps o => Bool -> Fix (Combinator q) x -> IMVar -> IΣVar -> (Fix4 (Instr o) '[] One x a, IΣVar)
+codeGen :: PositionOps o => Bool -> Fix Combinator x -> IMVar -> IΣVar -> (Fix4 (Instr o) '[] One x a, IΣVar)
 codeGen letBound p μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
   where
     (m, maxΣ) = finalise (histo alg p)
@@ -58,7 +58,7 @@ rollbackHandler = In4 (Seek (In4 Empt))
 parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
 parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (_If k (In4 Empt))))))
 
-peephole :: PositionOps o => Combinator q (Cofree (Combinator q) (CodeGen o a)) x -> Maybe (CodeGen o a x)
+peephole :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (USER f) m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (In4 (Lift2 (USER f) m))
@@ -98,7 +98,7 @@ peephole (MetaCombinator Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGe
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
-direct :: PositionOps o => Combinator q (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
+direct :: PositionOps o => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 direct (Pure x)      m = do return $! In4 (Push (USER x) m)
 direct (Satisfy p)   m = do return $! In4 (Sat (USER p) m)
 direct (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf pxc

@@ -20,6 +20,7 @@ import Parsley.Frontend.Optimiser          (optimise)
 import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
 import Parsley.Backend                     (codeGen)
 import Parsley.Machine.Instructions        (Program(..), LetBinding(..))
+import Parsley.Machine.Input               (PositionOps)
 import Parsley.Common.Identifiers          (IMVar, IΣVar, MVar(..))
 import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap))
 import Parsley.Common.Utils                (Quapplicative, WQ)
@@ -44,17 +45,17 @@ import qualified Data.HashSet        as HashSet (member, insert, empty, union)
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey, size)
 import qualified Data.Set            as Set     (null)
 
-compile :: Parser a -> (Program o a, DMap MVar (LetBinding WQ o a))
+compile :: PositionOps o => Parser a -> (Program o a, DMap MVar (LetBinding WQ o a))
 compile (Parser p) =
   let !(p', μs, maxV) = preprocess p
       !(m, maxΣ) = codeGen False (analyse emptyFlags p') (maxV + 1) 0
       !ms = compileLets μs (maxV + 1) maxΣ
   in trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (Program m, ms)
 
-compileLets :: Quapplicative q => DMap MVar (Fix (Combinator q)) -> IMVar -> IΣVar -> DMap MVar (LetBinding q o a)
+compileLets :: PositionOps o => DMap MVar (Fix (Combinator q)) -> IMVar -> IΣVar -> DMap MVar (LetBinding q o a)
 compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.empty, maxΣ) μs in ms
   where
-    compileLet :: Quapplicative q => MVar x -> Fix (Combinator q) x -> (DMap MVar (LetBinding q o a), IΣVar) -> (DMap MVar (LetBinding q o a), IΣVar)
+    compileLet :: PositionOps o => MVar x -> Fix (Combinator q) x -> (DMap MVar (LetBinding q o a), IΣVar) -> (DMap MVar (LetBinding q o a), IΣVar)
     compileLet (MVar μ) p (ms, maxΣ) =
       let (m, maxΣ') = codeGen True (analyse (emptyFlags {letBound = True}) p) maxV (maxΣ + 1)
       in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
@@ -197,9 +198,6 @@ addName x = local (HashSet.insert x)
 makeParserName :: Fix (Combinator q) a -> ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
 makeParserName !p = unsafePerformIO (fmap (\(StableName name) -> ParserName name) (makeStableName p))
-
-showM :: Parser a -> String
-showM = show . fst . compile
 
 liftA4 :: Applicative f => (a -> b -> c -> d -> e) -> f a -> f b -> f c -> f d -> f e
 liftA4 f u v w x = liftA3 f u v w <*> x

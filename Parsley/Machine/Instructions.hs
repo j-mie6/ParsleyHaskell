@@ -23,10 +23,10 @@ instance Show (LetBinding q o a x) where show (LetBinding m) = show m
 
 data Instr q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
   Ret       :: Instr q o k '[x] n x a
-  Push      :: Defunc q o x -> k (x : xs) n r a -> Instr q o k xs n r a
+  Push      :: Defunc q x -> k (x : xs) n r a -> Instr q o k xs n r a
   Pop       :: k xs n r a -> Instr q o k (x : xs) n r a
-  Lift2     :: Defunc q o (x -> y -> z) -> k (z : xs) n r a -> Instr q o k (y : x : xs) n r a
-  Sat       :: Defunc q o (Char -> Bool) -> k (Char : xs) (Succ n) r a -> Instr q o k xs (Succ n) r a
+  Lift2     :: Defunc q (x -> y -> z) -> k (z : xs) n r a -> Instr q o k (y : x : xs) n r a
+  Sat       :: Defunc q (Char -> Bool) -> k (Char : xs) (Succ n) r a -> Instr q o k xs (Succ n) r a
   Call      :: MVar x -> k (x : xs) (Succ n) r a -> Instr q o k xs (Succ n) r a
   Jump      :: MVar x -> Instr q o k '[] (Succ n) x a
   Empt      :: Instr q o k xs (Succ n) r a
@@ -35,7 +35,7 @@ data Instr q o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) 
   Tell      :: k (o : xs) n r a -> Instr q o k xs n r a
   Seek      :: k xs n r a -> Instr q o k (o : xs) n r a
   Case      :: k (x : xs) n r a -> k (y : xs) n r a -> Instr q o k (Either x y : xs) n r a
-  Choices   :: [Defunc q o (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr q o k (x : xs) n r a
+  Choices   :: [Defunc q (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr q o k (x : xs) n r a
   Iter      :: MVar Void -> k '[] One Void a -> k (o : xs) n r a -> Instr q o k xs n r a
   Join      :: ΦVar x -> Instr q o k (x : xs) n r a
   MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr q o k xs n r a
@@ -65,7 +65,7 @@ drainCoins = mkCoin DrainCoins
 _App :: Fix4 (Instr q o) (y : xs) n r a -> Instr q o (Fix4 (Instr q o)) (x : (x -> y) : xs) n r a
 _App m = Lift2 (USER APP) m
 
-_Fmap :: Defunc q o (x -> y) -> Fix4 (Instr q o) (y : xs) n r a -> Instr q o (Fix4 (Instr q o)) (x : xs) n r a
+_Fmap :: Defunc q (x -> y) -> Fix4 (Instr q o) (y : xs) n r a -> Instr q o (Fix4 (Instr q o)) (x : xs) n r a
 _Fmap f m = Push f (In4 (Lift2 (USER (FLIP_H APP)) m))
 
 _Modify :: ΣVar x -> Fix4 (Instr q o) xs n r a -> Instr q o (Fix4 (Instr q o)) ((x -> x) : xs) n r a

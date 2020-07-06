@@ -26,7 +26,7 @@ import Parsley.Machine.Instructions
 import Parsley.Common.Identifiers
 import Parsley.Machine.Input      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Parsley.Common.Indexed     (Fix4, cata4, Nat(..))
-import Parsley.Common.Utils       (Code, Quapplicative)
+import Parsley.Common.Utils       (Code)
 import Parsley.Common.Defunc      (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Data.Functor               ((<&>))
 import Data.Void                  (Void)
@@ -197,16 +197,16 @@ execCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub 
 execJump :: BoxOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
 execJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub retCont input handlers
 
-execPush :: PositionOps o => Defunc q o x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
+execPush :: Defunc q x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 execPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op (genDefunc x) (operands γ)})
 
 execPop :: Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 execPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ in xs})
 
-execLift2 :: PositionOps o => Defunc q o (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
+execLift2 :: Defunc q (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 execLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (genDefunc2 f x y) xs})
 
-execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Defunc q o (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+execSat :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Defunc q (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 execSat p (Machine k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -241,7 +241,7 @@ execCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
     Left x -> $$(mp (γ {operands = Op [||x||] xs}))
     Right y  -> $$(mq (γ {operands = Op [||y||] xs}))||]) p q
 
-execChoices :: PositionOps o => [Defunc q o (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+execChoices :: [Defunc q (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 execChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands γ in go x fs mks mdef (γ {operands = xs}))
   def
   (forM ks getMachine)

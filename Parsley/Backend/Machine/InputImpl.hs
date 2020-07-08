@@ -17,7 +17,11 @@ module Parsley.Backend.Machine.InputImpl (
     OffWith, OffWithStreamAnd, UnpackedLazyByteString,
     representationTypes,
     InputDependant(..),
-    module Parsley.Common.InputTypes
+    module Parsley.Common.InputTypes,
+    -- These must be exposed
+    dropStream,
+    textShiftRight, textShiftLeft,
+    byteStringShiftRight, byteStringShiftLeft, emptyUnpackedLazyByteString
   ) where
 
 import Parsley.Common.Utils     (Code)

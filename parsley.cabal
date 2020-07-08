@@ -101,29 +101,32 @@ library
 
   -- Modules included in this library but not exported.
   other-modules:       Parsley.Common,
-                       Parsley.Common.Defunc,
                        Parsley.Common.Fresh,
                        Parsley.Common.Identifiers,
                        Parsley.Common.Indexed,
                        Parsley.Common.Queue,
                        Parsley.Common.Utils,
                        Parsley.Common.Vec,
+                       Parsley.Common.InputTypes,
 
                        Parsley.Frontend,
                        Parsley.Frontend.CombinatorAnalyser,
                        Parsley.Frontend.CombinatorAST,
                        Parsley.Frontend.Compiler,
                        Parsley.Frontend.Optimiser,
+                       Parsley.Frontend.Defunc,
 
                        Parsley.Backend,
                        Parsley.Backend.CodeGenerator,
                        Parsley.Backend.InstructionAnalyser,
+                       Parsley.Backend.Optimiser,
 
-                       Parsley.Machine,
-                       Parsley.Machine.Input,
-                       Parsley.Machine.Instructions,
-                       Parsley.Machine.Machine,
-                       Parsley.Machine.MachineOps
+                       Parsley.Backend.Machine,
+                       Parsley.Backend.Machine.InputImpl,
+                       Parsley.Backend.Machine.Instructions,
+                       Parsley.Backend.Machine.Machine,
+                       Parsley.Backend.Machine.MachineOps,
+                       Parsley.Backend.Machine.Defunc
 
   -- LANGUAGE extensions used by modules in this package.
   other-extensions:    TemplateHaskell

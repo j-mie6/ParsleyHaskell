@@ -9,7 +9,7 @@
              FlexibleInstances #-}
 module Parsley.Backend.InstructionAnalyser where
 
-import Parsley.Machine.Instructions
+import Parsley.Backend.Machine.Instructions
 import Parsley.Common.Indexed
 import Parsley.Common.Vec
 

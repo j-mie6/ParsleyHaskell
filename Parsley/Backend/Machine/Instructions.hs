@@ -7,11 +7,12 @@
              PatternSynonyms,
              ScopedTypeVariables,
              OverloadedStrings #-}
-module Parsley.Machine.Instructions where
+module Parsley.Backend.Machine.Instructions where
 
 import Parsley.Common.Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
 import Parsley.Common.Utils       (WQ(..), intercalateDiff)
-import Parsley.Common.Defunc      (DefuncUser(APP, ID), Defunc(USER), pattern FLIP_H)
+import Parsley.Frontend.Defunc as Frontend (Defunc(APP, ID), pattern FLIP_H)
+import Parsley.Backend.Machine.Defunc as Backend (Defunc(USER))
 import Data.Void                  (Void)
 import Parsley.Common.Identifiers (MVar, ΦVar, ΣVar)
 import Data.GADT.Compare          (geq, (:~:)(Refl))
@@ -23,10 +24,10 @@ instance Show (LetBinding o a x) where show (LetBinding m) = show m
 
 data Instr o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
   Ret       :: Instr o k '[x] n x a
-  Push      :: Defunc x -> k (x : xs) n r a -> Instr o k xs n r a
+  Push      :: Backend.Defunc x -> k (x : xs) n r a -> Instr o k xs n r a
   Pop       :: k xs n r a -> Instr o k (x : xs) n r a
-  Lift2     :: Defunc (x -> y -> z) -> k (z : xs) n r a -> Instr o k (y : x : xs) n r a
-  Sat       :: Defunc (Char -> Bool) -> k (Char : xs) (Succ n) r a -> Instr o k xs (Succ n) r a
+  Lift2     :: Backend.Defunc (x -> y -> z) -> k (z : xs) n r a -> Instr o k (y : x : xs) n r a
+  Sat       :: Backend.Defunc (Char -> Bool) -> k (Char : xs) (Succ n) r a -> Instr o k xs (Succ n) r a
   Call      :: MVar x -> k (x : xs) (Succ n) r a -> Instr o k xs (Succ n) r a
   Jump      :: MVar x -> Instr o k '[] (Succ n) x a
   Empt      :: Instr o k xs (Succ n) r a
@@ -35,7 +36,7 @@ data Instr o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a
   Tell      :: k (o : xs) n r a -> Instr o k xs n r a
   Seek      :: k xs n r a -> Instr o k (o : xs) n r a
   Case      :: k (x : xs) n r a -> k (y : xs) n r a -> Instr o k (Either x y : xs) n r a
-  Choices   :: [Defunc (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr o k (x : xs) n r a
+  Choices   :: [Backend.Defunc (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr o k (x : xs) n r a
   Iter      :: MVar Void -> k '[] One Void a -> k (o : xs) n r a -> Instr o k xs n r a
   Join      :: ΦVar x -> Instr o k (x : xs) n r a
   MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr o k xs n r a
@@ -66,7 +67,7 @@ drainCoins = mkCoin DrainCoins
 pattern App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
 pattern App k = Lift2 (USER APP) k
 
-pattern Fmap :: Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
+pattern Fmap :: Backend.Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
 pattern Fmap f k = Push f (In4 (Lift2 (USER (FLIP_H APP)) k))
 
 _Modify :: ΣVar x -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) ((x -> x) : xs) n r a

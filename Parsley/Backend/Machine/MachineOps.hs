@@ -14,7 +14,7 @@
              AllowAmbiguousTypes,
              TypeApplications,
              ConstrainedClassMethods #-}
-module Parsley.Machine.MachineOps where
+module Parsley.Backend.Machine.MachineOps where
 
 import Parsley.Common.Utils   (Code)
 import Parsley.Common.Indexed (Nat(..))
@@ -23,7 +23,7 @@ import Control.Monad.ST       (ST)
 import Data.STRef             (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.STRef.Unboxed     (STRefU)
 import GHC.Exts               (TYPE)
-import Parsley.Machine.Input  (BoxOps(..), InputOps, next, Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
+import Parsley.Backend.Machine.InputImpl  (BoxOps(..), InputOps, next, Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Data.Text              (Text)
 import Data.Void              (Void)
 

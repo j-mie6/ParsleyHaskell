@@ -41,21 +41,21 @@ module Parsley ( Parser, runParser, parseFromFile
                , Level(..), Prec(..), precedence, monolith, infixL, infixR, prefix, postfix
                -- Template Haskell Utils
                , code, (>*<), makeQ, _code, _val, WQ, Lift
-               , module Parsley.Machine.Input
-               , module Parsley.Common.Defunc
+               , module Parsley.Common.InputTypes
+               , module Parsley.Frontend.Defunc
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
-import Parsley.Machine.Input      (Input(..), Rep, Text16(..), CharList(..), Stream)
 import Parsley.Frontend
-import Parsley.Machine.Machine    (exec, Ops)
+import Parsley.Backend            (Input(..), Rep, Text16(..), CharList(..), Stream, exec, Ops)
 import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
+import Parsley.Common.InputTypes
 import Data.Function              (fix)
 import Data.List                  (foldl')
 import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
-import Parsley.Common.Defunc      (DefuncUser(..), pattern FLIP_H)
+import Parsley.Frontend.Defunc hiding (genDefunc, genDefunc1, genDefunc2)
 
 class ParserOps rep where
   pure :: rep a -> Parser a
@@ -71,7 +71,7 @@ instance ParserOps WQ where
   pfoldl = pfoldl . BLACK
   pfoldl1 = pfoldl1 . BLACK
 
-instance {-# INCOHERENT #-} x ~ DefuncUser => ParserOps x where
+instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
   pure = _pure
   satisfy = _satisfy
   conditional = _conditional
@@ -315,10 +315,10 @@ pfoldr f k p = chainPre (f <$> p) (pure k)
 pfoldr1 :: (ParserOps repf, ParserOps repk) => repf (a -> b -> b) -> repk b -> Parser a -> Parser b
 pfoldr1 f k p = f <$> p <*> pfoldr f k p
 
-data Level a b = InfixL  [Parser (b -> a -> b)] (DefuncUser (a -> b))
-               | InfixR  [Parser (a -> b -> b)] (DefuncUser (a -> b))
-               | Prefix  [Parser (b -> b)]      (DefuncUser (a -> b))
-               | Postfix [Parser (b -> b)]      (DefuncUser (a -> b))
+data Level a b = InfixL  [Parser (b -> a -> b)] (Defunc (a -> b))
+               | InfixR  [Parser (a -> b -> b)] (Defunc (a -> b))
+               | Prefix  [Parser (b -> b)]      (Defunc (a -> b))
+               | Postfix [Parser (b -> b)]      (Defunc (a -> b))
 
 class Monolith a b c where
   infixL  :: [Parser (b -> a -> b)] -> c

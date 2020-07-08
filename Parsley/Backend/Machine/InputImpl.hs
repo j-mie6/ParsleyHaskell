@@ -10,9 +10,18 @@
              DataKinds,
              ImplicitParams,
              TypeFamilyDependencies #-}
-module Parsley.Machine.Input where
+module Parsley.Backend.Machine.InputImpl (
+    Unboxed, Rep,
+    Input(..), PositionOps(..), BoxOps(..), LogOps(..),
+    InputOps(..), more, next,
+    OffWith, OffWithStreamAnd, UnpackedLazyByteString,
+    representationTypes,
+    InputDependant(..),
+    module Parsley.Common.InputTypes
+  ) where
 
 import Parsley.Common.Utils     (Code)
+import Parsley.Common.InputTypes
 import Data.Array.Base          (UArray(..), listArray)
 import GHC.Prim                 (Int#, Addr#, ByteArray#, nullAddr#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
 import GHC.Exts                 (Int(..), Char(..), TYPE, RuntimeRep(..))
@@ -61,16 +70,6 @@ more :: (?ops :: InputOps rep) => Code (rep -> Bool)
 more = _more ?ops
 next :: (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code r) -> Code r
 next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
-
-{- Input Types -}
-newtype Text16 = Text16 Text
---newtype CacheText = CacheText Text
-newtype CharList = CharList String
-data Stream = {-# UNPACK #-} !Char :> Stream
-
-nomore :: Stream
-nomore = '\0' :> nomore
-
 
 {- Representation Types -}
 data OffWith ts = OffWith {-# UNPACK #-} !Int ts

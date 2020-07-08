@@ -9,7 +9,7 @@ import Prelude hiding ((<$>))
 import Parsley.Frontend.CombinatorAST (Combinator(..))
 import Parsley.Common.Indexed         (Fix(In))
 import Parsley.Common.Utils           (code, Quapplicative(..))
-import Parsley.Common.Defunc          (DefuncUser(..), pattern FLIP_H, pattern COMPOSE_H)
+import Parsley.Frontend.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H)
 
 pattern f :<$>: p = In (Pure f) :<*>: p
 pattern p :$>: x = p :*>: In (Pure x)
@@ -164,7 +164,7 @@ optimise p                                               = In p
 
 -- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p
 
-(>?>) :: Fix Combinator a -> DefuncUser (a -> Bool) -> Fix Combinator a
+(>?>) :: Fix Combinator a -> Defunc (a -> Bool) -> Fix Combinator a
 p >?> f = In (Branch (In (makeQ g qg :<$>: p)) (In Empty) (In (Pure ID)))
   where
     g x = if _val f x then Right x else Left ()

@@ -11,14 +11,14 @@ module Parsley.Frontend.CombinatorAST where
 import Parsley.Common.Indexed     (IFunctor, Fix(In), Const1(..), imap, cata)
 import Parsley.Common.Identifiers (IMVar, MVar(..), IΣVar(..))
 import Parsley.Common.Utils       (WQ, Quapplicative, intercalateDiff)
-import Parsley.Common.Defunc
+import Parsley.Frontend.Defunc
 
 -- Parser wrapper type
 newtype Parser a = Parser {unParser :: Fix Combinator a}
 
 -- Core smart constructors
 {-# INLINE _pure #-}
-_pure :: DefuncUser a -> Parser a
+_pure :: Defunc a -> Parser a
 _pure = Parser . In . Pure
 
 infixl 4 <*>
@@ -41,7 +41,7 @@ infixl 3 <|>
 Parser p <|> Parser q = Parser (In (p :<|>: q))
 
 {-# INLINE _satisfy #-}
-_satisfy :: DefuncUser (Char -> Bool) -> Parser Char
+_satisfy :: Defunc (Char -> Bool) -> Parser Char
 _satisfy = Parser . In . Satisfy
 
 lookAhead :: Parser a -> Parser a
@@ -53,7 +53,7 @@ notFollowedBy = Parser . In . NotFollowedBy . unParser
 try :: Parser a -> Parser a
 try = Parser . In . Try . unParser
 
-_conditional :: [(DefuncUser (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+_conditional :: [(Defunc (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
 _conditional cs (Parser p) (Parser def) =
   let (fs, qs) = unzip cs
   in Parser (In (Match p fs (map unParser qs) def))
@@ -72,8 +72,8 @@ debug name (Parser p) = Parser (In (Debug name p))
 
 -- Core datatype
 data Combinator (k :: * -> *) (a :: *) where
-  Pure           :: DefuncUser a -> Combinator k a
-  Satisfy        :: DefuncUser (Char -> Bool) -> Combinator k Char
+  Pure           :: Defunc a -> Combinator k a
+  Satisfy        :: Defunc (Char -> Bool) -> Combinator k Char
   (:<*>:)        :: k (a -> b) -> k a -> Combinator k b
   (:*>:)         :: k a -> k b -> Combinator k b
   (:<*:)         :: k a -> k b -> Combinator k a
@@ -84,7 +84,7 @@ data Combinator (k :: * -> *) (a :: *) where
   Let            :: Bool -> MVar a -> k a -> Combinator k a
   NotFollowedBy  :: k a -> Combinator k ()
   Branch         :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Combinator k c
-  Match          :: k a -> [DefuncUser (a -> Bool)] -> [k b] -> k b -> Combinator k b
+  Match          :: k a -> [Defunc (a -> Bool)] -> [k b] -> k b -> Combinator k b
   ChainPre       :: k (a -> a) -> k a -> Combinator k a
   ChainPost      :: k a -> k (a -> a) -> Combinator k a
   Debug          :: String -> k a -> Combinator k a

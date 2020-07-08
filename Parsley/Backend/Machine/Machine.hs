@@ -19,16 +19,16 @@
              InstanceSigs,
              MultiWayIf,
              ConstrainedClassMethods #-}
-module Parsley.Machine.Machine where
+module Parsley.Backend.Machine.Machine where
 
-import Parsley.Machine.MachineOps
-import Parsley.Machine.Instructions
+import Parsley.Backend.Machine.MachineOps
+import Parsley.Backend.Machine.Instructions
 import Parsley.Common.Identifiers
 import Parsley.Common.Vec         (Vec(..))
-import Parsley.Machine.Input      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
+import Parsley.Backend.Machine.InputImpl      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Parsley.Common.Indexed     (Fix4, cata4, Nat(..))
 import Parsley.Common.Utils       (Code)
-import Parsley.Common.Defunc      (Defunc, genDefunc, genDefunc1, genDefunc2)
+import Parsley.Backend.Machine.Defunc (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Data.Functor               ((<&>))
 import Data.Void                  (Void)
 import Control.Monad              (forM, join, liftM2)

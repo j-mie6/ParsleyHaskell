@@ -124,9 +124,10 @@ library
                        Parsley.Backend.Machine,
                        Parsley.Backend.Machine.InputImpl,
                        Parsley.Backend.Machine.Instructions,
-                       Parsley.Backend.Machine.Machine,
-                       Parsley.Backend.Machine.MachineOps,
+                       Parsley.Backend.Machine.Eval,
+                       Parsley.Backend.Machine.Ops,
                        Parsley.Backend.Machine.Defunc
+                       Parsley.Backend.Machine.State
 
   -- LANGUAGE extensions used by modules in this package.
   other-extensions:    TemplateHaskell

@@ -47,12 +47,10 @@ module Parsley ( Parser, runParser, parseFromFile
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Parsley.Frontend
-import Parsley.Backend            (Input(..), Rep, Text16(..), CharList(..), Stream, exec, Ops)
+import Parsley.Backend            (Input(..), Rep, Text16(..), CharList(..), Stream, eval, Ops)
 import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
 import Parsley.Common.InputTypes
 import Data.Function              (fix)
-import Data.List                  (foldl')
-import Control.Monad.ST           (runST)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
 import Parsley.Frontend.Defunc hiding (genDefunc, genDefunc1, genDefunc2)
@@ -355,7 +353,7 @@ precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
     level (Postfix ops wrap) atom = chainPost (wrap <$> atom) (choice ops)
 
 runParser :: forall input a. (Input input, Ops (Rep input)) => Parser a -> Code (input -> Maybe a)
-runParser p = [||\input -> runST $$(exec @(Rep input) (prepare @input [||input||]) (compile @(Rep input) p))||]
+runParser p = [||\input -> $$(eval @(Rep input) (prepare @input [||input||]) (compile @(Rep input) p))||]
 
 parseFromFile :: Parser a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

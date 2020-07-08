@@ -1,12 +1,10 @@
 {-# LANGUAGE GADTs,
              DataKinds,
-             KindSignatures,
              PolyKinds,
              TypeOperators,
              BangPatterns,
              MagicHash,
              TemplateHaskell,
-             TypeSynonymInstances,
              CPP,
              ImplicitParams,
              ScopedTypeVariables,
@@ -14,15 +12,14 @@
              AllowAmbiguousTypes,
              TypeApplications,
              ConstrainedClassMethods #-}
-module Parsley.Backend.Machine.MachineOps where
+module Parsley.Backend.Machine.Ops where
 
+import Parsley.Backend.Machine.State
 import Parsley.Common.Utils   (Code)
-import Parsley.Common.Indexed (Nat(..))
 import Parsley.Common.Vec     (Vec(..))
+import Parsley.Common.Indexed (Nat(..))
 import Control.Monad.ST       (ST)
 import Data.STRef             (STRef, writeSTRef, readSTRef, newSTRef)
-import Data.STRef.Unboxed     (STRefU)
-import GHC.Exts               (TYPE)
 import Parsley.Backend.Machine.InputImpl  (BoxOps(..), InputOps, next, Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Data.Text              (Text)
 import Data.Void              (Void)
@@ -33,19 +30,6 @@ derivation((OffWith [Char]))       \
 derivation((OffWith Stream))       \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
-
-data OpStack xs where
-  Empty :: OpStack '[]
-  Op :: Code x -> OpStack xs -> OpStack (x ': xs)
-
-type HandlerStack n s o a = Vec n (Code (Handler s o a))
-
-type Handler s o a = Unboxed o -> ST s (Maybe a)
-type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
-
-type SubRoutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
-newtype QSubRoutine s o a x = QSubRoutine { unwrapSub :: Code (SubRoutine s o a x) }
-newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
 
 raise :: forall o n s a. Vec (Succ n) (Code (Handler s o a)) -> Code (Handler s o a)
 raise (VCons h _) = h

@@ -1,86 +1,47 @@
 {-# LANGUAGE GADTs,
              DataKinds,
              TypeOperators,
-             RankNTypes,
-             BangPatterns,
-             FlexibleInstances,
-             MagicHash,
              TemplateHaskell,
              ScopedTypeVariables,
              RecordWildCards,
-             ConstraintKinds,
-             CPP,
              ImplicitParams,
              TypeApplications,
-             MultiWayIf,
-             ConstrainedClassMethods #-}
-module Parsley.Backend.Machine.Eval where
+             BangPatterns,
+             MultiWayIf #-}
+module Parsley.Backend.Machine.Eval (eval, Ops) where
 
 import Parsley.Backend.Machine.State
 import Parsley.Backend.Machine.Ops
 import Parsley.Backend.Machine.Instructions
+import Parsley.Backend.Machine.LetRecBuilder
 import Parsley.Common.Identifiers
 import Parsley.Common.Vec         (Vec(..))
-import Parsley.Backend.Machine.InputImpl      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
-import Parsley.Common.Indexed     (Fix4, cata4, Nat(..))
+import Parsley.Backend.Machine.InputImpl (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
+import Parsley.Common.Indexed     (Fix4, cata4, Nat(..), One)
 import Parsley.Common.Utils       (Code)
+import Data.Dependent.Map         (DMap)
 import Parsley.Backend.Machine.Defunc (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Data.Functor               ((<&>))
 import Data.Void                  (Void)
 import Control.Monad              (forM, liftM2)
 import Control.Monad.ST           (ST, runST)
 import Control.Monad.Reader       (ask, asks, local)
-import Data.Dependent.Map         (DMap, DSum(..))
-import Data.GADT.Compare          (GCompare)
 import Debug.Trace                (trace)
-import System.Console.Pretty      (color, Color(Green, White, Red, Blue))
-import Data.Text                  (Text)
-import Data.Functor.Const         (Const(..), getConst)
-import Language.Haskell.TH        (runQ, Q, newName, Name)
-import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
-import qualified Data.Dependent.Map as DMap ((!), map, toList, traverseWithKey)
-
-#define inputInstances(derivation) \
-derivation(Int)                    \
-derivation((OffWith [Char]))       \
-derivation((OffWith Stream))       \
-derivation(UnpackedLazyByteString) \
-derivation(Text)
-
-type Ops o = (LogHandler o, KOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
+import System.Console.Pretty      (color, Color(Green))
 
 eval :: forall o s a. Ops o => Code (InputDependant o) -> (Program o a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
 eval input (Program !p, fs) = trace ("EVALUATING: " ++ show p) [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
-        in scopeBindings fs
+        in letRec fs
              nameLet
              QSubRoutine
              (\(LetBinding k) names -> buildRec (emptyCtx {μs = names}) (readyMachine k))
              (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx {μs = names})))
   ||]
-
-nameLet :: MVar x -> LetBinding o a x -> String
-nameLet (MVar i) _ = "sub" ++ show i
-
-scopeBindings :: GCompare key => DMap key named
-                              -> (forall a. key a -> named a -> String)
-                              -> (forall x. Code ((x -> y) -> z) -> q x)
-                              -> (forall x. named x -> DMap key q -> Code ((x -> y) -> z))
-                              -> (DMap key q -> Code a)
-                              -> Code a
-scopeBindings bindings nameOf wrap letBuilder scoped = unsafeTExpCoerce $
-  do names <- makeNames bindings
-     LetE <$> generateBindings names bindings <*> unTypeQ (scoped (package names))
   where
-    package = DMap.map (wrap . unsafeTExpCoerce . return . VarE . getConst)
-    makeNames = DMap.traverseWithKey (\k v -> Const <$> newName (nameOf k v))
-    generateBindings names = traverse makeDecl . DMap.toList
-      where
-        makeDecl (k :=> v) =
-          do let Const name = names DMap.! k
-             body <- unTypeQ (letBuilder v (package names))
-             return (FunD name [Clause [] (NormalB body) []])
+    nameLet :: MVar x -> LetBinding o a x -> String
+    nameLet (MVar i) _ = "sub" ++ show i
 
 readyMachine :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
 readyMachine = cata4 (Machine . alg)
@@ -139,12 +100,12 @@ evalSat p (Machine k) = do
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
     readChar bad k γ@Γ{..} = sat input (genDefunc p) (\c input' -> k (γ {operands = Op c operands, input = input'})) bad
-    maybeEmitCheck Nothing mk γ = readChar (raiseΓ γ) mk γ
+    maybeEmitCheck Nothing mk γ = readChar (raise γ) mk γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad = $$(raiseΓ γ) in $$(emitLengthCheck n (readChar [||bad||] mk γ) [||bad||] γ)||]
+      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (readChar [||bad||] mk γ) [||bad||] γ)||]
 
 evalEmpt :: BoxOps o => MachineMonad s o xs (Succ n) r a
-evalEmpt = return $! raiseΓ
+evalEmpt = return $! raise
 
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
@@ -215,24 +176,6 @@ evalPut σ (Machine k) = liftM2 (\mk ref γ ->
        $$(mk (γ {operands = xs}))
   ||]) k (askΣ σ)
 
-preludeString :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
-preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
-  where
-    offset     = input γ
-    indent     = replicate (debugLevel ctx * 2) ' '
-    start      = [|| $$shiftLeft $$offset 5 ||]
-    end        = [|| $$shiftRight $$offset 5 ||]
-    inputTrace = [|| let replace '\n' = color Green "↙"
-                         replace ' '  = color White "·"
-                         replace c    = return c
-                         go i
-                           | $$same i $$end || not ($$more i) = []
-                           | otherwise = $$(next [||i||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
-                     in go $$start ||]
-    eof        = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]
-    prelude    = [|| concat [indent, dir : name, dir : " (", show ($$offToInt $$offset), "): "] ||]
-    caretSpace = [|| replicate (length $$prelude + $$offToInt $$offset - $$offToInt $$start) ' ' ||]
-
 evalLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) =
   liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(setupHandlerΓ γ (logHandler name ctx γ) k)||])
@@ -245,96 +188,11 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where
-  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (Handler s o a)
-
-#define deriveLogHandler(_o)                                                                                                \
-instance LogHandler _o where                                                                                                \
-{                                                                                                                           \
-  logHandler name ctx γ _ = [||\(!o#) ->                                                                                    \
-      trace $$(preludeString name '<' (γ {input = [||$$box o#||]}) ctx (color Red " Fail")) ($$(raise @_o (handlers γ)) o#) \
-    ||]                                                                                                                     \
-};
-inputInstances(deriveLogHandler)
-
 evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raiseΓ γ) γ
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raise γ) γ
 evalMeta (FreeCoins coins) (Machine k) = local (giveCoins coins) k
 evalMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
-evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raiseΓ γ) γ) (asks ((coins -) . liquidate)) k
-
-setupHandlerΓ :: Γ s o xs n r a
-              -> (Code o -> Code (Handler s o a))
-              -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
-setupHandlerΓ γ h k = setupHandler (handlers γ) (input γ) h (\hs -> k (γ {handlers = hs}))
-
-buildHandlerΓ :: (BoxOps o, HandlerOps o)
-              => Γ s o xs n r a
-              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
-              -> Code o -> Code (Handler s o a)
-buildHandlerΓ γ h = buildHandler (\c o -> h (γ {operands = Op c (operands γ), input = o}))
-
-raiseΓ :: BoxOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
-raiseΓ γ = let VCons h _ = handlers γ in [|| $$h ($$unbox $$(input γ)) ||]
-
-class BoxOps o => JoinBuilder o where
-  setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
-
-#define deriveJoinBuilder(_o)                                                   \
-instance JoinBuilder _o where                                                   \
-{                                                                               \
-  setupJoinPoint φ (Machine k) mx =                                             \
-    liftM2 (\mk ctx γ -> [||                                                    \
-      let join x !(o# :: Unboxed _o) =                                          \
-        $$(mk (γ {operands = Op [||x||] (operands γ), input = [||$$box o#||]})) \
-      in $$(run mx γ (insertΦ φ [||join||] ctx))                                \
-    ||]) (local voidCoins k) ask                                                \
-};
-inputInstances(deriveJoinBuilder)
-
-class BoxOps o => RecBuilder o where
-  buildIter :: ReturnOps o
-            => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-            -> (Code o -> Code (Handler s o a)) -> Code o -> Code (ST s (Maybe a))
-  buildRec  :: Ctx s o a
-            -> Machine s o '[] One r a
-            -> Code (SubRoutine s o a r)
-
-#define deriveRecBuilder(_o)                                                     \
-instance RecBuilder _o where                                                     \
-{                                                                                \
-  buildIter ctx μ l h o = let bx = box in [||                                    \
-      let handler !o# = $$(h [||$$bx o#||]);                                     \
-          loop !o# =                                                             \
-        $$(run l                                                                 \
-            (Γ Empty (noreturn @_o) [||$$bx o#||] (VCons [||handler o#||] VNil)) \
-            (voidCoins (insertSub μ [||\_ (!o#) _ -> loop o#||] ctx)))           \
-      in loop ($$unbox $$o)                                                      \
-    ||];                                                                         \
-  buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                        \
-    $$(run k (Γ Empty [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||]     \
-};
-inputInstances(deriveRecBuilder)
-
-emitLengthCheck :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Int -> Code (ST s (Maybe a)) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
-emitLengthCheck 0 good _ _   = good
-emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$good else $$bad ||]
-emitLengthCheck n good bad γ = [||
-  if $$more ($$shiftRight $$(input γ) (n - 1)) then $$good
-  else $$bad ||]
-
-class BoxOps o => KOps o where
-  suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
-  resume :: Code (Cont s o a x) -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
-
-#define deriveKOps(_o)                                                          \
-instance KOps _o where                                                          \
-{                                                                               \
-  suspend m γ = [|| \x (!o#) -> $$(m (γ {operands = Op [||x||] (operands γ),    \
-                                         input = [||$$box o#||]})) ||];         \
-  resume k γ = let Op x _ = operands γ in [|| $$k $$x ($$unbox $$(input γ)) ||] \
-};
-inputInstances(deriveKOps)
+evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raise γ) γ) (asks ((coins -) . liquidate)) k

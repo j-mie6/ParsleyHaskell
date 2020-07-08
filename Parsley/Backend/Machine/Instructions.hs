@@ -9,7 +9,7 @@
              OverloadedStrings #-}
 module Parsley.Backend.Machine.Instructions where
 
-import Parsley.Common.Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
+import Parsley.Common.Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One)
 import Parsley.Common.Utils       (WQ(..), intercalateDiff)
 import Parsley.Frontend.Defunc as Frontend (Defunc(APP, ID), pattern FLIP_H)
 import Parsley.Backend.Machine.Defunc as Backend (Defunc(USER))
@@ -17,7 +17,6 @@ import Data.Void                  (Void)
 import Parsley.Common.Identifiers (MVar, ΦVar, ΣVar)
 import Data.GADT.Compare          (geq, (:~:)(Refl))
 
-type One = Succ Zero
 newtype Program o a = Program { getProgram :: Fix4 (Instr o) '[] One a a }
 newtype LetBinding o a x = LetBinding (Fix4 (Instr o) '[] One x a)
 instance Show (LetBinding o a x) where show (LetBinding m) = show m

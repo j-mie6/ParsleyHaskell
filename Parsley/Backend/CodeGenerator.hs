@@ -9,11 +9,11 @@
 module Parsley.Backend.CodeGenerator (codeGen) where
 
 import Parsley.Frontend.CombinatorAST       (Combinator(..), MetaCombinator(..))
-import Parsley.Backend.Machine.Instructions (Instr(..), MetaInstr, One, pattern Fmap, pattern App, _Modify, pattern If, addCoins, refundCoins, drainCoins, freeCoins)
+import Parsley.Backend.Machine.Instructions (Instr(..), MetaInstr, pattern Fmap, pattern App, _Modify, pattern If, addCoins, refundCoins, drainCoins, freeCoins)
 import Parsley.Backend.Machine.InputImpl    (PositionOps)
 import Parsley.Common.Identifiers           (IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import Parsley.Backend.InstructionAnalyser  (coinsNeeded)
-import Parsley.Common.Indexed               (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
+import Parsley.Common.Indexed               (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), One, imap, histo, extract, (|>))
 import Parsley.Frontend.Defunc              (Defunc(BLACK, COMPOSE, UNIT, ID), pattern FLIP_H)
 import Parsley.Backend.Machine.Defunc       (Defunc(USER, SAME))
 import Control.Applicative                  (liftA2)

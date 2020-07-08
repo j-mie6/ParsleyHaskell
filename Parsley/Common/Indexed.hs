@@ -14,6 +14,7 @@ import Control.Applicative ((<|>), liftA2)
 import Data.Maybe          (fromMaybe)
 
 data Nat = Zero | Succ Nat
+type One = Succ Zero
 
 class IFunctor (f :: (* -> *) -> * -> *) where
   imap :: (forall j. a j -> b j) -> f a i -> f b i

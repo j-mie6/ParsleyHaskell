@@ -18,6 +18,7 @@ module Parsley.Machine.MachineOps where
 
 import Parsley.Common.Utils   (Code)
 import Parsley.Common.Indexed (Nat(..))
+import Parsley.Common.Vec     (Vec(..))
 import Control.Monad.ST       (ST)
 import Data.STRef             (STRef, writeSTRef, readSTRef, newSTRef)
 import Data.STRef.Unboxed     (STRefU)
@@ -36,10 +37,6 @@ derivation(Text)
 data OpStack xs where
   Empty :: OpStack '[]
   Op :: Code x -> OpStack xs -> OpStack (x ': xs)
-
-data Vec n a where
-  VNil :: Vec Zero a
-  VCons :: a -> Vec n a -> Vec (Succ n) a
 
 type HandlerStack n s o a = Vec n (Code (Handler s o a))
 

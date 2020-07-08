@@ -24,6 +24,7 @@ module Parsley.Machine.Machine where
 import Parsley.Machine.MachineOps
 import Parsley.Machine.Instructions
 import Parsley.Common.Identifiers
+import Parsley.Common.Vec         (Vec(..))
 import Parsley.Machine.Input      (InputDependant(..), PositionOps(..), BoxOps(..), LogOps(..), InputOps(..), next, more, Unboxed, OffWith, UnpackedLazyByteString, Stream)
 import Parsley.Common.Indexed     (Fix4, cata4, Nat(..))
 import Parsley.Common.Utils       (Code)
@@ -181,6 +182,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Join φ)            = execJoin φ
     alg (MkJoin φ p k)      = execMkJoin φ p k
     alg (Swap k)            = execSwap k
+    alg (Dup k)             = execDup k
     alg (Make σ k)          = execMake σ k
     alg (Get σ k)           = execGet σ k
     alg (Put σ k)           = execPut σ k
@@ -266,7 +268,13 @@ execMkJoin :: JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine 
 execMkJoin = setupJoinPoint
 
 execSwap :: Machine s o (x : y : xs) n r a -> MachineMonad s o (y : x : xs) n r a
-execSwap (Machine k) = k <&> (\mk γ -> mk (γ {operands = let Op y (Op x xs) = operands γ in Op x (Op y xs)}))
+execSwap (Machine k) = k <&> \mk γ -> mk (γ {operands = let Op y (Op x xs) = operands γ in Op x (Op y xs)})
+
+execDup :: Machine s o (x : x : xs) n r a -> MachineMonad s o (x : xs) n r a
+execDup (Machine k) = k <&> \mk γ -> let Op x xs = operands γ in [||
+    let dupx = $$x
+    in $$(mk (γ {operands = Op [||dupx||] (Op [||dupx||] xs)}))
+  ||]
 
 execMake :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 execMake σ k = asks $! \ctx γ -> let Op x xs = operands γ in [||

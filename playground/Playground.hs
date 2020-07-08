@@ -54,10 +54,13 @@ javascript :: String -> IO (Maybe Parsers.JSProgram)
 javascript = const (return Nothing)-- $$(Parsley.parseFromFile Parsers.javascript)
 
 defuncTest :: String -> Maybe (Maybe Int)
-defuncTest = $$(Parsley.runParser Parsers.defuncTest)
+defuncTest = const Nothing -- $$(Parsley.runParser Parsers.defuncTest)
 
 manyTest :: String -> Maybe String
-manyTest = $$(Parsley.runParser Parsers.manyTest)
+manyTest = const Nothing -- $$(Parsley.runParser Parsers.manyTest)
+
+skipManyInspect :: String -> Maybe ()
+skipManyInspect = $$(Parsley.runParser Parsers.skipManyInspect)
 
 --boom :: String -> Maybe String
 --boom = $$(Parsley.runParser Parsers.failure)

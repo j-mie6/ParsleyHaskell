@@ -9,7 +9,7 @@
 module Parsley.Backend.CodeGenerator (codeGen) where
 
 import Parsley.Frontend.CombinatorAST      (Combinator(..), MetaCombinator(..))
-import Parsley.Machine.Instructions        (Instr(..), MetaInstr, One, _Fmap, _App, _Modify, _If, addCoins, refundCoins, drainCoins, freeCoins)
+import Parsley.Machine.Instructions        (Instr(..), MetaInstr, One, pattern Fmap, pattern App, _Modify, pattern If, addCoins, refundCoins, drainCoins, freeCoins)
 import Parsley.Machine.Input               (PositionOps)
 import Parsley.Common.Identifiers          (IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import Parsley.Backend.InstructionAnalyser (coinsNeeded)
@@ -56,10 +56,10 @@ rollbackHandler :: Fix4 (Instr o) (o : xs) (Succ n) r a
 rollbackHandler = In4 (Seek (In4 Empt))
 
 parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
-parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (_If k (In4 Empt))))))
+parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (If k (In4 Empt))))))
 
 peephole :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
-peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (USER f) m))
+peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (USER f) m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (In4 (Lift2 (USER f) m))
      runCodeGen p qc
@@ -79,8 +79,8 @@ peephole (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ 
 peephole (MetaCombinator RequiresCut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m ->
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (In4 (_Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
-     pc <- freshM (runCodeGen p (In4 (_App m)))
+     opc <- freshM (runCodeGen op (In4 (Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
+     pc <- freshM (runCodeGen p (In4 (App m)))
      return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ opc (parsecHandler (In4 (Get σ (addCoins (coinsNeeded pc) pc)))))))))
 peephole (MetaCombinator RequiresCut (_ :< ChainPost (p :< _) (op :< _))) = Just $ CodeGen $ \m ->
   do μ <- askM
@@ -91,9 +91,9 @@ peephole (MetaCombinator RequiresCut (_ :< ChainPost (p :< _) (op :< _))) = Just
 peephole (MetaCombinator Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m ->
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (In4 (_Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
+     opc <- freshM (runCodeGen op (In4 (Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      let nop = coinsNeeded opc
-     pc <- freshM (runCodeGen p (In4 (_App m)))
+     pc <- freshM (runCodeGen p (In4 (App m)))
      return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (Get σ (addCoins (coinsNeeded pc) pc)))))))))
 -- TODO: One more for fmap try
 peephole _ = Nothing
@@ -101,7 +101,7 @@ peephole _ = Nothing
 direct :: PositionOps o => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 direct (Pure x)      m = do return $! In4 (Push (USER x) m)
 direct (Satisfy p)   m = do return $! In4 (Sat (USER p) m)
-direct (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf pxc
+direct (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (App m)); runCodeGen pf pxc
 direct (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 direct (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
 direct Empty         m = do return $! In4 Empt
@@ -125,8 +125,8 @@ direct (NotFollowedBy p) m =
      return $! In4 (Catch (addCoins (max (np - nm) 0) (In4 (Tell pc))) (In4 (Seek (In4 (Push (USER UNIT) m)))))
 direct (Branch b p q) m =
   do (binder, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
-     qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (_App φ)))))
+     pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (App φ)))))
+     qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (App φ)))))
      let minc = coinsNeeded (In4 (Case pc qc))
      let dp = max 0 (coinsNeeded pc - minc)
      let dq = max 0 (coinsNeeded qc - minc)
@@ -142,9 +142,9 @@ direct (Let _ μ _) m = return $! tailCallOptimise μ m
 direct (ChainPre op p) m =
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (In4 (_Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
+     opc <- freshM (runCodeGen op (In4 (Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      let nop = coinsNeeded opc
-     pc <- freshM (runCodeGen p (In4 (_App m)))
+     pc <- freshM (runCodeGen p (In4 (App m)))
      return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (Get σ pc))))))))
 direct (ChainPost p op) m =
   do μ <- askM

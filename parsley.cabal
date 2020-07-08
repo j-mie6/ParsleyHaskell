@@ -107,6 +107,7 @@ library
                        Parsley.Common.Indexed,
                        Parsley.Common.Queue,
                        Parsley.Common.Utils,
+                       Parsley.Common.Vec,
 
                        Parsley.Frontend,
                        Parsley.Frontend.CombinatorAnalyser,

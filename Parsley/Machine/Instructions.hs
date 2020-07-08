@@ -2,19 +2,19 @@
              DataKinds,
              TypeOperators,
              FlexibleInstances,
-             TemplateHaskell,
              PolyKinds,
              KindSignatures,
              PatternSynonyms,
-             ScopedTypeVariables #-}
+             ScopedTypeVariables,
+             OverloadedStrings #-}
 module Parsley.Machine.Instructions where
 
 import Parsley.Common.Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..))
-import Parsley.Common.Utils       (WQ(..))
+import Parsley.Common.Utils       (WQ(..), intercalateDiff)
 import Parsley.Common.Defunc      (DefuncUser(APP, ID), Defunc(USER), pattern FLIP_H)
 import Data.Void                  (Void)
-import Data.List                  (intercalate)
 import Parsley.Common.Identifiers (MVar, ΦVar, ΣVar)
+import Data.GADT.Compare          (geq, (:~:)(Refl))
 
 type One = Succ Zero
 newtype Program o a = Program { getProgram :: Fix4 (Instr o) '[] One a a }
@@ -40,6 +40,7 @@ data Instr o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a
   Join      :: ΦVar x -> Instr o k (x : xs) n r a
   MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr o k xs n r a
   Swap      :: k (x : y : xs) n r a -> Instr o k (y : x : xs) n r a
+  Dup       :: k (x : x : xs) n r a -> Instr o k (x : xs) n r a
   Make      :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
   Get       :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
   Put       :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
@@ -62,18 +63,18 @@ freeCoins = mkCoin FreeCoins
 refundCoins = mkCoin RefundCoins
 drainCoins = mkCoin DrainCoins
 
-_App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
-_App m = Lift2 (USER APP) m
+pattern App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
+pattern App k = Lift2 (USER APP) k
 
-_Fmap :: Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
-_Fmap f m = Push f (In4 (Lift2 (USER (FLIP_H APP)) m))
+pattern Fmap :: Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
+pattern Fmap f k = Push f (In4 (Lift2 (USER (FLIP_H APP)) k))
 
 _Modify :: ΣVar x -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) ((x -> x) : xs) n r a
-_Modify σ m = Get σ (In4 (_App (In4 (Put σ m))))
+_Modify σ = Get σ . In4 . App . In4 . Put σ
 
 -- This this is a nice little trick to get this instruction to generate optimised code
-_If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) (Bool : xs) n r a
-_If t e = Choices [USER ID] [t] e
+pattern If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) (Bool : xs) n r a
+pattern If t e = Choices [USER ID] [t] e
 
 instance IFunctor4 (Instr o) where
   imap4 f Ret                 = Ret
@@ -94,6 +95,7 @@ instance IFunctor4 (Instr o) where
   imap4 f (Join φ)            = Join φ
   imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
+  imap4 f (Dup k)             = Dup (f k)
   imap4 f (Make σ k)          = Make σ (f k)
   imap4 f (Get σ k)           = Get σ (f k)
   imap4 f (Put σ k)           = Put σ (f k)
@@ -103,36 +105,36 @@ instance IFunctor4 (Instr o) where
 
 instance Show (Program o a) where show = show . getProgram
 instance Show (Fix4 (Instr o) xs n r a) where
-  show x = let Const4 s = cata4 alg x in s where
-    alg :: forall i j k. Instr o (Const4 String) i j k a -> Const4 String i j k a
-    alg Ret                 = Const4 $ "Ret"
-    alg (Call μ k)          = Const4 $ "(Call " ++ show μ ++ " " ++ show k ++ ")"
-    alg (Jump μ)            = Const4 $ "(Jump " ++ show μ ++ ")"
-    alg (Push x k)          = Const4 $ "(Push " ++ show x ++ " " ++ show k ++ ")"
-    alg (Pop k)             = Const4 $ "(Pop " ++ show k ++ ")"
-    alg (Lift2 f k)         = Const4 $ "(Lift2 " ++ show f ++ " " ++ show k ++ ")"
-    alg (Sat f k)           = Const4 $ "(Sat " ++ show f ++ " " ++ show k ++ ")"
-    alg Empt                = Const4 $ "Empt"
-    alg (Commit k)          = Const4 $ "(Commit " ++ show k ++ ")"
-    alg (Catch p h)         = Const4 $ "(Catch " ++ show p ++ " " ++ show h ++ ")"
-    alg (Tell k)            = Const4 $ "(Tell " ++ show k ++ ")"
-    alg (Seek k)            = Const4 $ "(Seek " ++ show k ++ ")"
-    alg (Case p q)          = Const4 $ "(Case " ++ show p ++ " " ++ show q ++ ")"
-    alg (Choices fs ks def) = Const4 $ "(Choices " ++ show fs ++ " [" ++ intercalate ", " (map show ks) ++ "] " ++ show def ++ ")"
-    alg (Iter μ l h)        = Const4 $ "{Iter " ++ show μ ++ " " ++ show l ++ " " ++ show h ++ "}"
-    alg (Join φ)            = Const4 $ show φ
-    alg (MkJoin φ p k)      = Const4 $ "(let " ++ show φ ++ " = " ++ show p ++ " in " ++ show k ++ ")"
-    alg (Swap k)            = Const4 $ "(Swap " ++ show k ++ ")"
-    alg (Make σ k)          = Const4 $ "(Make " ++ show σ ++ " " ++ show k ++ ")"
-    alg (Get σ k)           = Const4 $ "(Get " ++ show σ ++ " " ++ show k ++ ")"
-    alg (Put σ k)           = Const4 $ "(Put " ++ show σ ++ " " ++ show k ++ ")"
-    alg (LogEnter _ k)      = Const4 $ show k
-    alg (LogExit _ k)       = Const4 $ show k
-    alg (MetaInstr m k)         = Const4 $ "[" ++ show m ++ "] " ++ show k
-
-instance Show (Const4 String xs n r a) where show = getConst4
+  show = ($ "") . getConst4 . cata4 (Const4 . alg)
+    where
+      alg :: forall xs n r a. Instr o (Const4 (String -> String)) xs n r a -> String -> String
+      alg Ret                 = "Ret"
+      alg (Call μ k)          = "(Call " . shows μ . " " . getConst4 k . ")"
+      alg (Jump μ)            = "(Jump " . shows μ . ")"
+      alg (Push x k)          = "(Push " . shows x . " " . getConst4 k . ")"
+      alg (Pop k)             = "(Pop " . getConst4 k . ")"
+      alg (Lift2 f k)         = "(Lift2 " . shows f . " " . getConst4 k . ")"
+      alg (Sat f k)           = "(Sat " . shows f . " " . getConst4 k . ")"
+      alg Empt                = "Empt"
+      alg (Commit k)          = "(Commit " . getConst4 k . ")"
+      alg (Catch p h)         = "(Catch " . getConst4 p . " " . getConst4 h . ")"
+      alg (Tell k)            = "(Tell " . getConst4 k . ")"
+      alg (Seek k)            = "(Seek " . getConst4 k . ")"
+      alg (Case p q)          = "(Case " . getConst4 p . " " . getConst4 q . ")"
+      alg (Choices fs ks def) = "(Choices " . shows fs . " [" . intercalateDiff (", ") (map getConst4 ks) . "] " . getConst4 def . ")"
+      alg (Iter μ l h)        = "{Iter " . shows μ . " " . getConst4 l . " " . getConst4 h . "}"
+      alg (Join φ)            = shows φ
+      alg (MkJoin φ p k)      = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
+      alg (Swap k)            = "(Swap " . getConst4 k . ")"
+      alg (Dup k)             = "(Dup " . getConst4 k . ")"
+      alg (Make σ k)          = "(Make " . shows σ . " " . getConst4 k . ")"
+      alg (Get σ k)           = "(Get " . shows σ . " " . getConst4 k . ")"
+      alg (Put σ k)           = "(Put " . shows σ . " " . getConst4 k . ")"
+      alg (LogEnter _ k)      = getConst4 k
+      alg (LogExit _ k)       = getConst4 k
+      alg (MetaInstr m k)     = "[" . shows m . "] " . getConst4 k
 
 instance Show (MetaInstr n) where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"
   show (RefundCoins n) = "Refund " ++ show n ++ " coins"
-  show (DrainCoins n)    = "Using " ++ show n ++ " coins"
+  show (DrainCoins n)  = "Using " ++ show n ++ " coins"

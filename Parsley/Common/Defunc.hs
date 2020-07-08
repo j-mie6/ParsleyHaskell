@@ -36,8 +36,9 @@ instance Quapplicative DefuncUser where
   _code = genDefuncUser
 
 data Defunc a where
-  USER :: DefuncUser a -> Defunc a
-  SAME :: PositionOps o => Defunc (o -> o -> Bool)
+  USER   :: DefuncUser a -> Defunc a
+  BOTTOM :: Defunc a
+  SAME   :: PositionOps o => Defunc (o -> o -> Bool)
 
 pattern COMPOSE_H :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) => DefuncUser x -> DefuncUser y -> DefuncUser z
 pattern COMPOSE_H f g = APP_H (APP_H COMPOSE f) g
@@ -79,6 +80,7 @@ genDefuncUser2 f          qx qy  = [|| $$(genDefuncUser f) $$qx $$qy ||]
 
 genDefunc :: Defunc a -> Code a
 genDefunc (USER x) = genDefuncUser x
+genDefunc BOTTOM   = [||undefined||]
 genDefunc SAME     = same
 
 genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
@@ -107,3 +109,4 @@ instance Show (DefuncUser a) where
 instance Show (Defunc a) where
   show (USER x) = show x
   show SAME = "same"
+  show BOTTOM = "[[irrelevant]]"

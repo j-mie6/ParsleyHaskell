@@ -36,6 +36,9 @@ manyTest = many (string "ab" $> (code 'c'))
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")
 
+skipManyInspect :: Parser ()
+skipManyInspect = skipMany (char 'a')
+
 brainfuck :: Parser [BrainFuckOp]
 brainfuck = whitespace *> bf <* eof
   where

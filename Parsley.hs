@@ -42,6 +42,7 @@ module Parsley ( Parser, runParser, parseFromFile
                -- Template Haskell Utils
                , code, (>*<), makeQ, _code, _val, WQ, Lift
                , module Parsley.Machine.Input
+               , module Parsley.Common.Defunc
                ) where
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
@@ -120,7 +121,7 @@ some = manyN 1
 
 skipMany :: Parser a -> Parser ()
 --skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
-skipMany = pfoldl (code const) UNIT
+skipMany = void . pfoldl (code const) UNIT -- the void here will encourage the optimiser to recognise that the register is unused
 
 skipManyN :: Int -> Parser a -> Parser ()
 skipManyN n p = foldr (const (p *>)) (skipMany p) [1..n]
@@ -143,6 +144,16 @@ endBy p sep = many (p <* sep)
 
 endBy1 :: Parser a -> Parser b -> Parser [a]
 endBy1 p sep = some (p <* sep)
+
+sepEndBy :: Parser a -> Parser b -> Parser [a]
+sepEndBy p sep = option EMPTY (sepEndBy1 p sep)
+
+-- TODO Could do better with registers + difference list?
+sepEndBy1 :: Parser a -> Parser b -> Parser [a]
+sepEndBy1 p sep =
+  let seb1 = p <**> (sep *> (FLIP_H CONS <$> option EMPTY seb1)
+                 <|> pure (APP_H (FLIP_H CONS) EMPTY))
+  in seb1
 
 manyTill :: Parser a -> Parser b -> Parser [a]
 manyTill p end = let go = end $> EMPTY <|> p <:> go in go

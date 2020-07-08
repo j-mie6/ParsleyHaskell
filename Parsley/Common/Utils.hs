@@ -1,10 +1,12 @@
 {-# LANGUAGE TemplateHaskell,
              FlexibleInstances,
              UndecidableInstances #-}
-module Parsley.Common.Utils (code, WQ(..), Code, Quapplicative(..)) where
+module Parsley.Common.Utils (code, WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff) where
 
 import LiftPlugin (LiftTo, code)
 import Language.Haskell.TH (TExpQ)
+import Data.List (intersperse)
+import Data.String (IsString(..))
 
 type Code a = TExpQ a
 data WQ a = WQ { __val :: a, __code :: Code a }
@@ -23,3 +25,16 @@ instance Quapplicative WQ where
   makeQ = WQ
   _code = __code
   _val = __val
+
+intercalate :: Monoid w => w -> [w] -> w
+intercalate xs xss = mconcat (intersperse xs xss)
+
+instance IsString (String -> String) where
+  fromString = showString
+
+newtype Id a = Id {unId :: a -> a}
+instance Semigroup (Id a) where f <> g = Id $ unId f . unId g
+instance Monoid (Id a) where mempty = Id $ id
+
+intercalateDiff :: (a -> a) -> [(a -> a)] -> a -> a
+intercalateDiff sep xs = unId $ intercalate (Id sep) (map Id xs)

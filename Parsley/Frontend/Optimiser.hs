@@ -143,7 +143,7 @@ optimise (Branch (In (Branch b (In Empty) (In (Pure f)))) (In Empty) k) = optimi
 -- Distributivity Law: f <$> branch b p q                = branch b ((f .) <$> p) ((f .) <$> q)
 optimise (f :<$>: In (Branch b p q))                     = optimise (Branch b (optimise (APP_H COMPOSE f :<$>: p)) (optimise (APP_H COMPOSE f :<$>: q)))
 -- pure Match law: match vs (pure x) f def               = if elem x vs then f x else def
-optimise (Match (In (Pure x)) fs qs def)          = foldr (\(f, q) k -> if _val f (_val x) then q else k) def (zip fs qs)
+optimise (Match (In (Pure x)) fs qs def)                 = foldr (\(f, q) k -> if _val f (_val x) then q else k) def (zip fs qs)
 -- Generalised Identity Match law: match vs p (pure . f) def = f <$> (p >?> flip elem vs) <|> def
 optimise (Match p fs qs def)
   | all (\case {In (Pure _) -> True; _ -> False}) qs     = optimise (optimise (makeQ apply qapply :<$>: (p >?> (makeQ validate qvalidate))) :<|>: def)

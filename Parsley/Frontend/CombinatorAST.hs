@@ -5,14 +5,13 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Parsley.Frontend.CombinatorAST where
 
 import Parsley.Common.Indexed     (IFunctor, Fix(In), Const1(..), imap, cata)
 import Parsley.Common.Identifiers (IMVar, MVar(..), IΣVar(..))
-import Parsley.Common.Utils       (WQ, Quapplicative)
+import Parsley.Common.Utils       (WQ, Quapplicative, intercalateDiff)
 import Parsley.Common.Defunc
-import Data.List                  (intercalate)
 
 -- Parser wrapper type
 newtype Parser a = Parser {unParser :: Fix Combinator a}
@@ -116,26 +115,26 @@ instance IFunctor Combinator where
   imap f (MetaCombinator m p) = MetaCombinator m (f p)
 
 instance Show (Fix Combinator a) where
-  show = getConst1 . cata (Const1 . alg)
+  show = ($ "") . getConst1 . cata (Const1 . alg)
     where
-      alg (Pure x)                                  = "(pure " ++ show x ++ ")"
-      alg (Satisfy f)                               = "(satisfy " ++ show f ++ ")"
-      alg (Const1 pf :<*>: Const1 px)               = concat ["(", pf, " <*> ",  px, ")"]
-      alg (Const1 p :*>: Const1 q)                  = concat ["(", p, " *> ", q, ")"]
-      alg (Const1 p :<*: Const1 q)                  = concat ["(", p, " <* ", q, ")"]
-      alg (Const1 p :<|>: Const1 q)                 = concat ["(", p, " <|> ", q, ")"]
+      alg (Pure x)                                  = "(pure " . shows x . ")"
+      alg (Satisfy f)                               = "(satisfy " . shows f . ")"
+      alg (Const1 pf :<*>: Const1 px)               = "(" . pf . " <*> " .  px . ")"
+      alg (Const1 p :*>: Const1 q)                  = "(" . p . " *> " . q . ")"
+      alg (Const1 p :<*: Const1 q)                  = "(" . p . " <* " . q . ")"
+      alg (Const1 p :<|>: Const1 q)                 = "(" . p . " <|> " . q . ")"
       alg Empty                                     = "empty"
-      alg (Try (Const1 p))                          = concat ["(try ", p, ")"]
-      alg (LookAhead (Const1 p))                    = concat ["(lookAhead ", p, ")"]
-      alg (Let False v _)                           = concat ["(let-bound ", show v, ")"]
-      alg (Let True v _)                            = concat ["(rec ", show v, ")"]
-      alg (NotFollowedBy (Const1 p))                = concat ["(notFollowedBy ", p, ")"]
-      alg (Branch (Const1 b) (Const1 p) (Const1 q)) = concat ["(branch ", b, " ", p, " ", q, ")"]
-      alg (Match (Const1 p) fs qs (Const1 def))     = concat ["(match ", p, " ", show fs, " [", intercalate ", " (map getConst1 qs), "] ", def, ")"]
-      alg (ChainPre (Const1 op) (Const1 p))         = concat ["(chainPre ", op, " ", p, ")"]
-      alg (ChainPost (Const1 p) (Const1 op))        = concat ["(chainPost ", p, " ", op, ")"]
+      alg (Try (Const1 p))                          = "(try " . p . ")"
+      alg (LookAhead (Const1 p))                    = "(lookAhead " . p . ")"
+      alg (Let False v _)                           = "(let-bound " . shows v . ")"
+      alg (Let True v _)                            = "(rec " . shows v . ")"
+      alg (NotFollowedBy (Const1 p))                = "(notFollowedBy " . p . ")"
+      alg (Branch (Const1 b) (Const1 p) (Const1 q)) = "(branch " . b . " " . p . " " . q . ")"
+      alg (Match (Const1 p) fs qs (Const1 def))     = "(match " . p . " " . shows fs . " [" . intercalateDiff (", ") (map getConst1 qs) . "] "  . def . ")"
+      alg (ChainPre (Const1 op) (Const1 p))         = "(chainPre " . op . " " . p . ")"
+      alg (ChainPost (Const1 p) (Const1 op))        = "(chainPost " . p . " " . op . ")"
       alg (Debug _ (Const1 p))                      = p
-      alg (MetaCombinator m (Const1 p))             = concat [p, " [", show m, "]"]
+      alg (MetaCombinator m (Const1 p))             = p . " [" . shows m . "]"
 
 instance Show MetaCombinator where
   show Cut = "coins after"

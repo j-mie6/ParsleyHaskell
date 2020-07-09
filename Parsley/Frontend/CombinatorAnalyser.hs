@@ -5,16 +5,16 @@
 {-# LANGUAGE TypeOperators #-}
 module Parsley.Frontend.CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
 
-import Parsley.Frontend.CombinatorAST (Combinator(..), MetaCombinator(..))
-import Parsley.Frontend.Identifiers   (IMVar, MVar(..))
-import Parsley.Common.Indexed         (Fix(..), Const1(..), imap, cata, zygo, (:*:)(..), (/\), ifst, isnd)
-import Control.Applicative            (liftA2)
-import Control.Monad.Reader           (ReaderT, ask, runReaderT, local)
-import Control.Monad.State.Strict     (State, get, put, evalState)
-import Data.Map.Strict                (Map)
-import Data.Set                       (Set)
-import Data.Monoid                    ((<>))
-import Data.Coerce                    (coerce)
+import Parsley.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
+import Parsley.Core.Identifiers   (IMVar, MVar(..))
+import Parsley.Common.Indexed     (Fix(..), Const1(..), imap, cata, zygo, (:*:)(..), (/\), ifst, isnd)
+import Control.Applicative        (liftA2)
+import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
+import Control.Monad.State.Strict (State, get, put, evalState)
+import Data.Map.Strict            (Map)
+import Data.Set                   (Set)
+import Data.Monoid                ((<>))
+import Data.Coerce                (coerce)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 

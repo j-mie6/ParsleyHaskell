@@ -15,11 +15,12 @@
 module Parsley.Frontend.Compiler(compile) where
 
 import Prelude hiding (pred)
-import Parsley.Frontend.CombinatorAST      (Combinator(..), Parser(..))
+import Parsley.Core.CombinatorAST      (Combinator(..))
+import Parsley.Core.Primitives         (Parser(..))
 import Parsley.Frontend.Optimiser          (optimise)
 import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
 import Parsley.Backend                     (codeGen, Program(..), LetBinding(..), PositionOps)
-import Parsley.Frontend.Identifiers        (IMVar, IΣVar, MVar(..))
+import Parsley.Core.Identifiers        (IMVar, IΣVar, MVar(..))
 import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap))
 import Parsley.Common.Utils                (Quapplicative, WQ)
 import Control.Applicative                 (liftA, liftA2, liftA3)

@@ -1,7 +1,7 @@
 {-# LANGUAGE KindSignatures,
              GeneralizedNewtypeDeriving,
              DerivingStrategies #-}
-module Parsley.Frontend.Identifiers (
+module Parsley.Core.Identifiers (
     MVar(..), IMVar,
     ΣVar(..), IΣVar,
   ) where

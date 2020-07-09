@@ -1,4 +1,4 @@
-module Parsley.Common.InputTypes where
+module Parsley.Core.InputTypes where
 
 import Data.Text (Text)
 

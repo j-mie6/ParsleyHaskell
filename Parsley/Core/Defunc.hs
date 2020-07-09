@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternSynonyms,
              TemplateHaskell,
              GADTs #-}
-module Parsley.Frontend.Defunc where
+module Parsley.Core.Defunc where
 
 import Parsley.Common.Utils (WQ(..), Code, Quapplicative(..))
 

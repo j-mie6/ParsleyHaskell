@@ -3,7 +3,6 @@
 module Parsley.Backend.Machine (
     Input, prepare, eval,
     PositionOps,
-    Text16(..), CharList(..),
     module Parsley.Backend.Machine.Instructions
   ) where
 
@@ -11,7 +10,7 @@ import Parsley.Backend.Machine.Instructions
 import Parsley.Backend.Machine.Eval (eval)
 import Parsley.Backend.Machine.InputRep (Rep)
 import Parsley.Backend.Machine.InputOps (InputPrep(..), PositionOps)
-import Parsley.Common.InputTypes
+import Parsley.Core.InputTypes
 import Parsley.Backend.Machine.Ops (Ops)
 import Data.Text (Text)
 import Data.Array.Unboxed (UArray)

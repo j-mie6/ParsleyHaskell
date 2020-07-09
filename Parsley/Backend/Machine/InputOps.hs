@@ -13,7 +13,7 @@ module Parsley.Backend.Machine.InputOps (
 
 import Parsley.Common.Utils     (Code)
 import Parsley.Backend.Machine.InputRep
-import Parsley.Common.InputTypes
+import Parsley.Core.InputTypes
 import Data.Array.Base          (UArray(..), listArray)
 import GHC.Prim                 (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
 import GHC.Exts                 (Int(..), Char(..))

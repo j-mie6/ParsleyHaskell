@@ -102,15 +102,18 @@ library
                        Parsley.Common.Queue,
                        Parsley.Common.Utils,
                        Parsley.Common.Vec,
-                       Parsley.Common.InputTypes,
+
+                       Parsley.Core,
+                       Parsley.Core.CombinatorAST,
+                       Parsley.Core.Identifiers,
+                       Parsley.Core.Defunc,
+                       Parsley.Core.InputTypes,
+                       Parsley.Core.Primitives,
 
                        Parsley.Frontend,
                        Parsley.Frontend.CombinatorAnalyser,
-                       Parsley.Frontend.CombinatorAST,
                        Parsley.Frontend.Compiler,
                        Parsley.Frontend.Optimiser,
-                       Parsley.Frontend.Defunc,
-                       Parsley.Frontend.Identifiers,
 
                        Parsley.Backend,
                        Parsley.Backend.CodeGenerator,

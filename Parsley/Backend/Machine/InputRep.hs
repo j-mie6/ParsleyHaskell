@@ -20,7 +20,7 @@ module Parsley.Backend.Machine.InputRep (
   ) where
 
 import Parsley.Common.Utils     (Code)
-import Parsley.Common.InputTypes
+import Parsley.Core.InputTypes
 import Data.Array.Unboxed       (UArray)
 import GHC.Prim                 (Int#, Addr#, nullAddr#)
 import GHC.Exts                 (Int(..), TYPE, RuntimeRep(..))

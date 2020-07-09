@@ -3,13 +3,13 @@
              DerivingStrategies #-}
 module Parsley.Backend.Machine.Identifiers (
     ΦVar(..), IΦVar,
-    module Parsley.Frontend.Identifiers,
+    module Parsley.Core.Identifiers,
   ) where
 
 import Data.Word         (Word64)
 import Unsafe.Coerce     (unsafeCoerce)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
-import Parsley.Frontend.Identifiers
+import Parsley.Core.Identifiers
 
 newtype ΦVar (a :: *) = ΦVar IΦVar
 newtype IΦVar = IΦVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show)

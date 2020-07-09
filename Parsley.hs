@@ -6,51 +6,22 @@
              AllowAmbiguousTypes,
              PatternSynonyms,
              GADTs #-}
-module Parsley ( Parser, runParser, parseFromFile
-               -- Functor
-               , fmap, (<$>), (<$), ($>), (<&>), void
-               -- Applicative
-               , pure, (<*>), (*>), (<*), (<**>), (<:>), liftA2, liftA3
-               -- Alternative
-               , empty, (<|>), (<+>), optionally, optional, option, choice, oneOf, noneOf, maybeP
-               -- Monoidal
-               , unit, (<~>), (<~), (~>)
-               -- Selective
-               , branch, select, match, conditional, predicate
-               -- "Monadic"
-               , (||=), (>>)
-               -- Primitives
-               , satisfy, item
-               , lookAhead, notFollowedBy, try
-               -- Iteratives
-               , chainl1, chainr1, chainPre, chainPost, chainl, chainr
-               , pfoldr, pfoldl, pfoldr1, pfoldl1
-               , many, manyN, some
-               , skipMany, skipManyN, skipSome
-               , sepBy, sepBy1, endBy, endBy1, manyTill, someTill
-               -- Composites
-               , char, eof, more
-               , traverse, sequence, string, token, repeat
-               , between
-               , (<?|>), (>?>), (>??>), when, while, fromMaybeP
-               , debug
-               -- Expressions
-               , Level(..), Prec(..), precedence, monolith, infixL, infixR, prefix, postfix
-               -- Template Haskell Utils
-               , code, (>*<), makeQ, _code, _val, WQ, Lift
-               , module Parsley.Common.InputTypes
-               , module Parsley.Frontend.Defunc
-               ) where
+module Parsley (
+    module Parsley,
+    module Core,
+    -- Template Haskell Utils
+    code, (>*<), makeQ, _code, _val, WQ, Lift
+  ) where
 
-import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
+import Prelude hiding              (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
+import Parsley.Core as Core hiding (_pure, _satisfy, _conditional)
+import Parsley.Core
 import Parsley.Frontend
-import Parsley.Backend            (Input, prepare, Text16(..), CharList(..), eval)
+import Parsley.Backend
 import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
-import Parsley.Common.InputTypes
 import Data.Function              (fix)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
-import Parsley.Frontend.Defunc hiding (genDefunc, genDefunc1, genDefunc2)
 
 class ParserOps rep where
   pure :: rep a -> Parser a

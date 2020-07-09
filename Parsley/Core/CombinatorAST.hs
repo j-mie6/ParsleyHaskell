@@ -6,69 +6,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Parsley.Frontend.CombinatorAST where
+module Parsley.Core.CombinatorAST where
 
-import Parsley.Common.Indexed       (IFunctor, Fix(In), Const1(..), imap, cata)
-import Parsley.Frontend.Identifiers (MVar)
-import Parsley.Common.Utils         (WQ, Quapplicative, intercalateDiff)
-import Parsley.Frontend.Defunc
-
--- Parser wrapper type
-newtype Parser a = Parser {unParser :: Fix Combinator a}
-
--- Core smart constructors
-{-# INLINE _pure #-}
-_pure :: Defunc a -> Parser a
-_pure = Parser . In . Pure
-
-infixl 4 <*>
-(<*>) :: Parser (a -> b) -> Parser a -> Parser b
-Parser p <*> Parser q = Parser (In (p :<*>: q))
-
-infixl 4 <*
-(<*) :: Parser a -> Parser b -> Parser a
-Parser p <* Parser q = Parser (In (p :<*: q))
-
-infixl 4 *>
-(*>) :: Parser a -> Parser b -> Parser b
-Parser p *> Parser q = Parser (In (p :*>: q))
-
-empty :: Parser a
-empty = Parser (In Empty)
-
-infixl 3 <|>
-(<|>) :: Parser a -> Parser a -> Parser a
-Parser p <|> Parser q = Parser (In (p :<|>: q))
-
-{-# INLINE _satisfy #-}
-_satisfy :: Defunc (Char -> Bool) -> Parser Char
-_satisfy = Parser . In . Satisfy
-
-lookAhead :: Parser a -> Parser a
-lookAhead = Parser . In . LookAhead . unParser
-
-notFollowedBy :: Parser a -> Parser ()
-notFollowedBy = Parser . In . NotFollowedBy . unParser
-
-try :: Parser a -> Parser a
-try = Parser . In . Try . unParser
-
-_conditional :: [(Defunc (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
-_conditional cs (Parser p) (Parser def) =
-  let (fs, qs) = unzip cs
-  in Parser (In (Match p fs (map unParser qs) def))
-
-branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
-branch (Parser c) (Parser p) (Parser q) = Parser (In (Branch c p q))
-
-chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre (Parser op) (Parser p) = Parser (In (ChainPre op p))
-
-chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost (Parser p) (Parser op) = Parser (In (ChainPost p op))
-
-debug :: String -> Parser a -> Parser a
-debug name (Parser p) = Parser (In (Debug name p))
+import Parsley.Common.Indexed   (IFunctor, Fix, Const1(..), imap, cata)
+import Parsley.Core.Identifiers (MVar)
+import Parsley.Common.Utils     (intercalateDiff)
+import Parsley.Core.Defunc
 
 -- Core datatype
 data Combinator (k :: * -> *) (a :: *) where

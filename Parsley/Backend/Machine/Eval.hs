@@ -29,8 +29,8 @@ import Control.Monad.Reader       (ask, asks, local)
 import Debug.Trace                (trace)
 import System.Console.Pretty      (color, Color(Green))
 
-eval :: forall o s a. Ops o => Code (InputDependant o) -> (Program o a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
-eval input (Program !p, fs) = trace ("EVALUATING: " ++ show p) [|| runST $
+eval :: forall o s a. Ops o => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
+eval input (LetBinding !p, fs) = trace ("EVALUATING: " ++ show p) [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs

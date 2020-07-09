@@ -9,7 +9,7 @@
 module Parsley.Backend.CodeGenerator (codeGen) where
 
 import Parsley.Core.CombinatorAST           (Combinator(..), MetaCombinator(..))
-import Parsley.Backend.Machine.Instructions (Instr(..), MetaInstr, pattern Fmap, pattern App, _Modify, pattern If, addCoins, refundCoins, drainCoins, freeCoins)
+import Parsley.Backend.Machine.Instructions (LetBinding(..), Instr(..), MetaInstr, pattern Fmap, pattern App, _Modify, pattern If, addCoins, refundCoins, drainCoins, freeCoins)
 import Parsley.Backend.Machine.InputOps     (PositionOps)
 import Parsley.Backend.Machine.Identifiers  (IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import Parsley.Backend.InstructionAnalyser  (coinsNeeded)
@@ -19,7 +19,7 @@ import Parsley.Backend.Machine.Defunc       (Defunc(USER, SAME))
 import Control.Applicative                  (liftA2)
 import Control.Monad.Reader                 (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict           (State, get, modify', runState, MonadState)
-import Parsley.Common.Fresh                 (VFreshT, HFresh, runFreshT, runFresh, evalFreshT, construct, MonadFresh(..), mapVFreshT)
+import Parsley.Common.Fresh                 (VFreshT, HFresh, runFreshT, evalFresh, evalFreshT, construct, MonadFresh(..), mapVFreshT)
 import Control.Monad.Trans                  (lift)
 import Data.Set                             (Set)
 import Data.Maybe                           (isJust)
@@ -28,9 +28,9 @@ import Data.Void                            (Void)
 import qualified Data.Set as Set
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a
-runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> (a, IΣVar)
+runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> a
 runCodeGenStack m μ0 φ0 σ0 =
-  (flip runFresh σ0 .
+  (flip evalFresh σ0 .
    flip evalFreshT μ0 .
    flip evalFreshT φ0) m
 
@@ -38,15 +38,14 @@ newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
 -- TODO, ensure that let-bound parsers do not use finalise to add coins!
-codeGen :: PositionOps o => Bool -> Fix Combinator x -> IMVar -> IΣVar -> (Fix4 (Instr o) '[] One x a, IΣVar)
-codeGen letBound p μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ (m, maxΣ)
+codeGen :: PositionOps o => Bool -> Fix Combinator x -> IMVar -> LetBinding o a x
+codeGen letBound p μ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ LetBinding m
   where
-    (m, maxΣ) = finalise (histo alg p)
+    m = finalise (histo alg p)
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg =
-      let (m, maxΣ) = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
-          n = coinsNeeded m
-      in (if letBound then m else addCoins n m, maxΣ)
+      let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 0
+      in if letBound then m else addCoins (coinsNeeded m) m
 
 pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
 pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)

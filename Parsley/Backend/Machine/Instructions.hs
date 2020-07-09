@@ -6,6 +6,8 @@
              KindSignatures,
              PatternSynonyms,
              ScopedTypeVariables,
+             DerivingStrategies,
+             GeneralizedNewtypeDeriving,
              OverloadedStrings #-}
 module Parsley.Backend.Machine.Instructions where
 
@@ -17,9 +19,7 @@ import Data.Void                  (Void)
 import Parsley.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
 import Data.GADT.Compare          (geq, (:~:)(Refl))
 
-newtype Program o a = Program { getProgram :: Fix4 (Instr o) '[] One a a }
-newtype LetBinding o a x = LetBinding (Fix4 (Instr o) '[] One x a)
-instance Show (LetBinding o a x) where show (LetBinding m) = show m
+newtype LetBinding o a x = LetBinding (Fix4 (Instr o) '[] One x a) deriving newtype Show
 
 data Instr o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
   Ret       :: Instr o k '[x] n x a
@@ -103,7 +103,6 @@ instance IFunctor4 (Instr o) where
   imap4 f (LogExit name k)    = LogExit name (f k)
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
 
-instance Show (Program o a) where show = show . getProgram
 instance Show (Fix4 (Instr o) xs n r a) where
   show = ($ "") . getConst4 . cata4 (Const4 . alg)
     where

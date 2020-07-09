@@ -19,8 +19,7 @@ import Parsley.Core.CombinatorAST      (Combinator(..))
 import Parsley.Core.Primitives         (Parser(..))
 import Parsley.Frontend.Optimiser          (optimise)
 import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
-import Parsley.Backend                     (codeGen, Program(..), LetBinding(..), PositionOps)
-import Parsley.Core.Identifiers        (IMVar, IΣVar, MVar(..))
+import Parsley.Core.Identifiers        (IMVar, MVar(..))
 import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap))
 import Parsley.Common.Utils                (Quapplicative, WQ)
 import Control.Applicative                 (liftA, liftA2, liftA3)
@@ -41,23 +40,20 @@ import GHC.Exts                            (Int(..))
 import Debug.Trace                         (trace)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
-import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, foldrWithKey, size)
+import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, map, size)
 import qualified Data.Set            as Set     (null)
 
-compile :: PositionOps o => Parser a -> (Program o a, DMap MVar (LetBinding o a))
-compile (Parser p) =
-  let !(p', μs, maxV) = preprocess p
-      !(m, maxΣ) = codeGen False (analyse emptyFlags p') (maxV + 1) 0
-      !ms = compileLets μs (maxV + 1) maxΣ
-  in trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (Program m, ms)
-
-compileLets :: PositionOps o => DMap MVar (Fix Combinator) -> IMVar -> IΣVar -> DMap MVar (LetBinding o a)
-compileLets μs maxV maxΣ = let (ms, _) = DMap.foldrWithKey compileLet (DMap.empty, maxΣ) μs in ms
+compile :: forall compiled a. Parser a -> (forall x. Bool -> Fix Combinator x -> IMVar -> compiled x) -> (compiled a, DMap MVar compiled)
+compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (m, ms)
   where
-    compileLet :: PositionOps o => MVar x -> Fix Combinator x -> (DMap MVar (LetBinding o a), IΣVar) -> (DMap MVar (LetBinding o a), IΣVar)
-    compileLet (MVar μ) p (ms, maxΣ) =
-      let (m, maxΣ') = codeGen True (analyse (emptyFlags {letBound = True}) p) maxV (maxΣ + 1)
-      in (DMap.insert (MVar μ) (LetBinding m) ms, maxΣ')
+    (p', μs, maxV) = preprocess p
+
+    codeGen' :: Bool -> Fix Combinator x -> compiled x
+    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = letBound}) p) (maxV + 1)
+
+    ms = DMap.map (codeGen' True) μs
+    m = codeGen' False p'
+
 
 preprocess :: Fix Combinator a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 preprocess p =
@@ -183,7 +179,7 @@ addRec :: MonadState LetFinderState m => ParserName -> m ()
 addRec = modifyRecs . HashSet.insert
 
 ifSeen :: MonadReader LetFinderCtx m => ParserName -> m a -> m a -> m a
-ifSeen x yes no = do !seen <- ask; if HashSet.member x seen then yes else no
+ifSeen x yes no = do seen <- ask; if HashSet.member x seen then yes else no
 
 ifNotProcessedBefore :: MonadState LetFinderState m => ParserName -> m () -> m ()
 ifNotProcessedBefore x m = do !before <- getBefore; if HashSet.member x before then return () else m

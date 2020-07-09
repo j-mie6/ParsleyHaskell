@@ -1,7 +1,6 @@
 module Parsley.Backend (
     Input, prepare, eval,
-    module Parsley.Backend.CodeGenerator,
-    PositionOps -- FIXME This needs to go
+    module Parsley.Backend.CodeGenerator
   ) where
 
 import Parsley.Backend.CodeGenerator

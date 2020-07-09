@@ -5,7 +5,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
 
-module Parsley.Common.Fresh ( VFreshT, HFreshT, VFresh, HFresh, runFreshT, runFresh, evalFreshT, execFreshT, MonadFresh(..), construct, mapVFreshT ) where
+module Parsley.Common.Fresh ( VFreshT, HFreshT, VFresh, HFresh, runFreshT, runFresh, evalFreshT, evalFresh, execFreshT, execFresh, MonadFresh(..), construct, mapVFreshT ) where
 import Control.Applicative    (liftA2)
 import Control.Monad.Identity (Identity, runIdentity)
 import Control.Monad.Fix      (MonadFix(..))
@@ -47,6 +47,12 @@ instance Monad n => RunFreshT x n (FreshT x n) where
 
 runFresh :: (Monad m, RunFreshT x Identity m) => m a -> x -> (a, x)
 runFresh mx = runIdentity . runFreshT mx
+
+evalFresh :: (Monad m, RunFreshT x Identity m) => m a -> x -> a
+evalFresh mx = runIdentity . evalFreshT mx
+
+execFresh :: (Monad m, RunFreshT x Identity m) => m a -> x -> x
+execFresh mx = runIdentity . execFreshT mx
 
 vFreshT :: (x -> x -> m (a, x, x)) -> VFreshT x m a
 vFreshT = VFreshT . FreshT

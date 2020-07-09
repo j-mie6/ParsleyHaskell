@@ -321,7 +321,7 @@ precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
     level (Postfix ops wrap) atom = chainPost (wrap <$> atom) (choice ops)
 
 runParser :: Input input => Parser a -> Code (input -> Maybe a)
-runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p))||]
+runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p codeGen))||]
 
 parseFromFile :: Parser a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

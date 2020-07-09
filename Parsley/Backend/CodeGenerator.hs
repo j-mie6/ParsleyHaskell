@@ -8,24 +8,22 @@
              PatternSynonyms #-}
 module Parsley.Backend.CodeGenerator (codeGen) where
 
-import Parsley.Core.CombinatorAST           (Combinator(..), MetaCombinator(..))
-import Parsley.Backend.Machine.Instructions (LetBinding(..), Instr(..), MetaInstr, pattern Fmap, pattern App, _Modify, pattern If, addCoins, refundCoins, drainCoins, freeCoins)
-import Parsley.Backend.Machine.InputOps     (PositionOps)
-import Parsley.Backend.Machine.Identifiers  (IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
-import Parsley.Backend.InstructionAnalyser  (coinsNeeded)
-import Parsley.Common.Indexed               (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), One, imap, histo, extract, (|>))
-import Parsley.Core.Defunc                  (Defunc(BLACK, COMPOSE, UNIT, ID), pattern FLIP_H)
-import Parsley.Backend.Machine.Defunc       (Defunc(USER, SAME))
+import Data.Maybe                           (isJust)
+import Data.Void                            (Void)
+import Debug.Trace                          (traceShow, trace)
 import Control.Applicative                  (liftA2)
 import Control.Monad.Reader                 (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict           (State, get, modify', runState, MonadState)
-import Parsley.Common.Fresh                 (VFreshT, HFresh, runFreshT, evalFresh, evalFreshT, construct, MonadFresh(..), mapVFreshT)
 import Control.Monad.Trans                  (lift)
-import Data.Set                             (Set)
-import Data.Maybe                           (isJust)
-import Debug.Trace                          (traceShow, trace)
-import Data.Void                            (Void)
-import qualified Data.Set as Set
+import Parsley.Backend.Machine              (Defunc(USER, SAME), LetBinding(..), Instr(..), MetaInstr, pattern Fmap, pattern App, _Modify,
+                                             pattern If, addCoins, refundCoins, drainCoins, freeCoins, PositionOps,
+                                             IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
+import Parsley.Backend.InstructionAnalyser  (coinsNeeded)
+import Parsley.Common.Fresh                 (VFreshT, HFresh, runFreshT, evalFresh, evalFreshT, construct, MonadFresh(..), mapVFreshT)
+import Parsley.Common.Indexed               (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), One, imap, histo, extract, (|>))
+import Parsley.Core.CombinatorAST           (Combinator(..), MetaCombinator(..))
+import Parsley.Core.Defunc                  (Defunc(BLACK, COMPOSE, UNIT, ID), pattern FLIP_H)
+
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a
 runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> a
@@ -37,7 +35,6 @@ runCodeGenStack m μ0 φ0 σ0 =
 newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
--- TODO, ensure that let-bound parsers do not use finalise to add coins!
 codeGen :: PositionOps o => Bool -> Fix Combinator x -> IMVar -> LetBinding o a x
 codeGen letBound p μ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ LetBinding m
   where

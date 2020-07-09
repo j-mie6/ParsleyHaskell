@@ -9,15 +9,14 @@
              DerivingStrategies,
              GeneralizedNewtypeDeriving,
              OverloadedStrings #-}
-module Parsley.Backend.Machine.Instructions where
+module Parsley.Backend.Machine.Instructions (module Parsley.Backend.Machine.Instructions) where
 
-import Parsley.Common.Indexed     (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One)
-import Parsley.Common.Utils       (WQ(..), intercalateDiff)
-import Parsley.Core.Defunc as Core (Defunc(APP, ID), pattern FLIP_H)
-import Parsley.Backend.Machine.Defunc as Machine (Defunc(USER))
-import Data.Void                  (Void)
+import Data.Void                           (Void)
 import Parsley.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
-import Data.GADT.Compare          (geq, (:~:)(Refl))
+import Parsley.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, WQ(..), intercalateDiff)
+
+import Parsley.Backend.Machine.Defunc as Machine (Defunc(USER))
+import Parsley.Core.Defunc            as Core    (Defunc(APP, ID), pattern FLIP_H)
 
 newtype LetBinding o a x = LetBinding (Fix4 (Instr o) '[] One x a) deriving newtype Show
 

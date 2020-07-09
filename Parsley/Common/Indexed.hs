@@ -1,14 +1,12 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE EmptyCase #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeOperators #-}
-module Parsley.Common.Indexed where
+{-# LANGUAGE GADTs,
+             FlexibleInstances,
+             RankNTypes,
+             DataKinds,
+             ScopedTypeVariables,
+             PolyKinds,
+             MultiParamTypeClasses,
+             TypeOperators #-}
+module Parsley.Common.Indexed (module Parsley.Common.Indexed) where
 
 import Control.Applicative ((<|>), liftA2)
 import Data.Maybe          (fromMaybe)

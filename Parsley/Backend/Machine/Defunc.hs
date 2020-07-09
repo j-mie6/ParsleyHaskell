@@ -1,9 +1,10 @@
 {-# LANGUAGE TemplateHaskell,
              GADTs #-}
-module Parsley.Backend.Machine.Defunc where
+module Parsley.Backend.Machine.Defunc (module Parsley.Backend.Machine.Defunc) where
 
-import Parsley.Common.Utils (Code)
 import Parsley.Backend.Machine.InputOps (PositionOps(same))
+import Parsley.Common.Utils             (Code)
+
 import qualified Parsley.Core.Defunc as Core (Defunc, genDefunc, genDefunc1, genDefunc2)
 
 data Defunc a where

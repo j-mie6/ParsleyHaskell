@@ -2,6 +2,7 @@
 module Parsley.Common.Queue (Queue, empty, enqueue, dequeue, null, size, foldr) where
 
 import Prelude hiding (null, foldr)
+
 import qualified Prelude (foldr)
 
 data Queue a = Queue {

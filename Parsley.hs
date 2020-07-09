@@ -14,14 +14,16 @@ module Parsley (
   ) where
 
 import Prelude hiding              (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
-import Parsley.Core as Core hiding (_pure, _satisfy, _conditional)
-import Parsley.Core
-import Parsley.Frontend
-import Parsley.Backend
-import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
+
 import Data.Function              (fix)
-import Language.Haskell.TH.Syntax (Lift)
 import Data.Text.IO               (readFile)
+import Language.Haskell.TH.Syntax (Lift)
+import Parsley.Backend            (codeGen, Input, eval, prepare)
+import Parsley.Core
+import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
+import Parsley.Frontend           (compile)
+
+import Parsley.Core as Core hiding (_pure, _satisfy, _conditional)
 
 class ParserOps rep where
   pure :: rep a -> Parser a

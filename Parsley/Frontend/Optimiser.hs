@@ -1,14 +1,13 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE GADTs,
+             TemplateHaskell,
+             LambdaCase,
+             PatternSynonyms,
+             ViewPatterns #-}
 module Parsley.Frontend.Optimiser (optimise) where
 
 import Prelude hiding ((<$>))
+import Parsley.Common    (Fix(In), code, Quapplicative(..))
 import Parsley.Core.CombinatorAST (Combinator(..))
-import Parsley.Common.Indexed     (Fix(In))
-import Parsley.Common.Utils       (code, Quapplicative(..))
 import Parsley.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H)
 
 pattern f :<$>: p = In (Pure f) :<*>: p

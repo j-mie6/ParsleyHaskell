@@ -3,10 +3,10 @@
              UndecidableInstances #-}
 module Parsley.Common.Utils (code, WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff) where
 
-import LiftPlugin (LiftTo, code)
-import Language.Haskell.TH (TExpQ)
 import Data.List (intersperse)
 import Data.String (IsString(..))
+import Language.Haskell.TH (TExpQ)
+import LiftPlugin (LiftTo, code)
 
 type Code a = TExpQ a
 data WQ a = WQ { __val :: a, __code :: Code a }

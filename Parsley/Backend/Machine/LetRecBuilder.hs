@@ -1,13 +1,13 @@
 {-# LANGUAGE RankNTypes, TemplateHaskell #-}
-module Parsley.Backend.Machine.LetRecBuilder where
+module Parsley.Backend.Machine.LetRecBuilder (letRec) where
 
-import Parsley.Common.Utils       (Code)
-import Data.Dependent.Map         (DMap, DSum(..))
+import Data.Functor.Const         (Const(..), getConst)
 import Data.GADT.Compare          (GCompare)
 import Language.Haskell.TH        (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
-import Data.Functor.Const         (Const(..), getConst)
-import Data.Dependent.Map as DMap ((!), map, toList, traverseWithKey)
+import Parsley.Common.Utils       (Code)
+
+import Data.Dependent.Map as DMap (DMap, DSum(..), (!), map, toList, traverseWithKey)
 
 letRec :: GCompare key => {-bindings-}   DMap key named
                        -> {-nameof-}     (forall a. key a -> named a -> String)

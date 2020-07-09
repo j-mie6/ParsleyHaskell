@@ -13,23 +13,23 @@
              TypeApplications,
              ConstrainedClassMethods,
              RecordWildCards #-}
-module Parsley.Backend.Machine.Ops where
+module Parsley.Backend.Machine.Ops (module Parsley.Backend.Machine.Ops) where
 
+import Control.Monad                       (liftM2)
+import Control.Monad.Reader                (ask, local)
+import Control.Monad.ST                    (ST)
+import Data.STRef                          (writeSTRef, readSTRef, newSTRef)
+import Data.Text                           (Text)
+import Data.Void                           (Void)
+import Debug.Trace                         (trace)
 import Parsley.Backend.Machine.Identifiers (MVar, ΦVar)
-import Parsley.Backend.Machine.State
-import Parsley.Common.Utils   (Code)
-import Parsley.Common.Vec     (Vec(..))
-import Parsley.Common.Indexed (Nat(..), One)
-import Control.Monad.ST       (ST)
-import Data.STRef             (writeSTRef, readSTRef, newSTRef)
-import Parsley.Backend.Machine.InputRep (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
-import Parsley.Backend.Machine.InputOps (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
-import Data.Text              (Text)
-import Data.Void              (Void)
-import Debug.Trace            (trace)
-import System.Console.Pretty  (color, Color(Green, White, Red, Blue))
-import Control.Monad.Reader   (ask, local)
-import Control.Monad          (liftM2)
+import Parsley.Backend.Machine.InputOps    (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Backend.Machine.InputRep    (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
+import Parsley.Backend.Machine.State       (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, Reg, SubRoutine, OpStack(..), run, voidCoins, insertSub, insertΦ, debugLevel)
+import Parsley.Common                      (One, Code, Vec(..), Nat(..))
+import System.Console.Pretty               (color, Color(Green, White, Red, Blue))
+
+
 
 #define inputInstances(derivation) \
 derivation(Int)                    \

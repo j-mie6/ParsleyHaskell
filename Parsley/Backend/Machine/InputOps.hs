@@ -11,19 +11,20 @@ module Parsley.Backend.Machine.InputOps (
     InputDependant(..),
   ) where
 
-import Parsley.Common.Utils     (Code)
+import Data.Array.Base                  (UArray(..), listArray)
+import Data.ByteString.Internal         (ByteString(..))
+import Data.Text.Array                  (aBA, empty)
+import Data.Text.Internal               (Text(..))
+import Data.Text.Unsafe                 (iter, Iter(..), iter_, reverseIter_)
+import GHC.Exts                         (Int(..), Char(..))
+import GHC.ForeignPtr                   (ForeignPtr(..))
+import GHC.Prim                         (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
 import Parsley.Backend.Machine.InputRep
+import Parsley.Common.Utils             (Code)
 import Parsley.Core.InputTypes
-import Data.Array.Base          (UArray(..), listArray)
-import GHC.Prim                 (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
-import GHC.Exts                 (Int(..), Char(..))
-import Data.Text.Array          (aBA, empty)
-import Data.Text.Internal       (Text(..))
-import Data.Text.Unsafe         (iter, Iter(..), iter_, reverseIter_)
-import Data.ByteString.Internal (ByteString(..))
-import GHC.ForeignPtr           (ForeignPtr(..))
-import qualified Data.Text                     as Text (length, index)
+
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
+import qualified Data.Text                     as Text (length, index)
 
 {- Auxillary Representation -}
 {- This requires GHC 8.10.1 - might be a while till we get there?

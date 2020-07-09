@@ -12,35 +12,36 @@
              AllowAmbiguousTypes,
              ScopedTypeVariables,
              KindSignatures #-}
-module Parsley.Frontend.Compiler(compile) where
+module Parsley.Frontend.Compiler (compile) where
 
 import Prelude hiding (pred)
-import Parsley.Core.CombinatorAST      (Combinator(..))
-import Parsley.Core.Primitives         (Parser(..))
-import Parsley.Frontend.Optimiser          (optimise)
-import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
-import Parsley.Core.Identifiers        (IMVar, MVar(..))
-import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap))
-import Parsley.Common.Utils                (Quapplicative, WQ)
+import Data.Dependent.Map                  (DMap)
+import Data.Hashable                       (Hashable, hashWithSalt, hash)
+import Data.HashMap.Strict                 (HashMap)
+import Data.HashSet                        (HashSet)
+import Data.List                           (foldl')
+import Data.IORef                          (IORef, newIORef, readIORef, writeIORef)
+import Debug.Trace                         (trace)
 import Control.Applicative                 (liftA, liftA2, liftA3)
 import Control.Monad                       (forM, forM_)
 import Control.Monad.Reader                (Reader, runReader, local, ask, asks, MonadReader)
 import Control.Monad.State.Strict          (State, StateT, get, gets, put, runState, execStateT, modify', MonadState)
-import Data.List                           (foldl')
-import Parsley.Common.Fresh                (HFreshT, newVar, newScope, runFreshT)
-import System.IO.Unsafe                    (unsafePerformIO)
-import Data.IORef                          (IORef, newIORef, readIORef, writeIORef)
-import GHC.StableName                      (StableName(..), makeStableName, hashStableName, eqStableName)
-import Data.Hashable                       (Hashable, hashWithSalt, hash)
-import Data.HashMap.Strict                 (HashMap)
-import Data.HashSet                        (HashSet)
-import Data.Dependent.Map                  (DMap)
-import GHC.Prim                            (StableName#, unsafeCoerce#)
 import GHC.Exts                            (Int(..))
-import Debug.Trace                         (trace)
+import GHC.Prim                            (StableName#, unsafeCoerce#)
+import GHC.StableName                      (StableName(..), makeStableName, hashStableName, eqStableName)
+import Numeric                        (showHex)
+import Parsley.Core.CombinatorAST          (Combinator(..))
+import Parsley.Core.Primitives             (Parser(..))
+import Parsley.Core.Identifiers            (IMVar, MVar(..))
+import Parsley.Common.Fresh                (HFreshT, newVar, newScope, runFreshT)
+import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap))
+import Parsley.Frontend.Optimiser          (optimise)
+import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
+import System.IO.Unsafe                    (unsafePerformIO)
+
+import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, map, size)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
-import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, map, size)
 import qualified Data.Set            as Set     (null)
 
 compile :: forall compiled a. Parser a -> (forall x. Bool -> Fix Combinator x -> IMVar -> compiled x) -> (compiled a, DMap MVar compiled)
@@ -207,4 +208,4 @@ instance Hashable ParserName where
   hashWithSalt salt (ParserName n) = hashWithSalt salt (StableName n)
 
 -- There is great evil in this world, and I'm probably responsible for half of it
-instance Show ParserName where show (ParserName n) = show (I# (unsafeCoerce# n))
+instance Show ParserName where showsPrec _ (ParserName n) = showHex (I# (unsafeCoerce# n))

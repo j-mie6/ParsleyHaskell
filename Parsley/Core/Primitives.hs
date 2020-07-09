@@ -1,8 +1,8 @@
 module Parsley.Core.Primitives (module Parsley.Core.Primitives) where
 
-import Parsley.Core.CombinatorAST
-import Parsley.Common.Indexed   (Fix(In))
-import Parsley.Core.Defunc
+import Parsley.Core.CombinatorAST (Combinator(..))
+import Parsley.Core.Defunc        (Defunc)
+import Parsley.Common.Indexed     (Fix(In))
 
 -- Parser wrapper type
 newtype Parser a = Parser {unParser :: Fix Combinator a}

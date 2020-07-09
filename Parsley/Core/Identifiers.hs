@@ -6,9 +6,9 @@ module Parsley.Core.Identifiers (
     ΣVar(..), IΣVar,
   ) where
 
+import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 import Data.Word         (Word64)
 import Unsafe.Coerce     (unsafeCoerce)
-import Data.GADT.Compare (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
 
 newtype ΣVar (a :: *) = ΣVar IΣVar
 newtype MVar (a :: *) = MVar IMVar

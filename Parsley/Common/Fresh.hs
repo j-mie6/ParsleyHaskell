@@ -1,17 +1,23 @@
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE GeneralisedNewtypeDeriving #-}
+{-# LANGUAGE FunctionalDependencies,
+             FlexibleInstances,
+             FlexibleContexts,
+             MultiParamTypeClasses,
+             UndecidableInstances,
+             GeneralisedNewtypeDeriving #-}
+module Parsley.Common.Fresh (
+    VFreshT, HFreshT, VFresh, HFresh,
+    runFreshT, runFresh,
+    evalFreshT, evalFresh,
+    execFreshT, execFresh,
+    MonadFresh(..), construct, mapVFreshT
+  ) where
 
-module Parsley.Common.Fresh ( VFreshT, HFreshT, VFresh, HFresh, runFreshT, runFresh, evalFreshT, evalFresh, execFreshT, execFresh, MonadFresh(..), construct, mapVFreshT ) where
 import Control.Applicative    (liftA2)
-import Control.Monad.Identity (Identity, runIdentity)
 import Control.Monad.Fix      (MonadFix(..))
-import Control.Monad.Trans    (MonadTrans(..), MonadIO(..))
+import Control.Monad.Identity (Identity, runIdentity)
 import Control.Monad.Reader   (MonadReader(..))
 import Control.Monad.State    (MonadState(..))
+import Control.Monad.Trans    (MonadTrans(..), MonadIO(..))
 
 -- Fresh operations
 class Monad m => MonadFresh x m | m -> x where

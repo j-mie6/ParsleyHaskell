@@ -3,18 +3,23 @@
 module Parsley.Backend.Machine (
     Input, prepare, eval,
     PositionOps,
-    module Parsley.Backend.Machine.Instructions
+    module Parsley.Backend.Machine.Instructions,
+    module Parsley.Backend.Machine.Defunc,
+    module Parsley.Backend.Machine.Identifiers
   ) where
 
+import Data.Array.Unboxed                   (UArray)
+import Data.ByteString                      (ByteString)
+import Data.Text                            (Text)
+import Parsley.Backend.Machine.Defunc       (Defunc(..))
+import Parsley.Backend.Machine.Eval         (eval)
+import Parsley.Backend.Machine.Identifiers
+import Parsley.Backend.Machine.InputRep     (Rep)
+import Parsley.Backend.Machine.InputOps     (InputPrep(..), PositionOps)
 import Parsley.Backend.Machine.Instructions
-import Parsley.Backend.Machine.Eval (eval)
-import Parsley.Backend.Machine.InputRep (Rep)
-import Parsley.Backend.Machine.InputOps (InputPrep(..), PositionOps)
+import Parsley.Backend.Machine.Ops          (Ops)
 import Parsley.Core.InputTypes
-import Parsley.Backend.Machine.Ops (Ops)
-import Data.Text (Text)
-import Data.Array.Unboxed (UArray)
-import Data.ByteString (ByteString)
+
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
 
 class (InputPrep input, Ops (Rep input)) => Input input

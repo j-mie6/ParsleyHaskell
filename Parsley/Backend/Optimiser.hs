@@ -1,9 +1,9 @@
 {-# LANGUAGE GADTs #-}
 module Parsley.Backend.Optimiser where
 
-import Parsley.Backend.Machine.Instructions
+import Data.GADT.Compare                    (geq, (:~:)(Refl))
+import Parsley.Backend.Machine
 import Parsley.Common.Indexed
-import Data.GADT.Compare (geq, (:~:)(Refl))
 
 -- We'll come back here later ;)
 optimise :: Instr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a

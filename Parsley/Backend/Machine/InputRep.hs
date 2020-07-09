@@ -14,21 +14,21 @@ module Parsley.Backend.Machine.InputRep (
     Stream, dropStream,
     representationTypes,
     -- These must be exposed
-    --dropStream,
     textShiftRight, textShiftLeft,
-    byteStringShiftRight, byteStringShiftLeft--, emptyUnpackedLazyByteString
+    byteStringShiftRight, byteStringShiftLeft
   ) where
 
-import Parsley.Common.Utils     (Code)
-import Parsley.Core.InputTypes
 import Data.Array.Unboxed       (UArray)
-import GHC.Prim                 (Int#, Addr#, nullAddr#)
-import GHC.Exts                 (Int(..), TYPE, RuntimeRep(..))
+import Data.ByteString.Internal (ByteString(..))
 import Data.Text.Internal       (Text(..))
 import Data.Text.Unsafe         (iter_, reverseIter_)
-import Data.ByteString.Internal (ByteString(..))
+import GHC.Exts                 (Int(..), TYPE, RuntimeRep(..))
 import GHC.ForeignPtr           (ForeignPtr(..), ForeignPtrContents)
+import GHC.Prim                 (Int#, Addr#, nullAddr#)
 import Language.Haskell.TH      (Q, Type)
+import Parsley.Common.Utils     (Code)
+import Parsley.Core.InputTypes  (Text16, CharList, Stream(..))
+
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 
 {- Auxillary Representation -}

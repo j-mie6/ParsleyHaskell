@@ -7,11 +7,11 @@
              UndecidableInstances,
              MultiParamTypeClasses,
              FlexibleInstances #-}
-module Parsley.Backend.InstructionAnalyser where
+module Parsley.Backend.InstructionAnalyser (coinsNeeded, relevancy) where
 
-import Parsley.Backend.Machine.Instructions
-import Parsley.Common.Indexed
-import Parsley.Common.Vec
+import Parsley.Backend.Machine (Instr(..), MetaInstr(..))
+import Parsley.Common.Indexed  (cata4, Fix4, Const4(..))
+import Parsley.Common.Vec      (Vec(..), Nat(..), SNat(..), SingNat(..), zipWithVec, replicateVec)
 
 coinsNeeded :: Fix4 (Instr o) xs n r a -> Int
 coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)

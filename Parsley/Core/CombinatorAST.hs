@@ -1,17 +1,16 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE OverloadedStrings #-}
-module Parsley.Core.CombinatorAST where
+{-# LANGUAGE GADTs,
+             DataKinds,
+             TypeOperators,
+             RankNTypes,
+             FlexibleInstances,
+             FlexibleContexts,
+             PolyKinds,
+             OverloadedStrings #-}
+module Parsley.Core.CombinatorAST (module Parsley.Core.CombinatorAST) where
 
-import Parsley.Common.Indexed   (IFunctor, Fix, Const1(..), imap, cata)
+import Parsley.Common           (IFunctor, Fix, Const1(..), imap, cata, intercalateDiff)
 import Parsley.Core.Identifiers (MVar)
-import Parsley.Common.Utils     (intercalateDiff)
-import Parsley.Core.Defunc
+import Parsley.Core.Defunc      (Defunc)
 
 -- Core datatype
 data Combinator (k :: * -> *) (a :: *) where

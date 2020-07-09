@@ -1,11 +1,8 @@
 {-# LANGUAGE TemplateHaskell,
-             DeriveLift,
              RankNTypes,
-             TypeApplications,
-             ScopedTypeVariables,
              FlexibleContexts,
              FlexibleInstances,
-             FunctionalDependencies,
+             MultiParamTypeClasses,
              AllowAmbiguousTypes,
              PatternSynonyms,
              GADTs #-}
@@ -47,7 +44,7 @@ module Parsley ( Parser, runParser, parseFromFile
 
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Parsley.Frontend
-import Parsley.Backend            (Input(..), Rep, Text16(..), CharList(..), Stream, eval, Ops)
+import Parsley.Backend            (Input, prepare, Text16(..), CharList(..), eval)
 import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
 import Parsley.Common.InputTypes
 import Data.Function              (fix)
@@ -352,8 +349,8 @@ precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
     level (Prefix ops wrap) atom  = chainPre (choice ops) (wrap <$> atom)
     level (Postfix ops wrap) atom = chainPost (wrap <$> atom) (choice ops)
 
-runParser :: forall input a. (Input input, Ops (Rep input)) => Parser a -> Code (input -> Maybe a)
-runParser p = [||\input -> $$(eval @(Rep input) (prepare @input [||input||]) (compile @(Rep input) p))||]
+runParser :: Input input => Parser a -> Code (input -> Maybe a)
+runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p))||]
 
 parseFromFile :: Parser a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

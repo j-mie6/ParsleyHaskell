@@ -3,7 +3,7 @@
 module Parsley.Backend.Machine.Defunc where
 
 import Parsley.Common.Utils (Code)
-import Parsley.Backend.Machine.InputImpl (PositionOps(same))
+import Parsley.Backend.Machine.InputOps (PositionOps(same))
 import qualified Parsley.Frontend.Defunc as Frontend (Defunc, genDefunc, genDefunc1, genDefunc2)
 
 data Defunc a where

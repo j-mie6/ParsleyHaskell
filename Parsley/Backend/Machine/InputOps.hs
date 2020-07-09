@@ -2,39 +2,26 @@
              MagicHash,
              UnboxedTuples,
              TemplateHaskell,
-             FlexibleInstances,
-             TypeApplications,
-             MultiParamTypeClasses,
-             TypeFamilies,
-             PolyKinds,
-             DataKinds,
              ImplicitParams,
-             TypeFamilyDependencies #-}
-module Parsley.Backend.Machine.InputImpl (
-    Unboxed, Rep,
-    Input(..), PositionOps(..), BoxOps(..), LogOps(..),
+             FlexibleInstances,
+             TypeApplications #-}
+module Parsley.Backend.Machine.InputOps (
+    InputPrep(..), PositionOps(..), BoxOps(..), LogOps(..),
     InputOps(..), more, next,
-    OffWith, OffWithStreamAnd, UnpackedLazyByteString,
-    representationTypes,
     InputDependant(..),
-    module Parsley.Common.InputTypes,
-    -- These must be exposed
-    dropStream,
-    textShiftRight, textShiftLeft,
-    byteStringShiftRight, byteStringShiftLeft, emptyUnpackedLazyByteString
   ) where
 
 import Parsley.Common.Utils     (Code)
+import Parsley.Backend.Machine.InputRep
 import Parsley.Common.InputTypes
 import Data.Array.Base          (UArray(..), listArray)
-import GHC.Prim                 (Int#, Addr#, ByteArray#, nullAddr#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
-import GHC.Exts                 (Int(..), Char(..), TYPE, RuntimeRep(..))
+import GHC.Prim                 (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
+import GHC.Exts                 (Int(..), Char(..))
 import Data.Text.Array          (aBA, empty)
 import Data.Text.Internal       (Text(..))
 import Data.Text.Unsafe         (iter, Iter(..), iter_, reverseIter_)
 import Data.ByteString.Internal (ByteString(..))
-import GHC.ForeignPtr           (ForeignPtr(..), ForeignPtrContents)
-import Language.Haskell.TH      (Q, Type)
+import GHC.ForeignPtr           (ForeignPtr(..))
 import qualified Data.Text                     as Text (length, index)
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 
@@ -52,7 +39,7 @@ data InputDependant rep = InputDependant {-next-} (rep -> (# Char, rep #))
                                          {-init-} rep
 
 {- Typeclasses -}
-class Input input where
+class InputPrep input where
   prepare :: Code input -> Code (InputDependant (Rep input))
 
 class PositionOps rep where
@@ -75,121 +62,19 @@ more = _more ?ops
 next :: (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code r) -> Code r
 next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
 
-{- Representation Types -}
-data OffWith ts = OffWith {-# UNPACK #-} !Int ts
-data OffWithStreamAnd ts = OffWithStreamAnd {-# UNPACK #-} !Int !Stream ts
-data UnpackedLazyByteString = UnpackedLazyByteString
-  {-# UNPACK #-} !Int
-  !Addr#
-  ForeignPtrContents
-  {-# UNPACK #-} !Int
-  {-# UNPACK #-} !Int
-  Lazy.ByteString
-
-representationTypes :: [Q Type]
-representationTypes = [[t|Int|], [t|OffWith [Char]|], [t|OffWith Stream|], [t|UnpackedLazyByteString|], [t|Text|]]
-
-offWith :: Code (ts -> OffWith ts)
-offWith = [||OffWith 0||]
-
-{-# INLINE emptyUnpackedLazyByteString #-}
-emptyUnpackedLazyByteString :: Int -> UnpackedLazyByteString
-emptyUnpackedLazyByteString i = UnpackedLazyByteString i nullAddr# (error "nullForeignPtr") 0 0 Lazy.Empty
-
-{- Representation Mappings -}
-type family Rep input where
-  Rep [Char] = Int
-  Rep (UArray Int Char) = Int
-  Rep Text16 = Int
-  Rep ByteString = Int
-  Rep CharList = OffWith String
-  Rep Text = Text
-  --Rep CacheText = (Text, Stream)
-  Rep Lazy.ByteString = UnpackedLazyByteString
-  --Rep Lazy.ByteString = OffWith Lazy.ByteString
-  Rep Stream = OffWith Stream
-
-type family RepKind rep where
-  RepKind Int = IntRep
-  RepKind Text = LiftedRep
-  RepKind UnpackedLazyByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
-  RepKind (OffWith _) = 'TupleRep '[IntRep, LiftedRep]
-  RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
-  RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
-
-type family Unboxed rep = (urep :: TYPE (RepKind rep)) | urep -> rep where
-  Unboxed Int = Int#
-  Unboxed Text = Text
-  Unboxed UnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)
-  Unboxed (OffWith ts) = (# Int#, ts #)
-  Unboxed (OffWithStreamAnd ts) = (# Int#, Stream, ts #)
-  Unboxed (Text, Stream) = (# Text, Stream #)
-
-{- Generic Representation Operations -}
-offWithSame :: Code (OffWith ts -> OffWith ts -> Bool)
-offWithSame = [||\(OffWith i _) (OffWith j _) -> i == j||]
-
-offWithShiftRight :: Code (Int -> ts -> ts) -> Code (OffWith ts -> Int -> OffWith ts)
-offWithShiftRight drop = [||\(OffWith o ts) i -> OffWith (o + i) ($$drop i ts)||]
-
-{-offWithStreamAnd :: ts -> OffWithStreamAnd ts
-offWithStreamAnd ts = OffWithStreamAnd 0 nomore ts
-
-offWithStreamAndBox :: (# Int#, Stream, ts #) -> OffWithStreamAnd ts
-offWithStreamAndBox (# i#, ss, ts #) = OffWithStreamAnd (I# i#) ss ts
-
-offWithStreamAndUnbox :: OffWithStreamAnd ts -> (# Int#, Stream, ts #)
-offWithStreamAndUnbox (OffWithStreamAnd (I# i#) ss ts) = (# i#, ss, ts #)
-
-offWithStreamAndToInt :: OffWithStreamAnd ts -> Int
-offWithStreamAndToInt (OffWithStreamAnd i _ _) = i-}
-
-dropStream :: Int -> Stream -> Stream
-dropStream 0 cs = cs
-dropStream n (_ :> cs) = dropStream (n-1) cs
-
-textShiftRight :: Text -> Int -> Text
-textShiftRight (Text arr off unconsumed) i = go i off unconsumed
-  where
-    go 0 off' unconsumed' = Text arr off' unconsumed'
-    go n off' unconsumed'
-      | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0
-                          in go (n-1) (off'+d) (unconsumed'-d)
-      | otherwise = Text arr off' unconsumed'
-
-textShiftLeft :: Text -> Int -> Text
-textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
-  where
-    go 0 off' unconsumed' = Text arr off' unconsumed'
-    go n off' unconsumed'
-      | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
-      | otherwise = Text arr off' unconsumed'
-
-byteStringShiftRight :: UnpackedLazyByteString -> Int -> UnpackedLazyByteString
-byteStringShiftRight !(UnpackedLazyByteString i addr# final off size cs) j
-  | j < size  = UnpackedLazyByteString (i + j) addr# final (off + j) (size - j) cs
-  | otherwise = case cs of
-    Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> byteStringShiftRight (UnpackedLazyByteString (i + size) addr'# final' off' size' cs') (j - size)
-    Lazy.Empty -> emptyUnpackedLazyByteString (i + size)
-
-byteStringShiftLeft :: UnpackedLazyByteString -> Int -> UnpackedLazyByteString
-byteStringShiftLeft (UnpackedLazyByteString i addr# final off size cs) j =
-  let d = min off j
-  in UnpackedLazyByteString (i - d) addr# final (off - d) (size + d) cs
-
 {- INSTANCES -}
--- Input Instances
-instance Input [Char] where
+-- InputPrep Instances
+instance InputPrep [Char] where
   prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 
-instance Input (UArray Int Char) where
+instance InputPrep (UArray Int Char) where
   prepare qinput = [||
       let UArray _ _ size input# = $$qinput
           next i@(I# i#) = (# C# (indexWideCharArray# input# i#), I# (i# +# 1#) #)
       in InputDependant next (< size) 0
     ||]
 
-instance Input Text16 where
+instance InputPrep Text16 where
   prepare qinput = [||
       let Text16 (Text arr off size) = $$qinput
           arr# = aBA arr
@@ -197,7 +82,7 @@ instance Input Text16 where
       in InputDependant next (< size) off
     ||]
 
-instance Input ByteString where
+instance InputPrep ByteString where
   prepare qinput = [||
       let PS (ForeignPtr addr# final) off size = $$qinput
           next i@(I# i#) =
@@ -207,7 +92,7 @@ instance Input ByteString where
       in InputDependant next (< size) off
     ||]
 
-instance Input CharList where
+instance InputPrep CharList where
   prepare qinput = [||
       let CharList input = $$qinput
           next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
@@ -218,14 +103,14 @@ instance Input CharList where
       in InputDependant next more ($$offWith input)
     ||]
 
-instance Input Text where
+instance InputPrep Text where
   prepare qinput = [||
       let next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off+d) (unconsumed-d) #)
           more (Text _ _ unconsumed) = unconsumed > 0
       in InputDependant next more $$qinput
     ||]
 
-instance Input Lazy.ByteString where
+instance InputPrep Lazy.ByteString where
   prepare qinput = [||
       let next (UnpackedLazyByteString i addr# final off@(I# off#) size cs) =
             case readWord8OffAddr# addr# off# realWorld# of
@@ -244,7 +129,7 @@ instance Input Lazy.ByteString where
       in InputDependant next more initial
     ||]
 
-instance Input Stream where
+instance InputPrep Stream where
   prepare qinput = [||
       let next (OffWith o (c :> cs)) = (# c, OffWith (o + 1) cs #)
       in InputDependant next (const True) ($$offWith $$qinput)

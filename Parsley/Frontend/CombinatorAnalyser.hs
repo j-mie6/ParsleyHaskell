@@ -6,7 +6,7 @@
 module Parsley.Frontend.CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
 
 import Parsley.Frontend.CombinatorAST (Combinator(..), MetaCombinator(..))
-import Parsley.Common.Identifiers     (IMVar, MVar(..))
+import Parsley.Frontend.Identifiers   (IMVar, MVar(..))
 import Parsley.Common.Indexed         (Fix(..), Const1(..), imap, cata, zygo, (:*:)(..), (/\), ifst, isnd)
 import Control.Applicative            (liftA2)
 import Control.Monad.Reader           (ReaderT, ask, runReaderT, local)

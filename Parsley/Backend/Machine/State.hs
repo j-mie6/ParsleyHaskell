@@ -4,8 +4,8 @@
              FlexibleContexts #-}
 module Parsley.Backend.Machine.State where
 
-import Parsley.Common.Identifiers
-import Parsley.Backend.Machine.InputImpl (Unboxed)
+import Parsley.Backend.Machine.Identifiers
+import Parsley.Backend.Machine.InputRep (Unboxed)
 import Parsley.Common.Vec         (Vec)
 import Parsley.Common.Utils       (Code)
 import Control.Monad.ST           (ST)
@@ -42,10 +42,11 @@ data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , input    :: Code o
                         , handlers :: HandlerStack n s o a }
 
-newtype QSTRef s x = QSTRef { unwrapRef :: Code (STRef s x) }
+type Reg = STRef
+newtype QReg s x = QReg { unwrapReg :: Code (Reg s x) }
 data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
-                     , σs         :: DMap ΣVar (QSTRef s)
+                     , σs         :: DMap ΣVar (QReg s)
                      , debugLevel :: Int
                      , coins      :: Int
                      , piggies    :: Queue Int }
@@ -59,8 +60,8 @@ insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q) (μs ctx)}
 insertΦ :: ΦVar x -> Code (Cont s o a x) -> Ctx s o a -> Ctx s o a
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 
-insertΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
-insertΣ σ qref ctx = ctx {σs = DMap.insert σ (QSTRef qref) (σs ctx)}
+insertΣ :: ΣVar x -> Code (Reg s x) -> Ctx s o a -> Ctx s o a
+insertΣ σ qref ctx = ctx {σs = DMap.insert σ (QReg qref) (σs ctx)}
 
 debugUp :: Ctx s o a -> Ctx s o a
 debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
@@ -105,23 +106,19 @@ outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
 askSub μ = do
-  msub <- asks (fmap unwrapSub . DMap.lookup μ . μs)
-  case msub of
-    Just sub -> return $! sub
-    Nothing  -> throw (missingDependency μ)
+  sub <- asks (fmap unwrapSub . DMap.lookup μ . μs)
+  maybe (throw (missingDependency μ)) return sub
 
-askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (Code (STRef s x))
+askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (Code (Reg s x))
 askΣ σ = do
-  mref <- asks (fmap unwrapRef . DMap.lookup σ . σs)
-  case mref of
-    Just ref -> return $! ref
-    Nothing  -> throw (outOfScopeRegister σ)
+  reg <- asks (fmap unwrapReg . DMap.lookup σ . σs)
+  maybe (throw (outOfScopeRegister σ)) return reg
 
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (Cont s o a x))
 askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
 
-instance Show MissingDependency where show (MissingDependency (IMVar μ)) = "Dependency μ" ++ show μ ++ " has not been compiled"
+instance Show MissingDependency where show (MissingDependency μ) = "Dependency μ" ++ show μ ++ " has not been compiled"
 instance Exception MissingDependency
 
-instance Show OutOfScopeRegister where show (OutOfScopeRegister (IΣVar σ)) = "Register r" ++ show σ ++ " is out of scope"
+instance Show OutOfScopeRegister where show (OutOfScopeRegister σ) = "Register r" ++ show σ ++ " is out of scope"
 instance Exception OutOfScopeRegister

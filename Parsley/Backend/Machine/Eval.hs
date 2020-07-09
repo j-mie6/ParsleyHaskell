@@ -8,15 +8,15 @@
              TypeApplications,
              BangPatterns,
              MultiWayIf #-}
-module Parsley.Backend.Machine.Eval (eval, Ops) where
+module Parsley.Backend.Machine.Eval (eval) where
 
 import Parsley.Backend.Machine.State
 import Parsley.Backend.Machine.Ops
 import Parsley.Backend.Machine.Instructions
 import Parsley.Backend.Machine.LetRecBuilder
-import Parsley.Common.Identifiers
+import Parsley.Backend.Machine.Identifiers
 import Parsley.Common.Vec         (Vec(..))
-import Parsley.Backend.Machine.InputImpl (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
+import Parsley.Backend.Machine.InputOps (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
 import Parsley.Common.Indexed     (Fix4, cata4, Nat(..), One)
 import Parsley.Common.Utils       (Code)
 import Data.Dependent.Map         (DMap)
@@ -73,13 +73,13 @@ readyMachine = cata4 (Machine . alg)
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
 
-evalRet :: KOps o => MachineMonad s o (x : xs) n x a
+evalRet :: ContOps o => MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
-evalCall :: KOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalCall :: ContOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) input handlers) k (askSub μ)
 
-evalJump :: BoxOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
+evalJump :: ContOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
 evalJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub retCont input handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
@@ -91,7 +91,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (genDefunc2 f x y) xs})
 
-evalSat :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p (Machine k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -99,19 +99,18 @@ evalSat p (Machine k) = do
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
-    readChar bad k γ@Γ{..} = sat input (genDefunc p) (\c input' -> k (γ {operands = Op c operands, input = input'})) bad
-    maybeEmitCheck Nothing mk γ = readChar (raise γ) mk γ
+    maybeEmitCheck Nothing mk γ = sat (genDefunc p) mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (readChar [||bad||] mk γ) [||bad||] γ)||]
+      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc p) mk [||bad||]) [||bad||] γ)||]
 
-evalEmpt :: BoxOps o => MachineMonad s o xs (Succ n) r a
+evalEmpt :: (BoxOps o, HandlerOps o) => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
 
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
 evalCatch :: (?ops :: InputOps o, BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
-evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandlerΓ γ (buildHandlerΓ γ mh) mk) k h
+evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandler γ (buildHandler γ mh) mk) k h
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (input γ) (operands γ)})
@@ -140,9 +139,9 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
 evalIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
          => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
          -> MachineMonad s o xs n r a
-evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandlerΓ γ mh) (input γ)) h ask
+evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ)) h ask
 
-evalJoin :: KOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
+evalJoin :: ContOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume
 
 evalMkJoin :: JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
@@ -159,26 +158,26 @@ evalDup (Machine k) = k <&> \mk γ -> let Op x xs = operands γ in [||
 
 evalMake :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalMake σ k = asks $! \ctx γ -> let Op x xs = operands γ in [||
-    do ref <- newΣ $$x
+    do ref <- $$(newΣ x)
        $$(run k (γ {operands = xs}) (insertΣ σ [||ref||] ctx))
   ||]
 
 evalGet :: ΣVar x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalGet σ (Machine k) = liftM2 (\mk ref γ -> [||
-    do x <- readΣ $$ref
+    do x <- $$(readΣ ref)
        $$(mk (γ {operands = Op [||x||] (operands γ)}))
   ||]) k (askΣ σ)
 
 evalPut :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalPut σ (Machine k) = liftM2 (\mk ref γ ->
     let Op x xs = operands γ in [||
-    do writeΣ $$ref $$x
+    do $$(writeΣ ref x)
        $$(mk (γ {operands = xs}))
   ||]) k (askΣ σ)
 
 evalLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) =
-  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(setupHandlerΓ γ (logHandler name ctx γ) k)||])
+  liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(setupHandler γ (logHandler name ctx γ) k)||])
     (local debugUp mk)
     ask
 
@@ -188,11 +187,11 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raise γ) γ
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins mk (raise γ) γ
 evalMeta (FreeCoins coins) (Machine k) = local (giveCoins coins) k
 evalMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
-evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raise γ) γ) (asks ((coins -) . liquidate)) k
+evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n mk (raise γ) γ) (asks ((coins -) . liquidate)) k

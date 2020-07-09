@@ -14,7 +14,7 @@ import Parsley.Common.Utils       (WQ(..), intercalateDiff)
 import Parsley.Frontend.Defunc as Frontend (Defunc(APP, ID), pattern FLIP_H)
 import Parsley.Backend.Machine.Defunc as Backend (Defunc(USER))
 import Data.Void                  (Void)
-import Parsley.Common.Identifiers (MVar, ΦVar, ΣVar)
+import Parsley.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
 import Data.GADT.Compare          (geq, (:~:)(Refl))
 
 newtype Program o a = Program { getProgram :: Fix4 (Instr o) '[] One a a }

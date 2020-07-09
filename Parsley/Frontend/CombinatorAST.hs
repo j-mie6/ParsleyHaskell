@@ -8,9 +8,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Parsley.Frontend.CombinatorAST where
 
-import Parsley.Common.Indexed     (IFunctor, Fix(In), Const1(..), imap, cata)
-import Parsley.Common.Identifiers (IMVar, MVar(..), IΣVar(..))
-import Parsley.Common.Utils       (WQ, Quapplicative, intercalateDiff)
+import Parsley.Common.Indexed       (IFunctor, Fix(In), Const1(..), imap, cata)
+import Parsley.Frontend.Identifiers (MVar)
+import Parsley.Common.Utils         (WQ, Quapplicative, intercalateDiff)
 import Parsley.Frontend.Defunc
 
 -- Parser wrapper type

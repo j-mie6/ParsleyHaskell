@@ -9,21 +9,20 @@
 module Parsley (
     module Parsley,
     module Core,
-    -- Template Haskell Utils
-    code, (>*<), makeQ, _code, _val, WQ, Lift
+    module THUtils,
+    Lift(..)
   ) where
 
 import Prelude hiding              (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
-
 import Data.Function              (fix)
 import Data.Text.IO               (readFile)
-import Language.Haskell.TH.Syntax (Lift)
+import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Backend            (codeGen, Input, eval, prepare)
 import Parsley.Core
-import Parsley.Common.Utils       (code, Quapplicative(..), WQ, Code)
 import Parsley.Frontend           (compile)
 
-import Parsley.Core as Core hiding (_pure, _satisfy, _conditional)
+import Parsley.Core as Core hiding     (_pure, _satisfy, _conditional)
+import Parsley.Common.Utils as THUtils (code, Quapplicative(..), WQ, Code)
 
 class ParserOps rep where
   pure :: rep a -> Parser a

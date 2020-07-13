@@ -29,7 +29,7 @@ import Control.Monad.State.Strict          (State, StateT, get, gets, put, runSt
 import GHC.Exts                            (Int(..))
 import GHC.Prim                            (StableName#, unsafeCoerce#)
 import GHC.StableName                      (StableName(..), makeStableName, hashStableName, eqStableName)
-import Numeric                        (showHex)
+import Numeric                             (showHex)
 import Parsley.Core.CombinatorAST          (Combinator(..))
 import Parsley.Core.Primitives             (Parser(..))
 import Parsley.Core.Identifiers            (IMVar, MVar(..))

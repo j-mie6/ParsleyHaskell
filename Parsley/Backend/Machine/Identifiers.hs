@@ -1,12 +1,14 @@
 {-# LANGUAGE KindSignatures,
              GeneralizedNewtypeDeriving,
-             DerivingStrategies #-}
+             DerivingStrategies,
+             GADTs #-}
 module Parsley.Backend.Machine.Identifiers (
     ΦVar(..), IΦVar,
     module Parsley.Core.Identifiers,
   ) where
 
-import Data.GADT.Compare        (GEq, GCompare, gcompare, geq, (:~:)(Refl), GOrdering(..))
+import Data.GADT.Compare        (GEq, GCompare, gcompare, geq, GOrdering(..))
+import Data.Typeable            ((:~:)(Refl))
 import Data.Word                (Word64)
 import Parsley.Core.Identifiers
 import Unsafe.Coerce            (unsafeCoerce)
@@ -22,7 +24,7 @@ instance GEq ΦVar where
     | otherwise = Nothing
 
 instance GCompare ΦVar where
-  gcompare (ΦVar u) (ΦVar v) = case compare u v of
-    LT -> unsafeCoerce GLT
-    EQ -> unsafeCoerce GEQ
-    GT -> unsafeCoerce GGT
+  gcompare φ1@(ΦVar u) φ2@(ΦVar v) = case compare u v of
+    LT -> GLT
+    EQ -> case geq φ1 φ2 of Just Refl -> GEQ
+    GT -> GGT

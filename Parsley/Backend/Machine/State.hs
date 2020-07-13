@@ -120,8 +120,6 @@ newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
 
 missingDependency :: MVar x -> MissingDependency
 missingDependency (MVar v) = MissingDependency v
-dependencyOf :: MissingDependency -> MVar x
-dependencyOf (MissingDependency v) = MVar v
 outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
 outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
 

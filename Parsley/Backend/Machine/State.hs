@@ -1,15 +1,16 @@
 {-# LANGUAGE DataKinds,
              TypeOperators,
              GADTs,
-             FlexibleContexts #-}
+             FlexibleContexts,
+             DeriveAnyClass #-}
 module Parsley.Backend.Machine.State (
-    HandlerStack, Handler, Cont, SubRoutine, MachineMonad,  Reg,
+    HandlerStack, Handler, Cont, SubRoutine, MachineMonad,
     Γ(..), Ctx, OpStack(..),
-    QSubRoutine(..), QJoin(..), QReg(..), Machine(..),
+    QSubRoutine(..), QJoin(..), Machine(..),
     run,
     emptyCtx,
-    insertSub, insertΦ, insertΣ,
-    askSub, askΣ, askΦ,
+    insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, concreteΣ, cachedΣ,
+    askSub, askΦ,
     debugUp, debugDown, debugLevel,
     storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
     hasCoin, isBankrupt, liquidate
@@ -21,6 +22,7 @@ import Control.Monad.Reader                (asks, MonadReader, Reader, runReader
 import Control.Monad.ST                    (ST)
 import Data.STRef                          (STRef)
 import Data.Dependent.Map                  (DMap)
+import Data.Maybe                          (fromMaybe)
 import Parsley.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Backend.Machine.InputRep    (Unboxed)
 import Parsley.Common                      (Queue, enqueue, dequeue, Code, Vec)
@@ -32,12 +34,10 @@ type HandlerStack n s o a = Vec n (Code (Handler s o a))
 type Handler s o a = Unboxed o -> ST s (Maybe a)
 type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
 type SubRoutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
-type Reg = STRef
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
 newtype QSubRoutine s o a x = QSubRoutine { unwrapSub :: Code (SubRoutine s o a x) }
 newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
-newtype QReg s x = QReg { unwrapReg :: Code (Reg s x) }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
 
 run :: Machine s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
@@ -47,6 +47,9 @@ data OpStack xs where
   Empty :: OpStack '[]
   Op :: Code x -> OpStack xs -> OpStack (x ': xs)
 
+data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
+                   , getCached :: Maybe (Code x) }
+
 data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , retCont  :: Code (Cont s o a r)
                         , input    :: Code o
@@ -54,7 +57,7 @@ data Γ s o xs n r a = Γ { operands :: OpStack xs
 
 data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
-                     , σs         :: DMap ΣVar (QReg s)
+                     , σs         :: DMap ΣVar (Reg s)
                      , debugLevel :: Int
                      , coins      :: Int
                      , piggies    :: Queue Int }
@@ -68,18 +71,27 @@ insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q) (μs ctx)}
 insertΦ :: ΦVar x -> Code (Cont s o a x) -> Ctx s o a -> Ctx s o a
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 
-insertΣ :: ΣVar x -> Code (Reg s x) -> Ctx s o a -> Ctx s o a
-insertΣ σ qref ctx = ctx {σs = DMap.insert σ (QReg qref) (σs ctx)}
+insertNewΣ :: ΣVar x -> Maybe (Code (STRef s x)) -> Code x -> Ctx s o a -> Ctx s o a
+insertNewΣ σ qref qx ctx = ctx {σs = DMap.insert σ (Reg qref (Just qx)) (σs ctx)}
+
+insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
+insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing) (σs ctx)}
+
+cacheΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
+cacheΣ σ qx ctx = case DMap.lookup σ (σs ctx) of
+  Just (Reg ref _) -> ctx {σs = DMap.insert σ (Reg ref (Just qx)) (σs ctx)}
+  Nothing          -> throw (outOfScopeRegister σ)
+
+concreteΣ :: ΣVar x -> Ctx s o a -> Code (STRef s x)
+concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (>>= getReg) . DMap.lookup σ . σs
+
+cachedΣ :: ΣVar x -> Ctx s o a -> Code x
+cachedΣ σ = fromMaybe (throw (registerFault σ)) . (>>= getCached) . DMap.lookup σ . σs
 
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
 askSub μ = do
   sub <- asks (fmap unwrapSub . DMap.lookup μ . μs)
   maybe (throw (missingDependency μ)) return sub
-
-askΣ :: MonadReader (Ctx s o a) m => ΣVar x -> m (Code (Reg s x))
-askΣ σ = do
-  reg <- asks (fmap unwrapReg . DMap.lookup σ . σs)
-  maybe (throw (outOfScopeRegister σ)) return reg
 
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (Cont s o a x))
 askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
@@ -115,16 +127,21 @@ voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
 liquidate :: Ctx s o a -> Int
 liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
 
-newtype MissingDependency = MissingDependency IMVar
-newtype OutOfScopeRegister = OutOfScopeRegister IΣVar
+newtype MissingDependency = MissingDependency IMVar deriving Exception
+newtype OutOfScopeRegister = OutOfScopeRegister IΣVar deriving Exception
+newtype IntangibleRegister = IntangibleRegister IΣVar deriving Exception
+newtype RegisterFault = RegisterFault IΣVar deriving Exception
 
 missingDependency :: MVar x -> MissingDependency
 missingDependency (MVar v) = MissingDependency v
 outOfScopeRegister :: ΣVar x -> OutOfScopeRegister
 outOfScopeRegister (ΣVar σ) = OutOfScopeRegister σ
+intangibleRegister :: ΣVar x -> IntangibleRegister
+intangibleRegister (ΣVar σ) = IntangibleRegister σ
+registerFault :: ΣVar x -> RegisterFault
+registerFault (ΣVar σ) = RegisterFault σ
 
 instance Show MissingDependency where show (MissingDependency μ) = "Dependency μ" ++ show μ ++ " has not been compiled"
-instance Exception MissingDependency
-
 instance Show OutOfScopeRegister where show (OutOfScopeRegister σ) = "Register r" ++ show σ ++ " is out of scope"
-instance Exception OutOfScopeRegister
+instance Show IntangibleRegister where show (IntangibleRegister σ) = "Register r" ++ show σ ++ " is intangible in this scope"
+instance Show RegisterFault where show (RegisterFault σ) = "Attempting to access register r" ++ show σ ++ " from cache has failed"

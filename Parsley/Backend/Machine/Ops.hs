@@ -15,21 +15,21 @@
              RecordWildCards #-}
 module Parsley.Backend.Machine.Ops (module Parsley.Backend.Machine.Ops) where
 
-import Control.Monad                       (liftM2)
-import Control.Monad.Reader                (ask, local)
-import Control.Monad.ST                    (ST)
-import Data.STRef                          (writeSTRef, readSTRef, newSTRef)
-import Data.Text                           (Text)
-import Data.Void                           (Void)
-import Debug.Trace                         (trace)
-import Parsley.Backend.Machine.Identifiers (MVar, ΦVar)
-import Parsley.Backend.Machine.InputOps    (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
-import Parsley.Backend.Machine.InputRep    (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
-import Parsley.Backend.Machine.State       (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, Reg, SubRoutine, OpStack(..), run, voidCoins, insertSub, insertΦ, debugLevel)
-import Parsley.Common                      (One, Code, Vec(..), Nat(..))
-import System.Console.Pretty               (color, Color(Green, White, Red, Blue))
-
-
+import Control.Monad                        (liftM2)
+import Control.Monad.Reader                 (ask, local)
+import Control.Monad.ST                     (ST)
+import Data.STRef                           (writeSTRef, readSTRef, newSTRef)
+import Data.Text                            (Text)
+import Data.Void                            (Void)
+import Debug.Trace                          (trace)
+import Parsley.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
+import Parsley.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
+import Parsley.Backend.Machine.Instructions (Access(..))
+import Parsley.Backend.Machine.State        (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, SubRoutine, OpStack(..),
+                                             run, voidCoins, insertSub, insertΦ, insertNewΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
+import Parsley.Common                       (One, Code, Vec(..), Nat(..))
+import System.Console.Pretty                (color, Color(Green, White, Red, Blue))
 
 #define inputInstances(derivation) \
 derivation(Int)                    \
@@ -54,13 +54,31 @@ emitLengthCheck n good bad γ = [||
   if $$more ($$shiftRight $$(input γ) (n - 1)) then $$(good γ)
   else $$bad ||]
 
+{- General Operations -}
+dup :: Code x -> (Code x -> Code r) -> Code r
+dup x k = [|| let !dupx = $$x in $$(k x) ||]
+
 {- Register Operations -}
-newΣ :: Code x -> Code (ST s (Reg s x))
-newΣ x = [||newSTRef $$x||]
-writeΣ :: Code (Reg s x) -> Code x -> Code (ST s ())
-writeΣ ref x = [||writeSTRef $$ref $$x||]
-readΣ :: Code (Reg s x) -> Code (ST s x)
-readΣ ref = [||readSTRef $$ref||]
+newΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+newΣ σ Soft x k ctx = dup x $ \dupx -> k (insertNewΣ σ Nothing dupx ctx)
+newΣ σ Hard x k ctx = dup x $ \dupx -> [||
+    do ref <- newSTRef $$dupx
+       $$(k (insertNewΣ σ (Just [||ref||]) dupx ctx))
+  ||]
+
+writeΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
+writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
+    do writeSTRef $$ref $$dupx
+       $$(k (cacheΣ σ dupx ctx))
+  ||]
+
+readΣ :: ΣVar x -> Access -> (Code x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
+readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
+    do x <- readSTRef $$ref
+       $$(k [||x||] (cacheΣ σ [||x||] ctx))
+  ||]
 
 {- Handler Operations -}
 class HandlerOps o where

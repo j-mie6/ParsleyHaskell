@@ -15,8 +15,9 @@ import Control.Applicative                  (liftA2)
 import Control.Monad.Reader                 (Reader, ask, asks, runReader, local, MonadReader)
 import Control.Monad.State.Strict           (State, get, modify', runState, MonadState)
 import Control.Monad.Trans                  (lift)
-import Parsley.Backend.Machine              (Defunc(USER, SAME), LetBinding(..), Instr(..), MetaInstr, pattern Fmap, pattern App, _Modify,
-                                             pattern If, addCoins, refundCoins, drainCoins, freeCoins, PositionOps,
+import Parsley.Backend.Machine              (Defunc(USER, SAME), LetBinding(..), Instr(..), MetaInstr,
+                                             pattern Fmap, pattern App, _Modify, _Get, _Put, _Make, pattern If,
+                                             addCoins, refundCoins, drainCoins, freeCoins, PositionOps,
                                              IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import Parsley.Backend.InstructionAnalyser  (coinsNeeded)
 import Parsley.Common.Fresh                 (VFreshT, HFresh, runFreshT, evalFresh, evalFreshT, construct, MonadFresh(..), mapVFreshT)
@@ -78,20 +79,20 @@ peephole (MetaCombinator RequiresCut (_ :< ChainPre (op :< _) (p :< _))) = Just 
      σ <- freshΣ
      opc <- freshM (runCodeGen op (In4 (Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      pc <- freshM (runCodeGen p (In4 (App m)))
-     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ opc (parsecHandler (In4 (Get σ (addCoins (coinsNeeded pc) pc)))))))))
+     return $! In4 (Push (USER ID) (In4 (_Make σ (In4 (Iter μ opc (parsecHandler (In4 (_Get σ (addCoins (coinsNeeded pc) pc)))))))))
 peephole (MetaCombinator RequiresCut (_ :< ChainPost (p :< _) (op :< _))) = Just $ CodeGen $ \m ->
   do μ <- askM
      σ <- freshΣ
      let nm = coinsNeeded m
      opc <- freshM (runCodeGen op (In4 (_Modify σ (In4 (Jump μ)))))
-     freshM (runCodeGen p (In4 (Make σ (In4 (Iter μ opc (parsecHandler (In4 (Get σ (addCoins nm m)))))))))
+     freshM (runCodeGen p (In4 (_Make σ (In4 (Iter μ opc (parsecHandler (In4 (_Get σ (addCoins nm m)))))))))
 peephole (MetaCombinator Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ \m ->
   do μ <- askM
      σ <- freshΣ
      opc <- freshM (runCodeGen op (In4 (Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      let nop = coinsNeeded opc
      pc <- freshM (runCodeGen p (In4 (App m)))
-     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (Get σ (addCoins (coinsNeeded pc) pc)))))))))
+     return $! In4 (Push (USER ID) (In4 (_Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (_Get σ (addCoins (coinsNeeded pc) pc)))))))))
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
@@ -142,13 +143,13 @@ direct (ChainPre op p) m =
      opc <- freshM (runCodeGen op (In4 (Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      let nop = coinsNeeded opc
      pc <- freshM (runCodeGen p (In4 (App m)))
-     return $! In4 (Push (USER ID) (In4 (Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (Get σ pc))))))))
+     return $! In4 (Push (USER ID) (In4 (_Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (_Get σ pc))))))))
 direct (ChainPost p op) m =
   do μ <- askM
      σ <- freshΣ
      opc <- freshM (runCodeGen op (In4 (_Modify σ (In4 (Jump μ)))))
      let nop = coinsNeeded opc
-     freshM (runCodeGen p (In4 (Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (Get σ m))))))))
+     freshM (runCodeGen p (In4 (_Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (_Get σ m))))))))
 direct (MakeRegister σ p q) m = error "Direct use of registers not supported"
 direct (GetRegister σ) m = error "Direct use of registers not supported"
 direct (PutRegister σ p) m = error "Direct use of registers not supported"

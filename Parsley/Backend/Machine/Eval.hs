@@ -20,7 +20,7 @@ import Control.Monad.ST                      (ST, runST)
 import Parsley.Backend.Machine.Defunc        (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Parsley.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
-import Parsley.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), LetBinding(..))
+import Parsley.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), LetBinding(..), Access(..))
 import Parsley.Backend.Machine.LetRecBuilder
 import Parsley.Backend.Machine.Ops
 import Parsley.Backend.Machine.State
@@ -64,9 +64,9 @@ readyMachine = cata4 (Machine . alg)
     alg (MkJoin φ p k)      = evalMkJoin φ p k
     alg (Swap k)            = evalSwap k
     alg (Dup k)             = evalDup k
-    alg (Make σ k)          = evalMake σ k
-    alg (Get σ k)           = evalGet σ k
-    alg (Put σ k)           = evalPut σ k
+    alg (Make σ c k)        = evalMake σ c k
+    alg (Get σ c k)         = evalGet σ c k
+    alg (Put σ c k)         = evalPut σ c k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
@@ -149,29 +149,22 @@ evalSwap :: Machine s o (x : y : xs) n r a -> MachineMonad s o (y : x : xs) n r 
 evalSwap (Machine k) = k <&> \mk γ -> mk (γ {operands = let Op y (Op x xs) = operands γ in Op x (Op y xs)})
 
 evalDup :: Machine s o (x : x : xs) n r a -> MachineMonad s o (x : xs) n r a
-evalDup (Machine k) = k <&> \mk γ -> let Op x xs = operands γ in [||
-    let dupx = $$x
-    in $$(mk (γ {operands = Op [||dupx||] (Op [||dupx||] xs)}))
-  ||]
+evalDup (Machine k) = k <&> \mk γ ->
+  let Op x xs = operands γ
+  in dup x $ \dupx -> mk (γ {operands = Op dupx (Op dupx xs)})
 
-evalMake :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-evalMake σ k = asks $! \ctx γ -> let Op x xs = operands γ in [||
-    do ref <- $$(newΣ x)
-       $$(run k (γ {operands = xs}) (insertΣ σ [||ref||] ctx))
-  ||]
+evalMake :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+evalMake σ a k = asks $! \ctx γ ->
+  let Op x xs = operands γ
+  in newΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalGet :: ΣVar x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
-evalGet σ (Machine k) = liftM2 (\mk ref γ -> [||
-    do x <- $$(readΣ ref)
-       $$(mk (γ {operands = Op [||x||] (operands γ)}))
-  ||]) k (askΣ σ)
+evalGet :: ΣVar x -> Access -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
+evalGet σ a k = asks $! \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
 
-evalPut :: ΣVar x -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-evalPut σ (Machine k) = liftM2 (\mk ref γ ->
-    let Op x xs = operands γ in [||
-    do $$(writeΣ ref x)
-       $$(mk (γ {operands = xs}))
-  ||]) k (askΣ σ)
+evalPut :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+evalPut σ a k = asks $! \ctx γ ->
+  let Op x xs = operands γ
+  in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
 evalLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) =

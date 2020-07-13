@@ -42,7 +42,6 @@ import System.IO.Unsafe                    (unsafePerformIO)
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, map, size)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
-import qualified Data.Set            as Set     (null)
 
 compile :: forall compiled a. Parser a -> (forall x. Bool -> Fix Combinator x -> IMVar -> compiled x) -> (compiled a, DMap MVar compiled)
 compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (m, ms)
@@ -54,7 +53,6 @@ compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.
 
     ms = DMap.map (codeGen' True) μs
     m = codeGen' False p'
-
 
 preprocess :: Fix Combinator a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 preprocess p =

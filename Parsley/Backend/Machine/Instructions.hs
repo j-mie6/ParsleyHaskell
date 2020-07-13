@@ -40,12 +40,14 @@ data Instr o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a
   MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr o k xs n r a
   Swap      :: k (x : y : xs) n r a -> Instr o k (y : x : xs) n r a
   Dup       :: k (x : x : xs) n r a -> Instr o k (x : xs) n r a
-  Make      :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
-  Get       :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
-  Put       :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+  Make      :: ΣVar x -> Access -> k xs n r a -> Instr o k (x : xs) n r a
+  Get       :: ΣVar x -> Access -> k (x : xs) n r a -> Instr o k xs n r a
+  Put       :: ΣVar x -> Access -> k xs n r a -> Instr o k (x : xs) n r a
   LogEnter  :: String -> k xs (Succ (Succ n)) r a -> Instr o k xs (Succ n) r a
   LogExit   :: String -> k xs n r a -> Instr o k xs n r a
   MetaInstr :: MetaInstr n -> k xs n r a -> Instr o k xs n r a
+
+data Access = Hard | Soft deriving Show
 
 data MetaInstr (n :: Nat) where
   AddCoins    :: Int -> MetaInstr (Succ n)
@@ -69,7 +71,16 @@ pattern Fmap :: Machine.Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Inst
 pattern Fmap f k = Push f (In4 (Lift2 (USER (FLIP_H APP)) k))
 
 _Modify :: ΣVar x -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) ((x -> x) : xs) n r a
-_Modify σ = Get σ . In4 . App . In4 . Put σ
+_Modify σ  = _Get σ . In4 . App . In4 . _Put σ
+
+_Make :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+_Make σ = Make σ Hard
+
+_Put :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+_Put σ = Put σ Hard
+
+_Get :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
+_Get σ = Get σ Hard
 
 -- This this is a nice little trick to get this instruction to generate optimised code
 pattern If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) (Bool : xs) n r a
@@ -95,9 +106,9 @@ instance IFunctor4 (Instr o) where
   imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
   imap4 f (Dup k)             = Dup (f k)
-  imap4 f (Make σ k)          = Make σ (f k)
-  imap4 f (Get σ k)           = Get σ (f k)
-  imap4 f (Put σ k)           = Put σ (f k)
+  imap4 f (Make σ a k)        = Make σ a (f k)
+  imap4 f (Get σ a k)         = Get σ a (f k)
+  imap4 f (Put σ a k)         = Put σ a (f k)
   imap4 f (LogEnter name k)   = LogEnter name (f k)
   imap4 f (LogExit name k)    = LogExit name (f k)
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
@@ -125,9 +136,9 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (MkJoin φ p k)      = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
       alg (Swap k)            = "(Swap " . getConst4 k . ")"
       alg (Dup k)             = "(Dup " . getConst4 k . ")"
-      alg (Make σ k)          = "(Make " . shows σ . " " . getConst4 k . ")"
-      alg (Get σ k)           = "(Get " . shows σ . " " . getConst4 k . ")"
-      alg (Put σ k)           = "(Put " . shows σ . " " . getConst4 k . ")"
+      alg (Make σ a k)        = "(Make " . shows σ . " " . shows a . getConst4 k . ")"
+      alg (Get σ a k)         = "(Get " . shows σ . " " . shows a . getConst4 k . ")"
+      alg (Put σ a k)         = "(Put " . shows σ . " " . shows a . getConst4 k . ")"
       alg (LogEnter _ k)      = getConst4 k
       alg (LogExit _ k)       = getConst4 k
       alg (MetaInstr m k)     = "[" . shows m . "] " . getConst4 k

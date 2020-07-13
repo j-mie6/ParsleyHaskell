@@ -41,9 +41,9 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
     alg (MkJoin _ (Const4 b) (Const4 k))       = (fst k + fst b, snd k || snd b)
     alg (Swap k)                               = getConst4 k
     alg (Dup k)                                = getConst4 k
-    alg (Make _ k)                             = getConst4 k
-    alg (Get _ k)                              = getConst4 k
-    alg (Put _ k)                              = getConst4 k
+    alg (Make _ _ k)                           = getConst4 k
+    alg (Get _ _ k)                            = getConst4 k
+    alg (Put _ _ k)                            = getConst4 k
     alg (LogEnter _ k)                         = getConst4 k
     alg (LogExit _ k)                          = getConst4 k
     alg (MetaInstr (AddCoins n) (Const4 k))    = k
@@ -121,9 +121,9 @@ relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
     alg (MkJoin _ b _)     n         = let VCons _ xs = getStack b (SSucc n) in xs
     alg (Swap k)           n         = let VCons rel1 (VCons rel2 xs) = getStack k n in VCons rel2 (VCons rel1 xs)
     alg (Dup k)            n         = let VCons rel1 (VCons rel2 xs) = getStack k (SSucc n) in VCons (rel1 || rel2) xs
-    alg (Make _ k)         (SSucc n) = VCons False (getStack k n)
-    alg (Get _ k)          n         = let VCons _ xs = getStack k (SSucc n) in xs
-    alg (Put _ k)          (SSucc n) = VCons False (getStack k n)
+    alg (Make _ _ k)       (SSucc n) = VCons False (getStack k n)
+    alg (Get _ _ k)        n         = let VCons _ xs = getStack k (SSucc n) in xs
+    alg (Put _ _ k)        (SSucc n) = VCons False (getStack k n)
     alg (LogEnter _ k)     n         = getStack k n
     alg (LogExit _ k)      n         = getStack k n
     alg (MetaInstr _ k)    n         = getStack k n

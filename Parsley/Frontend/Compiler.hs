@@ -94,19 +94,21 @@ findLetsAlg p = LetFinder $ do
     (do addRec name)
     (ifNotProcessedBefore name
       (do addName name (case q of
-            pf :<*>: px       -> do runLetFinder pf; runLetFinder px
-            p :*>: q          -> do runLetFinder p;  runLetFinder q
-            p :<*: q          -> do runLetFinder p;  runLetFinder q
-            p :<|>: q         -> do runLetFinder p;  runLetFinder q
-            Try p             -> do runLetFinder p
-            LookAhead p       -> do runLetFinder p
-            NotFollowedBy p   -> do runLetFinder p
-            Branch b p q      -> do runLetFinder b;  runLetFinder p; runLetFinder q
-            Match p _ qs d    -> do runLetFinder p;  forM_ qs runLetFinder; runLetFinder d
-            ChainPre op p     -> do runLetFinder op; runLetFinder p
-            ChainPost p op    -> do runLetFinder p;  runLetFinder op
-            Debug _ p         -> do runLetFinder p
-            _                 -> do return ())
+            pf :<*>: px        -> do runLetFinder pf; runLetFinder px
+            p :*>: q           -> do runLetFinder p;  runLetFinder q
+            p :<*: q           -> do runLetFinder p;  runLetFinder q
+            p :<|>: q          -> do runLetFinder p;  runLetFinder q
+            Try p              -> do runLetFinder p
+            LookAhead p        -> do runLetFinder p
+            NotFollowedBy p    -> do runLetFinder p
+            Branch b p q       -> do runLetFinder b;  runLetFinder p; runLetFinder q
+            Match p _ qs d     -> do runLetFinder p;  forM_ qs runLetFinder; runLetFinder d
+            ChainPre op p      -> do runLetFinder op; runLetFinder p
+            ChainPost p op     -> do runLetFinder p;  runLetFinder op
+            MakeRegister _ p q -> do runLetFinder p;  runLetFinder q
+            PutRegister _ p    -> do runLetFinder p
+            Debug _ p          -> do runLetFinder p
+            _                  -> do return ())
           doNotProcessAgain name))
 
 newtype LetInserter a =
@@ -139,21 +141,24 @@ letInsertion lets recs p = (p', μs, μMax)
       else do runLetInserter (postprocess q)
 
 postprocess :: Combinator LetInserter a -> LetInserter a
-postprocess (pf :<*>: px)       = LetInserter (fmap optimise (liftA2 (:<*>:) (runLetInserter pf) (runLetInserter px)))
-postprocess (p :*>: q)          = LetInserter (fmap optimise (liftA2 (:*>:)  (runLetInserter p)  (runLetInserter q)))
-postprocess (p :<*: q)          = LetInserter (fmap optimise (liftA2 (:<*:)  (runLetInserter p)  (runLetInserter q)))
-postprocess (p :<|>: q)         = LetInserter (fmap optimise (liftA2 (:<|>:) (runLetInserter p)  (runLetInserter q)))
-postprocess Empty               = LetInserter (return        (In Empty))
-postprocess (Try p)             = LetInserter (fmap optimise (fmap Try (runLetInserter p)))
-postprocess (LookAhead p)       = LetInserter (fmap optimise (fmap LookAhead (runLetInserter p)))
-postprocess (NotFollowedBy p)   = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
-postprocess (Branch b p q)      = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
-postprocess (Match p fs qs d)   = LetInserter (fmap optimise (liftA4 Match (runLetInserter p) (return fs) (traverse runLetInserter qs) (runLetInserter d)))
-postprocess (ChainPre op p)     = LetInserter (fmap optimise (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
-postprocess (ChainPost p op)    = LetInserter (fmap optimise (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
-postprocess (Debug name p)      = LetInserter (fmap optimise (fmap (Debug name) (runLetInserter p)))
-postprocess (Pure x)            = LetInserter (return        (In (Pure x)))
-postprocess (Satisfy f)         = LetInserter (return        (In (Satisfy f)))
+postprocess (pf :<*>: px)        = LetInserter (fmap optimise (liftA2 (:<*>:) (runLetInserter pf) (runLetInserter px)))
+postprocess (p :*>: q)           = LetInserter (fmap optimise (liftA2 (:*>:)  (runLetInserter p)  (runLetInserter q)))
+postprocess (p :<*: q)           = LetInserter (fmap optimise (liftA2 (:<*:)  (runLetInserter p)  (runLetInserter q)))
+postprocess (p :<|>: q)          = LetInserter (fmap optimise (liftA2 (:<|>:) (runLetInserter p)  (runLetInserter q)))
+postprocess Empty                = LetInserter (return        (In Empty))
+postprocess (Try p)              = LetInserter (fmap optimise (fmap Try (runLetInserter p)))
+postprocess (LookAhead p)        = LetInserter (fmap optimise (fmap LookAhead (runLetInserter p)))
+postprocess (NotFollowedBy p)    = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
+postprocess (Branch b p q)       = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
+postprocess (Match p fs qs d)    = LetInserter (fmap optimise (liftA4 Match (runLetInserter p) (return fs) (traverse runLetInserter qs) (runLetInserter d)))
+postprocess (ChainPre op p)      = LetInserter (fmap optimise (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
+postprocess (ChainPost p op)     = LetInserter (fmap optimise (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
+postprocess (MakeRegister σ p q) = LetInserter (fmap optimise (liftA2 (MakeRegister σ) (runLetInserter p) (runLetInserter q)))
+postprocess (GetRegister σ)      = LetInserter (return        (In (GetRegister σ)))
+postprocess (PutRegister σ p)    = LetInserter (fmap optimise (fmap (PutRegister σ) (runLetInserter p)))
+postprocess (Debug name p)       = LetInserter (fmap optimise (fmap (Debug name) (runLetInserter p)))
+postprocess (Pure x)             = LetInserter (return        (In (Pure x)))
+postprocess (Satisfy f)          = LetInserter (return        (In (Satisfy f)))
 
 getPreds :: MonadState LetFinderState m => m (HashMap ParserName Int)
 getPreds = gets preds

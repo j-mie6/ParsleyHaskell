@@ -9,7 +9,7 @@
 module Parsley.Core.CombinatorAST (module Parsley.Core.CombinatorAST) where
 
 import Parsley.Common           (IFunctor, Fix, Const1(..), imap, cata, intercalateDiff)
-import Parsley.Core.Identifiers (MVar)
+import Parsley.Core.Identifiers (MVar, ΣVar)
 import Parsley.Core.Defunc      (Defunc)
 
 -- Core datatype
@@ -29,6 +29,9 @@ data Combinator (k :: * -> *) (a :: *) where
   Match          :: k a -> [Defunc (a -> Bool)] -> [k b] -> k b -> Combinator k b
   ChainPre       :: k (a -> a) -> k a -> Combinator k a
   ChainPost      :: k a -> k (a -> a) -> Combinator k a
+  MakeRegister   :: ΣVar a -> k a -> k b -> Combinator k b
+  GetRegister    :: ΣVar a -> Combinator k a
+  PutRegister    :: ΣVar a -> k a -> Combinator k ()
   Debug          :: String -> k a -> Combinator k a
   MetaCombinator :: MetaCombinator -> k a -> Combinator k a
 
@@ -53,6 +56,9 @@ instance IFunctor Combinator where
   imap f (Match p fs qs d)    = Match (f p) fs (map f qs) (f d)
   imap f (ChainPre op p)      = ChainPre (f op) (f p)
   imap f (ChainPost p op)     = ChainPost (f p) (f op)
+  imap f (MakeRegister σ p q) = MakeRegister σ (f p) (f q)
+  imap f (GetRegister σ)      = GetRegister σ
+  imap f (PutRegister σ p)    = PutRegister σ (f p)
   imap f (Debug name p)       = Debug name (f p)
   imap f (MetaCombinator m p) = MetaCombinator m (f p)
 
@@ -75,6 +81,9 @@ instance Show (Fix Combinator a) where
       alg (Match (Const1 p) fs qs (Const1 def))     = "(match " . p . " " . shows fs . " [" . intercalateDiff (", ") (map getConst1 qs) . "] "  . def . ")"
       alg (ChainPre (Const1 op) (Const1 p))         = "(chainPre " . op . " " . p . ")"
       alg (ChainPost (Const1 p) (Const1 op))        = "(chainPost " . p . " " . op . ")"
+      alg (MakeRegister σ (Const1 p) (Const1 q))    = "(makeRegister " . shows σ . " " . p . " " . q . ")"
+      alg (GetRegister σ)                           = "(getRegister " . shows σ . ")"
+      alg (PutRegister σ (Const1 p))                = "(putRegister " . shows σ . " " . p . ")"
       alg (Debug _ (Const1 p))                      = p
       alg (MetaCombinator m (Const1 p))             = p . " [" . shows m . "]"
 

@@ -61,6 +61,9 @@ compliance (ChainPost p NonComp)    = seqCompliance p Comp
 compliance (ChainPost p op)         = seqCompliance p NonComp
 compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
 compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
+compliance (MakeRegister _ l r)     = seqCompliance l r
+compliance (GetRegister _)          = FullPure
+compliance (PutRegister _ c)        = coerce c
 compliance (MetaCombinator _ c)     = c
 
 newtype CutAnalysis a = CutAnalysis {cutOut :: Bool -> (Fix Combinator a, Bool)}
@@ -127,6 +130,9 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . zygo (CutAnalysis . alg) co
           (def', handled') = cutOut (ifst def) (cut && not handled)
           (qs', handled'') = foldr (\q -> biliftA2 (:) (&&) (cutOut (ifst q) (cut && not handled))) ([], handled') qs
       in (In (Match p' f qs' def'), handled || handled'')
+    alg (MakeRegister σ l r) cut = seqAlg (MakeRegister σ) cut (ifst l) (ifst r)
+    alg (GetRegister σ) _ = (In (GetRegister σ), False)
+    alg (PutRegister σ p) cut = rewrap (PutRegister σ) cut (ifst p)
 
 -- Termination Analysis (Generalised left-recursion checker)
 data Consumption = Some | None | Never

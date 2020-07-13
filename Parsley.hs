@@ -75,10 +75,6 @@ liftA3 f p q r = f <$> p <*> q <*> r
 
 many :: Parser a -> Parser [a]
 many = pfoldr CONS EMPTY
-{-many p = newRegister (pure ID) (\r ->
-    let go = modify r (COMPOSE_H (FLIP_H COMPOSE) CONS <$> p) *> go
-         <|> (APP_H (FLIP_H APP) EMPTY <$> get r)
-    in go)-}
 
 manyN :: Int -> Parser a -> Parser [a]
 manyN n p = foldr (const (p <:>)) (many p) [1..n]
@@ -115,12 +111,18 @@ endBy1 p sep = some (p <* sep)
 sepEndBy :: Parser a -> Parser b -> Parser [a]
 sepEndBy p sep = option EMPTY (sepEndBy1 p sep)
 
--- TODO Could do better with registers + difference list?
 sepEndBy1 :: Parser a -> Parser b -> Parser [a]
 sepEndBy1 p sep =
   let seb1 = p <**> (sep *> (FLIP_H CONS <$> option EMPTY seb1)
                  <|> pure (APP_H (FLIP_H CONS) EMPTY))
   in seb1
+
+{-sepEndBy1 :: Parser a -> Parser b -> Parser [a]
+sepEndBy1 p sep = newRegister_ ID $ \r ->
+  let go = modify r (COMPOSE_H (FLIP_H COMPOSE) CONS <$> p)
+         *> (sep *> (go <|> get r <*> pure EMPTY)
+         <|> get r <*> pure EMPTY)
+  in go-}
 
 manyTill :: Parser a -> Parser b -> Parser [a]
 manyTill p end = let go = end $> EMPTY <|> p <:> go in go
@@ -257,7 +259,60 @@ fromMaybeP pm px = select (makeQ (maybe (Left ()) Right) [||maybe (Left ()) Righ
 maybeP :: Parser a -> Parser (Maybe a)
 maybeP p = option (makeQ Nothing [||Nothing||]) (code Just <$> p)
 
+-- Stateful Parsers
+newRegister_ :: ParserOps rep => rep a -> (forall r. Reg r a -> Parser b) -> Parser b
+newRegister_ x = newRegister (pure x)
+
+put_ :: ParserOps rep => Reg r a -> rep a -> Parser ()
+put_ r = put r . pure
+
+gets :: Reg r a -> Parser (a -> b) -> Parser b
+gets r p = p <*> get r
+
+gets_ :: ParserOps rep => Reg r a -> rep (a -> b) -> Parser b
+gets_ r = gets r . pure
+
+modify :: Reg r a -> Parser (a -> a) -> Parser ()
+modify r p = put r (gets r p)
+
+modify_ :: ParserOps rep => Reg r a -> rep (a -> a) -> Parser ()
+modify_ r = modify r . pure
+
+move :: Reg r1 a -> Reg r2 a -> Parser ()
+move dst src = put dst (get src)
+
+local :: Reg r a -> Parser a -> Parser b -> Parser b
+local r p q = newRegister (get r) $ \tmp -> put r p
+                                         *> q
+                                         <* move r tmp
+
+swap :: Reg r1 a -> Reg r2 a -> Parser ()
+swap r1 r2 = newRegister (get r1) $ \tmp -> move r1 r2
+                                         *> move r2 tmp
+
+rollback :: Reg r a -> Parser b -> Parser b
+rollback r p = newRegister (get r) $ \save -> p <|> move r save *> empty
+
+for :: Parser a -> Parser (a -> Bool) -> Parser (a -> a) -> Parser () -> Parser ()
+for init cond step body =
+  newRegister init $ \i ->
+    let cond' :: Parser Bool
+        cond' = gets i cond
+    in when cond' (while (body *> modify i step *> cond'))
+
 -- Iterative Parsers
+{-chainPre :: Parser (a -> a) -> Parser a -> Parser a
+chainPre op p = newRegister_ ID $ \r ->
+  let go = modify r (FLIP_H COMPOSE <$> op) *> go
+       <|> get r <*> p
+  in go-}
+
+{-chainPost :: Parser a -> Parser (a -> a) -> Parser a
+chainPost p op = newRegister p $ \r ->
+  let go = modify r op *> go
+       <|> get r
+  in go-}
+
 chainl1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (b -> a -> b) -> Parser b
 chainl1' f p op = chainPost (f <$> p) (FLIP <$> op <*> p)
 

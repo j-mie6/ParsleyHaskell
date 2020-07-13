@@ -150,10 +150,10 @@ direct (ChainPost p op) m =
      opc <- freshM (runCodeGen op (In4 (_Modify σ (In4 (Jump μ)))))
      let nop = coinsNeeded opc
      freshM (runCodeGen p (In4 (_Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (_Get σ m))))))))
-direct (MakeRegister σ p q) m = error "Direct use of registers not supported"
-direct (GetRegister σ) m = error "Direct use of registers not supported"
-direct (PutRegister σ p) m = error "Direct use of registers not supported"
-direct (Debug name p) m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
+direct (MakeRegister σ p q)   m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
+direct (GetRegister σ)        m = do return $! In4 (_Get σ m)
+direct (PutRegister σ p)      m = do runCodeGen p (In4 (_Put σ (In4 (Push (USER UNIT) m))))
+direct (Debug name p)         m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 direct (MetaCombinator Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
 
 tailCallOptimise :: MVar x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a

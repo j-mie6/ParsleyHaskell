@@ -1,6 +1,7 @@
+{-# LANGUAGE RankNTypes #-}
 module Parsley.Core.Primitives (module Parsley.Core.Primitives) where
 
-import Parsley.Core.CombinatorAST (Combinator(..))
+import Parsley.Core.CombinatorAST (Combinator(..), Reg(..))
 import Parsley.Core.Defunc        (Defunc)
 import Parsley.Common.Indexed     (Fix(In))
 
@@ -58,6 +59,15 @@ chainPre (Parser op) (Parser p) = Parser (In (ChainPre op p))
 
 chainPost :: Parser a -> Parser (a -> a) -> Parser a
 chainPost (Parser p) (Parser op) = Parser (In (ChainPost p op))
+
+newRegister :: Parser a -> (forall r. Reg r a -> Parser b) -> Parser b
+newRegister (Parser p) f = {-Parser (In (ScopeRegister p (unParser . f))) `seq` -}error "Direct use of registers not supported"
+
+get :: Reg r a -> Parser a
+get (Reg reg) = Parser (In (GetRegister reg)) `seq` error "Direct use of registers not supported"
+
+put :: Reg r a -> Parser a -> Parser ()
+put (Reg reg) (Parser p) = Parser (In (PutRegister reg p)) `seq` error "Direct use of registers not supported"
 
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (Debug name p))

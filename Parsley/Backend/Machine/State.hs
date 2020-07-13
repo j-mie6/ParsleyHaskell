@@ -89,9 +89,7 @@ cachedΣ :: ΣVar x -> Ctx s o a -> Code x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (>>= getCached) . DMap.lookup σ . σs
 
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
-askSub μ = do
-  sub <- asks (fmap unwrapSub . DMap.lookup μ . μs)
-  maybe (throw (missingDependency μ)) return sub
+askSub μ = asks (fromMaybe (throw (missingDependency μ)) . fmap unwrapSub . DMap.lookup μ . μs)
 
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (Cont s o a x))
 askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)

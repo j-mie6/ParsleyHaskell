@@ -35,6 +35,11 @@ data Combinator (k :: * -> *) (a :: *) where
   Debug          :: String -> k a -> Combinator k a
   MetaCombinator :: MetaCombinator -> k a -> Combinator k a
 
+data ScopeRegister (k :: * -> *) (a :: *) where
+  ScopeRegister :: k a -> (forall r. Reg r a -> k b) -> ScopeRegister k b
+
+newtype Reg (r :: *) a = Reg (ΣVar a)
+
 data MetaCombinator where
   Cut         :: MetaCombinator
   RequiresCut :: MetaCombinator

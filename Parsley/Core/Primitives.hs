@@ -1,73 +1,74 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RankNTypes,
+             TypeOperators #-}
 module Parsley.Core.Primitives (module Parsley.Core.Primitives) where
 
-import Parsley.Core.CombinatorAST (Combinator(..), Reg(..))
+import Parsley.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..))
 import Parsley.Core.Defunc        (Defunc)
-import Parsley.Common.Indexed     (Fix(In))
+import Parsley.Common.Indexed     (Fix(In), (:+:)(..))
 
 -- Parser wrapper type
-newtype Parser a = Parser {unParser :: Fix Combinator a}
+newtype Parser a = Parser {unParser :: Fix (Combinator :+: ScopeRegister) a}
 
 -- Core smart constructors
 {-# INLINE _pure #-}
 _pure :: Defunc a -> Parser a
-_pure = Parser . In . Pure
+_pure = Parser . In . L . Pure
 
 infixl 4 <*>
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
-Parser p <*> Parser q = Parser (In (p :<*>: q))
+Parser p <*> Parser q = Parser (In (L (p :<*>: q)))
 
 infixl 4 <*
 (<*) :: Parser a -> Parser b -> Parser a
-Parser p <* Parser q = Parser (In (p :<*: q))
+Parser p <* Parser q = Parser (In (L (p :<*: q)))
 
 infixl 4 *>
 (*>) :: Parser a -> Parser b -> Parser b
-Parser p *> Parser q = Parser (In (p :*>: q))
+Parser p *> Parser q = Parser (In (L (p :*>: q)))
 
 empty :: Parser a
-empty = Parser (In Empty)
+empty = Parser (In (L Empty))
 
 infixl 3 <|>
 (<|>) :: Parser a -> Parser a -> Parser a
-Parser p <|> Parser q = Parser (In (p :<|>: q))
+Parser p <|> Parser q = Parser (In (L (p :<|>: q)))
 
 {-# INLINE _satisfy #-}
 _satisfy :: Defunc (Char -> Bool) -> Parser Char
-_satisfy = Parser . In . Satisfy
+_satisfy = Parser . In . L . Satisfy
 
 lookAhead :: Parser a -> Parser a
-lookAhead = Parser . In . LookAhead . unParser
+lookAhead = Parser . In . L . LookAhead . unParser
 
 notFollowedBy :: Parser a -> Parser ()
-notFollowedBy = Parser . In . NotFollowedBy . unParser
+notFollowedBy = Parser . In . L . NotFollowedBy . unParser
 
 try :: Parser a -> Parser a
-try = Parser . In . Try . unParser
+try = Parser . In . L . Try . unParser
 
 {-# INLINE _conditional #-}
 _conditional :: [(Defunc (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
 _conditional cs (Parser p) (Parser def) =
   let (fs, qs) = unzip cs
-  in Parser (In (Match p fs (map unParser qs) def))
+  in Parser (In (L (Match p fs (map unParser qs) def)))
 
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
-branch (Parser c) (Parser p) (Parser q) = Parser (In (Branch c p q))
+branch (Parser c) (Parser p) (Parser q) = Parser (In (L (Branch c p q)))
 
 chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre (Parser op) (Parser p) = Parser (In (ChainPre op p))
+chainPre (Parser op) (Parser p) = Parser (In (L (ChainPre op p)))
 
 chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost (Parser p) (Parser op) = Parser (In (ChainPost p op))
+chainPost (Parser p) (Parser op) = Parser (In (L (ChainPost p op)))
 
 newRegister :: Parser a -> (forall r. Reg r a -> Parser b) -> Parser b
-newRegister (Parser p) f = {-Parser (In (ScopeRegister p (unParser . f))) `seq` -}error "Direct use of registers not supported"
+newRegister (Parser p) f = Parser (In (R (ScopeRegister p (unParser . f)))) `seq` error "Direct use of registers not supported"
 
 get :: Reg r a -> Parser a
-get (Reg reg) = Parser (In (GetRegister reg)) `seq` error "Direct use of registers not supported"
+get (Reg reg) = Parser (In (L (GetRegister reg))) `seq` error "Direct use of registers not supported"
 
 put :: Reg r a -> Parser a -> Parser ()
-put (Reg reg) (Parser p) = Parser (In (PutRegister reg p)) `seq` error "Direct use of registers not supported"
+put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p))) `seq` error "Direct use of registers not supported"
 
 debug :: String -> Parser a -> Parser a
-debug name (Parser p) = Parser (In (Debug name p))
+debug name (Parser p) = Parser (In (L (Debug name p)))

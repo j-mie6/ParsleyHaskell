@@ -11,7 +11,8 @@
              UndecidableInstances,
              AllowAmbiguousTypes,
              ScopedTypeVariables,
-             KindSignatures #-}
+             KindSignatures,
+             TypeOperators #-}
 module Parsley.Frontend.Compiler (compile) where
 
 import Prelude hiding (pred)
@@ -30,11 +31,11 @@ import GHC.Exts                            (Int(..))
 import GHC.Prim                            (StableName#, unsafeCoerce#)
 import GHC.StableName                      (StableName(..), makeStableName, hashStableName, eqStableName)
 import Numeric                             (showHex)
-import Parsley.Core.CombinatorAST          (Combinator(..))
+import Parsley.Core.CombinatorAST          (Combinator(..), ScopeRegister(..), Reg(..))
 import Parsley.Core.Primitives             (Parser(..))
-import Parsley.Core.Identifiers            (IMVar, MVar(..))
+import Parsley.Core.Identifiers            (IMVar, MVar(..), IΣVar, ΣVar(..))
 import Parsley.Common.Fresh                (HFreshT, newVar, newScope, runFreshT)
-import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap))
+import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap), (:+:)(..), (\/), Const1(..))
 import Parsley.Frontend.Optimiser          (optimise)
 import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
 import System.IO.Unsafe                    (unsafePerformIO)
@@ -54,20 +55,21 @@ compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.
     ms = DMap.map (codeGen' True) μs
     m = codeGen' False p'
 
-preprocess :: Fix Combinator a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
+preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 preprocess p =
   let q = tagParser p
       (lets, recs) = findLets q
   in letInsertion lets recs q
 
-data ParserName = forall a. ParserName (StableName# (Fix Combinator a))
+data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
 data Tag t f (k :: * -> *) a = Tag {tag :: t, tagged :: f k a}
 newtype Tagger a = Tagger { runTagger :: Fix (Tag ParserName Combinator) a }
 
-tagParser :: Fix Combinator a -> Fix (Tag ParserName Combinator) a
-tagParser = runTagger . cata' alg
+tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combinator) a
+tagParser = runTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap runTagger \/ descope))
   where
-    alg p q = Tagger (In (Tag (makeParserName p) (imap runTagger q)))
+    regMaker = newRegMaker
+    descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ (runTagger p) (runTagger (f reg)))
 
 data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
                                      , recs   :: HashSet ParserName
@@ -86,27 +88,11 @@ findLets p = (lets, recs)
 findLetsAlg :: Tag ParserName Combinator LetFinder a -> LetFinder a
 findLetsAlg p = LetFinder $ do
   let name = tag p
-  let q = tagged p
   addPred name
   ifSeen name
     (do addRec name)
     (ifNotProcessedBefore name
-      (do addName name (case q of
-            pf :<*>: px        -> do runLetFinder pf; runLetFinder px
-            p :*>: q           -> do runLetFinder p;  runLetFinder q
-            p :<*: q           -> do runLetFinder p;  runLetFinder q
-            p :<|>: q          -> do runLetFinder p;  runLetFinder q
-            Try p              -> do runLetFinder p
-            LookAhead p        -> do runLetFinder p
-            NotFollowedBy p    -> do runLetFinder p
-            Branch b p q       -> do runLetFinder b;  runLetFinder p; runLetFinder q
-            Match p _ qs d     -> do runLetFinder p;  forM_ qs runLetFinder; runLetFinder d
-            ChainPre op p      -> do runLetFinder op; runLetFinder p
-            ChainPost p op     -> do runLetFinder p;  runLetFinder op
-            MakeRegister _ p q -> do runLetFinder p;  runLetFinder q
-            PutRegister _ p    -> do runLetFinder p
-            Debug _ p          -> do runLetFinder p
-            _                  -> do return ())
+      (do addName name (traverseCombinator (fmap Const1 . runLetFinder) (tagged p))
           doNotProcessAgain name))
 
 newtype LetInserter a =
@@ -139,24 +125,27 @@ letInsertion lets recs p = (p', μs, μMax)
       else do runLetInserter (postprocess q)
 
 postprocess :: Combinator LetInserter a -> LetInserter a
-postprocess (pf :<*>: px)        = LetInserter (fmap optimise (liftA2 (:<*>:) (runLetInserter pf) (runLetInserter px)))
-postprocess (p :*>: q)           = LetInserter (fmap optimise (liftA2 (:*>:)  (runLetInserter p)  (runLetInserter q)))
-postprocess (p :<*: q)           = LetInserter (fmap optimise (liftA2 (:<*:)  (runLetInserter p)  (runLetInserter q)))
-postprocess (p :<|>: q)          = LetInserter (fmap optimise (liftA2 (:<|>:) (runLetInserter p)  (runLetInserter q)))
-postprocess Empty                = LetInserter (return        (In Empty))
-postprocess (Try p)              = LetInserter (fmap optimise (fmap Try (runLetInserter p)))
-postprocess (LookAhead p)        = LetInserter (fmap optimise (fmap LookAhead (runLetInserter p)))
-postprocess (NotFollowedBy p)    = LetInserter (fmap optimise (fmap NotFollowedBy (runLetInserter p)))
-postprocess (Branch b p q)       = LetInserter (fmap optimise (liftA3 Branch (runLetInserter b) (runLetInserter p) (runLetInserter q)))
-postprocess (Match p fs qs d)    = LetInserter (fmap optimise (liftA4 Match (runLetInserter p) (return fs) (traverse runLetInserter qs) (runLetInserter d)))
-postprocess (ChainPre op p)      = LetInserter (fmap optimise (liftA2 ChainPre (runLetInserter op) (runLetInserter p)))
-postprocess (ChainPost p op)     = LetInserter (fmap optimise (liftA2 ChainPost (runLetInserter p) (runLetInserter op)))
-postprocess (MakeRegister σ p q) = LetInserter (fmap optimise (liftA2 (MakeRegister σ) (runLetInserter p) (runLetInserter q)))
-postprocess (GetRegister σ)      = LetInserter (return        (In (GetRegister σ)))
-postprocess (PutRegister σ p)    = LetInserter (fmap optimise (fmap (PutRegister σ) (runLetInserter p)))
-postprocess (Debug name p)       = LetInserter (fmap optimise (fmap (Debug name) (runLetInserter p)))
-postprocess (Pure x)             = LetInserter (return        (In (Pure x)))
-postprocess (Satisfy f)          = LetInserter (return        (In (Satisfy f)))
+postprocess = LetInserter . fmap optimise . traverseCombinator runLetInserter
+
+traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)
+traverseCombinator expose (pf :<*>: px)        = liftA2 (:<*>:) (expose pf) (expose px)
+traverseCombinator expose (p :*>: q)           = liftA2 (:*>:) (expose p) (expose q)
+traverseCombinator expose (p :<*: q)           = liftA2 (:<*:)  (expose p)  (expose q)
+traverseCombinator expose (p :<|>: q)          = liftA2 (:<|>:) (expose p)  (expose q)
+traverseCombinator expose Empty                = pure Empty
+traverseCombinator expose (Try p)              = fmap Try (expose p)
+traverseCombinator expose (LookAhead p)        = fmap LookAhead (expose p)
+traverseCombinator expose (NotFollowedBy p)    = fmap NotFollowedBy (expose p)
+traverseCombinator expose (Branch b p q)       = liftA3 Branch (expose b) (expose p) (expose q)
+traverseCombinator expose (Match p fs qs d)    = liftA4 Match (expose p) (pure fs) (traverse expose qs) (expose d)
+traverseCombinator expose (ChainPre op p)      = liftA2 ChainPre (expose op) (expose p)
+traverseCombinator expose (ChainPost p op)     = liftA2 ChainPost (expose p) (expose op)
+traverseCombinator expose (MakeRegister σ p q) = liftA2 (MakeRegister σ) (expose p) (expose q)
+traverseCombinator expose (GetRegister σ)      = pure (GetRegister σ)
+traverseCombinator expose (PutRegister σ p)    = fmap (PutRegister σ) (expose p)
+traverseCombinator expose (Debug name p)       = fmap (Debug name) (expose p)
+traverseCombinator expose (Pure x)             = pure (Pure x)
+traverseCombinator expose (Satisfy f)          = pure (Satisfy f)
 
 getPreds :: MonadState LetFinderState m => m (HashMap ParserName Int)
 getPreds = gets preds
@@ -194,9 +183,24 @@ doNotProcessAgain x = modifyBefore (HashSet.insert x)
 addName :: MonadReader LetFinderCtx m => ParserName -> m b -> m b
 addName x = local (HashSet.insert x)
 
-makeParserName :: Fix Combinator a -> ParserName
+makeParserName :: Fix (Combinator :+: ScopeRegister) a -> ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
 makeParserName !p = unsafePerformIO (fmap (\(StableName name) -> ParserName name) (makeStableName p))
+
+{-# NOINLINE newRegMaker #-}
+newRegMaker :: IORef IΣVar
+newRegMaker = unsafePerformIO (newIORef 0)
+
+{-# NOINLINE freshReg #-}
+freshReg :: IORef IΣVar -> (forall r. Reg r a -> x) -> x
+freshReg maker scope = scope $ unsafePerformIO $ do
+  x <- readIORef maker
+  writeIORef maker (x + 1)
+  return $! (Reg (ΣVar x))
+
+{-# NOINLINE numRegisters #-}
+numRegisters :: IORef IΣVar -> IΣVar
+numRegisters = unsafePerformIO . readIORef
 
 liftA4 :: Applicative f => (a -> b -> c -> d -> e) -> f a -> f b -> f c -> f d -> f e
 liftA4 f u v w x = liftA3 f u v w <*> x

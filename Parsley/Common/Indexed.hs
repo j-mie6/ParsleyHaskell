@@ -39,6 +39,18 @@ cata' alg i@(In x) = alg i (imap (cata' alg) x)
 cata4 :: IFunctor4 f => (forall i' j' k'. f a i' j' k' x -> a i' j' k' x) -> Fix4 f i j k x -> a i j k x
 cata4 alg (In4 x)  = alg (imap4 (cata4 alg) x)
 
+data (f :+: g) k a where
+  L :: f k a -> (f :+: g) k a
+  R :: g k a -> (f :+: g) k a
+
+instance (IFunctor f, IFunctor g) => IFunctor (f :+: g) where
+  imap f (L x) = L (imap f x)
+  imap f (R y) = R (imap f y)
+
+(\/) :: (f a i -> b) -> (g a i -> b) -> (f :+: g) a i -> b
+(f \/ g) (L x) = f x
+(f \/ g) (R y) = g y
+
 data Cofree f a i = a i :< f (Cofree f a) i
 extract :: Cofree f a i -> a i
 extract (x :< _) = x

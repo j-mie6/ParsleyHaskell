@@ -68,6 +68,9 @@ skipManyInspect = $$(Parsley.runParser Parsers.skipManyInspect)
 --nfb :: String -> Maybe ()
 --nfb = $$(Parsley.runParser Parsers.nfb)
 
+regTest :: String -> Maybe Int
+regTest = const Nothing -- $$(Parsley.runParser Parsers.regTest)
+
 main :: IO ()
 main =
   {-do res <- parseBrainfuck "inputs/helloworld.bf"

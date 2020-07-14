@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 module Parsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred, repeat)
@@ -26,6 +27,9 @@ cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac"
     m = bf <* item
     bf = match ">" item op empty
     op '>' = string ">"
+
+regTest :: Parser Int
+regTest = newRegister_ (code 7) (\r -> modify_ r (makeQ (succ @Int) [||succ @Int||]) *> get r)
 
 defuncTest :: Parser (Maybe Int)
 defuncTest = code Just <$> (code (+) <$> (item $> code 1) <*> (item $> code 8))

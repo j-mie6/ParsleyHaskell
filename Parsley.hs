@@ -200,6 +200,11 @@ char c = satisfy (EQ_H (CHAR c)) $> CHAR c
 item :: Parser Char
 item = satisfy (makeQ (const True) [|| const True ||])
 
+{-notFollowedBy :: Parser a -> Parser ()
+notFollowedBy p = newRegister_ (code True) $ \ok ->
+     optional (try (lookAhead p *> put_ ok (code False)))
+  *> get ok <?:> (unit, empty)-}
+
 -- Composite Combinators
 optionally :: ParserOps rep => Parser a -> rep b -> Parser b
 optionally p x = p $> x <|> pure x
@@ -216,9 +221,9 @@ choice = foldr (<|>) empty
 constp :: Parser a -> Parser (b -> a)
 constp = (code const <$>)
 
-infixl 4 <?|>
-(<?|>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
-cond <?|> (p, q) = predicate ID cond p q
+infixl 4 <?:>
+(<?:>) :: Parser Bool -> (Parser a, Parser a) -> Parser a
+cond <?:> (p, q) = predicate ID cond p q
 
 predicate :: ParserOps rep => rep (a -> Bool) -> Parser a -> Parser b -> Parser b -> Parser b
 predicate cond p t e = conditional [(cond, t)] p e
@@ -245,7 +250,7 @@ infixl 1 ||=
 p ||= f = match [minBound..maxBound] p f empty
 
 when :: Parser Bool -> Parser () -> Parser ()
-when p q = p <?|> (q, unit)
+when p q = p <?:> (q, unit)
 
 while :: Parser Bool -> Parser ()
 while x = fix (when x)

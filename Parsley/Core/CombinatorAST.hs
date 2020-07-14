@@ -86,11 +86,14 @@ instance Show (Fix Combinator a) where
       alg (Match (Const1 p) fs qs (Const1 def))     = "(match " . p . " " . shows fs . " [" . intercalateDiff (", ") (map getConst1 qs) . "] "  . def . ")"
       alg (ChainPre (Const1 op) (Const1 p))         = "(chainPre " . op . " " . p . ")"
       alg (ChainPost (Const1 p) (Const1 op))        = "(chainPost " . p . " " . op . ")"
-      alg (MakeRegister σ (Const1 p) (Const1 q))    = "(makeRegister " . shows σ . " " . p . " " . q . ")"
-      alg (GetRegister σ)                           = "(getRegister " . shows σ . ")"
-      alg (PutRegister σ (Const1 p))                = "(putRegister " . shows σ . " " . p . ")"
+      alg (MakeRegister σ (Const1 p) (Const1 q))    = "(make " . shows σ . " " . p . " " . q . ")"
+      alg (GetRegister σ)                           = "(get " . shows σ . ")"
+      alg (PutRegister σ (Const1 p))                = "(put " . shows σ . " " . p . ")"
       alg (Debug _ (Const1 p))                      = p
       alg (MetaCombinator m (Const1 p))             = p . " [" . shows m . "]"
+
+instance IFunctor ScopeRegister where
+  imap f (ScopeRegister p g) = ScopeRegister (f p) (f . g)
 
 instance Show MetaCombinator where
   show Cut = "coins after"

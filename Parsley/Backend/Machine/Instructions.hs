@@ -136,9 +136,9 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (MkJoin φ p k)      = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
       alg (Swap k)            = "(Swap " . getConst4 k . ")"
       alg (Dup k)             = "(Dup " . getConst4 k . ")"
-      alg (Make σ a k)        = "(Make " . shows σ . " " . shows a . getConst4 k . ")"
-      alg (Get σ a k)         = "(Get " . shows σ . " " . shows a . getConst4 k . ")"
-      alg (Put σ a k)         = "(Put " . shows σ . " " . shows a . getConst4 k . ")"
+      alg (Make σ a k)        = "(Make " . shows σ . " " . shows a . " " . getConst4 k . ")"
+      alg (Get σ a k)         = "(Get " . shows σ . " " . shows a . " " . getConst4 k . ")"
+      alg (Put σ a k)         = "(Put " . shows σ . " " . shows a . " " . getConst4 k . ")"
       alg (LogEnter _ k)      = getConst4 k
       alg (LogExit _ k)       = getConst4 k
       alg (MetaInstr m k)     = "[" . shows m . "] " . getConst4 k

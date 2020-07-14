@@ -118,10 +118,10 @@ sepEndBy1 p sep =
   in seb1
 
 {-sepEndBy1 :: Parser a -> Parser b -> Parser [a]
-sepEndBy1 p sep = newRegister_ ID $ \r ->
-  let go = modify r (COMPOSE_H (FLIP_H COMPOSE) CONS <$> p)
-         *> (sep *> (go <|> get r <*> pure EMPTY)
-         <|> get r <*> pure EMPTY)
+sepEndBy1 p sep = newRegister_ ID $ \acc ->
+  let go = modify acc (COMPOSE_H (FLIP_H COMPOSE) CONS <$> p)
+         *> (sep *> (go <|> get acc <*> pure EMPTY)
+         <|> get acc <*> pure EMPTY)
   in go-}
 
 manyTill :: Parser a -> Parser b -> Parser [a]
@@ -281,17 +281,20 @@ modify_ r = modify r . pure
 move :: Reg r1 a -> Reg r2 a -> Parser ()
 move dst src = put dst (get src)
 
+bind :: Parser a -> (Parser a -> Parser b) -> Parser b
+bind p f = newRegister p (f . get)
+
 local :: Reg r a -> Parser a -> Parser b -> Parser b
-local r p q = newRegister (get r) $ \tmp -> put r p
-                                         *> q
-                                         <* move r tmp
+local r p q = bind (get r) $ \x -> put r p
+                                *> q
+                                <* put r x
 
 swap :: Reg r1 a -> Reg r2 a -> Parser ()
-swap r1 r2 = newRegister (get r1) $ \tmp -> move r1 r2
-                                         *> move r2 tmp
+swap r1 r2 = bind (get r1) $ \x -> move r1 r2
+                                *> put r2 x
 
 rollback :: Reg r a -> Parser b -> Parser b
-rollback r p = newRegister (get r) $ \save -> p <|> move r save *> empty
+rollback r p = bind (get r) $ \x -> p <|> put r x *> empty
 
 for :: Parser a -> Parser (a -> Bool) -> Parser (a -> a) -> Parser () -> Parser ()
 for init cond step body =
@@ -302,15 +305,15 @@ for init cond step body =
 
 -- Iterative Parsers
 {-chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre op p = newRegister_ ID $ \r ->
-  let go = modify r (FLIP_H COMPOSE <$> op) *> go
-       <|> get r <*> p
+chainPre op p = newRegister_ ID $ \acc ->
+  let go = modify acc (FLIP_H COMPOSE <$> op) *> go
+       <|> get acc <*> p
   in go-}
 
 {-chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost p op = newRegister p $ \r ->
-  let go = modify r op *> go
-       <|> get r
+chainPost p op = newRegister p $ \acc ->
+  let go = modify acc op *> go
+       <|> get acc
   in go-}
 
 chainl1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (b -> a -> b) -> Parser b
@@ -321,6 +324,13 @@ chainl1 = chainl1' ID
 
 chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
 chainr1' f p op = let go = p <**> (option f (FLIP <$> op <*> go)) in go
+
+{-chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
+chainr1' f p op = newRegister_ ID $ \acc ->
+  let go = bind p $ \x ->
+             modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go
+         <|> get acc <*> (f <$> x)
+  in go-}
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainr1 = chainr1' ID

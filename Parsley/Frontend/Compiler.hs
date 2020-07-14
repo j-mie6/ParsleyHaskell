@@ -12,7 +12,8 @@
              AllowAmbiguousTypes,
              ScopedTypeVariables,
              KindSignatures,
-             TypeOperators #-}
+             TypeOperators,
+             TupleSections #-}
 module Parsley.Frontend.Compiler (compile) where
 
 import Prelude hiding (pred)
@@ -44,29 +45,30 @@ import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, map, size)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
 
-compile :: forall compiled a. Parser a -> (forall x. Bool -> Fix Combinator x -> IMVar -> compiled x) -> (compiled a, DMap MVar compiled)
+compile :: forall compiled a. Parser a -> (forall x. Bool -> Fix Combinator x -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
 compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (m, ms)
   where
-    (p', μs, maxV) = preprocess p
+    (p', μs, maxV, numRegs) = preprocess p
 
     codeGen' :: Bool -> Fix Combinator x -> compiled x
-    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = letBound}) p) (maxV + 1)
+    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = letBound}) p) (maxV + 1) numRegs
 
     ms = DMap.map (codeGen' True) μs
     m = codeGen' False p'
 
-preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
+preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar, IΣVar)
 preprocess p =
-  let q = tagParser p
+  let (q, numRegs) = tagParser p
       (lets, recs) = findLets q
-  in letInsertion lets recs q
+      (p', μs, maxV) = letInsertion lets recs q
+  in (p', μs, maxV, numRegs)
 
 data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
 data Tag t f (k :: * -> *) a = Tag {tag :: t, tagged :: f k a}
 newtype Tagger a = Tagger { runTagger :: Fix (Tag ParserName Combinator) a }
 
-tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combinator) a
-tagParser = runTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap runTagger \/ descope))
+tagParser :: Fix (Combinator :+: ScopeRegister) a -> (Fix (Tag ParserName Combinator) a, IΣVar)
+tagParser = (, numRegisters regMaker) . runTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap runTagger \/ descope))
   where
     regMaker = newRegMaker
     descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ (runTagger p) (runTagger (f reg)))

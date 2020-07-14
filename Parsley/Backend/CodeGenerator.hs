@@ -36,13 +36,13 @@ runCodeGenStack m μ0 φ0 σ0 =
 newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
-codeGen :: PositionOps o => Bool -> Fix Combinator x -> IMVar -> LetBinding o a x
-codeGen letBound p μ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ LetBinding m
+codeGen :: PositionOps o => Bool -> Fix Combinator x -> IMVar -> IΣVar -> LetBinding o a x
+codeGen letBound p μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show m) $ LetBinding m
   where
     m = finalise (histo alg p)
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg =
-      let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 0
+      let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
       in if letBound then m else addCoins (coinsNeeded m) m
 
 pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)

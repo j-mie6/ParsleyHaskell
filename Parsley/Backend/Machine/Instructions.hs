@@ -6,8 +6,6 @@
              KindSignatures,
              PatternSynonyms,
              ScopedTypeVariables,
-             DerivingStrategies,
-             GeneralizedNewtypeDeriving,
              OverloadedStrings #-}
 module Parsley.Backend.Machine.Instructions (module Parsley.Backend.Machine.Instructions) where
 
@@ -17,8 +15,6 @@ import Parsley.Common                      (IFunctor4, Fix4(In4), Const4(..), im
 
 import Parsley.Backend.Machine.Defunc as Machine (Defunc(USER))
 import Parsley.Core.Defunc            as Core    (Defunc(APP, ID), pattern FLIP_H)
-
-newtype LetBinding o a x = LetBinding (Fix4 (Instr o) '[] One x a) deriving newtype Show
 
 data Instr o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
   Ret       :: Instr o k '[x] n x a

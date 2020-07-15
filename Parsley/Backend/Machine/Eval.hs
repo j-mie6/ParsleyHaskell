@@ -20,7 +20,8 @@ import Control.Monad.ST                      (ST, runST)
 import Parsley.Backend.Machine.Defunc        (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Parsley.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
-import Parsley.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), LetBinding(..), Access(..))
+import Parsley.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
+import Parsley.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Backend.Machine.LetRecBuilder
 import Parsley.Backend.Machine.Ops
 import Parsley.Backend.Machine.State
@@ -28,13 +29,13 @@ import Parsley.Common                        (Fix4, cata4, One, Code, Vec(..), N
 import System.Console.Pretty                 (color, Color(Green))
 
 eval :: forall o s a. Ops o => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
-eval input (LetBinding !p, fs) = trace ("EVALUATING: " ++ show p) [|| runST $
+eval input (LetBinding !p _, fs) = trace ("EVALUATING: " ++ show p) [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
              QSubRoutine
-             (\(LetBinding k) names -> buildRec (emptyCtx names) (readyMachine k))
+             (\(LetBinding k _) names -> buildRec (emptyCtx names) (readyMachine k))
              (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx names)))
   ||]
   where

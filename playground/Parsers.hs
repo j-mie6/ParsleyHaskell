@@ -29,7 +29,7 @@ cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac"
     op '>' = string ">"
 
 regTest :: Parser Int
-regTest = newRegister_ (code 7) (\r -> modify_ r (makeQ (succ @Int) [||succ @Int||]) *> get r)
+regTest = newRegister_ (code 7) (\r -> modify_ r (makeQ (succ @Int) [||succ @Int||]) *> (let g = get r in g *> g))
 
 defuncTest :: Parser (Maybe Int)
 defuncTest = code Just <$> (code (+) <$> (item $> code 1) <*> (item $> code 8))

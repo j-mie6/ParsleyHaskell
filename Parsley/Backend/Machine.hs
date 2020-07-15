@@ -5,7 +5,8 @@ module Parsley.Backend.Machine (
     PositionOps,
     module Parsley.Backend.Machine.Instructions,
     module Parsley.Backend.Machine.Defunc,
-    module Parsley.Backend.Machine.Identifiers
+    module Parsley.Backend.Machine.Identifiers,
+    module Parsley.Backend.Machine.LetBindings
   ) where
 
 import Data.Array.Unboxed                   (UArray)
@@ -17,6 +18,7 @@ import Parsley.Backend.Machine.Identifiers
 import Parsley.Backend.Machine.InputRep     (Rep)
 import Parsley.Backend.Machine.InputOps     (InputPrep(..), PositionOps)
 import Parsley.Backend.Machine.Instructions
+import Parsley.Backend.Machine.LetBindings  (LetBinding, makeLetBinding)
 import Parsley.Backend.Machine.Ops          (Ops)
 import Parsley.Core.InputTypes
 

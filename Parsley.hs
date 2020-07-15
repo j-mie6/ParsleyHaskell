@@ -13,7 +13,7 @@ module Parsley (
     Lift(..)
   ) where
 
-import Prelude hiding              (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
+import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Data.Function              (fix)
 import Data.Text.IO               (readFile)
 import Language.Haskell.TH.Syntax (Lift(..))

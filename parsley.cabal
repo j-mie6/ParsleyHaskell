@@ -126,6 +126,7 @@ library
                        Parsley.Backend.Machine.Instructions,
                        Parsley.Backend.Machine.Eval,
                        Parsley.Backend.Machine.LetRecBuilder,
+                       Parsley.Backend.Machine.LetBindings,
                        Parsley.Backend.Machine.Ops,
                        Parsley.Backend.Machine.Defunc,
                        Parsley.Backend.Machine.State,

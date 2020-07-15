@@ -69,7 +69,7 @@ skipManyInspect = $$(Parsley.runParser Parsers.skipManyInspect)
 --nfb = $$(Parsley.runParser Parsers.nfb)
 
 regTest :: String -> Maybe Int
-regTest = const Nothing -- $$(Parsley.runParser Parsers.regTest)
+regTest = $$(Parsley.runParser Parsers.regTest)
 
 main :: IO ()
 main =

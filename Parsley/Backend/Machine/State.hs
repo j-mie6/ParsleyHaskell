@@ -2,9 +2,10 @@
              TypeOperators,
              GADTs,
              FlexibleContexts,
-             DeriveAnyClass #-}
+             DeriveAnyClass,
+             TypeFamilies #-}
 module Parsley.Backend.Machine.State (
-    HandlerStack, Handler, Cont, SubRoutine, MachineMonad,
+    HandlerStack, Handler, Cont, SubRoutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
     QSubRoutine(..), QJoin(..), Machine(..),
     run,
@@ -25,6 +26,7 @@ import Data.Dependent.Map                  (DMap)
 import Data.Maybe                          (fromMaybe)
 import Parsley.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Backend.Machine.InputRep    (Unboxed)
+import Parsley.Backend.Machine.LetBindings (Regs)
 import Parsley.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap    ((!), insert, empty, lookup, map, toList, traverseWithKey)
@@ -36,7 +38,11 @@ type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
 type SubRoutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
-newtype QSubRoutine s o a x = QSubRoutine { unwrapSub :: Code (SubRoutine s o a x) }
+type family Func (rs :: [*]) s o a x where
+  Func '[] s o a x      = SubRoutine s o a x
+  Func (r : rs) s o a x = STRef s r -> Func rs s o a x
+
+data QSubRoutine s o a x = QSubRoutine { unwrapSub :: Code (SubRoutine s o a x) }
 newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
 

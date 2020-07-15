@@ -35,7 +35,7 @@ eval input (LetBinding !p _, fs) = trace ("EVALUATING: " ++ show p) [|| runST $
         in letRec fs
              nameLet
              QSubRoutine
-             (\(LetBinding k _) names -> buildRec (emptyCtx names) (readyMachine k))
+             (\(LetBinding k rs) names -> buildRec (emptyCtx names) (readyMachine k))
              (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx names)))
   ||]
   where

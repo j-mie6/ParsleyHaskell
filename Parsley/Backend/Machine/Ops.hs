@@ -26,8 +26,9 @@ import Parsley.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Parsley.Backend.Machine.Instructions (Access(..))
-import Parsley.Backend.Machine.State        (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, SubRoutine, OpStack(..),
-                                             run, voidCoins, insertSub, insertΦ, insertNewΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
+import Parsley.Backend.Machine.LetBindings  (Regs(..))
+import Parsley.Backend.Machine.State        (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, SubRoutine, OpStack(..), Func,
+                                             run, voidCoins, insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
 import Parsley.Common                       (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                (color, Color(Green, White, Red, Blue))
 
@@ -176,6 +177,14 @@ instance RecBuilder _o where                                                    
     $$(run k (Γ Empty [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||];    \
 };
 inputInstances(deriveRecBuilder)
+
+takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> Code (SubRoutine s o a x)) -> Code (Func rs s o a x)
+takeFreeRegisters NoRegs ctx body = body ctx
+takeFreeRegisters (Reg σ σs) ctx body = [||\reg -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
+
+provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (SubRoutine s o a x)
+provideFreeRegisters sub NoRegs ctx = sub
+provideFreeRegisters f (Reg σ σs) ctx = provideFreeRegisters [||$$f $$(concreteΣ σ ctx)||] σs ctx
 
 {- Debugger Operations -}
 class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where

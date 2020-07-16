@@ -50,8 +50,8 @@ evalBf prog = go (Tape (repeat 0) 0 (repeat 0)) prog >> return ()
     write :: a -> Tape a -> Tape a
     write x (Tape ls _ rs) = Tape ls x rs
 
-javascript :: String -> IO (Maybe Parsers.JSProgram)
-javascript = const (return Nothing)-- $$(Parsley.parseFromFile Parsers.javascript)
+--javascript :: String -> IO (Maybe Parsers.JSProgram)
+--javascript = const (return Nothing)-- $$(Parsley.parseFromFile Parsers.javascript)
 
 defuncTest :: String -> Maybe (Maybe Int)
 defuncTest = const Nothing -- $$(Parsley.runParser Parsers.defuncTest)
@@ -61,6 +61,9 @@ manyTest = const Nothing -- $$(Parsley.runParser Parsers.manyTest)
 
 skipManyInspect :: String -> Maybe ()
 skipManyInspect = $$(Parsley.runParser Parsers.skipManyInspect)
+
+evalBf' :: String -> Maybe [Char]
+evalBf' = $$(Parsley.runParser (Parsers.evalBf Parsers.brainfuck))
 
 --boom :: String -> Maybe String
 --boom = $$(Parsley.runParser Parsers.failure)

@@ -143,13 +143,14 @@ optimise (Branch (In (Branch b (In Empty) (In (Pure f)))) (In Empty) k) = optimi
 optimise (f :<$>: In (Branch b p q))                     = optimise (Branch b (optimise (APP_H COMPOSE f :<$>: p)) (optimise (APP_H COMPOSE f :<$>: q)))
 -- pure Match law: match vs (pure x) f def               = if elem x vs then f x else def
 optimise (Match (In (Pure x)) fs qs def)                 = foldr (\(f, q) k -> if _val f (_val x) then q else k) def (zip fs qs)
+-- TODO I'm not actually sure this one is a good optimisation? might have some size constraint on it
 -- Generalised Identity Match law: match vs p (pure . f) def = f <$> (p >?> flip elem vs) <|> def
-optimise (Match p fs qs def)
+{-optimise (Match p fs qs def)
   | all (\case {In (Pure _) -> True; _ -> False}) qs     = optimise (optimise (makeQ apply qapply :<$>: (p >?> (makeQ validate qvalidate))) :<|>: def)
     where apply x    = foldr (\(f, In (Pure y)) k -> if _val f x then _val y else k) (error "whoopsie") (zip fs qs)
           qapply     = [||\x -> $$(foldr (\(f, In (Pure y)) k -> [||if $$(_code f) x then $$(_code y) else $$k||]) ([||error "whoopsie"||]) (zip fs qs))||]
           validate x = foldr (\f b -> _val f x || b) False fs
-          qvalidate  = [||\x -> $$(foldr (\f k -> [||$$(_code f) x || $$k||]) [||False||] fs)||]
+          qvalidate  = [||\x -> $$(foldr (\f k -> [||$$(_code f) x || $$k||]) [||False||] fs)||]-}
 -- Distributivity Law: f <$> match vs p g def            = match vs p ((f <$>) . g) (f <$> def)
 optimise (f :<$>: (In (Match p fs qs def)))              = In (Match p fs (map (optimise . (f :<$>:)) qs) (optimise (f :<$>: def)))
 -- Trivial let-bindings - NOTE: These will get moved when Let nodes no longer have the "source" in them
@@ -157,8 +158,8 @@ optimise (Let False _ p@(In (Pure _)))                = p
 optimise (Let False _ p@(In Empty))                   = p
 optimise (Let False _ p@(In (Satisfy _)))             = p
 optimise (Let False _ p@(In (In (Satisfy _) :$>: x))) = p
--- Applicative-fusion across let boundary?
---optimise (Let _ p@(In ()))
+optimise (Let False _ p@(In (GetRegister _)))         = p
+optimise (Let False _ p@(In (In (Pure _) :<*>: In (GetRegister _)))) = p
 optimise p                                               = In p
 
 -- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p

@@ -23,6 +23,7 @@ import Data.HashMap.Strict                 (HashMap)
 import Data.HashSet                        (HashSet)
 import Data.List                           (foldl')
 import Data.IORef                          (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe                          (isJust)
 import Debug.Trace                         (trace)
 import Control.Applicative                 (liftA, liftA2, liftA3)
 import Control.Monad                       (forM, forM_)
@@ -41,20 +42,20 @@ import Parsley.Frontend.Optimiser          (optimise)
 import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
 import System.IO.Unsafe                    (unsafePerformIO)
 
-import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, map, size)
+import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, mapWithKey, size)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
 
-compile :: forall compiled a. Parser a -> (forall x. Bool -> Fix Combinator x -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
+compile :: forall compiled a. Parser a -> (forall x. Maybe (MVar x) -> Fix Combinator x -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
 compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (m, ms)
   where
     (p', μs, maxV, numRegs) = preprocess p
 
-    codeGen' :: Bool -> Fix Combinator x -> compiled x
-    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = letBound}) p) (maxV + 1) numRegs
+    codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
+    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = isJust letBound}) p) (maxV + 1) numRegs
 
-    ms = DMap.map (codeGen' True) μs
-    m = codeGen' False p'
+    ms = DMap.mapWithKey (codeGen' . Just) μs
+    m = codeGen' Nothing p'
 
 preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar, IΣVar)
 preprocess p =

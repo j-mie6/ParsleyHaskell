@@ -8,6 +8,7 @@
              PatternSynonyms #-}
 module Parsley.Backend.CodeGenerator (codeGen) where
 
+import Data.Maybe                           (isJust)
 import Data.Set                             (Set, singleton, (\\), elems)
 import Data.Void                            (Void)
 import Debug.Trace                          (trace)
@@ -38,14 +39,15 @@ runCodeGenStack m μ0 φ0 σ0 =
 newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
-codeGen :: PositionOps o => Bool -> Fix Combinator x -> IMVar -> IΣVar -> LetBinding o a x
-codeGen letBound p μ0 σ0 = trace ("GENERATING: " ++ show p ++ "\nMACHINE: " ++ show (map ΣVar (elems rs)) ++ " => " ++ show m) $ makeLetBinding m rs
+codeGen :: PositionOps o => Maybe (MVar x) -> Fix Combinator x -> IMVar -> IΣVar -> LetBinding o a x
+codeGen letBound p μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (map ΣVar (elems rs)) ++ " => " ++ show m) $ makeLetBinding m rs
   where
+    name = maybe "TOP LEVEL" show letBound
     (m, rs) = finalise (histo alg p)
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg =
       let (m, rs) = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
-      in (if letBound then m else addCoins (coinsNeeded m) m, rs)
+      in (if isJust letBound then m else addCoins (coinsNeeded m) m, rs)
 
 pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
 pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
@@ -162,7 +164,7 @@ tailCallOptimise :: MVar x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> Fix4 (Inst
 tailCallOptimise μ (In4 Ret) = In4 (Jump μ)
 tailCallOptimise μ k         = In4 (Call μ k)
 
--- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret or Halt
+-- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret
 -- However, I'm not yet sure about the interactions with try yet...
 deadCommitOptimisation :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs (Succ n) r a
 deadCommitOptimisation (In4 Ret) = In4 Ret

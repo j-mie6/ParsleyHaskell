@@ -34,13 +34,12 @@ eval input (LetBinding !p _, fs) = trace ("EVALUATING: " ++ show p) [|| runST $
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
-             QSubRoutine
-             (\(LetBinding k rs) names -> buildRec (emptyCtx names) (readyMachine k))
+             (\exp rs names -> buildRec rs (emptyCtx names) (readyMachine exp))
              (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx names)))
   ||]
   where
-    nameLet :: MVar x -> LetBinding o a x -> String
-    nameLet (MVar i) _ = "sub" ++ show i
+    nameLet :: MVar x -> String
+    nameLet (MVar i) = "sub" ++ show i
 
 readyMachine :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
 readyMachine = cata4 (Machine . alg)

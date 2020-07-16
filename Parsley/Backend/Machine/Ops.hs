@@ -146,9 +146,10 @@ class BoxOps o => RecBuilder o where
   buildIter :: ReturnOps o
             => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
             -> (Code o -> Code (Handler s o a)) -> Code o -> Code (ST s (Maybe a))
-  buildRec  :: Ctx s o a
+  buildRec  :: Regs rs
+            -> Ctx s o a
             -> Machine s o '[] One r a
-            -> Code (SubRoutine s o a r)
+            -> Code (Func rs s o a r)
 
 #define deriveJoinBuilder(_o)                                                   \
 instance JoinBuilder _o where                                                   \
@@ -173,18 +174,15 @@ instance RecBuilder _o where                                                    
             (voidCoins (insertSub μ [||\_ (!o#) _ -> loop o#||] ctx)))           \
       in loop ($$unbox $$o)                                                      \
     ||];                                                                         \
-  buildRec ctx k = let bx = box in [|| \(!ret) (!o#) h ->                        \
-    $$(run k (Γ Empty [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||];    \
+  buildRec rs ctx k = let bx = box in takeFreeRegisters rs ctx (\ctx ->          \
+    [|| \(!ret) (!o#) h ->                                                       \
+      $$(run k (Γ Empty [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||]); \
 };
 inputInstances(deriveRecBuilder)
 
 takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> Code (SubRoutine s o a x)) -> Code (Func rs s o a x)
 takeFreeRegisters NoRegs ctx body = body ctx
-takeFreeRegisters (Reg σ σs) ctx body = [||\reg -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
-
-provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (SubRoutine s o a x)
-provideFreeRegisters sub NoRegs ctx = sub
-provideFreeRegisters f (Reg σ σs) ctx = provideFreeRegisters [||$$f $$(concreteΣ σ ctx)||] σs ctx
+takeFreeRegisters (FreeReg σ σs) ctx body = [||\reg -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
 {- Debugger Operations -}
 class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where

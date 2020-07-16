@@ -3,7 +3,9 @@
              GADTs,
              FlexibleContexts,
              DeriveAnyClass,
-             TypeFamilies #-}
+             TypeFamilies,
+             ExistentialQuantification,
+             TemplateHaskell #-}
 module Parsley.Backend.Machine.State (
     HandlerStack, Handler, Cont, SubRoutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
@@ -26,7 +28,7 @@ import Data.Dependent.Map                  (DMap)
 import Data.Maybe                          (fromMaybe)
 import Parsley.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Backend.Machine.InputRep    (Unboxed)
-import Parsley.Backend.Machine.LetBindings (Regs)
+import Parsley.Backend.Machine.LetBindings (Regs(..))
 import Parsley.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap    ((!), insert, empty, lookup, map, toList, traverseWithKey)
@@ -42,7 +44,7 @@ type family Func (rs :: [*]) s o a x where
   Func '[] s o a x      = SubRoutine s o a x
   Func (r : rs) s o a x = STRef s r -> Func rs s o a x
 
-data QSubRoutine s o a x = QSubRoutine { unwrapSub :: Code (SubRoutine s o a x) }
+data QSubRoutine s o a x = forall rs. QSubRoutine  (Code (Func rs s o a x)) (Regs rs)
 newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
 
@@ -72,7 +74,7 @@ emptyCtx :: DMap MVar (QSubRoutine s o a) -> Ctx s o a
 emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 Queue.empty
 
 insertSub :: MVar x -> Code (SubRoutine s o a x) -> Ctx s o a -> Ctx s o a
-insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q) (μs ctx)}
+insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q NoRegs) (μs ctx)}
 
 insertΦ :: ΦVar x -> Code (Cont s o a x) -> Ctx s o a -> Ctx s o a
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
@@ -95,7 +97,16 @@ cachedΣ :: ΣVar x -> Ctx s o a -> Code x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (>>= getCached) . DMap.lookup σ . σs
 
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
-askSub μ = asks (fromMaybe (throw (missingDependency μ)) . fmap unwrapSub . DMap.lookup μ . μs)
+askSub μ =
+  do QSubRoutine sub rs <- askSubUnbound μ
+     asks (provideFreeRegisters sub rs)
+
+askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
+askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
+
+provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (SubRoutine s o a x)
+provideFreeRegisters sub NoRegs ctx = sub
+provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters [||$$f $$(concreteΣ σ ctx)||] σs ctx
 
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (Cont s o a x))
 askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)

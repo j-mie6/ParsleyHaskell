@@ -62,13 +62,13 @@ chainPost :: Parser a -> Parser (a -> a) -> Parser a
 chainPost (Parser p) (Parser op) = Parser (In (L (ChainPost p op)))
 
 newRegister :: Parser a -> (forall r. Reg r a -> Parser b) -> Parser b
-newRegister (Parser p) f = Parser (In (R (ScopeRegister p (unParser . f)))) `seq` error "Direct use of registers not supported"
+newRegister (Parser p) f = Parser (In (R (ScopeRegister p (unParser . f))))
 
 get :: Reg r a -> Parser a
-get (Reg reg) = Parser (In (L (GetRegister reg))) `seq` error "Direct use of registers not supported"
+get (Reg reg) = Parser (In (L (GetRegister reg)))
 
 put :: Reg r a -> Parser a -> Parser ()
-put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p))) `seq` error "Direct use of registers not supported"
+put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
 
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (L (Debug name p)))

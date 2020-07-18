@@ -91,4 +91,5 @@ main =
      print (manyTest "ababc")
      print (manyTest "ababa")
      print (manyTest "ababac")
+     print (evalBf' "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.$")
      return ()

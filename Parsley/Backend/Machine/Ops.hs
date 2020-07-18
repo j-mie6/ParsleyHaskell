@@ -182,7 +182,7 @@ inputInstances(deriveRecBuilder)
 
 takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> Code (SubRoutine s o a x)) -> Code (Func rs s o a x)
 takeFreeRegisters NoRegs ctx body = body ctx
-takeFreeRegisters (FreeReg σ σs) ctx body = [||\reg -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
+takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
 {- Debugger Operations -}
 class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where

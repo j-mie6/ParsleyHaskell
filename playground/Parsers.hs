@@ -48,7 +48,7 @@ skipManyInspect = skipMany (char 'a')
 brainfuck :: Parser [BrainFuckOp]
 brainfuck = whitespace *> bf
   where
-    whitespace = skipMany (noneOf "<>+-[],.")
+    whitespace = skipMany (noneOf "<>+-[],.$")
     lexeme p = p <* whitespace
     bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
     op '>' = item $> code RightPointer
@@ -105,7 +105,7 @@ evalBf loader =
               let evalLoop =
                     predicate (EQ_H (code 0)) read
                       unit
-                      (local instrs (code getLoop <$> op) (go *> evalLoop))
+                      (local instrs (code getLoop <$> op) go *> evalLoop)
               in modify_ instrs (code tail)
               *> predicate (code isLoop) op
                    evalLoop

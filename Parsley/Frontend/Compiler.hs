@@ -52,28 +52,28 @@ import qualified Data.Set            as Set     (empty)
 compile :: forall compiled a. Parser a -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
 compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") $ (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
   where
-    (p', μs, maxV, numRegs) = preprocess p
-    (μs', !frs) = dependencyAnalysis p' μs --This is strict to ensure all registers are forced before code gen, but there must be a better way to do it
+    (p', μs, maxV) = preprocess p
+    (μs', frs, maxΣ) = dependencyAnalysis p' μs
 
     freeRegs :: Maybe (MVar x) -> Set IΣVar
     freeRegs = maybe Set.empty (\(MVar v) -> frs Map.! v)
 
     codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
-    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = isJust letBound}) p) (freeRegs letBound) (maxV + 1) numRegs
+    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = isJust letBound}) p) (freeRegs letBound) (maxV + 1) (maxΣ + 1)
 
-preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar, IΣVar)
+preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 preprocess p =
-  let (q, numRegs) = tagParser p
+  let q = tagParser p
       (lets, recs) = findLets q
       (p', μs, maxV) = letInsertion lets recs q
-  in (p', μs, maxV, numRegs)
+  in (p', μs, maxV)
 
 data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
 data Tag t f (k :: * -> *) a = Tag {tag :: t, tagged :: f k a}
 newtype Tagger a = Tagger { doTagger :: Fix (Tag ParserName Combinator) a }
 
-tagParser :: Fix (Combinator :+: ScopeRegister) a -> (Fix (Tag ParserName Combinator) a, IΣVar)
-tagParser = (, numRegisters regMaker) . doTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap doTagger \/ descope))
+tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combinator) a
+tagParser = doTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap doTagger \/ descope))
   where
     regMaker = newRegMaker
     descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ (doTagger p) (doTagger (f reg)))
@@ -184,10 +184,6 @@ freshReg maker scope = scope $ unsafePerformIO $ do
   x <- readIORef maker
   writeIORef maker (x + 1)
   return $! Reg (ΣVar x)
-
-{-# NOINLINE numRegisters #-}
-numRegisters :: IORef IΣVar -> IΣVar
-numRegisters = unsafePerformIO . readIORef
 
 instance IFunctor f => IFunctor (Tag t f) where
   imap f (Tag t k) = Tag t (imap f k)

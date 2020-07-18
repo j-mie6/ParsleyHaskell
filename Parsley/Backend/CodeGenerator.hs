@@ -19,35 +19,30 @@ import Parsley.Backend.Machine              (Defunc(USER, SAME), LetBinding, mak
                                              addCoins, refundCoins, drainCoins, freeCoins, PositionOps,
                                              IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import Parsley.Backend.InstructionAnalyser  (coinsNeeded)
-import Parsley.Common.Fresh                 (VFreshT, HFreshT, evalFreshT, construct, MonadFresh(..), mapVFreshT)
+import Parsley.Common.Fresh                 (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
 import Parsley.Common.Indexed               (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), One, imap, histo, extract, (|>))
 import Parsley.Core.CombinatorAST           (Combinator(..), MetaCombinator(..))
 import Parsley.Core.Defunc                  (Defunc(BLACK, COMPOSE, UNIT, ID), pattern FLIP_H)
 
-type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFreshT IΣVar (WriterT (Set IΣVar) (Writer (Set IΣVar))))) a
-runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> (a, Set IΣVar)
+type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a
+runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> a
 runCodeGenStack m μ0 φ0 σ0 =
-  (frees .
-   runWriter .
-   runWriterT .
-   flip evalFreshT σ0 .
+  (flip evalFresh σ0 .
    flip evalFreshT μ0 .
    flip evalFreshT φ0) m
-  where
-    frees ((x, uses), defs) = (x, uses \\ defs)
 
 newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
-codeGen :: PositionOps o => Maybe (MVar x) -> Fix Combinator x -> IMVar -> IΣVar -> LetBinding o a x
-codeGen letBound p μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (map ΣVar (elems rs)) ++ " => " ++ show m) $ makeLetBinding m rs
+codeGen :: PositionOps o => Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> LetBinding o a x
+codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (map ΣVar (elems rs)) ++ " => " ++ show m) $ makeLetBinding m rs
   where
     name = maybe "TOP LEVEL" show letBound
-    (m, rs) = finalise (histo alg p)
+    m = finalise (histo alg p)
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg =
-      let (m, rs) = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
-      in (if isJust letBound then m else addCoins (coinsNeeded m) m, rs)
+      let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
+      in if isJust letBound then m else addCoins (coinsNeeded m) m
 
 pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
 pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
@@ -154,9 +149,9 @@ direct (ChainPost p op) m =
      opc <- freshM (runCodeGen op (In4 (_Modify σ (In4 (Jump μ)))))
      let nop = coinsNeeded opc
      freshM (runCodeGen p (In4 (_Make σ (In4 (Iter μ (addCoins nop opc) (parsecHandler (In4 (_Get σ m))))))))
-direct (MakeRegister σ p q)   m = do defines σ; qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
-direct (GetRegister σ)        m = do uses σ; return $! In4 (_Get σ m)
-direct (PutRegister σ p)      m = do uses σ; runCodeGen p (In4 (_Put σ (In4 (Push (USER UNIT) m))))
+direct (MakeRegister σ p q)   m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
+direct (GetRegister σ)        m = do return $! In4 (_Get σ m)
+direct (PutRegister σ p)      m = do runCodeGen p (In4 (_Put σ (In4 (Push (USER UNIT) m))))
 direct (Debug name p)         m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 direct (MetaCombinator Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
 
@@ -169,12 +164,6 @@ tailCallOptimise μ k         = In4 (Call μ k)
 deadCommitOptimisation :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs (Succ n) r a
 deadCommitOptimisation (In4 Ret) = In4 Ret
 deadCommitOptimisation m         = In4 (Commit m)
-
-uses :: ΣVar a -> CodeGenStack ()
-uses (ΣVar σ) = lift (lift (lift (tell (singleton σ))))
-
-defines :: ΣVar a -> CodeGenStack ()
-defines (ΣVar σ) = lift (lift (lift (lift (tell (singleton σ)))))
 
 -- Refactor with asks
 askM :: CodeGenStack (MVar a)

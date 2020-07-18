@@ -7,6 +7,7 @@ module Parsley.Core.Identifiers (
     ΣVar(..), IΣVar,
   ) where
 
+import Data.Array        (Ix)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, GOrdering(..))
 import Data.Typeable     ((:~:)(Refl))
 import Data.Word         (Word64)
@@ -14,8 +15,8 @@ import Unsafe.Coerce     (unsafeCoerce)
 
 newtype ΣVar (a :: *) = ΣVar IΣVar
 newtype MVar (a :: *) = MVar IMVar
-newtype IMVar = IMVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show)
-newtype IΣVar = IΣVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show)
+newtype IMVar = IMVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show, Ix)
+newtype IΣVar = IΣVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show, Ix)
 
 instance Show (MVar a) where show (MVar μ) = "μ" ++ show μ
 instance Show (ΣVar a) where show (ΣVar σ) = "σ" ++ show σ

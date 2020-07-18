@@ -29,7 +29,7 @@ author:              Jamie Willis
 
 -- An email address to which users can send suggestions, bug reports, and
 -- patches.
-maintainer:          jamie.willis@bristol.ac.uk
+maintainer:          j.willis19@imperial.ac.uk
 
 -- A copyright notice.
 -- copyright:
@@ -112,6 +112,7 @@ library
                        Parsley.Frontend,
                        Parsley.Frontend.CombinatorAnalyser,
                        Parsley.Frontend.Compiler,
+                       Parsley.Frontend.Dependencies,
                        Parsley.Frontend.Optimiser,
 
                        Parsley.Backend,

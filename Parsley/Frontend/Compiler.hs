@@ -24,38 +24,42 @@ import Data.HashSet                        (HashSet)
 import Data.List                           (foldl')
 import Data.IORef                          (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe                          (isJust)
+import Data.Set                            (Set)
 import Debug.Trace                         (trace)
-import Control.Applicative                 (liftA, liftA2, liftA3)
-import Control.Monad                       (forM, forM_)
+import Control.Monad                       (forM)
 import Control.Monad.Reader                (Reader, runReader, local, ask, asks, MonadReader)
 import Control.Monad.State.Strict          (State, StateT, get, gets, put, runState, execStateT, modify', MonadState)
 import GHC.Exts                            (Int(..))
 import GHC.Prim                            (StableName#, unsafeCoerce#)
 import GHC.StableName                      (StableName(..), makeStableName, hashStableName, eqStableName)
 import Numeric                             (showHex)
-import Parsley.Core.CombinatorAST          (Combinator(..), ScopeRegister(..), Reg(..))
+import Parsley.Core.CombinatorAST          (Combinator(..), ScopeRegister(..), Reg(..), traverseCombinator)
 import Parsley.Core.Primitives             (Parser(..))
 import Parsley.Core.Identifiers            (IMVar, MVar(..), IΣVar, ΣVar(..))
 import Parsley.Common.Fresh                (HFreshT, newVar, newScope, runFreshT)
 import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap), (:+:)(..), (\/), Const1(..))
 import Parsley.Frontend.Optimiser          (optimise)
 import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
+import Parsley.Frontend.Dependencies       (dependencyAnalysis)
 import System.IO.Unsafe                    (unsafePerformIO)
 
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, mapWithKey, size)
 import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
 import qualified Data.HashSet        as HashSet (member, insert, empty, union)
+import qualified Data.Map            as Map     ((!))
+import qualified Data.Set            as Set     (empty)
 
-compile :: forall compiled a. Parser a -> (forall x. Maybe (MVar x) -> Fix Combinator x -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
-compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show ((DMap.size ms)) ++ " LET BINDINGS") $ (m, ms)
+compile :: forall compiled a. Parser a -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
+compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") $ (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
   where
     (p', μs, maxV, numRegs) = preprocess p
+    (μs', !frs) = dependencyAnalysis p' μs --This is strict to ensure all registers are forced before code gen, but there must be a better way to do it
+
+    freeRegs :: Maybe (MVar x) -> Set IΣVar
+    freeRegs = maybe Set.empty (\(MVar v) -> frs Map.! v)
 
     codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
-    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = isJust letBound}) p) (maxV + 1) numRegs
-
-    ms = DMap.mapWithKey (codeGen' . Just) μs
-    m = codeGen' Nothing p'
+    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = isJust letBound}) p) (freeRegs letBound) (maxV + 1) numRegs
 
 preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar, IΣVar)
 preprocess p =
@@ -66,26 +70,26 @@ preprocess p =
 
 data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
 data Tag t f (k :: * -> *) a = Tag {tag :: t, tagged :: f k a}
-newtype Tagger a = Tagger { runTagger :: Fix (Tag ParserName Combinator) a }
+newtype Tagger a = Tagger { doTagger :: Fix (Tag ParserName Combinator) a }
 
 tagParser :: Fix (Combinator :+: ScopeRegister) a -> (Fix (Tag ParserName Combinator) a, IΣVar)
-tagParser = (, numRegisters regMaker) . runTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap runTagger \/ descope))
+tagParser = (, numRegisters regMaker) . doTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap doTagger \/ descope))
   where
     regMaker = newRegMaker
-    descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ (runTagger p) (runTagger (f reg)))
+    descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ (doTagger p) (doTagger (f reg)))
 
 data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
                                      , recs   :: HashSet ParserName
                                      , before :: HashSet ParserName }
 type LetFinderCtx   = HashSet ParserName
-newtype LetFinder a = LetFinder { runLetFinder :: StateT LetFinderState (Reader LetFinderCtx) () }
+newtype LetFinder a = LetFinder { doLetFinder :: StateT LetFinderState (Reader LetFinderCtx) () }
 
 findLets :: Fix (Tag ParserName Combinator) a -> (HashSet ParserName, HashSet ParserName)
 findLets p = (lets, recs)
   where
     state = LetFinderState HashMap.empty HashSet.empty HashSet.empty
     ctx = HashSet.empty
-    LetFinderState preds recs _ = runReader (execStateT (runLetFinder (cata findLetsAlg p)) state) ctx
+    LetFinderState preds recs _ = runReader (execStateT (doLetFinder (cata findLetsAlg p)) state) ctx
     lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
 
 findLetsAlg :: Tag ParserName Combinator LetFinder a -> LetFinder a
@@ -95,21 +99,21 @@ findLetsAlg p = LetFinder $ do
   ifSeen name
     (do addRec name)
     (ifNotProcessedBefore name
-      (do addName name (traverseCombinator (fmap Const1 . runLetFinder) (tagged p))
+      (do addName name (traverseCombinator (fmap Const1 . doLetFinder) (tagged p))
           doNotProcessAgain name))
 
 newtype LetInserter a =
   LetInserter {
-      runLetInserter :: HFreshT IMVar
-                        (State ( HashMap ParserName IMVar
-                               , DMap MVar (Fix Combinator)))
-                        (Fix Combinator a)
+      doLetInserter :: HFreshT IMVar
+                       (State ( HashMap ParserName IMVar
+                              , DMap MVar (Fix Combinator)))
+                       (Fix Combinator a)
     }
 letInsertion :: HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName Combinator) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 letInsertion lets recs p = (p', μs, μMax)
   where
     m = cata alg p
-    ((p', μMax), (vs, μs)) = runState (runFreshT (runLetInserter m) 0) (HashMap.empty, DMap.empty)
+    ((p', μMax), (vs, μs)) = runState (runFreshT (doLetInserter m) 0) (HashMap.empty, DMap.empty)
     alg :: Tag ParserName Combinator LetInserter a -> LetInserter a
     alg p = LetInserter $ do
       let name = tag p
@@ -123,32 +127,12 @@ letInsertion lets recs p = (p', μs, μMax)
           v <- newVar
           let μ = MVar v
           put (HashMap.insert name v vs, DMap.insert μ q' μs)
-          q' <- runLetInserter (postprocess q)
+          q' <- doLetInserter (postprocess q)
           return $! optimise (Let recu μ q')
-      else do runLetInserter (postprocess q)
+      else do doLetInserter (postprocess q)
 
 postprocess :: Combinator LetInserter a -> LetInserter a
-postprocess = LetInserter . fmap optimise . traverseCombinator runLetInserter
-
-traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)
-traverseCombinator expose (pf :<*>: px)        = liftA2 (:<*>:) (expose pf) (expose px)
-traverseCombinator expose (p :*>: q)           = liftA2 (:*>:) (expose p) (expose q)
-traverseCombinator expose (p :<*: q)           = liftA2 (:<*:)  (expose p)  (expose q)
-traverseCombinator expose (p :<|>: q)          = liftA2 (:<|>:) (expose p)  (expose q)
-traverseCombinator expose Empty                = pure Empty
-traverseCombinator expose (Try p)              = fmap Try (expose p)
-traverseCombinator expose (LookAhead p)        = fmap LookAhead (expose p)
-traverseCombinator expose (NotFollowedBy p)    = fmap NotFollowedBy (expose p)
-traverseCombinator expose (Branch b p q)       = liftA3 Branch (expose b) (expose p) (expose q)
-traverseCombinator expose (Match p fs qs d)    = liftA4 Match (expose p) (pure fs) (traverse expose qs) (expose d)
-traverseCombinator expose (ChainPre op p)      = liftA2 ChainPre (expose op) (expose p)
-traverseCombinator expose (ChainPost p op)     = liftA2 ChainPost (expose p) (expose op)
-traverseCombinator expose (MakeRegister σ p q) = liftA2 (MakeRegister σ) (expose p) (expose q)
-traverseCombinator expose (GetRegister σ)      = pure (GetRegister σ)
-traverseCombinator expose (PutRegister σ p)    = fmap (PutRegister σ) (expose p)
-traverseCombinator expose (Debug name p)       = fmap (Debug name) (expose p)
-traverseCombinator expose (Pure x)             = pure (Pure x)
-traverseCombinator expose (Satisfy f)          = pure (Satisfy f)
+postprocess = LetInserter . fmap optimise . traverseCombinator doLetInserter
 
 getPreds :: MonadState LetFinderState m => m (HashMap ParserName Int)
 getPreds = gets preds
@@ -199,14 +183,11 @@ freshReg :: IORef IΣVar -> (forall r. Reg r a -> x) -> x
 freshReg maker scope = scope $ unsafePerformIO $ do
   x <- readIORef maker
   writeIORef maker (x + 1)
-  return $! (Reg (ΣVar x))
+  return $! Reg (ΣVar x)
 
 {-# NOINLINE numRegisters #-}
 numRegisters :: IORef IΣVar -> IΣVar
 numRegisters = unsafePerformIO . readIORef
-
-liftA4 :: Applicative f => (a -> b -> c -> d -> e) -> f a -> f b -> f c -> f d -> f e
-liftA4 f u v w x = liftA3 f u v w <*> x
 
 instance IFunctor f => IFunctor (Tag t f) where
   imap f (Tag t k) = Tag t (imap f k)

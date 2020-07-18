@@ -5,7 +5,8 @@
              FlexibleInstances,
              FlexibleContexts,
              PolyKinds,
-             OverloadedStrings #-}
+             OverloadedStrings,
+             ApplicativeDo #-}
 module Parsley.Core.CombinatorAST (module Parsley.Core.CombinatorAST) where
 
 import Parsley.Common           (IFunctor, Fix, Const1(..), imap, cata, intercalateDiff)
@@ -98,3 +99,24 @@ instance IFunctor ScopeRegister where
 instance Show MetaCombinator where
   show Cut = "coins after"
   show RequiresCut = "requires cut"
+
+traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)
+traverseCombinator expose (pf :<*>: px)        = do pf' <- expose pf; px' <- expose px; pure (pf' :<*>: px')
+traverseCombinator expose (p :*>: q)           = do p' <- expose p; q' <- expose q; pure (p' :*>: q')
+traverseCombinator expose (p :<*: q)           = do p' <- expose p; q' <- expose q; pure (p' :<*: q')
+traverseCombinator expose (p :<|>: q)          = do p' <- expose p; q' <- expose q; pure (p' :<|>: q')
+traverseCombinator expose Empty                = do pure Empty
+traverseCombinator expose (Try p)              = do p' <- expose p; pure (Try p')
+traverseCombinator expose (LookAhead p)        = do p' <- expose p; pure (LookAhead p')
+traverseCombinator expose (NotFollowedBy p)    = do p' <- expose p; pure (NotFollowedBy p')
+traverseCombinator expose (Branch b p q)       = do b' <- expose b; p' <- expose p; q' <- expose q; pure (Branch b' p' q')
+traverseCombinator expose (Match p fs qs d)    = do p' <- expose p; qs' <- traverse expose qs; d' <- expose d; pure (Match p' fs qs' d')
+traverseCombinator expose (ChainPre op p)      = do op' <- expose op; p' <- expose p; pure (ChainPre op' p')
+traverseCombinator expose (ChainPost p op)     = do p' <- expose p; op' <- expose op; pure (ChainPost p' op')
+traverseCombinator expose (MakeRegister σ p q) = do p' <- expose p; q' <- expose q; pure (MakeRegister σ p' q')
+traverseCombinator expose (GetRegister σ)      = do pure (GetRegister σ)
+traverseCombinator expose (PutRegister σ p)    = do p' <- expose p; pure (PutRegister σ p')
+traverseCombinator expose (Debug name p)       = do p' <- expose p; pure (Debug name p')
+traverseCombinator expose (Pure x)             = do pure (Pure x)
+traverseCombinator expose (Satisfy f)          = do pure (Satisfy f)
+traverseCombinator expose (Let r v p)          = do p' <- expose p; pure (Let r v p')

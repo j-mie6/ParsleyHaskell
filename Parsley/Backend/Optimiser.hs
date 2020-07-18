@@ -1,7 +1,8 @@
 {-# LANGUAGE GADTs #-}
 module Parsley.Backend.Optimiser where
 
-import Data.GADT.Compare                    (geq, (:~:)(Refl))
+import Data.GADT.Compare       (geq)
+import Data.Typeable           ((:~:)(Refl))
 import Parsley.Backend.Machine
 import Parsley.Common.Indexed
 

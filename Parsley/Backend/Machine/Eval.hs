@@ -29,7 +29,7 @@ import Parsley.Common                        (Fix4, cata4, One, Code, Vec(..), N
 import System.Console.Pretty                 (color, Color(Green))
 
 eval :: forall o s a. Ops o => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
-eval input (LetBinding !p _, fs) = trace ("EVALUATING: " ++ show p) [|| runST $
+eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs

@@ -66,13 +66,13 @@ compliance (GetRegister _)          = FullPure
 compliance (PutRegister _ c)        = coerce c
 compliance (MetaCombinator _ c)     = c
 
-newtype CutAnalysis a = CutAnalysis {cutOut :: Bool -> (Fix Combinator a, Bool)}
+newtype CutAnalysis a = CutAnalysis {doCut :: Bool -> (Fix Combinator a, Bool)}
 
 biliftA2 :: (a -> b -> c) -> (x -> y -> z) -> (a, x) -> (b, y) -> (c, z)
 biliftA2 f g (x1, y1) (x2, y2) = (f x1 x2, g y1 y2)
 
 cutAnalysis :: Bool -> Fix Combinator a -> Fix Combinator a
-cutAnalysis letBound = fst . ($ letBound) . cutOut . zygo (CutAnalysis . alg) compliance
+cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . alg) compliance
   where
     mkCut True = In . MetaCombinator Cut
     mkCut False = id
@@ -81,23 +81,23 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . zygo (CutAnalysis . alg) co
 
     seqAlg :: (Fix Combinator a -> Fix Combinator b -> Combinator (Fix Combinator) c) -> Bool -> CutAnalysis a -> CutAnalysis b -> (Fix Combinator c, Bool)
     seqAlg con cut l r =
-      let (l', handled) = cutOut l cut
-          (r', handled') = cutOut r (cut && not handled)
+      let (l', handled) = doCut l cut
+          (r', handled') = doCut r (cut && not handled)
       in (In (con l' r'), handled || handled')
 
     rewrap :: (Fix Combinator a -> Combinator (Fix Combinator) b) -> Bool -> CutAnalysis a -> (Fix Combinator b, Bool)
-    rewrap con cut p = let (p', handled) = cutOut p cut in (In (con p'), handled)
+    rewrap con cut p = let (p', handled) = doCut p cut in (In (con p'), handled)
 
     alg :: Combinator (CutAnalysis :*: Compliance) a -> Bool -> (Fix Combinator a, Bool)
     alg (Pure x) _ = (In (Pure x), False)
     alg (Satisfy f) cut = (mkCut cut (In (Satisfy f)), True)
     alg Empty _ = (In Empty, False)
-    alg (Let r μ p) cut = (mkCut (not cut) (In (Let r μ (fst (cutOut (ifst p) True)))), False) -- If there is no cut, we generate a piggy for the continuation
+    alg (Let r μ p) cut = (mkCut (not cut) (In (Let r μ (fst (doCut (ifst p) True)))), False) -- If there is no cut, we generate a piggy for the continuation
     alg (Try p) _ = fmap (const False) $ rewrap Try False (ifst p)
-    alg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (requiresCut (In (fst (cutOut p True) :<|>: fst (cutOut q False))), True)
+    alg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (requiresCut (In (fst (doCut p True) :<|>: fst (doCut q False))), True)
     alg (p :<|>: q) cut =
-      let (q', handled) = cutOut (ifst q) cut
-      in (In (fst (cutOut (ifst p) False) :<|>: q'), handled)
+      let (q', handled) = doCut (ifst q) cut
+      in (In (fst (doCut (ifst p) False) :<|>: q'), handled)
     alg (l :<*>: r) cut = seqAlg (:<*>:) cut (ifst l) (ifst r)
     alg (l :<*: r) cut = seqAlg (:<*:) cut (ifst l) (ifst r)
     alg (l :*>: r) cut = seqAlg (:*>:) cut (ifst l) (ifst r)
@@ -105,30 +105,30 @@ cutAnalysis letBound = fst . ($ letBound) . cutOut . zygo (CutAnalysis . alg) co
     alg (NotFollowedBy p) _ = fmap (const False) $ rewrap NotFollowedBy False (ifst p)
     alg (Debug msg p) cut = rewrap (Debug msg) cut (ifst p)
     alg (ChainPre (op :*: NonComp) p) _ =
-      let (op', _) = cutOut op True
-          (p', _) = cutOut (ifst p) False
+      let (op', _) = doCut op True
+          (p', _) = doCut (ifst p) False
       in (requiresCut (In (ChainPre op' p')), True)
     alg (ChainPre op p) cut =
-      let (op', _) = cutOut (ifst op) False
-          (p', handled) = cutOut (ifst p) cut
+      let (op', _) = doCut (ifst op) False
+          (p', handled) = doCut (ifst p) cut
       in (mkCut (not cut) (In (ChainPre op' p')), handled)
     alg (ChainPost p (op :*: NonComp)) cut =
-      let (p', _) = cutOut (ifst p) cut
-          (op', _) = cutOut op True
+      let (p', _) = doCut (ifst p) cut
+          (op', _) = doCut op True
       in (requiresCut (In (ChainPost p' op')), True)
     alg (ChainPost p op) cut =
-      let (p', handled) = cutOut (ifst p) cut
-          (op', _) = cutOut (ifst op) False
+      let (p', handled) = doCut (ifst p) cut
+          (op', _) = doCut (ifst op) False
       in (mkCut (cut && handled) (In (ChainPost p' op')), handled)
     alg (Branch b p q) cut =
-      let (b', handled) = cutOut (ifst b) cut
-          (p', handled') = cutOut (ifst p) (cut && not handled)
-          (q', handled'') = cutOut (ifst q) (cut && not handled)
+      let (b', handled) = doCut (ifst b) cut
+          (p', handled') = doCut (ifst p) (cut && not handled)
+          (q', handled'') = doCut (ifst q) (cut && not handled)
       in (In (Branch b' p' q'), handled || (handled' && handled''))
     alg (Match p f qs def) cut =
-      let (p', handled) = cutOut (ifst p) cut
-          (def', handled') = cutOut (ifst def) (cut && not handled)
-          (qs', handled'') = foldr (\q -> biliftA2 (:) (&&) (cutOut (ifst q) (cut && not handled))) ([], handled') qs
+      let (p', handled) = doCut (ifst p) cut
+          (def', handled') = doCut (ifst def) (cut && not handled)
+          (qs', handled'') = foldr (\q -> biliftA2 (:) (&&) (doCut (ifst q) (cut && not handled))) ([], handled') qs
       in (In (Match p' f qs' def'), handled || handled'')
     alg (MakeRegister σ l r) cut = seqAlg (MakeRegister σ) cut (ifst l) (ifst r)
     alg (GetRegister σ) _ = (In (GetRegister σ), False)

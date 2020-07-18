@@ -59,7 +59,7 @@ brainfuck = whitespace *> bf
     op ',' = item $> code Input
     op '[' = between (lexeme item) (char ']') (code Loop <$> bf)
 
-data Tape = Tape [Int] Int [Int] deriving Lift
+data Tape = Tape [Int] Int [Int]
 
 emptyTape :: Tape
 emptyTape = Tape (Prelude.repeat 0) 0 (Prelude.repeat 0)
@@ -90,7 +90,7 @@ evalBf :: Parser [BrainFuckOp] -> Parser [Char]
 evalBf loader =
   -- first step is to place the program into a register and read the delimiter, then set up the state
   newRegister loader $ \instrs ->
-    delim *> newRegister_ (code emptyTape) (\tape ->
+    delim *> newRegister_ (makeQ emptyTape [||emptyTape||]) (\tape ->
       newRegister_ EMPTY $ \out ->
            eval instrs tape out
         *> gets_ out (code reverse))

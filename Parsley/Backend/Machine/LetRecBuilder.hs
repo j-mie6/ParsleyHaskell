@@ -1,15 +1,17 @@
 {-# LANGUAGE RankNTypes, TemplateHaskell, TupleSections #-}
 module Parsley.Backend.Machine.LetRecBuilder (letRec) where
 
+import Data.Dependent.Sum                  (DSum((:=>)))
 import Data.Functor.Const                  (Const(..), getConst)
 import Data.GADT.Compare                   (GCompare)
+import Data.Some                           (Some(Some))
 import Language.Haskell.TH                 (runQ, Q, newName, Name)
 import Language.Haskell.TH.Syntax          (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import Parsley.Backend.Machine.LetBindings (LetBinding(..), Binding, Regs)
 import Parsley.Backend.Machine.State       (QSubRoutine(..), Func)
 import Parsley.Common.Utils                (Code)
 
-import Data.Dependent.Map as DMap (DMap, DSum(..), Some(..), (!), map, toList, traverseWithKey)
+import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
 
 letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o a)
                        -> {-nameof-}     (forall a rs. key a -> String)

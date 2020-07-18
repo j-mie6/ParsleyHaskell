@@ -5,8 +5,8 @@
              ViewPatterns #-}
 module Parsley.Frontend.Optimiser (optimise) where
 
-import Prelude hiding ((<$>))
-import Parsley.Common    (Fix(In), code, Quapplicative(..))
+import Prelude hiding             ((<$>))
+import Parsley.Common             (Fix(In), code, Quapplicative(..))
 import Parsley.Core.CombinatorAST (Combinator(..))
 import Parsley.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H)
 

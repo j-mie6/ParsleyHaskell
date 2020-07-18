@@ -1,0 +1,153 @@
+{-# LANGUAGE FlexibleContexts,
+             GADTs,
+             RecordWildCards #-}
+module Parsley.Frontend.Dependencies (dependencyAnalysis) where
+
+import Control.Monad              (unless, forM_)
+import Control.Monad.ST           (ST)
+import Control.Monad.Writer       (Writer, MonadWriter, execWriter, tell)
+import Data.Array                 (Array, (!), listArray)
+import Data.Array.MArray          (readArray, writeArray, newArray)
+import Data.Array.ST              (STUArray, runSTUArray)
+import Data.Array.Unboxed         (UArray, assocs)
+import Data.Dependent.Map         (DMap)
+import Data.List                  (foldl', partition, sortOn)
+import Data.Map.Strict            (Map)
+import Data.Set                   (Set, singleton, (\\), union, notMember)
+import Data.STRef                 (STRef, newSTRef, readSTRef, writeSTRef)
+import Parsley.Common.Indexed     (Fix, cata, Const1(..), (:*:)(..), zipper)
+import Parsley.Core.CombinatorAST (Combinator(..), traverseCombinator)
+import Parsley.Core.Identifiers   (IMVar, MVar(..), IΣVar, ΣVar(..))
+
+import qualified Data.Dependent.Map as DMap (foldrWithKey, filterWithKey)
+import qualified Data.Map.Strict    as Map  ((!), empty, insert, mapMaybeWithKey, findMax, elems, lookup)
+import qualified Data.Set           as Set  (elems, empty, insert)
+
+type Graph = Array IMVar [IMVar]
+
+dependencyAnalysis :: Fix Combinator a -> DMap MVar (Fix Combinator) -> (DMap MVar (Fix Combinator), Map IMVar (Set IΣVar))
+dependencyAnalysis toplevel μs =
+  let -- Step 1: find roots of the toplevel
+      roots = directDependencies Nothing toplevel
+      -- Step 2: build immediate dependencies
+      DependencyMaps{..} = buildDependencyMaps μs
+      -- Step 3: find the largest name
+      n = fst (Map.findMax immediateDependencies)
+      -- Step 4: Build a dependency graph
+      graph = buildGraph n immediateDependencies
+      -- Step 5: construct the seen set (dfnum)
+      -- Step 6: dfs from toplevel (via roots) all with same seen set
+      -- Step 7: elems of seen set with dfnum 0 are dead, otherwise they are collected into a list in descending order
+      (topo, dead) = topoOrdering roots n graph
+      -- Step 8: perform a dfs on each of the topo, with a new seen set for each,
+      --         building the flattened dependency map. If the current focus has
+      --         already been computed, add all its deps to the seen set and skip.
+      --         The end seen set becomes out flattened deps.
+      trueDeps = flattenDependencies topo (minMax topo) graph
+      -- Step 8: Compute the new registers, and remove dead ones
+      addNewRegs v immRegs
+        | notMember v dead = Just $ immRegs `union` foldMap (immediateFreeRegisters Map.!) (trueDeps Map.! v)
+        | otherwise        = Nothing
+      trueRegs = Map.mapMaybeWithKey addNewRegs immediateFreeRegisters
+  in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, trueRegs)
+
+minMax :: Ord a => [a] -> (a, a)
+minMax []     = error "cannot find minimum or maximum of empty list"
+minMax (x:xs) = foldl' (\(small, big) x -> (min small x, max big x)) (x, x) xs
+
+buildGraph :: IMVar -> Map IMVar (Set IMVar) -> Graph
+buildGraph n = listArray (0, n) . map Set.elems . Map.elems
+
+topoOrdering :: Set IMVar -> IMVar -> Graph -> ([IMVar], Set IMVar)
+topoOrdering roots n graph =
+  let dfnums = runSTUArray $ do
+        dfnums <- newArray (0, n) (0 :: Int)
+        nextDfnum <- newSTRef 1
+        let hasSeen v = (/= 0) <$> readArray dfnums v
+        let setSeen v = do dfnum <- readSTRef nextDfnum
+                           writeArray dfnums v dfnum
+                           writeSTRef nextDfnum (dfnum + 1)
+        forM_ roots (dfs hasSeen setSeen graph)
+        return dfnums
+      (lives, deads) = partition ((/= 0) . snd) (assocs dfnums)
+  in (reverseMap fst (sortOn snd lives), foldl' (\ds v0 -> Set.insert (fst v0) ds) Set.empty deads)
+
+reverseMap :: (a -> b) -> [a] -> [b]
+reverseMap f = foldl' (\xs x -> f x : xs) []
+
+flattenDependencies :: [IMVar] -> (IMVar, IMVar) -> Graph -> Map IMVar (Set IMVar)
+flattenDependencies topo range graph = foldl' reachable Map.empty topo
+  where
+    reachable :: Map IMVar (Set IMVar) -> IMVar -> Map IMVar (Set IMVar)
+    reachable deps root =
+      let seen = runSTUArray $ do
+            seen <- newArray range False
+            let setSeen v = writeArray seen v True
+            let seenOrSkip v = case Map.lookup v deps of
+                  Nothing -> readArray seen v
+                  Just ds -> setSeen v >> forM_ ds setSeen >> return True
+            dfs seenOrSkip setSeen graph root
+            return seen
+          ds = foldl' (\ds (v, b) -> if b then Set.insert v ds else ds) Set.empty (assocs seen)
+      in Map.insert root ds deps
+
+dfs :: (IMVar -> ST s Bool) -> (IMVar -> ST s ()) -> Graph -> IMVar -> ST s ()
+dfs hasSeen setSeen graph = go
+  where
+    go v = do seen <- hasSeen v
+              unless seen $
+                do setSeen v
+                   forM_ (graph ! v) go
+
+-- IMMEDIATE DEPENDENCY MAPS
+data DependencyMaps = DependencyMaps {
+  immediateFreeRegisters :: Map IMVar (Set IΣVar), -- Leave Lazy
+  immediateDependencies  :: Map IMVar (Set IMVar)  -- Could be Strict
+}
+
+buildDependencyMaps :: DMap MVar (Fix Combinator) -> DependencyMaps
+buildDependencyMaps = DMap.foldrWithKey (\(MVar v) p deps@DependencyMaps{..} ->
+  let (frs, ds) = freeRegistersAndDependencies v p
+  in deps { immediateFreeRegisters = Map.insert v frs immediateFreeRegisters
+          , immediateDependencies = Map.insert v ds immediateDependencies}) (DependencyMaps Map.empty Map.empty)
+
+freeRegistersAndDependencies :: IMVar -> Fix Combinator a -> (Set IΣVar, Set IMVar)
+freeRegistersAndDependencies v p =
+  let frsm :*: depsm = zipper freeRegistersAlg (dependenciesAlg (Just v)) p
+      frs = runFreeRegisters frsm
+      ds = runDependencies depsm
+  in (frs, ds)
+
+-- DEPENDENCY ANALYSIS
+newtype Dependencies a = Dependencies { doDependencies :: Writer (Set IMVar) () }
+runDependencies :: Dependencies a -> Set IMVar
+runDependencies = execWriter . doDependencies
+
+directDependencies :: Maybe IMVar -> Fix Combinator a -> Set IMVar
+directDependencies mv = runDependencies . cata (dependenciesAlg mv)
+
+dependenciesAlg :: Maybe IMVar -> Combinator Dependencies a -> Dependencies a
+dependenciesAlg (Just v) (Let _ μ@(MVar u) _) = Dependencies $ do unless (u == v) (dependsOn μ)
+dependenciesAlg Nothing  (Let _ μ _)          = Dependencies $ do dependsOn μ
+dependenciesAlg _ p                           = Dependencies $ do traverseCombinator (fmap Const1 . doDependencies) p; return ()
+
+dependsOn :: MonadWriter (Set IMVar) m => MVar a -> m ()
+dependsOn (MVar v) = tell (singleton v)
+
+-- FREE REGISTER ANALYSIS
+newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: Writer (Set IΣVar, Set IΣVar) () }
+runFreeRegisters :: FreeRegisters a -> Set IΣVar
+runFreeRegisters m = let (us, ds) = execWriter (doFreeRegisters m) in (us \\ ds)
+
+freeRegistersAlg :: Combinator FreeRegisters a -> FreeRegisters a
+freeRegistersAlg (GetRegister σ)      = FreeRegisters $ do uses σ
+freeRegistersAlg (PutRegister σ p)    = FreeRegisters $ do uses σ; doFreeRegisters p
+freeRegistersAlg (MakeRegister σ p q) = FreeRegisters $ do defs σ; doFreeRegisters p; doFreeRegisters q
+freeRegistersAlg (Let {})             = FreeRegisters $ do return () -- TODO This can be removed when Let doesn't have the body in it...
+freeRegistersAlg p                    = FreeRegisters $ do traverseCombinator (fmap Const1 . doFreeRegisters) p; return ()
+
+uses :: (Monoid w, MonadWriter (Set IΣVar, w) m) => ΣVar a -> m ()
+uses (ΣVar σ) = tell (singleton σ, mempty)
+
+defs :: (Monoid w, MonadWriter (w, Set IΣVar) m) => ΣVar a -> m ()
+defs (ΣVar σ) = tell (mempty, singleton σ)

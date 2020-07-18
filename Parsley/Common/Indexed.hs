@@ -75,6 +75,9 @@ mutu algl algr = cata (algl /\ algr)
 zygo :: IFunctor f => (forall j. f (a :*: b) j -> a j) -> (forall j. f b j -> b j) -> Fix f i -> a i
 zygo alg aux = ifst . mutu alg (aux . imap isnd)
 
+zipper :: IFunctor f => (forall j. f a j -> a j) -> (forall j. f b j -> b j) -> Fix f i -> (a :*: b) i
+zipper algl algr = mutu (algl . imap ifst) (algr . imap isnd)
+
 class                         Chain r k         where (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
 instance {-# OVERLAPPABLE #-} Chain a a         where (|>) = liftA2 (flip fromMaybe)
 instance {-# OVERLAPS #-}     Chain a (Maybe a) where (|>) = liftA2 (<|>)

@@ -75,6 +75,7 @@ newtype Tagger a = Tagger { doTagger :: Fix (Tag ParserName Combinator) a }
 tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combinator) a
 tagParser = doTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap doTagger \/ descope))
   where
+    -- TODO This needs to not float out - naughty GHC >:(
     regMaker = newRegMaker
     descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ (doTagger p) (doTagger (f reg)))
 

@@ -111,18 +111,17 @@ endBy1 p sep = some (p <* sep)
 sepEndBy :: Parser a -> Parser b -> Parser [a]
 sepEndBy p sep = option EMPTY (sepEndBy1 p sep)
 
-sepEndBy1 :: Parser a -> Parser b -> Parser [a]
+{-sepEndBy1 :: Parser a -> Parser b -> Parser [a]
 sepEndBy1 p sep =
   let seb1 = p <**> (sep *> (FLIP_H CONS <$> option EMPTY seb1)
                  <|> pure (APP_H (FLIP_H CONS) EMPTY))
-  in seb1
+  in seb1-}
 
-{-sepEndBy1 :: Parser a -> Parser b -> Parser [a]
+sepEndBy1 :: Parser a -> Parser b -> Parser [a]
 sepEndBy1 p sep = newRegister_ ID $ \acc ->
   let go = modify acc (COMPOSE_H (FLIP_H COMPOSE) CONS <$> p)
-         *> (sep *> (go <|> get acc <*> pure EMPTY)
-         <|> get acc <*> pure EMPTY)
-  in go-}
+         *> optional (sep *> optional go)
+  in go *> get acc <*> pure EMPTY
 
 manyTill :: Parser a -> Parser b -> Parser [a]
 manyTill p end = let go = end $> EMPTY <|> p <:> go in go
@@ -309,17 +308,17 @@ for init cond step body =
     in when cond' (while (body *> modify i step *> cond'))
 
 -- Iterative Parsers
+-- this form helps identify dead registers by optimisation in the backend, but might impact performance otherwise?
 {-chainPre :: Parser (a -> a) -> Parser a -> Parser a
 chainPre op p = newRegister_ ID $ \acc ->
-  let go = modify acc (FLIP_H COMPOSE <$> op) *> go
-       <|> get acc <*> p
-  in go-}
+  let go = optional (modify acc (FLIP_H COMPOSE <$> op) *> go)
+  in go *> get acc <*> p -}
 
+-- this form helps identify dead registers by optimisation in the backend, but might impact performance otherwise?
 {-chainPost :: Parser a -> Parser (a -> a) -> Parser a
 chainPost p op = newRegister p $ \acc ->
-  let go = modify acc op *> go
-       <|> get acc
-  in go-}
+  let go = optional (modify acc op *> go)
+  in go *> get acc-}
 
 chainl1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (b -> a -> b) -> Parser b
 chainl1' f p op = chainPost (f <$> p) (FLIP <$> op <*> p)
@@ -327,12 +326,13 @@ chainl1' f p op = chainPost (f <$> p) (FLIP <$> op <*> p)
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 = chainl1' ID
 
+-- this form helps identify dead registers by optimisation in the backend, but might impact performance otherwise?
 chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
 chainr1' f p op = newRegister_ ID $ \acc ->
   let go = bind p $ \x ->
              modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go
-         <|> get acc <*> (f <$> x)
-  in go
+         <|> (f <$> x)
+  in go <**> get acc
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainr1 = chainr1' ID

@@ -25,6 +25,9 @@ import qualified Data.Set           as Set  (elems, empty, insert, lookupMax)
 
 type Graph = Array IMVar [IMVar]
 
+-- TODO This actually should be in the backend... dead bindings and the topological ordering can be computed here
+--      but the register stuff should come after register optimisation and instruction peephole
+
 dependencyAnalysis :: Fix Combinator a -> DMap MVar (Fix Combinator) -> (DMap MVar (Fix Combinator), Map IMVar (Set IΣVar), IΣVar)
 dependencyAnalysis toplevel μs =
   let -- Step 1: find roots of the toplevel

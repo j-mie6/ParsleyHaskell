@@ -16,12 +16,14 @@ module Parsley (
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Data.Function              (fix)
 import Data.Text.IO               (readFile)
+import Debug.Trace                (trace)
 import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Backend            (codeGen, Input, eval, prepare)
 import Parsley.Core
 import Parsley.Frontend           (compile)
+import System.Console.Pretty      (color, style, Color(Red), Style(Bold, Underline, Italic))
 
-import Parsley.Core as Core hiding     (_pure, _satisfy, _conditional)
+import Parsley.Core as Core hiding     (_pure, _satisfy, _conditional, _join)
 import Parsley.Common.Utils as THUtils (code, Quapplicative(..), WQ, Code)
 
 class ParserOps rep where
@@ -72,6 +74,16 @@ liftA2 f p q = f <$> p <*> q
 
 liftA3 :: ParserOps rep => rep (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
 liftA3 f p q r = f <$> p <*> q <*> r
+
+join :: Parser (Parser a) -> Parser a
+join = trace joinWarning $ _join
+  where
+    -- TODO HasCallStack?
+    joinWarning = unlines [ unwords [color Red "WARNING: `join` is", color Red (style Bold "VERY"), color Red "expensive..."]
+                          , "Make sure you know what you're doing:"
+                          , unwords ["    legitimate uses of `join` are", style Italic "very rare"]
+                          , unwords ["    if possible use registers/`bind` and/or selectives, or if", style Underline "absolutely necessary" ++ ",", "make sure you minimise the size of the parser inside"]
+                          , "This warning may be surpressed by hiding `join` from Parsley and importing Parsley.ReallyVerySlow (join)" ]
 
 many :: Parser a -> Parser [a]
 many = pfoldr CONS EMPTY
@@ -308,17 +320,17 @@ for init cond step body =
     in when cond' (while (body *> modify i step *> cond'))
 
 -- Iterative Parsers
--- this form helps identify dead registers by optimisation in the backend, but might impact performance otherwise?
 {-chainPre :: Parser (a -> a) -> Parser a -> Parser a
 chainPre op p = newRegister_ ID $ \acc ->
-  let go = optional (modify acc (FLIP_H COMPOSE <$> op) *> go)
-  in go *> get acc <*> p -}
+  let go = modify acc (FLIP_H COMPOSE <$> op) *> go
+       <|> get acc <*> p
+  in go -}
 
--- this form helps identify dead registers by optimisation in the backend, but might impact performance otherwise?
 {-chainPost :: Parser a -> Parser (a -> a) -> Parser a
 chainPost p op = newRegister p $ \acc ->
-  let go = optional (modify acc op *> go)
-  in go *> get acc-}
+  let go = modify acc op *> go
+       <|> get acc
+  in go-}
 
 chainl1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (b -> a -> b) -> Parser b
 chainl1' f p op = chainPost (f <$> p) (FLIP <$> op <*> p)
@@ -326,16 +338,25 @@ chainl1' f p op = chainPost (f <$> p) (FLIP <$> op <*> p)
 chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 = chainl1' ID
 
--- this form helps identify dead registers by optimisation in the backend, but might impact performance otherwise?
 chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
 chainr1' f p op = newRegister_ ID $ \acc ->
   let go = bind p $ \x ->
-             modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go
-         <|> (f <$> x)
+           modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go
+       <|> (f <$> x)
   in go <**> get acc
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainr1 = chainr1' ID
+
+chaint' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (Parser (a -> a -> b -> b)) -> Parser b
+chaint' f p op = newRegister_ ID $ \acc ->
+  let go = bind p $ \x ->
+           modify acc (FLIP_H COMPOSE <$> (bind op (\g -> p <**> (_join g <*> x)))) *> go
+       <|> (f <$> x)
+  in go <**> get acc
+
+chaint :: Parser a -> Parser (Parser (a -> a -> a -> a)) -> Parser a
+chaint = chaint' ID
 
 chainr :: ParserOps rep => Parser a -> Parser (a -> a -> a) -> rep a -> Parser a
 chainr p op x = option x (chainr1 p op)
@@ -349,28 +370,32 @@ pfoldr f k p = chainPre (f <$> p) (pure k)
 pfoldr1 :: (ParserOps repf, ParserOps repk) => repf (a -> b -> b) -> repk b -> Parser a -> Parser b
 pfoldr1 f k p = f <$> p <*> pfoldr f k p
 
-data Level a b = InfixL  [Parser (b -> a -> b)] (Defunc (a -> b))
-               | InfixR  [Parser (a -> b -> b)] (Defunc (a -> b))
-               | Prefix  [Parser (b -> b)]      (Defunc (a -> b))
-               | Postfix [Parser (b -> b)]      (Defunc (a -> b))
+data Level a b = InfixL  [Parser (b -> a -> b)]               (Defunc (a -> b))
+               | InfixR  [Parser (a -> b -> b)]               (Defunc (a -> b))
+               | Prefix  [Parser (b -> b)]                    (Defunc (a -> b))
+               | Postfix [Parser (b -> b)]                    (Defunc (a -> b))
+               | Ternary [Parser (Parser (a -> a -> b -> b))] (Defunc (a -> b))
 
 class Monolith a b c where
-  infixL  :: [Parser (b -> a -> b)] -> c
-  infixR  :: [Parser (a -> b -> b)] -> c
-  prefix  :: [Parser (b -> b)]      -> c
-  postfix :: [Parser (b -> b)]      -> c
+  infixL  :: [Parser (b -> a -> b)]               -> c
+  infixR  :: [Parser (a -> b -> b)]               -> c
+  prefix  :: [Parser (b -> b)]                    -> c
+  postfix :: [Parser (b -> b)]                    -> c
+  ternary :: [Parser (Parser (a -> a -> b -> b))] -> c
 
 instance x ~ a => Monolith x a (Level a a) where
   infixL  = flip InfixL ID
   infixR  = flip InfixR ID
   prefix  = flip Prefix ID
   postfix = flip Postfix ID
+  ternary = flip Ternary ID
 
 instance {-# INCOHERENT #-} x ~ (WQ (a -> b) -> Level a b) => Monolith a b x where
   infixL  ops = InfixL ops . BLACK
   infixR  ops = InfixR ops . BLACK
   prefix  ops = Prefix ops . BLACK
   postfix ops = Postfix ops . BLACK
+  ternary ops = Ternary ops . BLACK
 
 data Prec a b where
   NoLevel :: Prec a a
@@ -387,6 +412,7 @@ precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
     level (InfixR ops wrap) atom  = chainr1' wrap atom (choice ops)
     level (Prefix ops wrap) atom  = chainPre (choice ops) (wrap <$> atom)
     level (Postfix ops wrap) atom = chainPost (wrap <$> atom) (choice ops)
+    level (Ternary ops wrap) atom = chaint' wrap atom (choice ops)
 
 runParser :: Input input => Parser a -> Code (input -> Maybe a)
 runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p codeGen))||]

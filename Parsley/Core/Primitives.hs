@@ -29,7 +29,7 @@ Parser p *> Parser q = Parser (In (L (p :*>: q)))
 empty :: Parser a
 empty = Parser (In (L Empty))
 
-infixl 3 <|>
+infixr 3 <|>
 (<|>) :: Parser a -> Parser a -> Parser a
 Parser p <|> Parser q = Parser (In (L (p :<|>: q)))
 
@@ -69,6 +69,9 @@ get (Reg reg) = Parser (In (L (GetRegister reg)))
 
 put :: Reg r a -> Parser a -> Parser ()
 put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
+
+_join :: Parser (Parser a) -> Parser a
+_join = error "hahah nice try :)"
 
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (L (Debug name p)))

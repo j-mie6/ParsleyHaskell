@@ -45,13 +45,14 @@ dependencyAnalysis toplevel μs =
       --         The end seen set becomes out flattened deps.
       trueDeps = flattenDependencies topo (minMax topo) graph
       -- Step 8: Compute the new registers, and remove dead ones
-      -- FIXME: This isn't right (again)
-      --        This time, suppose we have f0 -> f1 -> f2 with f0 defining r0, f1 defining r1 and f2 using r0 and r1
-      --        f0s true deps are f1 and f2, so the set is {r0, r1} \\ {r0}, but this ignores that f1 provides {r1} to f2!
-      addNewRegs v immRegs
-        | notMember v dead = Just $ immRegs `union` foldMap (immediateFreeRegisters Map.!) (trueDeps Map.! v) \\ (definedRegisters Map.! v)
+      addNewRegs v uses
+        | notMember v dead = let deps = trueDeps Map.! v
+                                 defs = definedRegisters Map.! v
+                                 subUses = foldMap (usedRegisters Map.!) deps
+                                 subDefs = foldMap (definedRegisters Map.!) deps
+                             in Just $ (uses \\ defs) `union` (subUses \\ subDefs)
         | otherwise        = Nothing
-      trueRegs = Map.mapMaybeWithKey addNewRegs immediateFreeRegisters
+      trueRegs = Map.mapMaybeWithKey addNewRegs usedRegisters
       largestRegister = fromMaybe (-1) (Set.lookupMax (Map.foldMapWithKey (const id) definedRegisters))
   in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, trueRegs, largestRegister)
 
@@ -105,15 +106,15 @@ dfs hasSeen setSeen graph = go
 
 -- IMMEDIATE DEPENDENCY MAPS
 data DependencyMaps = DependencyMaps {
-  immediateFreeRegisters :: Map IMVar (Set IΣVar), -- Leave Lazy
-  immediateDependencies  :: Map IMVar (Set IMVar), -- Could be Strict
-  definedRegisters       :: Map IMVar (Set IΣVar)
+  usedRegisters         :: Map IMVar (Set IΣVar), -- Leave Lazy
+  immediateDependencies :: Map IMVar (Set IMVar), -- Could be Strict
+  definedRegisters      :: Map IMVar (Set IΣVar)
 }
 
 buildDependencyMaps :: DMap MVar (Fix Combinator) -> DependencyMaps
 buildDependencyMaps = DMap.foldrWithKey (\(MVar v) p deps@DependencyMaps{..} ->
   let (frs, defs, ds) = freeRegistersAndDependencies v p
-  in deps { immediateFreeRegisters = Map.insert v frs immediateFreeRegisters
+  in deps { usedRegisters = Map.insert v frs usedRegisters
           , immediateDependencies = Map.insert v ds immediateDependencies
           , definedRegisters = Map.insert v defs definedRegisters}) (DependencyMaps Map.empty Map.empty Map.empty)
 
@@ -143,7 +144,7 @@ dependsOn (MVar v) = tell (singleton v)
 -- FREE REGISTER ANALYSIS
 newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: Writer (Set IΣVar, Set IΣVar) () }
 runFreeRegisters :: FreeRegisters a -> (Set IΣVar, Set IΣVar)
-runFreeRegisters m = let (us, ds) = execWriter (doFreeRegisters m) in (us \\ ds, ds)
+runFreeRegisters m = execWriter . doFreeRegisters
 
 freeRegistersAlg :: Combinator FreeRegisters a -> FreeRegisters a
 freeRegistersAlg (GetRegister σ)      = FreeRegisters $ do uses σ

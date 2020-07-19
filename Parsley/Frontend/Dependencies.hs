@@ -144,7 +144,7 @@ dependsOn (MVar v) = tell (singleton v)
 -- FREE REGISTER ANALYSIS
 newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: Writer (Set IΣVar, Set IΣVar) () }
 runFreeRegisters :: FreeRegisters a -> (Set IΣVar, Set IΣVar)
-runFreeRegisters m = execWriter . doFreeRegisters
+runFreeRegisters = execWriter . doFreeRegisters
 
 freeRegistersAlg :: Combinator FreeRegisters a -> FreeRegisters a
 freeRegistersAlg (GetRegister σ)      = FreeRegisters $ do uses σ

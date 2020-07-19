@@ -9,9 +9,12 @@
              ApplicativeDo #-}
 module Parsley.Core.CombinatorAST (module Parsley.Core.CombinatorAST) where
 
-import Parsley.Common           (IFunctor, Fix, Const1(..), imap, cata, intercalateDiff)
+import Parsley.Common           (IFunctor, Fix, Const1(..), imap, cata, intercalateDiff, (:+:))
 import Parsley.Core.Identifiers (MVar, ΣVar)
 import Parsley.Core.Defunc      (Defunc)
+
+-- Parser wrapper type
+newtype Parser a = Parser {unParser :: Fix (Combinator :+: ScopeRegister) a}
 
 -- Core datatype
 data Combinator (k :: * -> *) (a :: *) where

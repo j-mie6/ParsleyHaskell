@@ -1,13 +1,10 @@
 {-# LANGUAGE RankNTypes,
              TypeOperators #-}
-module Parsley.Core.Primitives (module Parsley.Core.Primitives) where
+module Parsley.Core.Primitives (Parser, module Parsley.Core.Primitives) where
 
-import Parsley.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..))
+import Parsley.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..))
 import Parsley.Core.Defunc        (Defunc)
 import Parsley.Common.Indexed     (Fix(In), (:+:)(..))
-
--- Parser wrapper type
-newtype Parser a = Parser {unParser :: Fix (Combinator :+: ScopeRegister) a}
 
 -- Core smart constructors
 {-# INLINE _pure #-}

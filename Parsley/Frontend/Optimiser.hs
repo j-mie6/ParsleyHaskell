@@ -7,7 +7,7 @@ module Parsley.Frontend.Optimiser (optimise) where
 
 import Prelude hiding             ((<$>))
 import Parsley.Common             (Fix(In), code, Quapplicative(..))
-import Parsley.Core.CombinatorAST (Combinator(..))
+import Parsley.Core.CombinatorAST (Combinator(..), Parser(..))
 import Parsley.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H, pattern FLIP_CONST)
 
 pattern f :<$>: p = In (Pure f) :<*>: p

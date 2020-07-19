@@ -84,7 +84,7 @@ some = manyN 1
 
 skipMany :: Parser a -> Parser ()
 --skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
-skipMany = void . pfoldl (code const) UNIT -- the void here will encourage the optimiser to recognise that the register is unused
+skipMany = void . pfoldl CONST UNIT -- the void here will encourage the optimiser to recognise that the register is unused
 
 skipManyN :: Int -> Parser a -> Parser ()
 skipManyN n p = foldr (const (p *>)) (skipMany p) [1..n]
@@ -198,7 +198,7 @@ char :: Char -> Parser Char
 char c = satisfy (EQ_H (CHAR c)) $> CHAR c
 
 item :: Parser Char
-item = satisfy (makeQ (const True) [|| const True ||])
+item = satisfy (APP_H CONST (code True))
 
 {-notFollowedBy :: Parser a -> Parser ()
 notFollowedBy p = newRegister_ (code True) $ \ok ->
@@ -328,14 +328,11 @@ chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainl1 = chainl1' ID
 
 chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
-chainr1' f p op = let go = p <**> (option f (FLIP <$> op <*> go)) in go
-
-{-chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
 chainr1' f p op = newRegister_ ID $ \acc ->
   let go = bind p $ \x ->
              modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go
          <|> get acc <*> (f <$> x)
-  in go-}
+  in go
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainr1 = chainr1' ID

@@ -45,6 +45,9 @@ dependencyAnalysis toplevel μs =
       --         The end seen set becomes out flattened deps.
       trueDeps = flattenDependencies topo (minMax topo) graph
       -- Step 8: Compute the new registers, and remove dead ones
+      -- FIXME: This isn't right (again)
+      --        This time, suppose we have f0 -> f1 -> f2 with f0 defining r0, f1 defining r1 and f2 using r0 and r1
+      --        f0s true deps are f1 and f2, so the set is {r0, r1} \\ {r0}, but this ignores that f1 provides {r1} to f2!
       addNewRegs v immRegs
         | notMember v dead = Just $ immRegs `union` foldMap (immediateFreeRegisters Map.!) (trueDeps Map.! v) \\ (definedRegisters Map.! v)
         | otherwise        = Nothing

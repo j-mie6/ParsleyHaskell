@@ -8,7 +8,7 @@ module Parsley.Frontend.Optimiser (optimise) where
 import Prelude hiding             ((<$>))
 import Parsley.Common             (Fix(In), code, Quapplicative(..))
 import Parsley.Core.CombinatorAST (Combinator(..))
-import Parsley.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H)
+import Parsley.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H, pattern FLIP_CONST)
 
 pattern f :<$>: p = In (Pure f) :<*>: p
 pattern p :$>: x = p :*>: In (Pure x)
@@ -37,15 +37,21 @@ optimise (Match (In Empty) _ _ def)                     = def
 optimise (Match p _ qs (In Empty))
   | all (\case {In Empty -> True; _ -> False}) qs = optimise (p :*>: In Empty)
 -- APPLICATIVE OPTIMISATION
--- Identity Law: pure id <*> u                          = u
-optimise (In (Pure ID) :<*>: u)                         = u
+-- Identity Law: id <$> u                               = u
+optimise (ID :<$>: u)                                   = u
+-- Flip const optimisation: flip const <$> u            = u *> pure id
+optimise (FLIP_CONST :<$>: u)                           = optimise (u :*>: In (Pure ID))
 -- Homomorphism Law: pure f <*> pure x                  = pure (f x)
-optimise (In (Pure f) :<*>: In (Pure x))                = In (Pure (APP_H f x))
+optimise (f :<$>: In (Pure x))                          = In (Pure (APP_H f x))
 -- NOTE: This is basically a shortcut, it can be caught by the Composition Law and Homomorphism law
 -- Functor Composition Law: f <$> (g <$> p)             = (f . g) <$> p
 optimise (f :<$>: In (g :<$>: p))                       = optimise (COMPOSE_H f g :<$>: p)
 -- Composition Law: u <*> (v <*> w)                     = (.) <$> u <*> v <*> w
 optimise (u :<*>: In (v :<*>: w))                       = optimise (optimise (optimise (COMPOSE :<$>: u) :<*>: v) :<*>: w)
+-- Definition of *>
+optimise (In (FLIP_CONST :<$>: p) :<*>: q)              = In (p :*>: q)
+-- Definition of <*
+optimise (In (CONST :<$>: p) :<*>: q)                   = In (p :<*: q)
 -- Reassociation Law 1: (u *> v) <*> w                  = u *> (v <*> w)
 optimise (In (u :*>: v) :<*>: w)                        = optimise (u :*>: (optimise (v :<*>: w)))
 -- Interchange Law: u <*> pure x                        = pure ($ x) <*> u

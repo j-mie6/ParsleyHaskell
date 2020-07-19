@@ -46,8 +46,8 @@ main = do
   --print (Happys.Javascript.runParser Happys.Javascript.javascript input)
   print (iterbenchP "abababababab")
   print (iterbenchP "abababababa")
-  defaultMain [ {-iterbench
-              , -}javascript
+  defaultMain [ predbench,iterbench
+              , javascript
               , brainfuck
               , nandlang
               ]
@@ -59,12 +59,25 @@ eofP = $$(Parsley.runParser Parsley.eof)
 eof :: Benchmark
 eof = env (return ("", "a")) $ \(~(yay, nay)) -> bgroup "eof" [ bench "yay" $ nf eofP yay, bench "nay" $ nf eofP "nay"]
 
+-- Pred bench
+deriving instance Generic Pred
+deriving instance NFData Pred
+
+predbenchP :: String -> Maybe Pred
+predbenchP = $$(Parsley.runParser ParsleyParsers.pred)
+
+predbench :: Benchmark
+predbench = env (return (concat ("f" : replicate 100_000 " && t"), take 500_000 (concat ("f" : replicate 100_000 " && t")))) $ \(~(good, bad)) ->
+  bgroup "predbench" [ bench "good" $ nf predbenchP good
+                     , bench "bad" $ nf predbenchP bad
+                     ]
+
 -- Iter bench (skipMany)
 iterbenchP :: String -> Maybe ()
 iterbenchP = $$(Parsley.runParser (Parsley.skipMany (Parsley.string "ab")))
 
 iterbench :: Benchmark
-iterbench = env (return (concat (replicate 100_000 "ab"), take 199_000 (concat (replicate 100_000 "ab")))) $ \(~(good, bad)) ->
+iterbench = env (return (concat (replicate 100_000 "ab"), take 199_999 (concat (replicate 100_000 "ab")))) $ \(~(good, bad)) ->
   bgroup "iterbench" [ bench "good" $ nf iterbenchP good
                      , bench "bad" $ nf iterbenchP bad
                      ]

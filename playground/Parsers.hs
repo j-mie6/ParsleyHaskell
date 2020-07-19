@@ -45,6 +45,14 @@ nfb = notFollowedBy (char 'a') <|> void (string "ab")
 skipManyInspect :: Parser ()
 skipManyInspect = skipMany (char 'a')
 
+boom :: Parser ()
+boom = let foo = newRegister_ UNIT (\r0 ->
+            let goo = newRegister_ UNIT (\r1 ->
+                  let hoo = get r0 <~> get r1 *> hoo in hoo
+                 ) *> goo
+            in goo) *> pure UNIT
+       in foo *> foo
+
 brainfuck :: Parser [BrainFuckOp]
 brainfuck = whitespace *> bf
   where

@@ -59,6 +59,10 @@ emitLengthCheck n good bad γ = [||
 dup :: Code x -> (Code x -> Code r) -> Code r
 dup x k = [|| let !dupx = $$x in $$(k [||dupx||]) ||]
 
+{-# INLINE returnST #-}
+returnST :: forall s a. a -> ST s a
+returnST = return @(ST s)
+
 {- Register Operations -}
 newΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
 newΣ σ Soft x k ctx = dup x $ \dupx -> k $! insertNewΣ σ Nothing dupx ctx
@@ -98,15 +102,15 @@ setupHandler γ h k = [||
     in $$(k (γ {handlers = VCons [||handler||] (handlers γ)}))
   ||]
 
-#define deriveHandlerOps(_o)                                \
-instance HandlerOps _o where                                \
-{                                                           \
-  buildHandler γ h c = [||\o# ->                            \
-    $$(h (γ {operands = Op c (operands γ),                  \
-             input = [||$$box o#||]}))||];                  \
-  fatal = [||\(!o#) -> return Nothing :: ST s (Maybe a)||]; \
-  raise γ = let VCons h _ = handlers γ                      \
-            in [|| $$h ($$unbox $$(input γ)) ||];           \
+#define deriveHandlerOps(_o)                      \
+instance HandlerOps _o where                      \
+{                                                 \
+  buildHandler γ h c = [||\o# ->                  \
+    $$(h (γ {operands = Op c (operands γ),        \
+             input = [||$$box o#||]}))||];        \
+  fatal = [||\(!o#) -> returnST Nothing ||];      \
+  raise γ = let VCons h _ = handlers γ            \
+            in [|| $$h ($$unbox $$(input γ)) ||]; \
 };
 inputInstances(deriveHandlerOps)
 
@@ -133,7 +137,7 @@ inputInstances(deriveContOps)
 #define deriveReturnOps(_o)                                       \
 instance ReturnOps _o where                                       \
 {                                                                 \
-  halt = [||\x o# -> return $! Just x||];                         \
+  halt = [||\x o# -> returnST $! Just x||];                       \
   noreturn = [||\x o# -> error "Return is not permitted here"||]; \
 };
 inputInstances(deriveReturnOps)

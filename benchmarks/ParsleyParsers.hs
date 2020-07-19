@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
-module ParsleyParsers where 
+module ParsleyParsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
@@ -196,13 +196,13 @@ javascript = whitespace *> many element <* eof
         f fract exp n = readMaybe (show n ++ fract ++ exp)
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
         g exp n = readMaybe (show n ++ exp)
-        qg = [||\exp n -> readMaybe (show n ++ exp)||] 
+        qg = [||\exp n -> readMaybe (show n ++ exp)||]
 
     fraction :: Parser [Char]
     fraction = char '.' <:> some (oneOf ['0'..'9'])
 
     exponent' :: Parser [Char]
-    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE" 
+    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE"
              *> (((code (:) <$> oneOf "+-") <|> pure (code id))
              <*> (code show <$> decimal)))
 

@@ -14,6 +14,7 @@ data Defunc a where
   CHAR    :: Char -> Defunc Char
   ID      :: Defunc (a -> a)
   CONS    :: Defunc (a -> [a] -> [a])
+  CONST   :: Defunc (a -> b -> a)
   EMPTY   :: Defunc [a]
   UNIT    :: Defunc ()
   BLACK   :: WQ a -> Defunc a
@@ -25,9 +26,10 @@ instance Quapplicative Defunc where
   _val FLIP        = flip
   _val (APP_H f x) = (_val f) (_val x)
   _val (CHAR c)    = c
-  _val (EQ_H x)    = (== (_val x))
+  _val (EQ_H x)    = ((_val x) ==)
   _val ID          = id
   _val CONS        = (:)
+  _val CONST       = const
   _val EMPTY       = []
   _val UNIT        = ()
   _val (BLACK f)   = _val f
@@ -37,12 +39,16 @@ pattern COMPOSE_H :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) =>
 pattern COMPOSE_H f g = APP_H (APP_H COMPOSE f) g
 pattern FLIP_H :: () => ((x -> y) ~ ((a -> b -> c) -> b -> a -> c)) => Defunc x -> Defunc y
 pattern FLIP_H f      = APP_H FLIP f
+pattern FLIP_CONST :: () => (x ~ (a -> b -> b)) => Defunc x
+pattern FLIP_CONST    = FLIP_H CONST
 
 genDefunc :: Defunc a -> Code a
 genDefunc APP             = [|| \f x -> f x ||]
 genDefunc COMPOSE         = [|| \f g x -> f (g x) ||]
 genDefunc FLIP            = [|| \f x y -> f y x ||]
 genDefunc (COMPOSE_H f g) = [|| \x -> $$(genDefunc1 (COMPOSE_H f g) [||x||]) ||]
+genDefunc CONST           = [|| \x y -> x ||]
+genDefunc FLIP_CONST      = [|| \x y -> y ||]
 genDefunc (FLIP_H f)      = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
 genDefunc (APP_H f x)     = genDefunc2 APP (genDefunc f) (genDefunc x)
 genDefunc (CHAR c)        = [|| c ||]
@@ -58,8 +64,10 @@ genDefunc1 APP             qf = [|| \x -> $$qf x ||]
 genDefunc1 COMPOSE         qf = [|| \g x -> $$qf (g x) ||]
 genDefunc1 FLIP            qf = [|| \x y -> $$qf y x ||]
 genDefunc1 (COMPOSE_H f g) qx = [|| $$(genDefunc1 f (genDefunc1 g qx)) ||]
+genDefunc1 CONST           qx = [|| \y -> $$qx ||]
+genDefunc1 FLIP_CONST      qx = genDefunc ID
 genDefunc1 (FLIP_H f)      qx = [|| \y -> $$(genDefunc2 (FLIP_H f) qx [||y||]) ||]
-genDefunc1 (EQ_H x)        qy = [|| $$qy == $$(genDefunc x) ||]
+genDefunc1 (EQ_H x)        qy = [|| $$(genDefunc x)  == $$qy ||]
 genDefunc1 ID              qx = qx
 genDefunc1 f               qx = [|| $$(genDefunc f) $$qx ||]
 
@@ -67,6 +75,8 @@ genDefunc2 :: Defunc (a -> b -> c) -> Code a -> Code b -> Code c
 genDefunc2 APP        qf qx  = [|| $$qf $$qx ||]
 genDefunc2 COMPOSE    qf qg  = [|| \x -> $$qf ($$qg x) ||]
 genDefunc2 FLIP       qf qx  = [|| \y -> $$qf y $$qx ||]
+genDefunc2 CONST      qx qy  = qx
+genDefunc2 FLIP_CONST qx qy  = qy
 genDefunc2 (FLIP_H f) qx qy  = genDefunc2 f qy qx
 genDefunc2 CONS       qx qxs = [|| $$qx : $$qxs ||]
 genDefunc2 f          qx qy  = [|| $$(genDefunc f) $$qx $$qy ||]
@@ -83,5 +93,6 @@ instance Show (Defunc a) where
   show ID  = "id"
   show EMPTY = "[]"
   show CONS = "(:)"
+  show CONST = "const"
   show UNIT = "()"
   show _ = "x"

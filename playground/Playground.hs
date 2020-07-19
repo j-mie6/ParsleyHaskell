@@ -65,8 +65,8 @@ skipManyInspect = $$(Parsley.runParser Parsers.skipManyInspect)
 evalBf' :: String -> Maybe [Char]
 evalBf' = $$(Parsley.runParser (Parsers.evalBf Parsers.brainfuck))
 
---boom :: String -> Maybe String
---boom = $$(Parsley.runParser Parsers.failure)
+boom :: String -> Maybe ()
+boom = $$(Parsley.runParser Parsers.boom)
 
 --nfb :: String -> Maybe ()
 --nfb = $$(Parsley.runParser Parsers.nfb)

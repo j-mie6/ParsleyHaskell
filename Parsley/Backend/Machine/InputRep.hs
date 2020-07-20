@@ -31,20 +31,6 @@ import Parsley.Core.InputTypes  (Text16, CharList, Stream(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 
-{- Auxillary Representation -}
-{- This requires GHC 8.10.1 - might be a while till we get there?
-   Indeed, 8.10.1 would allow us to basically remove box and unbox I think
-type InputDependant rep = (# {-next-} rep -> (# Char, rep #)
-                           , {-more-} rep -> Bool
-                           , {-init-} rep
-                           #)
--}
-
-data InputDependant rep = InputDependant {-next-} (rep -> (# Char, rep #))
-                                         {-more-} (rep -> Bool)
-                                         {-init-} rep
-
-
 {- Representation Types -}
 data OffWith ts = OffWith {-# UNPACK #-} !Int ts
 data OffWithStreamAnd ts = OffWithStreamAnd {-# UNPACK #-} !Int !Stream ts

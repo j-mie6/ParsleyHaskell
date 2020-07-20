@@ -9,15 +9,16 @@
 module Parsley.Common.Indexed (module Parsley.Common.Indexed) where
 
 import Control.Applicative ((<|>), liftA2)
+import Data.Kind           (Type)
 import Data.Maybe          (fromMaybe)
 
 data Nat = Zero | Succ Nat
 type One = Succ Zero
 
-class IFunctor (f :: (* -> *) -> * -> *) where
+class IFunctor (f :: (Type -> Type) -> Type -> Type) where
   imap :: (forall j. a j -> b j) -> f a i -> f b i
 
-class IFunctor4 (f :: ([*] -> Nat -> * -> * -> *) -> [*] -> Nat -> * -> * -> *) where
+class IFunctor4 (f :: ([Type] -> Nat -> Type -> Type -> Type) -> [Type] -> Nat -> Type -> Type -> Type) where
   imap4 :: (forall i' j' k'. a i' j' k' x -> b i' j' k' x) -> f a i j k x -> f b i j k x
 
 newtype Fix f a = In (f (Fix f) a)
@@ -48,8 +49,8 @@ instance (IFunctor f, IFunctor g) => IFunctor (f :+: g) where
   imap f (R y) = R (imap f y)
 
 (\/) :: (f a i -> b) -> (g a i -> b) -> (f :+: g) a i -> b
-(f \/ g) (L x) = f x
-(f \/ g) (R y) = g y
+(f \/ _) (L x) = f x
+(_ \/ g) (R y) = g y
 
 data Cofree f a i = a i :< f (Cofree f a) i
 extract :: Cofree f a i -> a i

@@ -1,3 +1,4 @@
+{-# OPTIONS -Wno-incomplete-patterns #-}
 {-# LANGUAGE KindSignatures,
              GeneralizedNewtypeDeriving,
              DerivingStrategies,
@@ -9,12 +10,13 @@ module Parsley.Core.Identifiers (
 
 import Data.Array        (Ix)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, GOrdering(..))
+import Data.Kind         (Type)
 import Data.Typeable     ((:~:)(Refl))
 import Data.Word         (Word64)
 import Unsafe.Coerce     (unsafeCoerce)
 
-newtype ΣVar (a :: *) = ΣVar IΣVar
-newtype MVar (a :: *) = MVar IMVar
+newtype ΣVar (a :: Type) = ΣVar IΣVar
+newtype MVar (a :: Type) = MVar IMVar
 newtype IMVar = IMVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show, Ix)
 newtype IΣVar = IΣVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show, Ix)
 

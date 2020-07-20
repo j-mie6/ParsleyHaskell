@@ -1,3 +1,4 @@
+{-# OPTIONS -Wno-monomorphism-restriction #-}
 {-# LANGUAGE GADTs,
              DataKinds,
              TypeOperators,
@@ -48,7 +49,7 @@ sat p k bad γ@Γ{..} = next input $ \c input' -> [||
     else $$bad
   ||]
 
-emitLengthCheck :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+emitLengthCheck :: (?ops :: InputOps o, PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
 emitLengthCheck n good bad γ = [||
@@ -108,7 +109,7 @@ instance HandlerOps _o where                      \
   buildHandler γ h c = [||\o# ->                  \
     $$(h (γ {operands = Op c (operands γ),        \
              input = [||$$box o#||]}))||];        \
-  fatal = [||\(!o#) -> returnST Nothing ||];      \
+  fatal = [||\(!_) -> returnST Nothing ||];       \
   raise γ = let VCons h _ = handlers γ            \
             in [|| $$h ($$unbox $$(input γ)) ||]; \
 };
@@ -134,11 +135,11 @@ instance ContOps _o where                                                       
 };
 inputInstances(deriveContOps)
 
-#define deriveReturnOps(_o)                                       \
-instance ReturnOps _o where                                       \
-{                                                                 \
-  halt = [||\x o# -> returnST $! Just x||];                       \
-  noreturn = [||\x o# -> error "Return is not permitted here"||]; \
+#define deriveReturnOps(_o)                                      \
+instance ReturnOps _o where                                      \
+{                                                                \
+  halt = [||\x _ -> returnST $! Just x||];                       \
+  noreturn = [||\_ _ -> error "Return is not permitted here"||]; \
 };
 inputInstances(deriveReturnOps)
 

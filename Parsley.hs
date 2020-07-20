@@ -1,3 +1,4 @@
+{-# OPTIONS -fplugin=LiftPlugin #-}
 {-# LANGUAGE TemplateHaskell,
              RankNTypes,
              FlexibleContexts,

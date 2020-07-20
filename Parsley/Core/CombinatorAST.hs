@@ -9,6 +9,7 @@
              ApplicativeDo #-}
 module Parsley.Core.CombinatorAST (module Parsley.Core.CombinatorAST) where
 
+import Data.Kind                (Type)
 import Parsley.Common           (IFunctor, Fix, Const1(..), imap, cata, intercalateDiff, (:+:))
 import Parsley.Core.Identifiers (MVar, ΣVar)
 import Parsley.Core.Defunc      (Defunc)
@@ -17,7 +18,7 @@ import Parsley.Core.Defunc      (Defunc)
 newtype Parser a = Parser {unParser :: Fix (Combinator :+: ScopeRegister) a}
 
 -- Core datatype
-data Combinator (k :: * -> *) (a :: *) where
+data Combinator (k :: Type -> Type) (a :: Type) where
   Pure           :: Defunc a -> Combinator k a
   Satisfy        :: Defunc (Char -> Bool) -> Combinator k Char
   (:<*>:)        :: k (a -> b) -> k a -> Combinator k b
@@ -39,10 +40,10 @@ data Combinator (k :: * -> *) (a :: *) where
   Debug          :: String -> k a -> Combinator k a
   MetaCombinator :: MetaCombinator -> k a -> Combinator k a
 
-data ScopeRegister (k :: * -> *) (a :: *) where
+data ScopeRegister (k :: Type -> Type) (a :: Type) where
   ScopeRegister :: k a -> (forall r. Reg r a -> k b) -> ScopeRegister k b
 
-newtype Reg (r :: *) a = Reg (ΣVar a)
+newtype Reg (r :: Type) a = Reg (ΣVar a)
 
 data MetaCombinator where
   Cut         :: MetaCombinator
@@ -66,7 +67,7 @@ instance IFunctor Combinator where
   imap f (ChainPre op p)      = ChainPre (f op) (f p)
   imap f (ChainPost p op)     = ChainPost (f p) (f op)
   imap f (MakeRegister σ p q) = MakeRegister σ (f p) (f q)
-  imap f (GetRegister σ)      = GetRegister σ
+  imap _ (GetRegister σ)      = GetRegister σ
   imap f (PutRegister σ p)    = PutRegister σ (f p)
   imap f (Debug name p)       = Debug name (f p)
   imap f (MetaCombinator m p) = MetaCombinator m (f p)
@@ -108,7 +109,7 @@ traverseCombinator expose (pf :<*>: px)        = do pf' <- expose pf; px' <- exp
 traverseCombinator expose (p :*>: q)           = do p' <- expose p; q' <- expose q; pure (p' :*>: q')
 traverseCombinator expose (p :<*: q)           = do p' <- expose p; q' <- expose q; pure (p' :<*: q')
 traverseCombinator expose (p :<|>: q)          = do p' <- expose p; q' <- expose q; pure (p' :<|>: q')
-traverseCombinator expose Empty                = do pure Empty
+traverseCombinator _      Empty                = do pure Empty
 traverseCombinator expose (Try p)              = do p' <- expose p; pure (Try p')
 traverseCombinator expose (LookAhead p)        = do p' <- expose p; pure (LookAhead p')
 traverseCombinator expose (NotFollowedBy p)    = do p' <- expose p; pure (NotFollowedBy p')
@@ -117,9 +118,10 @@ traverseCombinator expose (Match p fs qs d)    = do p' <- expose p; qs' <- trave
 traverseCombinator expose (ChainPre op p)      = do op' <- expose op; p' <- expose p; pure (ChainPre op' p')
 traverseCombinator expose (ChainPost p op)     = do p' <- expose p; op' <- expose op; pure (ChainPost p' op')
 traverseCombinator expose (MakeRegister σ p q) = do p' <- expose p; q' <- expose q; pure (MakeRegister σ p' q')
-traverseCombinator expose (GetRegister σ)      = do pure (GetRegister σ)
+traverseCombinator _      (GetRegister σ)      = do pure (GetRegister σ)
 traverseCombinator expose (PutRegister σ p)    = do p' <- expose p; pure (PutRegister σ p')
 traverseCombinator expose (Debug name p)       = do p' <- expose p; pure (Debug name p')
-traverseCombinator expose (Pure x)             = do pure (Pure x)
-traverseCombinator expose (Satisfy f)          = do pure (Satisfy f)
+traverseCombinator _      (Pure x)             = do pure (Pure x)
+traverseCombinator _      (Satisfy f)          = do pure (Satisfy f)
 traverseCombinator expose (Let r v p)          = do p' <- expose p; pure (Let r v p')
+traverseCombinator expose (MetaCombinator m p) = do p' <- expose p; pure (MetaCombinator m p')

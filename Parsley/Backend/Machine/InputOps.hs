@@ -13,9 +13,9 @@ module Parsley.Backend.Machine.InputOps (
 
 import Data.Array.Base                  (UArray(..), listArray)
 import Data.ByteString.Internal         (ByteString(..))
-import Data.Text.Array                  (aBA, empty)
+import Data.Text.Array                  (aBA{-, empty-})
 import Data.Text.Internal               (Text(..))
-import Data.Text.Unsafe                 (iter, Iter(..), iter_, reverseIter_)
+import Data.Text.Unsafe                 (iter, Iter(..){-, iter_, reverseIter_-})
 import GHC.Exts                         (Int(..), Char(..))
 import GHC.ForeignPtr                   (ForeignPtr(..))
 import GHC.Prim                         (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
@@ -24,7 +24,7 @@ import Parsley.Common.Utils             (Code)
 import Parsley.Core.InputTypes
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
-import qualified Data.Text                     as Text (length, index)
+--import qualified Data.Text                     as Text (length, index)
 
 {- Auxillary Representation -}
 {- This requires GHC 8.10.1 - might be a while till we get there?
@@ -71,7 +71,7 @@ instance InputPrep [Char] where
 instance InputPrep (UArray Int Char) where
   prepare qinput = [||
       let UArray _ _ size input# = $$qinput
-          next i@(I# i#) = (# C# (indexWideCharArray# input# i#), I# (i# +# 1#) #)
+          next (I# i#) = (# C# (indexWideCharArray# input# i#), I# (i# +# 1#) #)
       in InputDependant next (< size) 0
     ||]
 
@@ -79,7 +79,7 @@ instance InputPrep Text16 where
   prepare qinput = [||
       let Text16 (Text arr off size) = $$qinput
           arr# = aBA arr
-          next i@(I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), I# (i# +# 1#) #)
+          next (I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), I# (i# +# 1#) #)
       in InputDependant next (< size) off
     ||]
 
@@ -185,7 +185,7 @@ instance LogOps (OffWith ts) where
 
 instance LogOps Text where
   shiftLeft = [||textShiftLeft||]
-  offToInt = [||\(Text arr off unconsumed) -> div off 2||]
+  offToInt = [||\(Text _ off _) -> div off 2||]
 
 instance LogOps UnpackedLazyByteString where
   shiftLeft = [||byteStringShiftLeft||]

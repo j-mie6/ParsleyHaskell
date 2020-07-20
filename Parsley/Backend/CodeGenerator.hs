@@ -1,3 +1,4 @@
+{-# OPTIONS -Wno-incomplete-patterns #-}
 {-# LANGUAGE GADTs,
              DataKinds,
              TypeOperators,
@@ -9,20 +10,20 @@
 module Parsley.Backend.CodeGenerator (codeGen) where
 
 import Data.Maybe                           (isJust)
-import Data.Set                             (Set, singleton, (\\), elems)
-import Data.Void                            (Void)
+import Data.Set                             (Set, elems)
 import Debug.Trace                          (trace)
 import Control.Monad.Trans                  (lift)
-import Control.Monad.Writer                 (WriterT, Writer, runWriter, runWriterT, tell)
-import Parsley.Backend.Machine              (Defunc(USER, SAME), LetBinding, makeLetBinding, Instr(..), MetaInstr,
+import Parsley.Backend.Machine              (Defunc(USER, SAME), LetBinding, makeLetBinding, Instr(..),
                                              pattern Fmap, pattern App, _Modify, _Get, _Put, _Make, pattern If,
-                                             addCoins, refundCoins, drainCoins, freeCoins, PositionOps,
+                                             addCoins, refundCoins, drainCoins, PositionOps,
                                              IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import Parsley.Backend.InstructionAnalyser  (coinsNeeded)
 import Parsley.Common.Fresh                 (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
-import Parsley.Common.Indexed               (IFunctor, Fix, Fix4(In4), Cofree(..), Nat(..), One, imap, histo, extract, (|>))
+import Parsley.Common.Indexed               (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Parsley.Core.CombinatorAST           (Combinator(..), MetaCombinator(..))
-import Parsley.Core.Defunc                  (Defunc(BLACK, COMPOSE, UNIT, ID), pattern FLIP_H)
+import Parsley.Core.Defunc                  (Defunc(COMPOSE, UNIT, ID), pattern FLIP_H)
+
+import Parsley.Core.Defunc as Core          (Defunc)
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a
 runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> a
@@ -39,14 +40,19 @@ codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p +
   where
     name = maybe "TOP LEVEL" show letBound
     m = finalise (histo alg p)
+    alg :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg =
       let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
       in if isJust letBound then m else addCoins (coinsNeeded m) m
 
+pattern (:<$>:) :: Core.Defunc (a -> b) -> k a -> Combinator (Cofree Combinator k) b
 pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
+pattern (:$>:) :: Combinator (Cofree Combinator k) a -> Core.Defunc b -> Combinator (Cofree Combinator k) b
 pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
+pattern LiftA2 :: Core.Defunc (a -> b -> c) -> k a -> k b -> Combinator (Cofree Combinator k) c
 pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
+pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
 rollbackHandler :: Fix4 (Instr o) (o : xs) (Succ n) r a
@@ -101,7 +107,7 @@ direct (Satisfy p)   m = do return $! In4 (Sat (USER p) m)
 direct (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (App m)); runCodeGen pf pxc
 direct (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 direct (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
-direct Empty         m = do return $! In4 Empt
+direct Empty         _ = do return $! In4 Empt
 direct (p :<|>: q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))

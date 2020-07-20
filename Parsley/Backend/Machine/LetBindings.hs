@@ -13,11 +13,11 @@ module Parsley.Backend.Machine.LetBindings (
   ) where
 
 import Prelude hiding                       (foldr)
+import Data.Kind                            (Type)
 import Data.Set                             (Set, foldr)
-import Data.STRef                           (STRef)
 import Parsley.Backend.Machine.Identifiers  (IΣVar, ΣVar(..))
 import Parsley.Backend.Machine.Instructions (Instr)
-import Parsley.Common                       (Fix4, One, Code)
+import Parsley.Common                       (Fix4, One)
 import Unsafe.Coerce                        (unsafeCoerce)
 
 type Binding o a x = Fix4 (Instr o) '[] One x a
@@ -27,7 +27,7 @@ deriving instance Show (LetBinding o a x)
 makeLetBinding :: Binding o a x -> Set IΣVar -> LetBinding o a x
 makeLetBinding m rs = LetBinding m (unsafeMakeRegs rs)
 
-data Regs (rs :: [*]) where
+data Regs (rs :: [Type]) where
   NoRegs :: Regs '[]
   FreeReg :: ΣVar r -> Regs rs -> Regs (r : rs)
 deriving instance Show (Regs rs)

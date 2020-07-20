@@ -1,3 +1,4 @@
+{-# OPTIONS -Wno-orphans #-}
 {-# LANGUAGE TemplateHaskell,
              FlexibleInstances,
              UndecidableInstances #-}

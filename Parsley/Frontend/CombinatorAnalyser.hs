@@ -5,29 +5,30 @@
              TypeOperators #-}
 module Parsley.Frontend.CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
 
-import Control.Applicative        (liftA2)
-import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
-import Control.Monad.State.Strict (State, get, put, evalState)
+--import Control.Applicative        (liftA2)
+--import Control.Monad.Reader       (ReaderT, ask, runReaderT, local)
+--import Control.Monad.State.Strict (State, get, put, evalState)
 import Data.Coerce                (coerce)
-import Data.Map.Strict            (Map)
-import Data.Monoid                ((<>))
-import Data.Set                   (Set)
-import Parsley.Common.Indexed     (Fix(..), Const1(..), imap, cata, zygo, (:*:)(..), (/\), ifst, isnd)
+import Data.Kind                  (Type)
+--import Data.Map.Strict            (Map)
+--import Data.Set                   (Set)
+import Parsley.Common.Indexed     (Fix(..){-, imap, cata-}, zygo, (:*:)(..), ifst)
 import Parsley.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
-import Parsley.Core.Identifiers   (IMVar, MVar(..))
+--import Parsley.Core.Identifiers   (IMVar, MVar(..))
 
-import qualified Data.Map.Strict as Map
-import qualified Data.Set        as Set
+--import qualified Data.Map.Strict as Map
+--import qualified Data.Set        as Set
 
 data AnalysisFlags = AnalysisFlags {
   letBound :: Bool
 }
+emptyFlags :: AnalysisFlags
 emptyFlags = AnalysisFlags False
 
 analyse :: AnalysisFlags -> Fix Combinator a -> Fix Combinator a
 analyse flags = cutAnalysis (letBound flags) {-. terminationAnalysis-}
 
-data Compliance (k :: *) = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
+data Compliance (k :: Type) = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
 
 seqCompliance :: Compliance a -> Compliance b -> Compliance c
 seqCompliance c FullPure = coerce c
@@ -56,9 +57,9 @@ compliance (LookAhead c)            = c -- Lookahead will consume input on failu
 compliance (NotFollowedBy _)        = FullPure
 compliance (Debug _ c)              = c
 compliance (ChainPre NonComp p)     = seqCompliance Comp p
-compliance (ChainPre op p)          = seqCompliance NonComp p
+compliance (ChainPre _ p)           = seqCompliance NonComp p
 compliance (ChainPost p NonComp)    = seqCompliance p Comp
-compliance (ChainPost p op)         = seqCompliance p NonComp
+compliance (ChainPost p _)          = seqCompliance p NonComp
 compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
 compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
 compliance (MakeRegister _ l r)     = seqCompliance l r
@@ -133,9 +134,10 @@ cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . alg) com
     alg (MakeRegister σ l r) cut = seqAlg (MakeRegister σ) cut (ifst l) (ifst r)
     alg (GetRegister σ) _ = (In (GetRegister σ), False)
     alg (PutRegister σ p) cut = rewrap (PutRegister σ) cut (ifst p)
+    alg (MetaCombinator m p) cut = rewrap (MetaCombinator m) cut (ifst p)
 
 -- Termination Analysis (Generalised left-recursion checker)
-data Consumption = Some | None | Never
+{-data Consumption = Some | None | Never
 data Prop = Prop {success :: Consumption, fails :: Consumption, indisputable :: Bool} | Unknown
 
 looping (Prop Never Never _)          = True
@@ -239,3 +241,4 @@ terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (cata (T
                          return $! prop'
     alg (Debug _ p)                          = runTerm p
     --alg _                                    = return $! Unknown
+-}

@@ -9,6 +9,7 @@
              FlexibleInstances #-}
 module Parsley.Backend.InstructionAnalyser (coinsNeeded, relevancy) where
 
+import Data.Kind               (Type)
 import Parsley.Backend.Machine (Instr(..), MetaInstr(..))
 import Parsley.Common.Indexed  (cata4, Fix4, Const4(..))
 import Parsley.Common.Vec      (Vec(..), Nat(..), SNat(..), SingNat(..), zipWithVec, replicateVec)
@@ -17,15 +18,15 @@ coinsNeeded :: Fix4 (Instr o) xs n r a -> Int
 coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
   where
     algCatch :: (Int, Bool) -> (Int, Bool) -> (Int, Bool)
-    algCatch k1 (k2, True) = k1
-    algCatch (k1, True) k2 = k2
+    algCatch k (_, True) = k
+    algCatch (_, True) k = k
     algCatch (k1, _) (k2, _) = (min k1 k2, False)
 
     alg :: Instr o (Const4 (Int, Bool)) xs n r a -> (Int, Bool)
     alg Ret                                    = (0, False)
     alg (Push _ (Const4 k))                    = (fst k, False)
     alg (Pop k)                                = getConst4 k
-    alg (Lift2 f k)                            = getConst4 k
+    alg (Lift2 _ k)                            = getConst4 k
     alg (Sat _ (Const4 k))                     = (fst k + 1, snd k)
     alg (Call _ (Const4 k))                    = (0, snd k)
     alg (Jump _)                               = (0, False)
@@ -46,10 +47,9 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
     alg (Put _ _ k)                            = getConst4 k
     alg (LogEnter _ k)                         = getConst4 k
     alg (LogExit _ k)                          = getConst4 k
-    alg (MetaInstr (AddCoins n) (Const4 k))    = k
-    alg (MetaInstr (FreeCoins n) (Const4 k))   = (n, snd k)
+    alg (MetaInstr (AddCoins _) (Const4 k))    = k
     alg (MetaInstr (RefundCoins n) (Const4 k)) = (max (fst k - n) 0, snd k) -- These were refunded, so deduct
-    alg (MetaInstr (DrainCoins n) (Const4 k))  = (fst k, False)
+    alg (MetaInstr (DrainCoins _) (Const4 k))  = (fst k, False)
 
 {- TODO
   Live Value Analysis
@@ -89,7 +89,7 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
           if a register is never used, then the Make instruction can be removed
 -}
 
-type family Length (xs :: [*]) :: Nat where
+type family Length (xs :: [Type]) :: Nat where
   Length '[] = Zero
   Length (_ : xs) = Succ (Length xs)
 
@@ -111,7 +111,7 @@ relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
     alg (Jump _)           _         = VNil
     alg Empt               n         = replicateVec n False
     alg (Commit k)         n         = getStack k n
-    alg (Catch k h)        n         = getStack k n
+    alg (Catch k _)        n         = getStack k n
     alg (Tell k)           n         = let VCons _ xs = getStack k (SSucc n) in xs
     alg (Seek k)           (SSucc n) = VCons True (getStack k n)
     alg (Case p q)         n         = VCons True (let VCons _ xs = zipRelevancy (getStack p n) (getStack q n) in xs)

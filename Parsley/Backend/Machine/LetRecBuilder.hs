@@ -2,10 +2,10 @@
 module Parsley.Backend.Machine.LetRecBuilder (letRec) where
 
 import Data.Dependent.Sum                  (DSum((:=>)))
-import Data.Functor.Const                  (Const(..), getConst)
+import Data.Functor.Const                  (Const(..))
 import Data.GADT.Compare                   (GCompare)
 import Data.Some                           (Some(Some))
-import Language.Haskell.TH                 (runQ, Q, newName, Name)
+import Language.Haskell.TH                 (newName, Name)
 import Language.Haskell.TH.Syntax          (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import Parsley.Backend.Machine.LetBindings (LetBinding(..), Binding, Regs)
 import Parsley.Backend.Machine.State       (QSubRoutine(..), Func)
@@ -14,7 +14,7 @@ import Parsley.Common.Utils                (Code)
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
 
 letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o a)
-                       -> {-nameof-}     (forall a rs. key a -> String)
+                       -> {-nameof-}     (forall x. key x -> String)
                        -> {-genBinding-} (forall x rs. Binding o a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
                        -> {-expr-}       (DMap key (QSubRoutine s o a) -> Code b)
                        -> Code b

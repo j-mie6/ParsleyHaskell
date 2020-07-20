@@ -25,14 +25,15 @@ import Control.Monad.Reader                (asks, MonadReader, Reader, runReader
 import Control.Monad.ST                    (ST)
 import Data.STRef                          (STRef)
 import Data.Dependent.Map                  (DMap)
+import Data.Kind                           (Type)
 import Data.Maybe                          (fromMaybe)
 import Parsley.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Backend.Machine.InputRep    (Unboxed)
 import Parsley.Backend.Machine.LetBindings (Regs(..))
 import Parsley.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
-import qualified Data.Dependent.Map as DMap    ((!), insert, empty, lookup, map, toList, traverseWithKey)
-import qualified Parsley.Common.Queue as Queue (empty, size, null, foldr)
+import qualified Data.Dependent.Map as DMap    ((!), insert, empty, lookup)
+import qualified Parsley.Common.Queue as Queue (empty, null, foldr)
 
 type HandlerStack n s o a = Vec n (Code (Handler s o a))
 type Handler s o a = Unboxed o -> ST s (Maybe a)
@@ -40,7 +41,7 @@ type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
 type SubRoutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
-type family Func (rs :: [*]) s o a x where
+type family Func (rs :: [Type]) s o a x where
   Func '[] s o a x      = SubRoutine s o a x
   Func (r : rs) s o a x = STRef s r -> Func rs s o a x
 
@@ -105,7 +106,7 @@ askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
 
 provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (SubRoutine s o a x)
-provideFreeRegisters sub NoRegs ctx = sub
+provideFreeRegisters sub NoRegs _ = sub
 provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters [||$$f $$(concreteΣ σ ctx)||] σs ctx
 
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (Cont s o a x))

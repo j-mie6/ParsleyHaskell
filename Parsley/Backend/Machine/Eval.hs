@@ -16,7 +16,7 @@ import Data.Void                             (Void)
 import Debug.Trace                           (trace)
 import Control.Monad                         (forM, liftM2)
 import Control.Monad.Reader                  (ask, asks, local)
-import Control.Monad.ST                      (ST, runST)
+import Control.Monad.ST                      (runST)
 import Parsley.Backend.Machine.Defunc        (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Parsley.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
@@ -28,7 +28,7 @@ import Parsley.Backend.Machine.State
 import Parsley.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                 (color, Color(Green))
 
-eval :: forall o s a. Ops o => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
+eval :: forall o a. Ops o => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
 eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
@@ -78,7 +78,7 @@ evalCall :: ContOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineM
 evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) input handlers) k (askSub μ)
 
 evalJump :: ContOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
-evalJump μ = askSub μ <&> \sub γ@Γ{..} -> callWithContinuation sub retCont input handlers
+evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation sub retCont input handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op (genDefunc x) (operands γ)})
@@ -107,7 +107,7 @@ evalEmpt = return $! raise
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
-evalCatch :: (?ops :: InputOps o, BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
+evalCatch :: (BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandler γ (buildHandler γ mh) mk) k h
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
@@ -116,7 +116,7 @@ evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (input γ) (operand
 evalSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
 evalSeek (Machine k) = k <&> \mk γ -> let Op input xs = operands γ in mk (γ {operands = xs, input = input})
 
-evalCase :: JoinBuilder o => Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
+evalCase :: Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
 evalCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
   let Op e xs = operands γ
   in [||case $$e of
@@ -128,11 +128,11 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
   def
   (forM ks getMachine)
   where
-    go _ [] [] def γ = def γ
     go x (f:fs) (mk:mks) def γ = [||
         if $$(genDefunc1 f x) then $$(mk γ)
         else $$(go x fs mks def γ)
       ||]
+    go _ _ _ def γ = def γ
 
 evalIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
          => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
@@ -183,6 +183,5 @@ evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins mk (raise γ) γ
-evalMeta (FreeCoins coins) (Machine k) = local (giveCoins coins) k
 evalMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
 evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n mk (raise γ) γ) (asks ((coins -) . liquidate)) k

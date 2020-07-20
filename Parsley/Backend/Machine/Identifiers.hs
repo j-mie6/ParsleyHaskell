@@ -1,3 +1,4 @@
+{-# OPTIONS -Wno-incomplete-patterns #-}
 {-# LANGUAGE KindSignatures,
              GeneralizedNewtypeDeriving,
              DerivingStrategies,
@@ -8,12 +9,13 @@ module Parsley.Backend.Machine.Identifiers (
   ) where
 
 import Data.GADT.Compare        (GEq, GCompare, gcompare, geq, GOrdering(..))
+import Data.Kind                (Type)
 import Data.Typeable            ((:~:)(Refl))
 import Data.Word                (Word64)
 import Parsley.Core.Identifiers
 import Unsafe.Coerce            (unsafeCoerce)
 
-newtype ΦVar (a :: *) = ΦVar IΦVar
+newtype ΦVar (a :: Type) = ΦVar IΦVar
 newtype IΦVar = IΦVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show)
 
 instance Show (ΦVar a) where show (ΦVar φ) = "φ" ++ show φ

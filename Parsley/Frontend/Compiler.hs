@@ -21,13 +21,12 @@ import Data.Dependent.Map                  (DMap)
 import Data.Hashable                       (Hashable, hashWithSalt, hash)
 import Data.HashMap.Strict                 (HashMap)
 import Data.HashSet                        (HashSet)
-import Data.List                           (foldl')
 import Data.IORef                          (IORef, newIORef, readIORef, writeIORef)
+import Data.Kind                           (Type)
 import Data.Maybe                          (isJust)
 import Data.Set                            (Set)
 import Debug.Trace                         (trace)
-import Control.Monad                       (forM)
-import Control.Monad.Reader                (Reader, runReader, local, ask, asks, MonadReader)
+import Control.Monad.Reader                (Reader, runReader, local, ask, MonadReader)
 import Control.Monad.State.Strict          (State, StateT, get, gets, put, runState, execStateT, modify', MonadState)
 import GHC.Exts                            (Int(..))
 import GHC.Prim                            (StableName#, unsafeCoerce#)
@@ -35,7 +34,7 @@ import GHC.StableName                      (StableName(..), makeStableName, hash
 import Numeric                             (showHex)
 import Parsley.Core.CombinatorAST          (Combinator(..), ScopeRegister(..), Reg(..), Parser(..), traverseCombinator)
 import Parsley.Core.Identifiers            (IMVar, MVar(..), IΣVar, ΣVar(..))
-import Parsley.Common.Fresh                (HFreshT, newVar, newScope, runFreshT)
+import Parsley.Common.Fresh                (HFreshT, newVar, runFreshT)
 import Parsley.Common.Indexed              (Fix(In), cata, cata', IFunctor(imap), (:+:)(..), (\/), Const1(..))
 import Parsley.Frontend.Optimiser          (optimise)
 import Parsley.Frontend.CombinatorAnalyser (analyse, emptyFlags, AnalysisFlags(..))
@@ -43,8 +42,8 @@ import Parsley.Frontend.Dependencies       (dependencyAnalysis)
 import System.IO.Unsafe                    (unsafePerformIO)
 
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, mapWithKey, size)
-import qualified Data.HashMap.Strict as HashMap ((!), lookup, insert, empty, insertWith, foldrWithKey)
-import qualified Data.HashSet        as HashSet (member, insert, empty, union)
+import qualified Data.HashMap.Strict as HashMap (lookup, insert, empty, insertWith, foldrWithKey)
+import qualified Data.HashSet        as HashSet (member, insert, empty)
 import qualified Data.Map            as Map     ((!))
 import qualified Data.Set            as Set     (empty)
 
@@ -68,7 +67,7 @@ preprocess p =
   in (p', μs, maxV)
 
 data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
-data Tag t f (k :: * -> *) a = Tag {tag :: t, tagged :: f k a}
+data Tag t f (k :: Type -> Type) a = Tag {tag :: t, tagged :: f k a}
 newtype Tagger a = Tagger { doTagger :: Fix (Tag ParserName Combinator) a }
 
 tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combinator) a
@@ -113,7 +112,7 @@ letInsertion :: HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName 
 letInsertion lets recs p = (p', μs, μMax)
   where
     m = cata alg p
-    ((p', μMax), (vs, μs)) = runState (runFreshT (doLetInserter m) 0) (HashMap.empty, DMap.empty)
+    ((p', μMax), (_, μs)) = runState (runFreshT (doLetInserter m) 0) (HashMap.empty, DMap.empty)
     alg :: Tag ParserName Combinator LetInserter a -> LetInserter a
     alg p = LetInserter $ do
       let name = tag p
@@ -133,12 +132,6 @@ letInsertion lets recs p = (p', μs, μMax)
 
 postprocess :: Combinator LetInserter a -> LetInserter a
 postprocess = LetInserter . fmap optimise . traverseCombinator doLetInserter
-
-getPreds :: MonadState LetFinderState m => m (HashMap ParserName Int)
-getPreds = gets preds
-
-getRecs :: MonadState LetFinderState m => m (HashSet ParserName)
-getRecs = gets recs
 
 getBefore :: MonadState LetFinderState m => m (HashSet ParserName)
 getBefore = gets before

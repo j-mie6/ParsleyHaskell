@@ -158,6 +158,17 @@ library
 
   -- Base language which the package is written in.
   default-language:    Haskell2010
-  ghc-options:         -fplugin=LiftPlugin -fplugin=IdiomsPlugin -pgmP cpphs -optP --cpp
-  ---fprint-explicit-kinds -fprint-explicit-runtime-reps
+  ghc-options:         -Wall -Weverything -Wcompat
+                       -Wno-unticked-promoted-constructors
+                       -Wno-name-shadowing
+                       -Wno-unused-do-bind
+                       -Wno-implicit-prelude
+                       -Wno-missing-import-lists
+                       -Wno-missing-local-signatures
+                       -Wno-safe
+                       -Wno-unsafe
+                       -Wno-missed-specialisations
+                       -Wno-all-missed-specialisations
+                       -Wno-incomplete-uni-patterns
+                       -pgmP cpphs -optP --cpp
   ---freverse-errors (or backwards?)

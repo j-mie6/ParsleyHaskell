@@ -1,3 +1,5 @@
+{-# OPTIONS -fplugin=IdiomsPlugin
+            -fplugin=LiftPlugin #-}
 {-# LANGUAGE GADTs,
              TemplateHaskell,
              LambdaCase,
@@ -7,13 +9,15 @@ module Parsley.Frontend.Optimiser (optimise) where
 
 import Prelude hiding             ((<$>))
 import Parsley.Common             (Fix(In), code, Quapplicative(..))
-import Parsley.Core.CombinatorAST (Combinator(..), Parser(..))
+import Parsley.Core.CombinatorAST (Combinator(..))
 import Parsley.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H, pattern FLIP_CONST)
 
+pattern (:<$>:) :: Defunc (a -> b) -> Fix Combinator a -> Combinator (Fix Combinator) b
 pattern f :<$>: p = In (Pure f) :<*>: p
+pattern (:$>:) :: Fix Combinator a -> Defunc b -> Combinator (Fix Combinator) b
 pattern p :$>: x = p :*>: In (Pure x)
+pattern (:<$:) :: Defunc a -> Fix Combinator b -> Combinator (Fix Combinator) a
 pattern x :<$: p = In (Pure x) :<*: p
-pattern LiftA2 f p q = In (f :<$>: p) :<*>: q
 
 optimise :: Combinator (Fix Combinator) a -> Fix Combinator a
 -- DESTRUCTIVE OPTIMISATION
@@ -57,16 +61,16 @@ optimise (In (u :*>: v) :<*>: w)                        = optimise (u :*>: (opti
 -- Interchange Law: u <*> pure x                        = pure ($ x) <*> u
 optimise (u :<*>: In (Pure x))                          = optimise (APP_H (FLIP_H APP) x :<$>: u)
 -- Right Absorption Law: (f <$> p) *> q                 = p *> q
-optimise (In (f :<$>: p) :*>: q)                        = In (p :*>: q)
+optimise (In (_ :<$>: p) :*>: q)                        = In (p :*>: q)
 -- Left Absorption Law: p <* (f <$> q)                  = p <* q
-optimise (p :<*: (In (f :<$>: q)))                      = In (p :<*: q)
+optimise (p :<*: (In (_ :<$>: q)))                      = In (p :<*: q)
 -- Reassociation Law 2: u <*> (v <* w)                  = (u <*> v) <* w
 optimise (u :<*>: In (v :<*: w))                        = optimise (optimise (u :<*>: v) :<*: w)
 -- Reassociation Law 3: u <*> (v $> x)                  = (u <*> pure x) <* v
 optimise (u :<*>: In (v :$>: x))                        = optimise (optimise (u :<*>: In (Pure x)) :<*: v)
 -- ALTERNATIVE OPTIMISATION
 -- Left Catch Law: pure x <|> u                         = pure x
-optimise (p@(In (Pure x)) :<|>: _)                      = p
+optimise (p@(In (Pure _)) :<|>: _)                      = p
 -- Left Neutral Law: empty <|> u                        = u
 optimise (In Empty :<|>: u)                             = u
 -- Right Neutral Law: u <|> empty                       = u
@@ -89,7 +93,7 @@ optimise (x :<$: u)                                     = optimise (u :$>: x)
 -- Associativity Law (u <* v) <* w                      = u <* (v <* w)
 optimise (In (u :<*: v) :<*: w)                         = optimise (u :<*: optimise (v :<*: w))
 -- Pure lookahead: lookAhead (pure x)                   = pure x
-optimise (LookAhead p@(In (Pure x)))                    = p
+optimise (LookAhead p@(In (Pure _)))                    = p
 -- Dead lookahead: lookAhead empty                      = empty
 optimise (LookAhead p@(In Empty))                       = p
 -- Pure negative-lookahead: notFollowedBy (pure x)      = empty
@@ -160,18 +164,18 @@ optimise (Match (In (Pure x)) fs qs def)                 = foldr (\(f, q) k -> i
 -- Distributivity Law: f <$> match vs p g def            = match vs p ((f <$>) . g) (f <$> def)
 optimise (f :<$>: (In (Match p fs qs def)))              = In (Match p fs (map (optimise . (f :<$>:)) qs) (optimise (f :<$>: def)))
 -- Trivial let-bindings - NOTE: These will get moved when Let nodes no longer have the "source" in them
-optimise (Let False _ p@(In (Pure _)))                = p
-optimise (Let False _ p@(In Empty))                   = p
-optimise (Let False _ p@(In (Satisfy _)))             = p
-optimise (Let False _ p@(In (In (Satisfy _) :$>: x))) = p
-optimise (Let False _ p@(In (GetRegister _)))         = p
+optimise (Let False _ p@(In (Pure _)))                               = p
+optimise (Let False _ p@(In Empty))                                  = p
+optimise (Let False _ p@(In (Satisfy _)))                            = p
+optimise (Let False _ p@(In (In (Satisfy _) :$>: _)))                = p
+optimise (Let False _ p@(In (GetRegister _)))                        = p
 optimise (Let False _ p@(In (In (Pure _) :<*>: In (GetRegister _)))) = p
-optimise p                                               = In p
+optimise p                                                           = In p
 
 -- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p
 
-(>?>) :: Fix Combinator a -> Defunc (a -> Bool) -> Fix Combinator a
+{-(>?>) :: Fix Combinator a -> Defunc (a -> Bool) -> Fix Combinator a
 p >?> f = In (Branch (In (makeQ g qg :<$>: p)) (In Empty) (In (Pure ID)))
   where
     g x = if _val f x then Right x else Left ()
-    qg = [||\x -> if $$(_code f) x then Right x else Left ()||]
+    qg = [||\x -> if $$(_code f) x then Right x else Left ()||]-}

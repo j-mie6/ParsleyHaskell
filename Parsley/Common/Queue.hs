@@ -1,3 +1,4 @@
+{-# OPTIONS -Wno-incomplete-patterns #-}
 {-# LANGUAGE ViewPatterns #-}
 module Parsley.Common.Queue (Queue, empty, enqueue, dequeue, null, size, foldr) where
 
@@ -20,7 +21,7 @@ enqueue x q = q {insz = insz q + 1, ins = x : ins q}
 
 dequeue :: Queue a -> (a, Queue a)
 dequeue q@(outs -> (x:outs')) = (x, q {outsz = outsz q - 1, outs = outs'})
-dequeue q@(outs -> []) = dequeue (Queue (insz q) (reverse (ins q)) 0 [])
+dequeue q@(outs -> [])        = dequeue (Queue (insz q) (reverse (ins q)) 0 [])
 
 null :: Queue a -> Bool
 null (Queue 0 [] 0 []) = True

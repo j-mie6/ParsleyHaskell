@@ -9,14 +9,15 @@
              OverloadedStrings #-}
 module Parsley.Backend.Machine.Instructions (module Parsley.Backend.Machine.Instructions) where
 
+import Data.Kind                           (Type)
 import Data.Void                           (Void)
 import Parsley.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
-import Parsley.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, WQ(..), intercalateDiff)
+import Parsley.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 
 import Parsley.Backend.Machine.Defunc as Machine (Defunc(USER))
 import Parsley.Core.Defunc            as Core    (Defunc(APP, ID), pattern FLIP_H)
 
-data Instr o (k :: [*] -> Nat -> * -> * -> *) (xs :: [*]) (n :: Nat) (r :: *) (a :: *) where
+data Instr o (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
   Ret       :: Instr o k '[x] n x a
   Push      :: Machine.Defunc x -> k (x : xs) n r a -> Instr o k xs n r a
   Pop       :: k xs n r a -> Instr o k (x : xs) n r a
@@ -47,17 +48,18 @@ data Access = Hard | Soft deriving Show
 
 data MetaInstr (n :: Nat) where
   AddCoins    :: Int -> MetaInstr (Succ n)
-  FreeCoins   :: Int -> MetaInstr n
   RefundCoins :: Int -> MetaInstr n
   DrainCoins  :: Int -> MetaInstr (Succ n)
 
 mkCoin :: (Int -> MetaInstr n) -> Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-mkCoin meta 0 = id
+mkCoin _    0 = id
 mkCoin meta n = In4 . MetaInstr (meta n)
 
+addCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 addCoins = mkCoin AddCoins
-freeCoins = mkCoin FreeCoins
+refundCoins :: Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 refundCoins = mkCoin RefundCoins
+drainCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 drainCoins = mkCoin DrainCoins
 
 pattern App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
@@ -83,14 +85,14 @@ pattern If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix
 pattern If t e = Choices [USER ID] [t] e
 
 instance IFunctor4 (Instr o) where
-  imap4 f Ret                 = Ret
+  imap4 _ Ret                 = Ret
   imap4 f (Push x k)          = Push x (f k)
   imap4 f (Pop k)             = Pop (f k)
   imap4 f (Lift2 g k)         = Lift2 g (f k)
   imap4 f (Sat g k)           = Sat g (f k)
   imap4 f (Call μ k)          = Call μ (f k)
-  imap4 f (Jump μ)            = Jump μ
-  imap4 f Empt                = Empt
+  imap4 _ (Jump μ)            = Jump μ
+  imap4 _ Empt                = Empt
   imap4 f (Commit k)          = Commit (f k)
   imap4 f (Catch p h)         = Catch (f p) (f h)
   imap4 f (Tell k)            = Tell (f k)
@@ -98,7 +100,7 @@ instance IFunctor4 (Instr o) where
   imap4 f (Case p q)          = Case (f p) (f q)
   imap4 f (Choices fs ks def) = Choices fs (map f ks) (f def)
   imap4 f (Iter μ l h)        = Iter μ (f l) (f h)
-  imap4 f (Join φ)            = Join φ
+  imap4 _ (Join φ)            = Join φ
   imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
   imap4 f (Dup k)             = Dup (f k)

@@ -133,8 +133,8 @@ sepEndBy1 p sep =
 sepEndBy1 :: Parser a -> Parser b -> Parser [a]
 sepEndBy1 p sep = newRegister_ ID $ \acc ->
   let go = modify acc (COMPOSE_H (FLIP_H COMPOSE) CONS <$> p)
-         *> optional (sep *> optional go)
-  in go *> get acc <*> pure EMPTY
+         *> (sep *> (go <|> get acc) <|> get acc)
+  in go <*> pure EMPTY
 
 manyTill :: Parser a -> Parser b -> Parser [a]
 manyTill p end = let go = end $> EMPTY <|> p <:> go in go
@@ -324,8 +324,8 @@ for init cond step body =
 {-chainPre :: Parser (a -> a) -> Parser a -> Parser a
 chainPre op p = newRegister_ ID $ \acc ->
   let go = modify acc (FLIP_H COMPOSE <$> op) *> go
-       <|> get acc <*> p
-  in go -}
+       <|> get acc
+  in go <*> p -}
 
 {-chainPost :: Parser a -> Parser (a -> a) -> Parser a
 chainPost p op = newRegister p $ \acc ->
@@ -343,7 +343,7 @@ chainr1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) ->
 chainr1' f p op = newRegister_ ID $ \acc ->
   let go = bind p $ \x ->
            modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go
-       <|> (f <$> x)
+       <|> f <$> x
   in go <**> get acc
 
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
@@ -353,7 +353,7 @@ chaint' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (Parser (a -> a -
 chaint' f p op = newRegister_ ID $ \acc ->
   let go = bind p $ \x ->
            modify acc (FLIP_H COMPOSE <$> (bind op (\g -> p <**> (_join g <*> x)))) *> go
-       <|> (f <$> x)
+       <|> f <$> x
   in go <**> get acc
 
 chaint :: Parser a -> Parser (Parser (a -> a -> a -> a)) -> Parser a

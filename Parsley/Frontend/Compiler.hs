@@ -68,14 +68,14 @@ preprocess p =
 
 data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
 data Tag t f (k :: Type -> Type) a = Tag {tag :: t, tagged :: f k a}
-newtype Tagger a = Tagger { doTagger :: Fix (Tag ParserName Combinator) a }
 
 tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combinator) a
-tagParser = doTagger . cata' (\p -> Tagger . In . Tag (makeParserName p) . (imap doTagger \/ descope))
+tagParser p = cata' tagAlg p
   where
-    -- TODO This needs to not float out - naughty GHC >:(
-    regMaker = newRegMaker
-    descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ (doTagger p) (doTagger (f reg)))
+    tagAlg p = In . Tag (makeParserName p) . (id \/ descope)
+    descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ p (f reg))
+    regMaker :: IORef IΣVar
+    regMaker = newRegMaker p
 
 data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
                                      , recs   :: HashSet ParserName
@@ -167,9 +167,10 @@ makeParserName :: Fix (Combinator :+: ScopeRegister) a -> ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
 makeParserName !p = unsafePerformIO (fmap (\(StableName name) -> ParserName name) (makeStableName p))
 
+-- The argument here stops GHC from floating it out, it should be provided something from the scope
 {-# NOINLINE newRegMaker #-}
-newRegMaker :: IORef IΣVar
-newRegMaker = unsafePerformIO (newIORef 0)
+newRegMaker :: a -> IORef IΣVar
+newRegMaker x = x `seq` unsafePerformIO (newIORef 0)
 
 {-# NOINLINE freshReg #-}
 freshReg :: IORef IΣVar -> (forall r. Reg r a -> x) -> x

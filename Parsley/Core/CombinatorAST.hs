@@ -1,12 +1,5 @@
-{-# LANGUAGE GADTs,
-             DataKinds,
-             TypeOperators,
-             RankNTypes,
-             FlexibleInstances,
-             FlexibleContexts,
-             PolyKinds,
-             OverloadedStrings,
-             ApplicativeDo #-}
+{-# LANGUAGE ApplicativeDo,
+             OverloadedStrings #-}
 module Parsley.Core.CombinatorAST (module Parsley.Core.CombinatorAST) where
 
 import Data.Kind                (Type)

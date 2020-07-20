@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts,
-             FlexibleInstances #-}
 module Parsley.Backend.Machine (
     Input, prepare, eval,
     PositionOps,

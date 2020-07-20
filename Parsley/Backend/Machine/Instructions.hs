@@ -1,12 +1,5 @@
-{-# LANGUAGE GADTs,
-             DataKinds,
-             TypeOperators,
-             FlexibleInstances,
-             PolyKinds,
-             KindSignatures,
-             PatternSynonyms,
-             ScopedTypeVariables,
-             OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings,
+             PatternSynonyms #-}
 module Parsley.Backend.Machine.Instructions (module Parsley.Backend.Machine.Instructions) where
 
 import Data.Kind                           (Type)

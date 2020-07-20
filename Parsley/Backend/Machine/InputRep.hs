@@ -1,11 +1,7 @@
-{-# LANGUAGE BangPatterns,
-             MagicHash,
-             UnboxedTuples,
-             PolyKinds,
-             DataKinds,
-             TemplateHaskell,
+{-# LANGUAGE MagicHash,
              TypeFamilies,
-             TypeFamilyDependencies #-}
+             TypeFamilyDependencies,
+             UnboxedTuples #-}
 module Parsley.Backend.Machine.InputRep (
     Unboxed, Rep,
     OffWith(..), offWith, offWithSame, offWithShiftRight,

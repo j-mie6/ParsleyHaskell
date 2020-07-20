@@ -1,19 +1,10 @@
-{-# LANGUAGE GADTs,
-             DataKinds,
-             RecursiveDo,
-             RankNTypes,
-             BangPatterns,
+{-# LANGUAGE AllowAmbiguousTypes,
              MagicHash,
-             FlexibleContexts,
-             MultiWayIf,
-             FlexibleInstances,
              MultiParamTypeClasses,
-             UndecidableInstances,
-             AllowAmbiguousTypes,
-             ScopedTypeVariables,
-             KindSignatures,
-             TypeOperators,
-             TupleSections #-}
+             MultiWayIf,
+             RecursiveDo,
+             TupleSections,
+             UndecidableInstances #-}
 module Parsley.Frontend.Compiler (compile) where
 
 import Prelude hiding (pred)

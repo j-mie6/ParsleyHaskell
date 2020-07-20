@@ -1,12 +1,5 @@
-{-# OPTIONS -Wno-incomplete-patterns #-}
-{-# LANGUAGE GADTs,
-             DataKinds,
-             TypeOperators,
-             RankNTypes,
-             FlexibleContexts,
-             TemplateHaskell,
-             PolyKinds,
-             PatternSynonyms #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# LANGUAGE PatternSynonyms #-}
 module Parsley.Backend.CodeGenerator (codeGen) where
 
 import Data.Maybe                           (isJust)

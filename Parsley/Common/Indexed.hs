@@ -1,11 +1,4 @@
-{-# LANGUAGE GADTs,
-             FlexibleInstances,
-             RankNTypes,
-             DataKinds,
-             ScopedTypeVariables,
-             PolyKinds,
-             MultiParamTypeClasses,
-             TypeOperators #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Parsley.Common.Indexed (module Parsley.Common.Indexed) where
 
 import Control.Applicative ((<|>), liftA2)

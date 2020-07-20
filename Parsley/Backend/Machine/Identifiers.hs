@@ -1,8 +1,6 @@
-{-# OPTIONS -Wno-incomplete-patterns #-}
-{-# LANGUAGE KindSignatures,
-             GeneralizedNewtypeDeriving,
-             DerivingStrategies,
-             GADTs #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# LANGUAGE DerivingStrategies,
+             GeneralizedNewtypeDeriving #-}
 module Parsley.Backend.Machine.Identifiers (
     ΦVar(..), IΦVar,
     module Parsley.Core.Identifiers,

@@ -1,8 +1,6 @@
-{-# OPTIONS -fplugin=IdiomsPlugin
-            -fplugin=LiftPlugin #-}
-{-# LANGUAGE GADTs,
-             TemplateHaskell,
-             LambdaCase,
+{-# OPTIONS_GHC -fplugin=IdiomsPlugin
+                -fplugin=LiftPlugin #-}
+{-# LANGUAGE LambdaCase,
              PatternSynonyms,
              ViewPatterns #-}
 module Parsley.Frontend.Optimiser (optimise) where

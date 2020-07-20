@@ -1,7 +1,5 @@
-{-# OPTIONS -Wno-orphans #-}
-{-# LANGUAGE TemplateHaskell,
-             FlexibleInstances,
-             UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Parsley.Common.Utils (code, WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff) where
 
 import Data.List (intersperse)

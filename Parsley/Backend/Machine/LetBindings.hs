@@ -1,10 +1,5 @@
-{-# LANGUAGE GADTs,
-             DataKinds,
-             TypeOperators,
-             PolyKinds,
-             KindSignatures,
-             StandaloneDeriving,
-             ExistentialQuantification #-}
+{-# LANGUAGE ExistentialQuantification,
+             StandaloneDeriving #-}
 module Parsley.Backend.Machine.LetBindings (
     LetBinding(..),
     Regs(..),

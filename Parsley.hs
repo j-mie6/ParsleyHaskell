@@ -1,12 +1,7 @@
-{-# OPTIONS -fplugin=LiftPlugin #-}
-{-# LANGUAGE TemplateHaskell,
-             RankNTypes,
-             FlexibleContexts,
-             FlexibleInstances,
+{-# OPTIONS_GHC -fplugin=LiftPlugin #-}
+{-# LANGUAGE AllowAmbiguousTypes,
              MultiParamTypeClasses,
-             AllowAmbiguousTypes,
-             PatternSynonyms,
-             GADTs #-}
+             PatternSynonyms #-}
 module Parsley (
     module Parsley,
     module Core,

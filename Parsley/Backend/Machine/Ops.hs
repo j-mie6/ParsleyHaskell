@@ -1,19 +1,12 @@
-{-# OPTIONS -Wno-monomorphism-restriction #-}
-{-# LANGUAGE GADTs,
-             DataKinds,
-             TypeOperators,
-             BangPatterns,
-             MagicHash,
-             TemplateHaskell,
+{-# OPTIONS_GHC -Wno-monomorphism-restriction #-}
+{-# LANGUAGE AllowAmbiguousTypes,
+             ConstrainedClassMethods,
+             ConstraintKinds,
              CPP,
              ImplicitParams,
-             ScopedTypeVariables,
-             ConstraintKinds,
-             FlexibleInstances,
-             AllowAmbiguousTypes,
-             TypeApplications,
-             ConstrainedClassMethods,
-             RecordWildCards #-}
+             MagicHash,
+             RecordWildCards,
+             TypeApplications #-}
 module Parsley.Backend.Machine.Ops (module Parsley.Backend.Machine.Ops) where
 
 import Control.Monad                        (liftM2)

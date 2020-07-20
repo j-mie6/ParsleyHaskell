@@ -1,5 +1,3 @@
-{-# LANGUAGE RankNTypes,
-             TypeOperators #-}
 module Parsley.Core.Primitives (Parser, module Parsley.Core.Primitives) where
 
 import Parsley.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..))

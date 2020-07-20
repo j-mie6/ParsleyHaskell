@@ -1,12 +1,6 @@
-{-# LANGUAGE DataKinds,
-             GADTs,
-             KindSignatures,
-             FlexibleContexts,
-             TypeOperators,
+{-# LANGUAGE MultiParamTypeClasses,
              TypeFamilies,
-             UndecidableInstances,
-             MultiParamTypeClasses,
-             FlexibleInstances #-}
+             UndecidableInstances #-}
 module Parsley.Backend.InstructionAnalyser (coinsNeeded, relevancy) where
 
 import Data.Kind               (Type)

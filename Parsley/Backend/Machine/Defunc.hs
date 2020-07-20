@@ -1,5 +1,3 @@
-{-# LANGUAGE TemplateHaskell,
-             GADTs #-}
 module Parsley.Backend.Machine.Defunc (module Parsley.Backend.Machine.Defunc) where
 
 import Parsley.Backend.Machine.InputOps (PositionOps(same))

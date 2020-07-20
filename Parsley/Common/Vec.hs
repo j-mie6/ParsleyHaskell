@@ -1,6 +1,3 @@
-{-# LANGUAGE KindSignatures,
-             DataKinds,
-             GADTs #-}
 module Parsley.Common.Vec (module Parsley.Common.Vec, Nat(..)) where
 
 import Parsley.Common.Indexed (Nat(..))

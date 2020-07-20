@@ -1,9 +1,7 @@
 {-# LANGUAGE FunctionalDependencies,
-             FlexibleInstances,
-             FlexibleContexts,
+             GeneralisedNewtypeDeriving,
              MultiParamTypeClasses,
-             UndecidableInstances,
-             GeneralisedNewtypeDeriving #-}
+             UndecidableInstances #-}
 module Parsley.Common.Fresh (
     VFreshT, HFreshT, VFresh, HFresh,
     runFreshT, runFresh,

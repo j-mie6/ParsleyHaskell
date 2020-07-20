@@ -1,8 +1,3 @@
-{-# LANGUAGE GADTs,
-             DataKinds,
-             RankNTypes,
-             PolyKinds,
-             TypeOperators #-}
 module Parsley.Frontend.CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
 
 --import Control.Applicative        (liftA2)

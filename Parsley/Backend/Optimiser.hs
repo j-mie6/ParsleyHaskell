@@ -1,4 +1,3 @@
-{-# LANGUAGE GADTs #-}
 module Parsley.Backend.Optimiser (optimise) where
 
 import Data.GADT.Compare       (geq)

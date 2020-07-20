@@ -104,8 +104,8 @@ library
 
                        Parsley.Core,
                        Parsley.Core.CombinatorAST,
-                       Parsley.Core.Identifiers,
                        Parsley.Core.Defunc,
+                       Parsley.Core.Identifiers,
                        Parsley.Core.InputTypes,
                        Parsley.Core.Primitives,
 
@@ -121,19 +121,32 @@ library
                        Parsley.Backend.Optimiser,
 
                        Parsley.Backend.Machine,
-                       Parsley.Backend.Machine.InputRep,
-                       Parsley.Backend.Machine.InputOps,
-                       Parsley.Backend.Machine.Instructions,
-                       Parsley.Backend.Machine.Eval,
-                       Parsley.Backend.Machine.LetRecBuilder,
-                       Parsley.Backend.Machine.LetBindings,
-                       Parsley.Backend.Machine.Ops,
                        Parsley.Backend.Machine.Defunc,
-                       Parsley.Backend.Machine.State,
-                       Parsley.Backend.Machine.Identifiers
+                       Parsley.Backend.Machine.Eval,
+                       Parsley.Backend.Machine.LetBindings,
+                       Parsley.Backend.Machine.LetRecBuilder,
+                       Parsley.Backend.Machine.Identifiers,
+                       Parsley.Backend.Machine.InputOps,
+                       Parsley.Backend.Machine.InputRep,
+                       Parsley.Backend.Machine.Instructions,
+                       Parsley.Backend.Machine.Ops,
+                       Parsley.Backend.Machine.State
+
 
   -- LANGUAGE extensions used by modules in this package.
-  other-extensions:    TemplateHaskell
+  default-extensions:  BangPatterns,
+                       DataKinds,
+                       GADTs,
+                       FlexibleContexts,
+                       FlexibleInstances,
+                       KindSignatures,
+                       PolyKinds,
+                       RankNTypes,
+                       ScopedTypeVariables,
+                       TemplateHaskell,
+                       TypeOperators,
+
+                       NoStarIsType
 
   -- Other library packages from which modules are imported.
   build-depends:       base >=4.10 && <5,

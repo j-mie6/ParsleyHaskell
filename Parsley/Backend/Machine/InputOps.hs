@@ -1,10 +1,7 @@
-{-# LANGUAGE BangPatterns,
+{-# LANGUAGE ImplicitParams,
              MagicHash,
-             UnboxedTuples,
-             TemplateHaskell,
-             ImplicitParams,
-             FlexibleInstances,
-             TypeApplications #-}
+             TypeApplications,
+             UnboxedTuples #-}
 module Parsley.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), BoxOps(..), LogOps(..),
     InputOps(..), more, next,

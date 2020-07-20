@@ -1,11 +1,6 @@
-{-# LANGUAGE DataKinds,
-             TypeOperators,
-             GADTs,
-             FlexibleContexts,
-             DeriveAnyClass,
-             TypeFamilies,
+{-# LANGUAGE DeriveAnyClass,
              ExistentialQuantification,
-             TemplateHaskell #-}
+             TypeFamilies #-}
 module Parsley.Backend.Machine.State (
     HandlerStack, Handler, Cont, SubRoutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),

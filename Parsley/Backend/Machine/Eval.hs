@@ -1,13 +1,7 @@
-{-# LANGUAGE GADTs,
-             DataKinds,
-             TypeOperators,
-             TemplateHaskell,
-             ScopedTypeVariables,
+{-# LANGUAGE ImplicitParams,
+             MultiWayIf,
              RecordWildCards,
-             ImplicitParams,
-             TypeApplications,
-             BangPatterns,
-             MultiWayIf #-}
+             TypeApplications #-}
 module Parsley.Backend.Machine.Eval (eval) where
 
 import Data.Dependent.Map                    (DMap)

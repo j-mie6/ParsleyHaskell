@@ -1,4 +1,4 @@
-{-# OPTIONS -Wno-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# LANGUAGE ViewPatterns #-}
 module Parsley.Common.Queue (Queue, empty, enqueue, dequeue, null, size, foldr) where
 

@@ -24,8 +24,6 @@ import Parsley.Fold            as Fold        (many, some)
 import Parsley.Selective       as Selective
 import Parsley.Core.Primitives as Primitives  (debug)
 
--- Additional Combinators
-
 runParser :: Input input => Parser a -> Code (input -> Maybe a)
 runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p codeGen))||]
 

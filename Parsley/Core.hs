@@ -7,5 +7,5 @@ module Parsley.Core (
 
 import Parsley.Core.CombinatorAST (Reg)
 import Parsley.Core.Defunc hiding (genDefunc, genDefunc1, genDefunc2)
-import Parsley.Core.Primitives
+import Parsley.Core.Primitives hiding (_pure, _satisfy, _conditional)
 import Parsley.Core.InputTypes

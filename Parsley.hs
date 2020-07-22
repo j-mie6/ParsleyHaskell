@@ -12,36 +12,12 @@ module Parsley (
 import Prelude hiding             (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), (>>), sequence, traverse, repeat, readFile)
 import Data.Function              (fix)
 import Data.Text.IO               (readFile)
-import Debug.Trace                (trace)
 import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Backend            (codeGen, Input, eval, prepare)
-import Parsley.Core
 import Parsley.Frontend           (compile)
-import System.Console.Pretty      (color, style, Color(Red), Style(Bold, Underline, Italic))
 
-import Parsley.Core as Core hiding     (_pure, _satisfy, _conditional, _join)
+import Parsley.Core as Core
 import Parsley.Common.Utils as THUtils (code, Quapplicative(..), WQ, Code)
-
-class ParserOps rep where
-  pure :: rep a -> Parser a
-  satisfy :: rep (Char -> Bool) -> Parser Char
-  conditional :: [(rep (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
-  pfoldl :: ParserOps repk => rep (b -> a -> b) -> repk b -> Parser a -> Parser b
-  pfoldl1 :: ParserOps repk => rep (b -> a -> b) -> repk b -> Parser a -> Parser b
-
-instance ParserOps WQ where
-  pure = pure . BLACK
-  satisfy = satisfy . BLACK
-  conditional cs p def = conditional (map (\(f, t) -> (BLACK f, t)) cs) p def
-  pfoldl = pfoldl . BLACK
-  pfoldl1 = pfoldl1 . BLACK
-
-instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
-  pure = _pure
-  satisfy = _satisfy
-  conditional = _conditional
-  pfoldl f k p = chainPost (pure k) (FLIP_H f <$> p)
-  pfoldl1 f k p = chainPost (f <$> pure k <*> p) (FLIP_H f <$> p)
 
 fmap :: ParserOps rep => rep (a -> b) -> Parser a -> Parser b
 fmap f = (pure f <*>)
@@ -70,16 +46,6 @@ liftA2 f p q = f <$> p <*> q
 
 liftA3 :: ParserOps rep => rep (a -> b -> c -> d) -> Parser a -> Parser b -> Parser c -> Parser d
 liftA3 f p q r = f <$> p <*> q <*> r
-
-join :: Parser (Parser a) -> Parser a
-join = trace joinWarning $ _join
-  where
-    -- TODO HasCallStack?
-    joinWarning = unlines [ unwords [color Red "WARNING: `join` is", color Red (style Bold "VERY"), color Red "expensive..."]
-                          , "Make sure you know what you're doing:"
-                          , unwords ["    legitimate uses of `join` are", style Italic "very rare"]
-                          , unwords ["    if possible use registers/`bind` and/or selectives, or if", style Underline "absolutely necessary" ++ ",", "make sure you minimise the size of the parser inside"]
-                          , "This warning may be surpressed by hiding `join` from Parsley and importing Parsley.ReallyVerySlow (join)" ]
 
 many :: Parser a -> Parser [a]
 many = pfoldr CONS EMPTY
@@ -250,7 +216,7 @@ px >??> pf = select (liftA2 (makeQ g qg) pf px) empty
     qg = [||\f x -> if f x then Right x else Left ()||]
 
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-match vs p f = _conditional (map (\v -> (EQ_H (code v), f v)) vs) p
+match vs p f = conditional (map (\v -> (EQ_H (code v), f v)) vs) p
 
 infixl 1 ||=
 (||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b
@@ -344,16 +310,6 @@ chainr1' f p op = newRegister_ ID $ \acc ->
 chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
 chainr1 = chainr1' ID
 
-chaint' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (Parser (a -> a -> b -> b)) -> Parser b
-chaint' f p op = newRegister_ ID $ \acc ->
-  let go = bind p $ \x ->
-           modify acc (FLIP_H COMPOSE <$> (bind op (\g -> p <**> (_join g <*> x)))) *> go
-       <|> f <$> x
-  in go <**> get acc
-
-chaint :: Parser a -> Parser (Parser (a -> a -> a -> a)) -> Parser a
-chaint = chaint' ID
-
 chainr :: ParserOps rep => Parser a -> Parser (a -> a -> a) -> rep a -> Parser a
 chainr p op x = option x (chainr1 p op)
 
@@ -366,32 +322,34 @@ pfoldr f k p = chainPre (f <$> p) (pure k)
 pfoldr1 :: (ParserOps repf, ParserOps repk) => repf (a -> b -> b) -> repk b -> Parser a -> Parser b
 pfoldr1 f k p = f <$> p <*> pfoldr f k p
 
+pfoldl :: (ParserOps repf, ParserOps repk) => repf (b -> a -> b) -> repk b -> Parser a -> Parser b
+pfoldl f k p = chainPost (pure k) ((FLIP <$> pure f) <*> p)
+
+pfoldl1 :: (ParserOps repf, ParserOps repk) => repf (b -> a -> b) -> repk b -> Parser a -> Parser b
+pfoldl1 f k p = chainPost (f <$> pure k <*> p) ((FLIP <$> pure f) <*> p)
+
 data Level a b = InfixL  [Parser (b -> a -> b)]               (Defunc (a -> b))
                | InfixR  [Parser (a -> b -> b)]               (Defunc (a -> b))
                | Prefix  [Parser (b -> b)]                    (Defunc (a -> b))
                | Postfix [Parser (b -> b)]                    (Defunc (a -> b))
-               | Ternary [Parser (Parser (a -> a -> b -> b))] (Defunc (a -> b))
 
 class Monolith a b c where
   infixL  :: [Parser (b -> a -> b)]               -> c
   infixR  :: [Parser (a -> b -> b)]               -> c
   prefix  :: [Parser (b -> b)]                    -> c
   postfix :: [Parser (b -> b)]                    -> c
-  ternary :: [Parser (Parser (a -> a -> b -> b))] -> c
 
 instance x ~ a => Monolith x a (Level a a) where
   infixL  = flip InfixL ID
   infixR  = flip InfixR ID
   prefix  = flip Prefix ID
   postfix = flip Postfix ID
-  ternary = flip Ternary ID
 
 instance {-# INCOHERENT #-} x ~ (WQ (a -> b) -> Level a b) => Monolith a b x where
   infixL  ops = InfixL ops . BLACK
   infixR  ops = InfixR ops . BLACK
   prefix  ops = Prefix ops . BLACK
   postfix ops = Postfix ops . BLACK
-  ternary ops = Ternary ops . BLACK
 
 data Prec a b where
   NoLevel :: Prec a a
@@ -408,7 +366,6 @@ precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
     level (InfixR ops wrap) atom  = chainr1' wrap atom (choice ops)
     level (Prefix ops wrap) atom  = chainPre (choice ops) (wrap <$> atom)
     level (Postfix ops wrap) atom = chainPost (wrap <$> atom) (choice ops)
-    level (Ternary ops wrap) atom = chaint' wrap atom (choice ops)
 
 runParser :: Input input => Parser a -> Code (input -> Maybe a)
 runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p codeGen))||]

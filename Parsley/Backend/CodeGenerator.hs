@@ -151,6 +151,7 @@ direct (ChainPost p op) m =
 direct (MakeRegister σ p q)   m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 direct (GetRegister σ)        m = do return $! In4 (_Get σ m)
 direct (PutRegister σ p)      m = do runCodeGen p (In4 (_Put σ (In4 (Push (USER UNIT) m))))
+direct (Link l)               _m = case l of
 direct (Debug name p)         m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 direct (MetaCombinator Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
 

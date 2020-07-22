@@ -1,6 +1,5 @@
 {-# LANGUAGE ImplicitParams,
              MagicHash,
-             TypeApplications,
              UnboxedTuples #-}
 module Parsley.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), BoxOps(..), LogOps(..),

@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections #-}
 module Parsley.Backend.Machine.LetRecBuilder (letRec) where
 
 import Data.Dependent.Sum                  (DSum((:=>)))

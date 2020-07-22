@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
 module Parsley.Frontend.Dependencies (dependencyAnalysis) where
 
 import Control.Monad              (unless, forM_)

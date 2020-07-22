@@ -1,7 +1,4 @@
-{-# LANGUAGE ImplicitParams,
-             MultiWayIf,
-             RecordWildCards,
-             TypeApplications #-}
+{-# LANGUAGE ImplicitParams #-}
 module Parsley.Backend.Machine.Eval (eval) where
 
 import Data.Dependent.Map                    (DMap)

@@ -4,9 +4,7 @@
              ConstraintKinds,
              CPP,
              ImplicitParams,
-             MagicHash,
-             RecordWildCards,
-             TypeApplications #-}
+             MagicHash #-}
 module Parsley.Backend.Machine.Ops (module Parsley.Backend.Machine.Ops) where
 
 import Control.Monad                        (liftM2)

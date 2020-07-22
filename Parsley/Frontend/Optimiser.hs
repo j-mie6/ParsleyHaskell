@@ -1,7 +1,6 @@
 {-# OPTIONS_GHC -fplugin=IdiomsPlugin
                 -fplugin=LiftPlugin #-}
-{-# LANGUAGE LambdaCase,
-             PatternSynonyms,
+{-# LANGUAGE PatternSynonyms,
              ViewPatterns #-}
 module Parsley.Frontend.Optimiser (optimise) where
 

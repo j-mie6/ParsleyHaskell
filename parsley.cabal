@@ -92,7 +92,14 @@ executable playground
 
 library
   -- Modules exported by the library.
-  exposed-modules:     Parsley
+  exposed-modules:     Parsley,
+                       Parsley.Applicative,
+                       Parsley.Alternative,
+                       Parsley.Selective,
+                       Parsley.Register,
+                       Parsley.Combinator,
+                       Parsley.Fold,
+                       Parsley.Precedence
 
   -- Modules included in this library but not exported.
   other-modules:       Parsley.Common,

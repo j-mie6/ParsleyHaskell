@@ -1,8 +1,29 @@
-module Parsley.Core.Primitives (Parser, module Parsley.Core.Primitives) where
+module Parsley.Core.Primitives (
+    Parser,
+    Reg,
+    module Parsley.Core.Primitives
+  ) where
 
+import Prelude hiding             (pure)
 import Parsley.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..))
-import Parsley.Core.Defunc        (Defunc)
+import Parsley.Core.Defunc        (Defunc(BLACK))
 import Parsley.Common.Indexed     (Fix(In), (:+:)(..))
+import Parsley.Common.Utils       (WQ)
+
+class ParserOps rep where
+  pure :: rep a -> Parser a
+  satisfy :: rep (Char -> Bool) -> Parser Char
+  conditional :: [(rep (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+
+instance ParserOps WQ where
+  pure = pure . BLACK
+  satisfy = satisfy . BLACK
+  conditional cs p def = conditional (map (\(f, t) -> (BLACK f, t)) cs) p def
+
+instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
+  pure = _pure
+  satisfy = _satisfy
+  conditional = _conditional
 
 -- Core smart constructors
 {-# INLINE _pure #-}
@@ -64,9 +85,6 @@ get (Reg reg) = Parser (In (L (GetRegister reg)))
 
 put :: Reg r a -> Parser a -> Parser ()
 put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
-
-_join :: Parser (Parser a) -> Parser a
-_join = error "hahah nice try :)"
 
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (L (Debug name p)))

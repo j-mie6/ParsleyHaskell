@@ -1,4 +1,8 @@
-module Parsley.Core.Primitives (Parser, module Parsley.Core.Primitives) where
+module Parsley.Core.Primitives (
+    Parser,
+    Reg,
+    module Parsley.Core.Primitives
+  ) where
 
 import Prelude hiding             (pure)
 import Parsley.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..))

@@ -27,6 +27,8 @@ import qualified Happys.Brainfuck
 import qualified Happys.Javascript
 import qualified Bisons.Bison as Bison
 import qualified Parsley
+import qualified Parsley.Combinator         as Parsley
+import qualified Parsley.Fold               as Parsley
 import qualified Text.Yoda                  as Yoda
 import qualified Text.Parsec                as Parsec
 import qualified Text.Megaparsec            as Megaparsec

@@ -6,6 +6,9 @@ module Parsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred, repeat)
 import Parsley
+import Parsley.Combinator (noneOf)
+import Parsley.Fold (skipMany)
+import Parsley.Register (Reg, get, put, newRegister, newRegister_, gets_, modify, local, modify_, bind)
 import Control.Monad (liftM)
 import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper, isDigit, digitToInt, chr, ord)
 import Data.Set (fromList, member)

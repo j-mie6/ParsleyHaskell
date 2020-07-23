@@ -1,22 +1,23 @@
 module Parsley.Backend.Machine (
-    Input, prepare, eval,
+    Input, prepare,
     PositionOps,
     module Parsley.Backend.Machine.Instructions,
     module Parsley.Backend.Machine.Defunc,
     module Parsley.Backend.Machine.Identifiers,
-    module Parsley.Backend.Machine.LetBindings
+    module Parsley.Backend.Machine.LetBindings,
+    module Parsley.Backend.Machine.Linker
   ) where
 
 import Data.Array.Unboxed                   (UArray)
 import Data.ByteString                      (ByteString)
 import Data.Text                            (Text)
 import Parsley.Backend.Machine.Defunc       (Defunc(..))
-import Parsley.Backend.Machine.Eval         (eval)
 import Parsley.Backend.Machine.Identifiers
 import Parsley.Backend.Machine.InputRep     (Rep)
 import Parsley.Backend.Machine.InputOps     (InputPrep(..), PositionOps)
 import Parsley.Backend.Machine.Instructions
 import Parsley.Backend.Machine.LetBindings  (LetBinding, makeLetBinding)
+import Parsley.Backend.Machine.Linker
 import Parsley.Backend.Machine.Ops          (Ops)
 import Parsley.Core.InputTypes
 

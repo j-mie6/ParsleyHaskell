@@ -1,39 +1,22 @@
 {-# LANGUAGE ImplicitParams #-}
 module Parsley.Backend.Machine.Eval (eval) where
 
-import Data.Dependent.Map                    (DMap)
 import Data.Functor                          ((<&>))
 import Data.Void                             (Void)
 import Debug.Trace                           (trace)
 import Control.Monad                         (forM, liftM2)
 import Control.Monad.Reader                  (ask, asks, local)
-import Control.Monad.ST                      (runST)
 import Parsley.Backend.Machine.Defunc        (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Parsley.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
-import Parsley.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
+import Parsley.Backend.Machine.InputOps      (PositionOps, BoxOps, LogOps, InputOps)
 import Parsley.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
-import Parsley.Backend.Machine.LetBindings   (LetBinding(..))
-import Parsley.Backend.Machine.LetRecBuilder
 import Parsley.Backend.Machine.Ops
 import Parsley.Backend.Machine.State
-import Parsley.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
+import Parsley.Common                        (Fix4, cata4, One, Vec(..), Nat(..))
 import System.Console.Pretty                 (color, Color(Green))
 
-eval :: forall o a. Ops o => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
-eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
-  do let !(InputDependant next more offset) = $$input
-     $$(let ?ops = InputOps [||more||] [||next||]
-        in letRec fs
-             nameLet
-             (\exp rs names -> buildRec rs (emptyCtx names) (readyMachine exp))
-             (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx names)))
-  ||]
-  where
-    nameLet :: MVar x -> String
-    nameLet (MVar i) = "sub" ++ show i
-
-readyMachine :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
-readyMachine = cata4 (Machine . alg)
+eval :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
+eval = cata4 (Machine . alg)
   where
     alg :: (?ops :: InputOps o, Ops o) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = evalRet

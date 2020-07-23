@@ -12,7 +12,7 @@ module Parsley (
 
 import Prelude hiding   (readFile)
 import Data.Text.IO     (readFile)
-import Parsley.Backend  (codeGen, Input, eval, prepare)
+import Parsley.Backend  (codeGen, Input, staticLink, prepare)
 import Parsley.Frontend (compile)
 
 import Parsley.Alternative     as Alternative
@@ -25,7 +25,7 @@ import Parsley.Selective       as Selective
 import Parsley.Core.Primitives as Primitives  (debug)
 
 runParser :: Input input => Parser a -> Code (input -> Maybe a)
-runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p codeGen))||]
+runParser p = [||\input -> $$(staticLink (compile p codeGen) (prepare [||input||]))||]
 
 parseFromFile :: Parser a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

@@ -130,12 +130,13 @@ library
                        Parsley.Backend.Machine,
                        Parsley.Backend.Machine.Defunc,
                        Parsley.Backend.Machine.Eval,
-                       Parsley.Backend.Machine.LetBindings,
-                       Parsley.Backend.Machine.LetRecBuilder,
                        Parsley.Backend.Machine.Identifiers,
                        Parsley.Backend.Machine.InputOps,
                        Parsley.Backend.Machine.InputRep,
                        Parsley.Backend.Machine.Instructions,
+                       Parsley.Backend.Machine.LetBindings,
+                       Parsley.Backend.Machine.LetRecBuilder,
+                       Parsley.Backend.Machine.Linker,
                        Parsley.Backend.Machine.Ops,
                        Parsley.Backend.Machine.State
 

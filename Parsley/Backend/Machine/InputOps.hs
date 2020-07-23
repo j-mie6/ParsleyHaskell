@@ -40,7 +40,7 @@ class InputPrep input where
   prepare :: Code input -> Code (InputDependant (Rep input))
 
 class PositionOps rep where
-  same :: Code (rep -> rep -> Bool)
+  same       :: Code (rep -> rep -> Bool)
   shiftRight :: Code (rep -> Int -> rep)
 
 class BoxOps rep where

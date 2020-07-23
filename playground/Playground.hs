@@ -9,7 +9,9 @@
              FlexibleContexts,
              NumericUnderscores,
              UnboxedTuples,
-             NoMonomorphismRestriction #-}
+             NoMonomorphismRestriction,
+             FlexibleInstances,
+             AllowAmbiguousTypes #-}
 module Main where
 import Parsers (BrainFuckOp(..))
 import qualified Parsers
@@ -70,6 +72,8 @@ boom = $$(Parsley.runParser Parsers.boom)
 
 --nfb :: String -> Maybe ()
 --nfb = $$(Parsley.runParser Parsers.nfb)
+
+$(Parsley.buildLoadableParser "linkTest" [t|()|] Parsers.nfb)
 
 regTest :: String -> Maybe Int
 regTest = $$(Parsley.runParser Parsers.regTest)

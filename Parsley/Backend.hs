@@ -4,4 +4,4 @@ module Parsley.Backend (
   ) where
 
 import Parsley.Backend.CodeGenerator (codeGen)
-import Parsley.Backend.Machine       (Input, prepare, staticLink)
+import Parsley.Backend.Machine       (Input, prepare, staticLink, dynamicLink, LinkedParser, InputPolymorphic(..))

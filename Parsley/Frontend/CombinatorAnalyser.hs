@@ -8,7 +8,7 @@ import Data.Kind                  (Type)
 --import Data.Map.Strict            (Map)
 --import Data.Set                   (Set)
 import Parsley.Common.Indexed     (Fix(..){-, imap, cata-}, zygo, (:*:)(..), ifst)
-import Parsley.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
+import Parsley.Core.CombinatorAST (Combinator(..), MetaCombinator(..), Loadable(..))
 --import Parsley.Core.Identifiers   (IMVar, MVar(..))
 
 --import qualified Data.Map.Strict as Map
@@ -60,7 +60,7 @@ compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (de
 compliance (MakeRegister _ l r)     = seqCompliance l r
 compliance (GetRegister _)          = FullPure
 compliance (PutRegister _ c)        = coerce c
-compliance (Link _)                 = DomComp --TODO ?
+compliance (Load (Linked _))        = DomComp
 compliance (MetaCombinator _ c)     = c
 
 newtype CutAnalysis a = CutAnalysis {doCut :: Bool -> (Fix Combinator a, Bool)}
@@ -130,7 +130,7 @@ cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . alg) com
     alg (MakeRegister σ l r) cut = seqAlg (MakeRegister σ) cut (ifst l) (ifst r)
     alg (GetRegister σ) _ = (In (GetRegister σ), False)
     alg (PutRegister σ p) cut = rewrap (PutRegister σ) cut (ifst p)
-    alg (Link l) _cut = case l of -- not too sure about this yet?
+    alg (Load (Linked l)) cut = (mkCut (not cut) (In (Load (Linked l))), False) -- not too sure about this yet?
     alg (MetaCombinator m p) cut = rewrap (MetaCombinator m) cut (ifst p)
 
 -- Termination Analysis (Generalised left-recursion checker)

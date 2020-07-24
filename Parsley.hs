@@ -23,7 +23,7 @@ import Parsley.Combinator      as Combinator  (item, char, string, satisfy, notF
 import Parsley.Common.Utils    as THUtils     (code, Quapplicative(..), WQ, Code)
 import Parsley.Fold            as Fold        (many, some)
 import Parsley.Selective       as Selective
-import Parsley.Core.Primitives as Primitives  (debug)
+import Parsley.Core.Primitives as Primitives  (debug, load)
 
 runParser :: Input input => Parser a -> Code (input -> Maybe a)
 runParser p = [||\input -> $$(staticLink (compile p codeGen) (prepare [||input||]))||]

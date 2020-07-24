@@ -10,11 +10,11 @@
              NumericUnderscores,
              UnboxedTuples,
              NoMonomorphismRestriction,
-             FlexibleInstances,
-             AllowAmbiguousTypes #-}
+             FlexibleInstances #-}
 module Main where
 import Parsers (BrainFuckOp(..))
 import qualified Parsers
+import qualified LinkedParsers
 import qualified Parsley
 import Data.Int
 import Data.Char (ord, chr)
@@ -76,7 +76,8 @@ boom = $$(Parsley.runParser Parsers.boom)
 regTest :: String -> Maybe Int
 regTest = $$(Parsley.runParser Parsers.regTest)
 
-$(Parsley.buildLoadableParser "linkTest" [t|Char|] Parsers.linkTest)
+linkedTest :: String -> Maybe Char
+linkedTest = $$(Parsley.runParser (Parsley.load LinkedParsers.linkTest))
 
 main :: IO ()
 main =

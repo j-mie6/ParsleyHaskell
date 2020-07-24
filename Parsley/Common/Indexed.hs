@@ -81,5 +81,3 @@ newtype Const1 a k = Const1 {getConst1 :: a}
 
 data Unit4 i j k l = Unit4
 newtype Const4 a i j k l = Const4 {getConst4 :: a}
-
-

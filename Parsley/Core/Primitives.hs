@@ -5,8 +5,9 @@ module Parsley.Core.Primitives (
   ) where
 
 import Prelude hiding             (pure)
-import Parsley.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..))
+import Parsley.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..), Loadable(..))
 import Parsley.Core.Defunc        (Defunc(BLACK))
+import Parsley.Core.Interface     (QParsley)
 import Parsley.Common.Indexed     (Fix(In), (:+:)(..))
 import Parsley.Common.Utils       (WQ)
 
@@ -85,6 +86,9 @@ get (Reg reg) = Parser (In (L (GetRegister reg)))
 
 put :: Reg r a -> Parser a -> Parser ()
 put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
+
+load :: QParsley a -> Parser a
+load = Parser . In . L . Load . Linked
 
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (L (Debug name p)))

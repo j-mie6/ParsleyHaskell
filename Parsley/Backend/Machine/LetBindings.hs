@@ -4,7 +4,7 @@ module Parsley.Backend.Machine.LetBindings (
     LetBinding(..),
     Regs(..),
     makeLetBinding,
-    Binding
+    Binding(..)
   ) where
 
 import Prelude hiding                       (foldr)
@@ -15,11 +15,14 @@ import Parsley.Backend.Machine.Instructions (Instr)
 import Parsley.Common                       (Fix4, One)
 import Unsafe.Coerce                        (unsafeCoerce)
 
-type Binding o a x = Fix4 (Instr o) '[] One x a
-data LetBinding o a x = forall rs. LetBinding (Binding o a x) (Regs rs)
-deriving instance Show (LetBinding o a x)
+newtype Binding o x = Binding (forall r. Fix4 (Instr o) '[] One x r)
+data LetBinding o x = forall rs. LetBinding (Binding o x) (Regs rs)
 
-makeLetBinding :: Binding o a x -> Set IΣVar -> LetBinding o a x
+deriving instance Show (LetBinding o x)
+instance Show (Binding o x) where
+  show (Binding b) = show b
+
+makeLetBinding :: Binding o x -> Set IΣVar -> LetBinding o x
 makeLetBinding m rs = LetBinding m (unsafeMakeRegs rs)
 
 data Regs (rs :: [Type]) where

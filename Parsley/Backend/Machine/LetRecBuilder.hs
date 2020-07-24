@@ -12,10 +12,10 @@ import Parsley.Common.Utils                (Code)
 
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
 
-letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o a)
+letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o)
                        -> {-nameof-}     (forall x. key x -> String)
-                       -> {-genBinding-} (forall x rs. Binding o a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
-                       -> {-expr-}       (DMap key (QSubRoutine s o a) -> Code b)
+                       -> {-genBinding-} (forall x rs. Binding o x -> Regs rs -> DMap key (QSubRoutine s o r) -> Code (Func rs s o r x))
+                       -> {-expr-}       (DMap key (QSubRoutine s o r) -> Code b)
                        -> Code b
 letRec bindings nameOf genBinding expr = unsafeTExpCoerce $
   do -- Make a bunch of names
@@ -33,5 +33,5 @@ letRec bindings nameOf genBinding expr = unsafeTExpCoerce $
      -- Construct the let expression
      return (if null decls then exp else LetE decls exp)
   where
-     makeTypedName :: Const (Name, Some Regs) x -> QSubRoutine s o a x
+     makeTypedName :: Const (Name, Some Regs) x -> QSubRoutine s o r x
      makeTypedName (Const (name, Some frees)) = QSubRoutine (unsafeTExpCoerce (return (VarE name))) frees

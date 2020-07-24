@@ -34,13 +34,13 @@ derivation(Text)
 type Ops o = (LogHandler o, ContOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps o) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n a r -> Code (ST s r)) -> Code (ST s r) -> Γ s o xs n a r -> Code (ST s r)
 sat p k bad γ@Γ{..} = next input $ \c input' -> [||
     if $$(p c) then $$(k (γ {operands = Op c operands, input = input'}))
     else $$bad
   ||]
 
-emitLengthCheck :: (?ops :: InputOps o, PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+emitLengthCheck :: (?ops :: InputOps o, PositionOps o) => Int -> (Γ s o xs n a r -> Code (ST s r)) -> Code (ST s r) -> Γ s o xs n a r -> Code (ST s r)
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
 emitLengthCheck n good bad γ = [||
@@ -56,21 +56,21 @@ returnST :: forall s a. a -> ST s a
 returnST = return @(ST s)
 
 {- Register Operations -}
-newΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+newΣ :: ΣVar x -> Access -> Code x -> (Ctx s o r -> Code (ST s r)) -> Ctx s o r -> Code (ST s r)
 newΣ σ Soft x k ctx = dup x $ \dupx -> k $! insertNewΣ σ Nothing dupx ctx
 newΣ σ Hard x k ctx = dup x $ \dupx -> [||
     do ref <- newSTRef $$dupx
        $$(k $! insertNewΣ σ (Just [||ref||]) dupx ctx)
   ||]
 
-writeΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+writeΣ :: ΣVar x -> Access -> Code x -> (Ctx s o r -> Code (ST s r)) -> Ctx s o r -> Code (ST s r)
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k $! cacheΣ σ dupx ctx
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$dupx
        $$(k $! cacheΣ σ dupx ctx)
   ||]
 
-readΣ :: ΣVar x -> Access -> (Code x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+readΣ :: ΣVar x -> Access -> (Code x -> Ctx s o r -> Code (ST s r)) -> Ctx s o r -> Code (ST s r)
 readΣ σ Soft k ctx = (k $! cachedΣ σ ctx) $! ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
@@ -80,15 +80,15 @@ readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
 {- Handler Operations -}
 class HandlerOps o where
   buildHandler :: BoxOps o
-               => Γ s o xs n r a
-               -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
-               -> Code o -> Code (Handler s o a)
-  fatal :: Code (Handler s o a)
-  raise :: BoxOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
+               => Γ s o xs n a r
+               -> (Γ s o (o : xs) n a r -> Code (ST s r))
+               -> Code o -> Code (Handler s o r)
+  fatal :: Code (Handler s o (Maybe a))
+  raise :: BoxOps o => Γ s o xs (Succ n) a r -> Code (ST s r)
 
-setupHandler :: Γ s o xs n r a
-             -> (Code o -> Code (Handler s o a))
-             -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+setupHandler :: Γ s o xs n a r
+             -> (Code o -> Code (Handler s o r))
+             -> (Γ s o xs (Succ n) a r -> Code (ST s r)) -> Code (ST s r)
 setupHandler γ h k = [||
     let handler = $$(h (input γ))
     in $$(k (γ {handlers = VCons [||handler||] (handlers γ)}))
@@ -97,7 +97,7 @@ setupHandler γ h k = [||
 #define deriveHandlerOps(rep)                     \
 instance HandlerOps rep where                     \
 {                                                 \
-  buildHandler γ h c = [||\(o# :: Unboxed rep) -> \
+  buildHandler γ h c = [||\o# ->                  \
     $$(h (γ {operands = Op c (operands γ),        \
              input = [||$$box o#||]}))||];        \
   fatal = [||\(!_) -> returnST Nothing ||];       \
@@ -108,12 +108,12 @@ inputInstances(deriveHandlerOps)
 
 {- Control Flow Operations -}
 class BoxOps o => ContOps o where
-  suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
-  resume :: Code (Cont s o a x) -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
-  callWithContinuation :: Code (SubRoutine s o a x) -> Code (Cont s o a x) -> Code o -> Vec (Succ n) (Code (Handler s o a)) -> Code (ST s (Maybe a))
+  suspend :: (Γ s o (x : xs) n a r -> Code (ST s r)) -> Γ s o xs n a r -> Code (Cont s o r x)
+  resume :: Code (Cont s o r x) -> Γ s o (x : xs) n a r -> Code (ST s r)
+  callWithContinuation :: Code (SubRoutine s o r x) -> Code (Cont s o r x) -> Code o -> Vec (Succ n) (Code (Handler s o r)) -> Code (ST s r)
 
 class ReturnOps o where
-  halt :: Code (Cont s o a a)
+  halt :: Code (Cont s o (Maybe a) a)
   noreturn :: Code (Cont s o a Void)
 
 #define deriveContOps(rep)                                                                     \
@@ -136,16 +136,16 @@ inputInstances(deriveReturnOps)
 
 {- Builder Operations -}
 class BoxOps o => JoinBuilder o where
-  setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+  setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n a r -> Machine s o xs n a r -> MachineMonad s o xs n a r
 
 class BoxOps o => RecBuilder o where
   buildIter :: ReturnOps o
-            => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-            -> (Code o -> Code (Handler s o a)) -> Code o -> Code (ST s (Maybe a))
+            => Ctx s o r -> MVar Void -> Machine s o '[] One Void r
+            -> (Code o -> Code (Handler s o r)) -> Code o -> Code (ST s r)
   buildRec  :: Regs rs
-            -> Ctx s o a
-            -> Machine s o '[] One r a
-            -> Code (Func rs s o a r)
+            -> Ctx s o r
+            -> Machine s o '[] One a r
+            -> Code (Func rs s o r a)
 
 #define deriveJoinBuilder(rep)                                                  \
 instance JoinBuilder rep where                                                  \
@@ -176,15 +176,15 @@ instance RecBuilder rep where                                                   
 };
 inputInstances(deriveRecBuilder)
 
-takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> Code (SubRoutine s o a x)) -> Code (Func rs s o a x)
+takeFreeRegisters :: Regs rs -> Ctx s o r -> (Ctx s o r -> Code (SubRoutine s o r x)) -> Code (Func rs s o r x)
 takeFreeRegisters NoRegs ctx body = body ctx
 takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
 {- Debugger Operations -}
 class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where
-  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (Handler s o a)
+  logHandler :: (?ops :: InputOps o) => String -> Ctx s o r -> Γ s o xs (Succ n) a r -> Code o -> Code (Handler s o r)
 
-preludeString :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
+preludeString :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Char -> Γ s o xs n a r -> Ctx s o r -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset     = input γ

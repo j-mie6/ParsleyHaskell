@@ -4,8 +4,9 @@ module Parsley.Core.CombinatorAST (module Parsley.Core.CombinatorAST) where
 
 import Data.Kind                (Type)
 import Parsley.Common           (IFunctor, Fix, Const1(..), imap, cata, intercalateDiff, (:+:))
-import Parsley.Core.Identifiers (MVar, ΣVar)
 import Parsley.Core.Defunc      (Defunc)
+import Parsley.Core.Identifiers (MVar, ΣVar)
+import Parsley.Core.Interface   (QParsley)
 
 -- Parser wrapper type
 newtype Parser a = Parser {unParser :: Fix (Combinator :+: ScopeRegister) a}
@@ -30,7 +31,7 @@ data Combinator (k :: Type -> Type) (a :: Type) where
   MakeRegister   :: ΣVar a -> k a -> k b -> Combinator k b
   GetRegister    :: ΣVar a -> Combinator k a
   PutRegister    :: ΣVar a -> k a -> Combinator k ()
-  Link           :: Linkable k a -> Combinator k a
+  Load           :: Loadable k a -> Combinator k a
   Debug          :: String -> k a -> Combinator k a
   MetaCombinator :: MetaCombinator -> k a -> Combinator k a
 
@@ -39,7 +40,8 @@ data ScopeRegister (k :: Type -> Type) (a :: Type) where
 
 newtype Reg (r :: Type) a = Reg (ΣVar a)
 
-data Linkable  (k :: Type -> Type) (a :: Type) where
+data Loadable  (k :: Type -> Type) (a :: Type) where
+  Linked :: QParsley a -> Loadable k a
 
 data MetaCombinator where
   Cut         :: MetaCombinator
@@ -65,15 +67,15 @@ instance IFunctor Combinator where
   imap f (MakeRegister σ p q) = MakeRegister σ (f p) (f q)
   imap _ (GetRegister σ)      = GetRegister σ
   imap f (PutRegister σ p)    = PutRegister σ (f p)
-  imap f (Link l)             = Link (imap f l)
+  imap f (Load l)             = Load (imap f l)
   imap f (Debug name p)       = Debug name (f p)
   imap f (MetaCombinator m p) = MetaCombinator m (f p)
 
 instance IFunctor ScopeRegister where
   imap f (ScopeRegister p g) = ScopeRegister (f p) (f . g)
 
-instance IFunctor Linkable where
-  imap _f = \case
+instance IFunctor Loadable where
+  imap _ (Linked p) = Linked p
 
 instance Show (Fix Combinator a) where
   show = ($ "") . getConst1 . cata (Const1 . alg)
@@ -97,7 +99,7 @@ instance Show (Fix Combinator a) where
       alg (MakeRegister σ (Const1 p) (Const1 q))    = "(make " . shows σ . " " . p . " " . q . ")"
       alg (GetRegister σ)                           = "(get " . shows σ . ")"
       alg (PutRegister σ (Const1 p))                = "(put " . shows σ . " " . p . ")"
-      alg (Link l)                                  = shows l
+      alg (Load l)                                  = shows l
       alg (Debug _ (Const1 p))                      = p
       alg (MetaCombinator m (Const1 p))             = p . " [" . shows m . "]"
 
@@ -105,8 +107,8 @@ instance Show MetaCombinator where
   show Cut = "coins after"
   show RequiresCut = "requires cut"
 
-instance Show (Linkable k a) where
-  show = \case
+instance Show (Loadable k a) where
+  show (Linked _) = "linked parser"
 
 traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)
 traverseCombinator expose (pf :<*>: px)        = do pf' <- expose pf; px' <- expose px; pure (pf' :<*>: px')
@@ -129,7 +131,7 @@ traverseCombinator _      (Pure x)             = do pure (Pure x)
 traverseCombinator _      (Satisfy f)          = do pure (Satisfy f)
 traverseCombinator expose (Let r v p)          = do p' <- expose p; pure (Let r v p')
 traverseCombinator expose (MetaCombinator m p) = do p' <- expose p; pure (MetaCombinator m p')
-traverseCombinator expose (Link l)             = do l' <- traverseLinkable expose l; pure (Link l')
+traverseCombinator expose (Load l)             = do l' <- traverseLoadable expose l; pure (Load l')
 
-traverseLinkable :: (forall a. f a -> m (k a)) -> Linkable f a -> m (Linkable k a)
-traverseLinkable _expose = \case
+traverseLoadable :: Applicative m => (forall a. f a -> m (k a)) -> Loadable f a -> m (Loadable k a)
+traverseLoadable _ (Linked p) = pure (Linked p)

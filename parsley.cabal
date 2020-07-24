@@ -82,7 +82,7 @@ executable playground
                        text,
                        bytestring,
                        containers
-  other-modules:       Parsers
+  other-modules:       Parsers, LinkedParsers
   other-extensions:    TemplateHaskell
   hs-source-dirs:      ./playground
   main-is:             Playground.hs
@@ -114,6 +114,7 @@ library
                        Parsley.Core.Defunc,
                        Parsley.Core.Identifiers,
                        Parsley.Core.InputTypes,
+                       Parsley.Core.Interface,
                        Parsley.Core.Primitives,
 
                        Parsley.Frontend,

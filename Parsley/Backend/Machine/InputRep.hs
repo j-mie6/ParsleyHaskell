@@ -41,6 +41,7 @@ data UnpackedLazyByteString = UnpackedLazyByteString
 representationTypes :: [Q Type]
 representationTypes = [[t|Int|], [t|OffWith [Char]|], [t|OffWith Stream|], [t|UnpackedLazyByteString|], [t|Text|]]
 
+{-# INLINE offWith #-}
 offWith :: Code (ts -> OffWith ts)
 offWith = [||OffWith 0||]
 
@@ -79,9 +80,11 @@ type family Unboxed rep = (urep :: TYPE (RepKind rep)) | urep -> rep where
   Unboxed (Text, Stream) = (# Text, Stream #)
 
 {- Generic Representation Operations -}
+{-# INLINE offWithSame #-}
 offWithSame :: Code (OffWith ts -> OffWith ts -> Bool)
 offWithSame = [||\(OffWith i _) (OffWith j _) -> i == j||]
 
+{-# INLINE offWithShiftRight #-}
 offWithShiftRight :: Code (Int -> ts -> ts) -> Code (OffWith ts -> Int -> OffWith ts)
 offWithShiftRight drop = [||\(OffWith o ts) i -> OffWith (o + i) ($$drop i ts)||]
 

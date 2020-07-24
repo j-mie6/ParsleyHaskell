@@ -71,9 +71,9 @@ evalSat p (Machine k) = do
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
-    maybeEmitCheck Nothing mk γ = sat (genDefunc p) mk (raise γ) γ
+    maybeEmitCheck Nothing mk γ = sat (genDefunc1 p) mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc p) mk [||bad||]) [||bad||] γ)||]
+      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc1 p) mk [||bad||]) [||bad||] γ)||]
 
 evalEmpt :: (BoxOps o, HandlerOps o) => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise

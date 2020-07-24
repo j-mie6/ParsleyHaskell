@@ -5,7 +5,7 @@ import Data.Functor.Const                  (Const(..))
 import Data.GADT.Compare                   (GCompare)
 import Data.Some                           (Some(Some))
 import Language.Haskell.TH                 (newName, Name)
-import Language.Haskell.TH.Syntax          (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
+import Language.Haskell.TH.Syntax          (unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(ValD), Pat(VarP), Body(NormalB))
 import Parsley.Backend.Machine.LetBindings (LetBinding(..), Binding, Regs)
 import Parsley.Backend.Machine.State       (QSubRoutine(..), Func)
 import Parsley.Common.Utils                (Code)
@@ -26,12 +26,12 @@ letRec bindings nameOf genBinding expr = unsafeTExpCoerce $
      let makeDecl (k :=> LetBinding body frees) =
           do let Const (name, _) = names ! k
              func <- unTypeQ (genBinding body frees typedNames)
-             return (FunD name [Clause [] (NormalB func) []])
+             return (ValD (VarP name) (NormalB func) [])
      decls <- traverse makeDecl (toList bindings)
      -- Generate the main expression using the same names
      exp <- unTypeQ (expr typedNames)
      -- Construct the let expression
-     return (LetE decls exp)
+     return (if null decls then exp else LetE decls exp)
   where
      makeTypedName :: Const (Name, Some Regs) x -> QSubRoutine s o a x
      makeTypedName (Const (name, Some frees)) = QSubRoutine (unsafeTExpCoerce (return (VarE name))) frees

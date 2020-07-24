@@ -34,9 +34,9 @@ derivation(Text)
 type Ops o = (LogHandler o, ContOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o) => Code (Char -> Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps o) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 sat p k bad γ@Γ{..} = next input $ \c input' -> [||
-    if $$p $$c then $$(k (γ {operands = Op c operands, input = input'}))
+    if $$(p c) then $$(k (γ {operands = Op c operands, input = input'}))
     else $$bad
   ||]
 
@@ -97,7 +97,7 @@ setupHandler γ h k = [||
 #define deriveHandlerOps(rep)                     \
 instance HandlerOps rep where                     \
 {                                                 \
-  buildHandler γ h c = [||\o# ->                  \
+  buildHandler γ h c = [||\(o# :: Unboxed rep) -> \
     $$(h (γ {operands = Op c (operands γ),        \
              input = [||$$box o#||]}))||];        \
   fatal = [||\(!_) -> returnST Nothing ||];       \

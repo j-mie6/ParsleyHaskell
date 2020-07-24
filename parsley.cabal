@@ -140,7 +140,6 @@ library
                        Parsley.Backend.Machine.Ops,
                        Parsley.Backend.Machine.State
 
-
   -- LANGUAGE extensions used by modules in this package.
   default-extensions:  BangPatterns,
                        DataKinds,

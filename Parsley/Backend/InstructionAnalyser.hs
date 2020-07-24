@@ -4,7 +4,7 @@
 module Parsley.Backend.InstructionAnalyser (coinsNeeded, relevancy) where
 
 import Data.Kind               (Type)
-import Parsley.Backend.Machine (Instr(..), Foreign(..), MetaInstr(..))
+import Parsley.Backend.Machine (Instr(..), MetaInstr(..))
 import Parsley.Common.Indexed  (cata4, Fix4, Const4(..))
 import Parsley.Common.Vec      (Vec(..), Nat(..), SNat(..), SingNat(..), zipWithVec, replicateVec)
 
@@ -39,7 +39,7 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
     alg (Make _ _ k)                           = getConst4 k
     alg (Get _ _ k)                            = getConst4 k
     alg (Put _ _ k)                            = getConst4 k
-    alg (Foreign _ (Const4 k))                 = (0, snd k) -- TODO ???
+    alg (Foreign (Const4 k))                   = (0, snd k) -- TODO ???
     alg (LogEnter _ k)                         = getConst4 k
     alg (LogExit _ k)                          = getConst4 k
     alg (MetaInstr (AddCoins _) (Const4 k))    = k
@@ -97,29 +97,29 @@ relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
 
     -- This algorithm is over-approximating: join and ret aren't _always_ relevant
     alg :: Instr o RelevancyStack xs n r a -> SNat (Length xs) -> Vec (Length xs) Bool
-    alg Ret                  _         = VCons True VNil
-    alg (Push _ k)           n         = let VCons _ xs = getStack k (SSucc n) in xs
-    alg (Pop k)              (SSucc n) = VCons False (getStack k n)
-    alg (Lift2 _ k)          (SSucc n) = let VCons rel xs = getStack k n in VCons rel (VCons rel xs)
-    alg (Sat _ k)            n         = let VCons _ xs = getStack k (SSucc n) in xs
-    alg (Call _ k)           n         = let VCons _ xs = getStack k (SSucc n) in xs
-    alg (Jump _)             _         = VNil
-    alg Empt                 n         = replicateVec n False
-    alg (Commit k)           n         = getStack k n
-    alg (Catch k _)          n         = getStack k n
-    alg (Tell k)             n         = let VCons _ xs = getStack k (SSucc n) in xs
-    alg (Seek k)             (SSucc n) = VCons True (getStack k n)
-    alg (Case p q)           n         = VCons True (let VCons _ xs = zipRelevancy (getStack p n) (getStack q n) in xs)
-    alg (Choices _ ks def)   (SSucc n) = VCons True (foldr (zipRelevancy . (flip getStack n)) (getStack def n) ks)
-    alg (Iter _ _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
-    alg (Join _)             (SSucc n) = VCons True (replicateVec n False)
-    alg (MkJoin _ b _)       n         = let VCons _ xs = getStack b (SSucc n) in xs
-    alg (Swap k)             n         = let VCons rel1 (VCons rel2 xs) = getStack k n in VCons rel2 (VCons rel1 xs)
-    alg (Dup k)              n         = let VCons rel1 (VCons rel2 xs) = getStack k (SSucc n) in VCons (rel1 || rel2) xs
-    alg (Make _ _ k)         (SSucc n) = VCons False (getStack k n)
-    alg (Get _ _ k)          n         = let VCons _ xs = getStack k (SSucc n) in xs
-    alg (Put _ _ k)          (SSucc n) = VCons False (getStack k n)
-    alg (Foreign (Link _) k) n         = let VCons _ xs = getStack k (SSucc n) in xs -- foreign may _never_ consume state
-    alg (LogEnter _ k)       n         = getStack k n
-    alg (LogExit _ k)        n         = getStack k n
-    alg (MetaInstr _ k)      n         = getStack k n
+    alg Ret                _         = VCons True VNil
+    alg (Push _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
+    alg (Pop k)            (SSucc n) = VCons False (getStack k n)
+    alg (Lift2 _ k)        (SSucc n) = let VCons rel xs = getStack k n in VCons rel (VCons rel xs)
+    alg (Sat _ k)          n         = let VCons _ xs = getStack k (SSucc n) in xs
+    alg (Call _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
+    alg (Jump _)           _         = VNil
+    alg Empt               n         = replicateVec n False
+    alg (Commit k)         n         = getStack k n
+    alg (Catch k _)        n         = getStack k n
+    alg (Tell k)           n         = let VCons _ xs = getStack k (SSucc n) in xs
+    alg (Seek k)           (SSucc n) = VCons True (getStack k n)
+    alg (Case p q)         n         = VCons True (let VCons _ xs = zipRelevancy (getStack p n) (getStack q n) in xs)
+    alg (Choices _ ks def) (SSucc n) = VCons True (foldr (zipRelevancy . (flip getStack n)) (getStack def n) ks)
+    alg (Iter _ _ k)       n         = let VCons _ xs = getStack k (SSucc n) in xs
+    alg (Join _)           (SSucc n) = VCons True (replicateVec n False)
+    alg (MkJoin _ b _)     n         = let VCons _ xs = getStack b (SSucc n) in xs
+    alg (Swap k)           n         = let VCons rel1 (VCons rel2 xs) = getStack k n in VCons rel2 (VCons rel1 xs)
+    alg (Dup k)            n         = let VCons rel1 (VCons rel2 xs) = getStack k (SSucc n) in VCons (rel1 || rel2) xs
+    alg (Make _ _ k)       (SSucc n) = VCons False (getStack k n)
+    alg (Get _ _ k)        n         = let VCons _ xs = getStack k (SSucc n) in xs
+    alg (Put _ _ k)        (SSucc n) = VCons False (getStack k n)
+    alg (Foreign k)        n         = let VCons _ xs = getStack k n in VCons True xs
+    alg (LogEnter _ k)     n         = getStack k n
+    alg (LogExit _ k)      n         = getStack k n
+    alg (MetaInstr _ k)    n         = getStack k n

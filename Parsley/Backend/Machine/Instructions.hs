@@ -5,7 +5,7 @@ module Parsley.Backend.Machine.Instructions (module Parsley.Backend.Machine.Inst
 import Data.Kind                           (Type)
 import Data.Void                           (Void)
 import Parsley.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
-import Parsley.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, Code, intercalateDiff)
+import Parsley.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 import Parsley.Core.Interface              (Parsley)
 
 import Parsley.Backend.Machine.Defunc as Machine (Defunc(USER))
@@ -34,13 +34,10 @@ data Instr o (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: N
   Make      :: ΣVar x -> Access -> k xs n r a -> Instr o k (x : xs) n r a
   Get       :: ΣVar x -> Access -> k (x : xs) n r a -> Instr o k xs n r a
   Put       :: ΣVar x -> Access -> k xs n r a -> Instr o k (x : xs) n r a
-  Foreign   :: Foreign x ins outs -> k (x : outs) (Succ n) r a -> Instr o k ins (Succ n) r a
+  Foreign   :: k (x : xs) (Succ n) r a -> Instr o k (Parsley x : xs) (Succ n) r a
   LogEnter  :: String -> k xs (Succ (Succ n)) r a -> Instr o k xs (Succ n) r a
   LogExit   :: String -> k xs n r a -> Instr o k xs n r a
   MetaInstr :: MetaInstr n -> k xs n r a -> Instr o k xs n r a
-
-data Foreign (x :: Type) (ins :: [Type]) (outs :: [Type]) where
-  Link :: Code (Parsley x) -> Foreign x xs xs
 
 data Access = Hard | Soft deriving Show
 
@@ -105,7 +102,7 @@ instance IFunctor4 (Instr o) where
   imap4 f (Make σ a k)        = Make σ a (f k)
   imap4 f (Get σ a k)         = Get σ a (f k)
   imap4 f (Put σ a k)         = Put σ a (f k)
-  imap4 f (Foreign x k)       = Foreign x (f k)
+  imap4 f (Foreign k)         = Foreign (f k)
   imap4 f (LogEnter name k)   = LogEnter name (f k)
   imap4 f (LogExit name k)    = LogExit name (f k)
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
@@ -136,13 +133,10 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (Make σ a k)        = "(Make " . shows σ . " " . shows a . " " . getConst4 k . ")"
       alg (Get σ a k)         = "(Get " . shows σ . " " . shows a . " " . getConst4 k . ")"
       alg (Put σ a k)         = "(Put " . shows σ . " " . shows a . " " . getConst4 k . ")"
-      alg (Foreign f k)       = "(Foreign " . shows f . " " . getConst4 k . ")"
+      alg (Foreign k)         = "(Foreign " . getConst4 k . ")"
       alg (LogEnter _ k)      = getConst4 k
       alg (LogExit _ k)       = getConst4 k
       alg (MetaInstr m k)     = "[" . shows m . "] " . getConst4 k
-
-instance Show (Foreign x ins outs) where
-  show (Link _) = "linked parser"
 
 instance Show (MetaInstr n) where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"

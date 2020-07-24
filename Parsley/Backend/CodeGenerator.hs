@@ -6,7 +6,7 @@ import Data.Maybe                           (isJust)
 import Data.Set                             (Set, elems)
 import Debug.Trace                          (trace)
 import Control.Monad.Trans                  (lift)
-import Parsley.Backend.Machine              (Defunc(USER, SAME), LetBinding, makeLetBinding, Binding(..), Instr(..), Foreign(..),
+import Parsley.Backend.Machine              (Defunc(USER, SAME, FOREIGN), LetBinding, makeLetBinding, Binding(..), Instr(..),
                                              pattern Fmap, pattern App, _Modify, _Get, _Put, _Make, pattern If,
                                              addCoins, refundCoins, drainCoins, PositionOps,
                                              IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
@@ -152,7 +152,7 @@ direct (ChainPost p op) m =
 direct (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 direct (GetRegister σ)              m = do return $! In4 (_Get σ m)
 direct (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (USER UNIT) m))))
-direct (Load (Linked (QParsley l))) m = do return $! In4 (Foreign (Link l) m)
+direct (Load (Linked (QParsley l))) m = do return $! In4 (Push (FOREIGN l) (In4 (Foreign m)))
 direct (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 direct (MetaCombinator Cut p)       m = do runCodeGen p (addCoins (coinsNeeded m) m)
 

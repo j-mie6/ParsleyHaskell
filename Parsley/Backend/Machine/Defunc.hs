@@ -2,18 +2,21 @@ module Parsley.Backend.Machine.Defunc (module Parsley.Backend.Machine.Defunc) wh
 
 import Parsley.Backend.Machine.InputOps (PositionOps(same))
 import Parsley.Common.Utils             (Code)
+import Parsley.Core.Interface           (Parsley)
 
 import qualified Parsley.Core.Defunc as Core (Defunc, genDefunc, genDefunc1, genDefunc2)
 
 data Defunc a where
-  USER   :: Core.Defunc a -> Defunc a
-  BOTTOM :: Defunc a
-  SAME   :: PositionOps o => Defunc (o -> o -> Bool)
+  USER    :: Core.Defunc a -> Defunc a
+  BOTTOM  :: Defunc a
+  FOREIGN :: Code (Parsley a) -> Defunc (Parsley a)
+  SAME    :: PositionOps o => Defunc (o -> o -> Bool)
 
 genDefunc :: Defunc a -> Code a
-genDefunc (USER x) = Core.genDefunc x
-genDefunc BOTTOM   = [||undefined||]
-genDefunc SAME     = same
+genDefunc (USER x)    = Core.genDefunc x
+genDefunc BOTTOM      = [||undefined||]
+genDefunc (FOREIGN q) = q
+genDefunc SAME        = same
 
 genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
 genDefunc1 (USER f) qx = Core.genDefunc1 f qx
@@ -24,6 +27,7 @@ genDefunc2 (USER f) qx qy = Core.genDefunc2 f qx qy
 genDefunc2 f qx qy        = [|| $$(genDefunc f) $$qx $$qy ||]
 
 instance Show (Defunc a) where
-  show (USER x) = show x
-  show SAME = "same"
-  show BOTTOM = "[[irrelevant]]"
+  show (USER x)    = show x
+  show SAME        = "same"
+  show (FOREIGN _) = "foreign object"
+  show BOTTOM      = "[[irrelevant]]"

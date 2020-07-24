@@ -9,10 +9,11 @@ import Control.Monad.Reader                  (ask, asks, local)
 import Parsley.Backend.Machine.Defunc        (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Parsley.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Backend.Machine.InputOps      (PositionOps, BoxOps, LogOps, InputOps)
-import Parsley.Backend.Machine.Instructions  (Instr(..), Foreign(..), MetaInstr(..), Access(..))
+import Parsley.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
 import Parsley.Backend.Machine.Ops
 import Parsley.Backend.Machine.State
 import Parsley.Common                        (Fix4, cata4, One, Vec(..), Nat(..))
+import Parsley.Core.Interface                (Parsley)
 import System.Console.Pretty                 (color, Color(Green))
 
 eval :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o) xs n a r -> Machine s o xs n a r
@@ -41,7 +42,7 @@ eval = cata4 (Machine . alg)
     alg (Make σ c k)        = evalMake σ c k
     alg (Get σ c k)         = evalGet σ c k
     alg (Put σ c k)         = evalPut σ c k
-    alg (Foreign f k)       = evalForeign f k
+    alg (Foreign k)         = evalForeign k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
@@ -141,8 +142,8 @@ evalPut σ a k = asks $! \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalForeign :: Foreign x ins out -> Machine s o (x : outs) n a r -> MachineMonad s o ins n a r
-evalForeign f k = error "Unimplemented"
+evalForeign :: Machine s o (x : xs) n a r -> MachineMonad s o (Parsley x : xs) n a r
+evalForeign k = error "Unimplemented"
 
 evalLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Machine s o xs (Succ (Succ n)) a r -> MachineMonad s o xs (Succ n) a r
 evalLogEnter name (Machine mk) =

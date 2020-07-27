@@ -8,12 +8,12 @@ import Control.Monad                         (forM, liftM2)
 import Control.Monad.Reader                  (ask, asks, local)
 import Parsley.Backend.Machine.Defunc        (Defunc, genDefunc, genDefunc1, genDefunc2)
 import Parsley.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
-import Parsley.Backend.Machine.InputOps      (PositionOps, BoxOps, LogOps, InputOps)
+import Parsley.Backend.Machine.InputOps      (PositionOps, BoxOps, LogOps, InputOps(_next, _more))
 import Parsley.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
 import Parsley.Backend.Machine.Ops
 import Parsley.Backend.Machine.State
 import Parsley.Common                        (Fix4, cata4, One, Vec(..), Nat(..))
-import Parsley.Core.Interface                (Parsley)
+import Parsley.Core.Interface                (Parsley(..))
 import System.Console.Pretty                 (color, Color(Green))
 
 eval :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o) xs n a r -> Machine s o xs n a r
@@ -142,8 +142,13 @@ evalPut σ a k = asks $! \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalForeign :: Machine s o (x : xs) n a r -> MachineMonad s o (Parsley x : xs) n a r
-evalForeign k = error "Unimplemented"
+evalForeign :: (?ops :: InputOps o, BoxOps o, HandlerOps o) => Machine s o (x : xs) (Succ n) a r -> MachineMonad s o (Parsley x : xs) (Succ n) a r
+evalForeign (Machine k) = k <&> \mk γ@Γ{..} -> let Op p xs = operands in [||
+    let Parsley f = $$p
+        good x o = $$(mk (γ {operands = Op [||x||] xs, input = [||o||]}))
+        bad o = $$(raise (γ {input = [||o||]}))
+    in f $$(_next ?ops) $$(_more ?ops) $$input good bad
+  ||]
 
 evalLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Machine s o xs (Succ (Succ n)) a r -> MachineMonad s o xs (Succ n) a r
 evalLogEnter name (Machine mk) =

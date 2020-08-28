@@ -5,7 +5,7 @@ module ParsleyParsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
-import Parsley.Combinator (token, oneOf, noneOf, eof)
+import Parsley.Combinator (atomic, oneOf, noneOf, eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
 import CommonFunctions
@@ -29,10 +29,10 @@ showi = show
 deriving instance Lift Pred
 
 pred :: Parser Char Pred
-pred = precedence (monolith [ prefix [token "!" $> code Not]
-                            , infixR [token "&&" $> code And]])
-                  ( token "t" $> code T
-                <|> token "f" $> code F)
+pred = precedence (monolith [ prefix [atomic "!" $> code Not]
+                            , infixR [atomic "&&" $> code And]])
+                  ( atomic "t" $> code T
+                <|> atomic "f" $> code F)
 
 -- Brainfuck benchmark
 deriving instance Lift BrainFuckOp
@@ -42,13 +42,13 @@ brainfuck = whitespace *> bf <* eof
   where
     whitespace = skipMany (noneOf "<>+-[],.")
     lexeme p = p <* whitespace
-    {-bf = many ( lexeme ((token ">" $> code RightPointer)
-                    <|> (token "<" $> code LeftPointer)
-                    <|> (token "+" $> code Increment)
-                    <|> (token "-" $> code Decrement)
-                    <|> (token "." $> code Output)
-                    <|> (token "," $> code Input)
-                    <|> (between (lexeme (token "[")) (token "]") (code Loop <$> bf))))-}
+    {-bf = many ( lexeme ((atomic ">" $> code RightPointer)
+                    <|> (atomic "<" $> code LeftPointer)
+                    <|> (atomic "+" $> code Increment)
+                    <|> (atomic "-" $> code Decrement)
+                    <|> (atomic "." $> code Output)
+                    <|> (atomic "," $> code Input)
+                    <|> (between (lexeme (atomic "[")) (atomic "]") (code Loop <$> bf))))-}
     bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
     op '>' = item $> code RightPointer
     op '<' = item $> code LeftPointer
@@ -221,7 +221,7 @@ javascript = whitespace *> many element <* eof
         qf = [||\x d -> $$(_code qbase) * x + digitToInt d||]
 
     stringLiteral :: Parser Char String
-    stringLiteral = code catMaybes <$> between (token "\"") (token "\"") (many stringChar) <* whitespace
+    stringLiteral = code catMaybes <$> between (char '\"') (char '\"') (many stringChar) <* whitespace
     symbol :: Char -> Parser Char Char
     symbol c = try (char c) <* whitespace
     parens :: Parser Char a -> Parser Char a
@@ -246,14 +246,14 @@ javascript = whitespace *> many element <* eof
     spaces = skipSome space
 
     oneLineComment :: Parser Char ()
-    oneLineComment = void (token "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))
+    oneLineComment = void (atomic "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))
 
     multiLineComment :: Parser Char ()
     multiLineComment =
-      let inComment = void (token "*/")
+      let inComment = void (atomic "*/")
                   <|> skipSome (noneOf "*") *> inComment
                   <|> char '*' *> inComment
-      in token "/*" *> inComment
+      in atomic "/*" *> inComment
 
     identStart = satisfy (code jsIdentStart)
     identLetter = satisfy (code jsIdentLetter)
@@ -267,8 +267,8 @@ javascript = whitespace *> many element <* eof
     stringChar = code Just <$> satisfy (code jsStringLetter) <|> stringEscape
 
     stringEscape :: Parser Char (Maybe Char)
-    stringEscape = token "\\" *> (token "&" $> code Nothing
-                              <|> spaces *> token "\\" $> code Nothing
+    stringEscape = atomic "\\" *> (atomic "&" $> code Nothing
+                              <|> spaces *> atomic "\\" $> code Nothing
                               <|> code Just <$> escapeCode)
 
     escapeCode :: Parser Char Char
@@ -284,35 +284,35 @@ javascript = whitespace *> many element <* eof
         escCode '"' = pure (code ('"'))
         escCode '\'' = pure (code ('\''))
         escCode '^' = makeQ (\c -> toEnum (fromEnum c - fromEnum 'A' + 1)) [||\c -> toEnum (fromEnum c - fromEnum 'A' + 1)||] <$> satisfy (code isUpper)
-        escCode 'A' = token "CK" $> code ('\ACK')
-        escCode 'B' = token "S" $> code ('\BS') <|> token "EL" $> code ('\BEL')
-        escCode 'C' = token "R" $> code ('\CR') <|> token "AN" $> code ('\CAN')
-        escCode 'D' = token "C" *> (token "1" $> code ('\DC1')
-                             <|> token "2" $> code ('\DC2')
-                             <|> token "3" $> code ('\DC3')
-                             <|> token "4" $> code ('\DC4'))
-               <|> token "EL" $> code ('\DEL')
-               <|> token "LE" $> code ('\DLE')
-        escCode 'E' = token "M" $> code ('\EM')
-               <|> token "T" *> (token "X" $> code ('\ETX')
-                             <|> token "B" $> code ('\ETB'))
-               <|> token "SC" $> code ('\ESC')
-               <|> token "OT" $> code ('\EOT')
-               <|> token "NQ" $> code ('\ENQ')
-        escCode 'F' = token "F" $> code ('\FF') <|> token "S" $> code ('\FS')
-        escCode 'G' = token "S" $> code ('\GS')
-        escCode 'H' = token "T" $> code ('\HT')
-        escCode 'L' = token "F" $> code ('\LF')
-        escCode 'N' = token "UL" $> code ('\NUL') <|> token "AK" $> code ('\NAK')
-        escCode 'R' = token "S" $> code ('\RS')
-        escCode 'S' = token "O" *> option (code ('\SO')) (token "H" $> code ('\SOH'))
-               <|> token "I" $> code ('\SI')
-               <|> token "P" $> code ('\SP')
-               <|> token "TX" $> code ('\STX')
-               <|> token "YN" $> code ('\SYN')
-               <|> token "UB" $> code ('\SUB')
-        escCode 'U' = token "S" $> code ('\US')
-        escCode 'V' = token "T" $> code ('\VT')
+        escCode 'A' = atomic "CK" $> code ('\ACK')
+        escCode 'B' = atomic "S" $> code ('\BS') <|> atomic "EL" $> code ('\BEL')
+        escCode 'C' = atomic "R" $> code ('\CR') <|> atomic "AN" $> code ('\CAN')
+        escCode 'D' = atomic "C" *> (atomic "1" $> code ('\DC1')
+                             <|> atomic "2" $> code ('\DC2')
+                             <|> atomic "3" $> code ('\DC3')
+                             <|> atomic "4" $> code ('\DC4'))
+               <|> atomic "EL" $> code ('\DEL')
+               <|> atomic "LE" $> code ('\DLE')
+        escCode 'E' = atomic "M" $> code ('\EM')
+               <|> atomic "T" *> (atomic "X" $> code ('\ETX')
+                             <|> atomic "B" $> code ('\ETB'))
+               <|> atomic "SC" $> code ('\ESC')
+               <|> atomic "OT" $> code ('\EOT')
+               <|> atomic "NQ" $> code ('\ENQ')
+        escCode 'F' = atomic "F" $> code ('\FF') <|> atomic "S" $> code ('\FS')
+        escCode 'G' = atomic "S" $> code ('\GS')
+        escCode 'H' = atomic "T" $> code ('\HT')
+        escCode 'L' = atomic "F" $> code ('\LF')
+        escCode 'N' = atomic "UL" $> code ('\NUL') <|> atomic "AK" $> code ('\NAK')
+        escCode 'R' = atomic "S" $> code ('\RS')
+        escCode 'S' = atomic "O" *> option (code ('\SO')) (atomic "H" $> code ('\SOH'))
+               <|> atomic "I" $> code ('\SI')
+               <|> atomic "P" $> code ('\SP')
+               <|> atomic "TX" $> code ('\STX')
+               <|> atomic "YN" $> code ('\SYN')
+               <|> atomic "UB" $> code ('\SUB')
+        escCode 'U' = atomic "S" $> code ('\US')
+        escCode 'V' = atomic "T" $> code ('\VT')
         -- TODO numeric
         escCode _ = empty--error "numeric escape codes not supported"
 
@@ -404,4 +404,4 @@ nandlang = whitespace *> skipMany funcdef <* eof
     spaces :: Parser Char ()
     spaces = skipSome space
     oneLineComment :: Parser Char ()
-    oneLineComment = void (token "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))
+    oneLineComment = void (atomic "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))

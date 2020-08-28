@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 module Parsley.Core.Defunc (module Parsley.Core.Defunc) where
 
-import Parsley.Common.Utils (WQ(..), Code, Quapplicative(..))
+import Parsley.Common.Utils (WQ(..), Code, Quapplicative(..), Lift)
 
 data Defunc a where
   APP     :: Defunc ((a -> b) -> a -> b)
@@ -9,7 +9,7 @@ data Defunc a where
   FLIP    :: Defunc ((a -> b -> c) -> b -> a -> c)
   APP_H   :: Defunc (a -> b) -> Defunc a -> Defunc b
   EQ_H    :: Eq a => Defunc a -> Defunc (a -> Bool)
-  CHAR    :: Char -> Defunc Char
+  TOK     :: (Lift t, Show t) => t -> Defunc t
   ID      :: Defunc (a -> a)
   CONS    :: Defunc (a -> [a] -> [a])
   CONST   :: Defunc (a -> b -> a)
@@ -23,7 +23,7 @@ instance Quapplicative Defunc where
   _val COMPOSE     = (.)
   _val FLIP        = flip
   _val (APP_H f x) = (_val f) (_val x)
-  _val (CHAR c)    = c
+  _val (TOK t)     = t
   _val (EQ_H x)    = ((_val x) ==)
   _val ID          = id
   _val CONS        = (:)
@@ -49,7 +49,7 @@ genDefunc CONST           = [|| \x _ -> x ||]
 genDefunc FLIP_CONST      = [|| \_ y -> y ||]
 genDefunc (FLIP_H f)      = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
 genDefunc (APP_H f x)     = genDefunc2 APP (genDefunc f) (genDefunc x)
-genDefunc (CHAR c)        = [|| c ||]
+genDefunc (TOK t)         = [|| t ||]
 genDefunc (EQ_H x)        = [|| \y -> $$(genDefunc x) == y ||]
 genDefunc ID              = [|| \x -> x ||]
 genDefunc CONS            = [|| \x xs -> x : xs ||]
@@ -86,7 +86,7 @@ instance Show (Defunc a) where
   show (FLIP_H f) = concat ["(flip ", show f, ")"]
   show (COMPOSE_H f g) = concat ["(", show f, " . ", show g, ")"]
   show (APP_H f x) = concat ["(", show f, " ", show x, ")"]
-  show (CHAR c) = show c
+  show (TOK t) = show t
   show (EQ_H x) = concat ["(== ", show x, ")"]
   show ID  = "id"
   show EMPTY = "[]"

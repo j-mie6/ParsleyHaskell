@@ -1,10 +1,11 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE UndecidableInstances #-}
-module Parsley.Common.Utils (code, WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff) where
+module Parsley.Common.Utils (code, WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff, Lift) where
 
 import Data.List (intersperse)
 import Data.String (IsString(..))
 import Language.Haskell.TH (TExpQ)
+import Language.Haskell.TH.Syntax (Lift)
 import LiftPlugin (LiftTo, code)
 
 type Code a = TExpQ a

@@ -22,7 +22,7 @@ import Parsley.Backend.Machine.State
 import Parsley.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                 (color, Color(Green))
 
-eval :: forall o a. Ops o => Code (InputDependant o) -> (LetBinding o Char a a, DMap MVar (LetBinding o Char a)) -> Code (Maybe a)
+eval :: forall o t a. Ops o => Code (InputDependant o t) -> (LetBinding o t a a, DMap MVar (LetBinding o t a)) -> Code (Maybe a)
 eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
@@ -35,10 +35,10 @@ eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
     nameLet :: MVar x -> String
     nameLet (MVar i) = "sub" ++ show i
 
-readyMachine :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o Char) xs n r a -> Machine s o xs n r a
+readyMachine :: (?ops :: InputOps o t, Ops o) => Fix4 (Instr o t) xs n r a -> Machine s o xs n r a
 readyMachine = cata4 (Machine . alg)
   where
-    alg :: (?ops :: InputOps o, Ops o) => Instr o Char (Machine s o) xs n r a -> MachineMonad s o xs n r a
+    alg :: (?ops :: InputOps o t, Ops o) => Instr o t (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = evalRet
     alg (Call μ k)          = evalCall μ k
     alg (Jump μ)            = evalJump μ
@@ -83,7 +83,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (genDefunc2 f x y) xs})
 
-evalSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: (?ops :: InputOps o t, PositionOps o, BoxOps o, HandlerOps o) => Defunc (t -> Bool) -> Machine s o (t : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p (Machine k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -160,19 +160,19 @@ evalPut σ a k = asks $! \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
+evalLogEnter :: (?ops :: InputOps o t, LogHandler o, Show t) => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) =
   liftM2 (\k ctx γ -> [|| trace $$(preludeString name '>' γ ctx "") $$(setupHandler γ (logHandler name ctx γ) k)||])
     (local debugUp mk)
     ask
 
-evalLogExit :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalLogExit :: (?ops :: InputOps o t, PositionOps o, LogOps o, Show t) => String -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalLogExit name (Machine mk) =
   liftM2 (\k ctx γ -> [|| trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||])
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps o t, PositionOps o, BoxOps o, HandlerOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k

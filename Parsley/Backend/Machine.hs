@@ -1,5 +1,5 @@
 module Parsley.Backend.Machine (
-    Input, prepare, eval,
+    Input, Token, prepare, eval,
     PositionOps,
     module Parsley.Backend.Machine.Instructions,
     module Parsley.Backend.Machine.Defunc,
@@ -13,7 +13,7 @@ import Data.Text                            (Text)
 import Parsley.Backend.Machine.Defunc       (Defunc(..))
 import Parsley.Backend.Machine.Eval         (eval)
 import Parsley.Backend.Machine.Identifiers
-import Parsley.Backend.Machine.InputRep     (Rep)
+import Parsley.Backend.Machine.InputRep     (Rep, Token)
 import Parsley.Backend.Machine.InputOps     (InputPrep(..), PositionOps)
 import Parsley.Backend.Machine.Instructions
 import Parsley.Backend.Machine.LetBindings  (LetBinding, makeLetBinding)

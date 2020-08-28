@@ -12,7 +12,7 @@ import Parsley.Common.Utils       (WQ)
 
 class ParserOps rep where
   pure :: rep a -> Parser t a
-  satisfy :: rep (Char -> Bool) -> Parser Char Char
+  satisfy :: rep (t -> Bool) -> Parser t t
   conditional :: [(rep (a -> Bool), Parser t b)] -> Parser t a -> Parser t b -> Parser t b
 
 instance ParserOps WQ where
@@ -50,7 +50,7 @@ infixr 3 <|>
 Parser p <|> Parser q = Parser (In (L (p :<|>: q)))
 
 {-# INLINE _satisfy #-}
-_satisfy :: Defunc (Char -> Bool) -> Parser Char Char
+_satisfy :: Defunc (t -> Bool) -> Parser t t
 _satisfy = Parser . In . L . Satisfy
 
 lookAhead :: Parser t a -> Parser t a
@@ -86,5 +86,5 @@ get (Reg reg) = Parser (In (L (GetRegister reg)))
 put :: Reg r a -> Parser t a -> Parser t ()
 put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
 
-debug :: String -> Parser t a -> Parser t a
+debug :: Show t => String -> Parser t a -> Parser t a
 debug name (Parser p) = Parser (In (L (Debug name p)))

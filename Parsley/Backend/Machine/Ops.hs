@@ -36,13 +36,13 @@ derivation(Text)
 type Ops o = (LogHandler o, ContOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o) => Code (Char -> Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps o t) => Code (t -> Bool) -> (Γ s o (t : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 sat p k bad γ@Γ{..} = next input $ \c input' -> [||
     if $$p $$c then $$(k (γ {operands = Op c operands, input = input'}))
     else $$bad
   ||]
 
-emitLengthCheck :: (?ops :: InputOps o, PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+emitLengthCheck :: (?ops :: InputOps o t, PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
 emitLengthCheck n good bad γ = [||
@@ -184,18 +184,20 @@ takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters
 
 {- Debugger Operations -}
 class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where
-  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (Handler s o a)
+  logHandler :: (?ops :: InputOps o t, Show t) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (Handler s o a)
 
-preludeString :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
+-- FIXME: This we need a new class that _isn't_ Show
+preludeString :: (?ops :: InputOps o t, PositionOps o, LogOps o, Show t) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset     = input γ
     indent     = replicate (debugLevel ctx * 2) ' '
     start      = [|| $$shiftLeft $$offset 5 ||]
     end        = [|| $$shiftRight $$offset 5 ||]
-    inputTrace = [|| let replace '\n' = color Green "↙"
-                         replace ' '  = color White "·"
-                         replace c    = return c
+    inputTrace = [|| let --replace '\n' = color Green "↙"
+                         --replace ' '  = color White "·"
+                         --replace c    = return c
+                         replace = show
                          go i
                            | $$same i $$end || not ($$more i) = []
                            | otherwise = $$(next [||i||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))

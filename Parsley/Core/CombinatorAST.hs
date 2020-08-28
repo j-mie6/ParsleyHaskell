@@ -30,7 +30,7 @@ data Combinator (t :: Type) (k :: Type -> Type) (a :: Type) where
   MakeRegister   :: ΣVar a -> k a -> k b -> Combinator t k b
   GetRegister    :: ΣVar a -> Combinator t k a
   PutRegister    :: ΣVar a -> k a -> Combinator t k ()
-  Debug          :: String -> k a -> Combinator t k a
+  Debug          :: Show t => String -> k a -> Combinator t k a
   MetaCombinator :: MetaCombinator -> k a -> Combinator t k a
 
 data ScopeRegister (k :: Type -> Type) (a :: Type) where

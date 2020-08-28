@@ -33,8 +33,8 @@ data Instr (o :: Type) (t :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) 
   Make      :: ΣVar x -> Access -> k xs n r a -> Instr o t k (x : xs) n r a
   Get       :: ΣVar x -> Access -> k (x : xs) n r a -> Instr o t k xs n r a
   Put       :: ΣVar x -> Access -> k xs n r a -> Instr o t k (x : xs) n r a
-  LogEnter  :: String -> k xs (Succ (Succ n)) r a -> Instr o t k xs (Succ n) r a
-  LogExit   :: String -> k xs n r a -> Instr o t k xs n r a
+  LogEnter  :: Show t => String -> k xs (Succ (Succ n)) r a -> Instr o t k xs (Succ n) r a
+  LogExit   :: Show t => String -> k xs n r a -> Instr o t k xs n r a
   MetaInstr :: MetaInstr n -> k xs n r a -> Instr o t k xs n r a
 
 data Access = Hard | Soft deriving Show

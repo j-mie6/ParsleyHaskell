@@ -26,19 +26,19 @@ import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 {- Auxillary Representation -}
 {- This requires GHC 8.10.1 - might be a while till we get there?
    Indeed, 8.10.1 would allow us to basically remove box and unbox I think
-type InputDependant rep = (# {-next-} rep -> (# Char, rep #)
-                           , {-more-} rep -> Bool
-                           , {-init-} rep
-                           #)
+type InputDependant rep tok = (# {-next-} rep -> (# tok, rep #)
+                              , {-more-} rep -> Bool
+                              , {-init-} rep
+                              #)
 -}
 
-data InputDependant rep = InputDependant {-next-} (rep -> (# Char, rep #))
-                                         {-more-} (rep -> Bool)
-                                         {-init-} rep
+data InputDependant rep tok = InputDependant {-next-} (rep -> (# tok, rep #))
+                                             {-more-} (rep -> Bool)
+                                             {-init-} rep
 
 {- Typeclasses -}
 class InputPrep input where
-  prepare :: Code input -> Code (InputDependant (Rep input))
+  prepare :: Code input -> Code (InputDependant (Rep input) (Token input))
 
 class PositionOps rep where
   same :: Code (rep -> rep -> Bool)
@@ -52,12 +52,12 @@ class LogOps rep where
   shiftLeft :: Code (rep -> Int -> rep)
   offToInt  :: Code (rep -> Int)
 
-data InputOps rep = InputOps { _more       :: Code (rep -> Bool)
-                             , _next       :: Code (rep -> (# Char, rep #))
-                             }
-more :: (?ops :: InputOps rep) => Code (rep -> Bool)
+data InputOps rep tok = InputOps { _more       :: Code (rep -> Bool)
+                                 , _next       :: Code (rep -> (# tok, rep #))
+                                 }
+more :: (?ops :: InputOps rep tok) => Code (rep -> Bool)
 more = _more ?ops
-next :: (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code r) -> Code r
+next :: (?ops :: InputOps rep tok) => Code rep -> (Code tok -> Code rep -> Code r) -> Code r
 next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
 
 {- INSTANCES -}

@@ -90,10 +90,10 @@ instance InputPrep ByteString where
       in InputDependant next (< size) off
     ||]
 
-instance InputPrep CharList where
+instance InputPrep (TokList t) where
   prepare qinput = [||
-      let CharList input = $$qinput
-          next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
+      let TokList input = $$qinput
+          next (OffWith i (t:ts)) = (# t, OffWith (i+1) ts #)
           size = length input
           more (OffWith i _) = i < size
           --more (OffWith _ []) = False
@@ -138,7 +138,7 @@ instance PositionOps Int where
   same = [||(==) @Int||]
   shiftRight = [||(+) @Int||]
 
-instance PositionOps (OffWith String) where
+instance PositionOps (OffWith [t]) where
   same = offWithSame
   shiftRight = offWithShiftRight [||drop||]
 

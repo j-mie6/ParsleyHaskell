@@ -38,10 +38,10 @@ ofChars = foldr (\c rest qc -> [|| c == $$qc || $$(rest qc) ||]) (const [||False
 atomic :: Token t => [t] -> Parser t [t]
 atomic = try . tokens
 
-eof :: Parser Char ()
+eof :: Parser Int ()
 eof = notFollowedBy item
 
-more :: Parser Char ()
+more :: Parser Int ()
 more = lookAhead (void item)
 
 -- Parsing Primitives

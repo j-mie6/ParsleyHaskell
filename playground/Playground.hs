@@ -4,6 +4,7 @@
              DeriveAnyClass,
              DeriveGeneric,
              DataKinds,
+             TypeApplications,
              TypeOperators,
              TypeFamilies,
              FlexibleContexts,
@@ -77,8 +78,8 @@ abcTalk = $$(Parsley.runParser Parsers.abc)
 regTest :: String -> Maybe Int
 regTest = $$(Parsley.runParser Parsers.regTest)
 
-tokTest :: String -> Maybe Char
-tokTest = $$(Parsley.runParser Parsers.tokTest)
+tokTest :: [Int] -> Maybe Int
+tokTest = $$(Parsley.runParser @(Parsley.TokList Int) Parsers.tokTest) . Parsley.TokList
 
 main :: IO ()
 main =
@@ -99,3 +100,4 @@ main =
      print (manyTest "ababac")
      print (evalBf' "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.$")
      return ()
+     print (tokTest [2, 4, 4, 6])

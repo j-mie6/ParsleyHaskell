@@ -16,7 +16,7 @@ import GHC.Generics           (Generic)
 import Control.Monad.Identity (Identity)
 import Data.Text              (Text)
 import Data.ByteString        (ByteString)
-import Parsley                (Text16(..), CharList(..), Stream)
+import Parsley                (Text16(..), TokList(..), Stream)
 import qualified ParsleyParsers
 import qualified YodaParsers
 import qualified ParsecParsers
@@ -110,7 +110,7 @@ brainfuckParsleyT = $$(Parsley.runParser ParsleyParsers.brainfuck)
 brainfuckParsleyB :: ByteString -> Maybe [BrainFuckOp]
 brainfuckParsleyB = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
-brainfuckParsleySS :: CharList -> Maybe [BrainFuckOp]
+brainfuckParsleySS :: TokList Char -> Maybe [BrainFuckOp]
 brainfuckParsleySS = $$(Parsley.runParser ParsleyParsers.brainfuck)
 
 brainfuckParsleyLB :: Data.ByteString.Lazy.ByteString -> Maybe [BrainFuckOp]

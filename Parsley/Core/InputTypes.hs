@@ -5,7 +5,7 @@ import Data.Text (Text)
 {- Input Types -}
 newtype Text16 = Text16 Text
 --newtype CacheText = CacheText Text
-newtype CharList = CharList String
+newtype TokList t = TokList [t]
 data Stream = {-# UNPACK #-} !Char :> Stream
 
 nomore :: Stream

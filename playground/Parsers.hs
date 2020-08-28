@@ -6,8 +6,8 @@ module Parsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred, repeat)
 import Parsley
-import Parsley.Combinator (noneOf)
-import Parsley.Fold (skipMany)
+import Parsley.Combinator (noneOf, eof)
+import Parsley.Fold (skipMany, pfoldr)
 import Parsley.Register (Reg, get, put, newRegister, newRegister_, gets_, modify, local, modify_, bind)
 import Control.Monad (liftM)
 import Data.Char (isAlpha, isAlphaNum, isSpace, isUpper, isDigit, digitToInt, chr, ord)
@@ -49,8 +49,8 @@ abc :: Parser Char ()
 abc = skipMany (try (string "abc" <|> string "defg"))
 
 instance Token Int
-tokTest :: Parser t t
-tokTest = item
+tokTest :: Parser Int Int
+tokTest = pfoldr (code (+)) (code 0) (satisfy (code even)) <* eof
 
 skipManyInspect :: Parser Char ()
 skipManyInspect = skipMany (char 'a')

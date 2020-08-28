@@ -27,7 +27,7 @@ instance Input [Char]
 instance Input (UArray Int Char)
 instance Input Text16
 instance Input ByteString
-instance Input CharList
+instance Input (TokList t)
 instance Input Text
 --instance Input CacheText
 instance Input Lazy.ByteString

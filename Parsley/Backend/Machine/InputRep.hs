@@ -23,7 +23,7 @@ import GHC.ForeignPtr           (ForeignPtr(..), ForeignPtrContents)
 import GHC.Prim                 (Int#, Addr#, nullAddr#)
 import Language.Haskell.TH      (Q, Type)
 import Parsley.Common.Utils     (Code)
-import Parsley.Core.InputTypes  (Text16, CharList, Stream(..))
+import Parsley.Core.InputTypes  (Text16, TokList, Stream(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 
@@ -51,11 +51,11 @@ emptyUnpackedLazyByteString i = UnpackedLazyByteString i nullAddr# (error "nullF
 {- Representation Mappings -}
 -- When a new input type is added here, it needs an Input instance in Parsley.Backend.Machine
 type family Rep input where
-  Rep [Char] = Int
-  Rep (UArray Int Char) = Int
+  Rep [_] = Int
+  Rep (UArray Int _) = Int
   Rep Text16 = Int
   Rep ByteString = Int
-  Rep CharList = OffWith String
+  Rep (TokList t) = OffWith [t]
   Rep Text = Text
   --Rep CacheText = (Text, Stream)
   Rep Lazy.ByteString = UnpackedLazyByteString
@@ -67,7 +67,7 @@ type family Item input where
   Item (UArray Int t) = t
   Item Text16 = Char
   Item ByteString = Char
-  Item CharList = Char
+  Item (TokList t) = t
   Item Text = Char
   Item Lazy.ByteString = Char
   Item Stream = Char

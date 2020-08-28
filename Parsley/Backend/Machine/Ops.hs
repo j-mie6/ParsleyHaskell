@@ -18,7 +18,7 @@ import Data.Void                            (Void)
 import Debug.Trace                          (trace)
 import Parsley.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
-import Parsley.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
+import Parsley.Backend.Machine.InputRep     (OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Parsley.Backend.Machine.Instructions (Access(..))
 import Parsley.Backend.Machine.LetBindings  (Regs(..))
 import Parsley.Backend.Machine.State        (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, SubRoutine, OpStack(..), Func,
@@ -28,7 +28,7 @@ import System.Console.Pretty                (color, Color(Green, White, Red, Blu
 
 #define inputInstances(derivation) \
 derivation(Int)                    \
-derivation((OffWith [Char]))       \
+derivation((OffWith [t]))          \
 derivation((OffWith Stream))       \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
@@ -154,7 +154,7 @@ instance JoinBuilder _o where                                                   
 {                                                                               \
   setupJoinPoint φ (Machine k) mx =                                             \
     liftM2 (\mk ctx γ -> [||                                                    \
-      let join x !(o# :: Unboxed _o) =                                          \
+      let join x !o# =                                                          \
         $$(mk (γ {operands = Op [||x||] (operands γ), input = [||$$box o#||]})) \
       in $$(run mx γ (insertΦ φ [||join||] ctx))                                \
     ||]) (local voidCoins k) ask;                                               \

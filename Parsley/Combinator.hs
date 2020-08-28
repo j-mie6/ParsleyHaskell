@@ -26,22 +26,22 @@ string = tokens
 tokens :: Token t => [t] -> Parser t [t]
 tokens = traverse token
 
-oneOf :: [Char] -> Parser Char Char
-oneOf cs = satisfy (makeQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
+oneOf :: Token t => [t] -> Parser t t
+oneOf cs = satisfy (makeQ (flip elem cs) [||\c -> $$(ofToks cs [||c||])||])
 
-noneOf :: [Char] -> Parser Char Char
-noneOf cs = satisfy (makeQ (not . flip elem cs) [||\c -> not $$(ofChars cs [||c||])||])
+noneOf :: Token t => [t] -> Parser t t
+noneOf cs = satisfy (makeQ (not . flip elem cs) [||\c -> not $$(ofToks cs [||c||])||])
 
-ofChars :: [Char] -> Code Char -> Code Bool
-ofChars = foldr (\c rest qc -> [|| c == $$qc || $$(rest qc) ||]) (const [||False||])
+ofToks :: Token t => [t] -> Code t -> Code Bool
+ofToks = foldr (\c rest qc -> [|| c == $$qc || $$(rest qc) ||]) (const [||False||])
 
 atomic :: Token t => [t] -> Parser t [t]
 atomic = try . tokens
 
-eof :: Parser Int ()
+eof :: Parser t ()
 eof = notFollowedBy item
 
-more :: Parser Int ()
+more :: Parser t ()
 more = lookAhead (void item)
 
 -- Parsing Primitives

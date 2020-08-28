@@ -8,30 +8,30 @@ import Parsley.Core.Identifiers (MVar, ΣVar)
 import Parsley.Core.Defunc      (Defunc)
 
 -- Parser wrapper type
-newtype Parser a = Parser {unParser :: Fix (Combinator :+: ScopeRegister) a}
+newtype Parser t a = Parser {unParser :: Fix (Combinator t :+: ScopeRegister) a}
 
 -- Core datatype
-data Combinator (k :: Type -> Type) (a :: Type) where
-  Pure           :: Defunc a -> Combinator k a
-  Satisfy        :: Defunc (Char -> Bool) -> Combinator k Char
-  (:<*>:)        :: k (a -> b) -> k a -> Combinator k b
-  (:*>:)         :: k a -> k b -> Combinator k b
-  (:<*:)         :: k a -> k b -> Combinator k a
-  (:<|>:)        :: k a -> k a -> Combinator k a
-  Empty          :: Combinator k a
-  Try            :: k a -> Combinator k a
-  LookAhead      :: k a -> Combinator k a
-  Let            :: Bool -> MVar a -> k a -> Combinator k a
-  NotFollowedBy  :: k a -> Combinator k ()
-  Branch         :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Combinator k c
-  Match          :: k a -> [Defunc (a -> Bool)] -> [k b] -> k b -> Combinator k b
-  ChainPre       :: k (a -> a) -> k a -> Combinator k a
-  ChainPost      :: k a -> k (a -> a) -> Combinator k a
-  MakeRegister   :: ΣVar a -> k a -> k b -> Combinator k b
-  GetRegister    :: ΣVar a -> Combinator k a
-  PutRegister    :: ΣVar a -> k a -> Combinator k ()
-  Debug          :: String -> k a -> Combinator k a
-  MetaCombinator :: MetaCombinator -> k a -> Combinator k a
+data Combinator (t :: Type) (k :: Type -> Type) (a :: Type) where
+  Pure           :: Defunc a -> Combinator t k a
+  Satisfy        :: Defunc (t -> Bool) -> Combinator t k t
+  (:<*>:)        :: k (a -> b) -> k a -> Combinator t k b
+  (:*>:)         :: k a -> k b -> Combinator t k b
+  (:<*:)         :: k a -> k b -> Combinator t k a
+  (:<|>:)        :: k a -> k a -> Combinator t k a
+  Empty          :: Combinator t k a
+  Try            :: k a -> Combinator t k a
+  LookAhead      :: k a -> Combinator t k a
+  Let            :: Bool -> MVar a -> k a -> Combinator t k a
+  NotFollowedBy  :: k a -> Combinator t k ()
+  Branch         :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Combinator t k c
+  Match          :: k a -> [Defunc (a -> Bool)] -> [k b] -> k b -> Combinator t k b
+  ChainPre       :: k (a -> a) -> k a -> Combinator t k a
+  ChainPost      :: k a -> k (a -> a) -> Combinator t k a
+  MakeRegister   :: ΣVar a -> k a -> k b -> Combinator t k b
+  GetRegister    :: ΣVar a -> Combinator t k a
+  PutRegister    :: ΣVar a -> k a -> Combinator t k ()
+  Debug          :: String -> k a -> Combinator t k a
+  MetaCombinator :: MetaCombinator -> k a -> Combinator t k a
 
 data ScopeRegister (k :: Type -> Type) (a :: Type) where
   ScopeRegister :: k a -> (forall r. Reg r a -> k b) -> ScopeRegister k b
@@ -43,7 +43,7 @@ data MetaCombinator where
   RequiresCut :: MetaCombinator
 
 -- Instances
-instance IFunctor Combinator where
+instance IFunctor (Combinator t) where
   imap _ (Pure x)             = Pure x
   imap _ (Satisfy p)          = Satisfy p
   imap f (p :<*>: q)          = f p :<*>: f q
@@ -65,7 +65,7 @@ instance IFunctor Combinator where
   imap f (Debug name p)       = Debug name (f p)
   imap f (MetaCombinator m p) = MetaCombinator m (f p)
 
-instance Show (Fix Combinator a) where
+instance Show (Fix (Combinator t) a) where
   show = ($ "") . getConst1 . cata (Const1 . alg)
     where
       alg (Pure x)                                  = "(pure " . shows x . ")"
@@ -97,7 +97,7 @@ instance Show MetaCombinator where
   show Cut = "coins after"
   show RequiresCut = "requires cut"
 
-traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)
+traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator t f a -> m (Combinator t k a)
 traverseCombinator expose (pf :<*>: px)        = do pf' <- expose pf; px' <- expose px; pure (pf' :<*>: px')
 traverseCombinator expose (p :*>: q)           = do p' <- expose p; q' <- expose q; pure (p' :*>: q')
 traverseCombinator expose (p :<*: q)           = do p' <- expose p; q' <- expose q; pure (p' :<*: q')

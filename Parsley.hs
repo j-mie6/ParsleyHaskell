@@ -24,8 +24,8 @@ import Parsley.Fold            as Fold        (many, some)
 import Parsley.Selective       as Selective
 import Parsley.Core.Primitives as Primitives  (debug)
 
-runParser :: Input input => Parser a -> Code (input -> Maybe a)
+runParser :: Input input => Parser Char a -> Code (input -> Maybe a)
 runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p codeGen))||]
 
-parseFromFile :: Parser a -> Code (FilePath -> IO (Maybe a))
+parseFromFile :: Parser Char a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

@@ -26,7 +26,7 @@ type Graph = Array IMVar [IMVar]
 -- TODO This actually should be in the backend... dead bindings and the topological ordering can be computed here
 --      but the register stuff should come after register optimisation and instruction peephole
 
-dependencyAnalysis :: Fix Combinator a -> DMap MVar (Fix Combinator) -> (DMap MVar (Fix Combinator), Map IMVar (Set IΣVar), IΣVar)
+dependencyAnalysis :: Fix (Combinator t) a -> DMap MVar (Fix (Combinator t)) -> (DMap MVar (Fix (Combinator t)), Map IMVar (Set IΣVar), IΣVar)
 dependencyAnalysis toplevel μs =
   let -- Step 1: find roots of the toplevel
       roots = directDependencies Nothing toplevel
@@ -112,14 +112,14 @@ data DependencyMaps = DependencyMaps {
   definedRegisters      :: Map IMVar (Set IΣVar)
 }
 
-buildDependencyMaps :: DMap MVar (Fix Combinator) -> DependencyMaps
+buildDependencyMaps :: DMap MVar (Fix (Combinator t)) -> DependencyMaps
 buildDependencyMaps = DMap.foldrWithKey (\(MVar v) p deps@DependencyMaps{..} ->
   let (frs, defs, ds) = freeRegistersAndDependencies v p
   in deps { usedRegisters = Map.insert v frs usedRegisters
           , immediateDependencies = Map.insert v ds immediateDependencies
           , definedRegisters = Map.insert v defs definedRegisters}) (DependencyMaps Map.empty Map.empty Map.empty)
 
-freeRegistersAndDependencies :: IMVar -> Fix Combinator a -> (Set IΣVar,  Set IΣVar, Set IMVar)
+freeRegistersAndDependencies :: IMVar -> Fix (Combinator t) a -> (Set IΣVar,  Set IΣVar, Set IMVar)
 freeRegistersAndDependencies v p =
   let frsm :*: depsm = zipper freeRegistersAlg (dependenciesAlg (Just v)) p
       (frs, defs) = runFreeRegisters frsm
@@ -131,10 +131,10 @@ newtype Dependencies a = Dependencies { doDependencies :: Writer (Set IMVar) () 
 runDependencies :: Dependencies a -> Set IMVar
 runDependencies = execWriter . doDependencies
 
-directDependencies :: Maybe IMVar -> Fix Combinator a -> Set IMVar
+directDependencies :: Maybe IMVar -> Fix (Combinator t) a -> Set IMVar
 directDependencies mv = runDependencies . cata (dependenciesAlg mv)
 
-dependenciesAlg :: Maybe IMVar -> Combinator Dependencies a -> Dependencies a
+dependenciesAlg :: Maybe IMVar -> Combinator t Dependencies a -> Dependencies a
 dependenciesAlg (Just v) (Let _ μ@(MVar u) _) = Dependencies $ do unless (u == v) (dependsOn μ)
 dependenciesAlg Nothing  (Let _ μ _)          = Dependencies $ do dependsOn μ
 dependenciesAlg _ p                           = Dependencies $ do traverseCombinator (fmap Const1 . doDependencies) p; return ()
@@ -147,7 +147,7 @@ newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: Writer (Set IΣVar,
 runFreeRegisters :: FreeRegisters a -> (Set IΣVar, Set IΣVar)
 runFreeRegisters = execWriter . doFreeRegisters
 
-freeRegistersAlg :: Combinator FreeRegisters a -> FreeRegisters a
+freeRegistersAlg :: Combinator t FreeRegisters a -> FreeRegisters a
 freeRegistersAlg (GetRegister σ)      = FreeRegisters $ do uses σ
 freeRegistersAlg (PutRegister σ p)    = FreeRegisters $ do uses σ; doFreeRegisters p
 freeRegistersAlg (MakeRegister σ p q) = FreeRegisters $ do defs σ; doFreeRegisters p; doFreeRegisters q

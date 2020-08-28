@@ -20,7 +20,7 @@ data AnalysisFlags = AnalysisFlags {
 emptyFlags :: AnalysisFlags
 emptyFlags = AnalysisFlags False
 
-analyse :: AnalysisFlags -> Fix Combinator a -> Fix Combinator a
+analyse :: AnalysisFlags -> Fix (Combinator t) a -> Fix (Combinator t) a
 analyse flags = cutAnalysis (letBound flags) {-. terminationAnalysis-}
 
 data Compliance (k :: Type) = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
@@ -37,7 +37,7 @@ caseCompliance FullPure c              = coerce c
 caseCompliance c1 c2 | c1 == coerce c2 = coerce c1
 caseCompliance _ _                     = NonComp
 
-compliance :: Combinator Compliance a -> Compliance a
+compliance :: Combinator t Compliance a -> Compliance a
 compliance (Pure _)                 = FullPure
 compliance (Satisfy _)              = NonComp
 compliance Empty                    = FullPure
@@ -62,12 +62,12 @@ compliance (GetRegister _)          = FullPure
 compliance (PutRegister _ c)        = coerce c
 compliance (MetaCombinator _ c)     = c
 
-newtype CutAnalysis a = CutAnalysis {doCut :: Bool -> (Fix Combinator a, Bool)}
+data CutAnalysis t a = CutAnalysis {doCut :: Bool -> (Fix (Combinator t) a, Bool)}
 
 biliftA2 :: (a -> b -> c) -> (x -> y -> z) -> (a, x) -> (b, y) -> (c, z)
 biliftA2 f g (x1, y1) (x2, y2) = (f x1 x2, g y1 y2)
 
-cutAnalysis :: Bool -> Fix Combinator a -> Fix Combinator a
+cutAnalysis :: Bool -> Fix (Combinator t) a -> Fix (Combinator t) a
 cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . alg) compliance
   where
     mkCut True = In . MetaCombinator Cut
@@ -75,16 +75,16 @@ cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . alg) com
 
     requiresCut = In . MetaCombinator RequiresCut
 
-    seqAlg :: (Fix Combinator a -> Fix Combinator b -> Combinator (Fix Combinator) c) -> Bool -> CutAnalysis a -> CutAnalysis b -> (Fix Combinator c, Bool)
+    seqAlg :: (Fix (Combinator t) a -> Fix (Combinator t) b -> Combinator t (Fix (Combinator t)) c) -> Bool -> CutAnalysis t a -> CutAnalysis t b -> (Fix (Combinator t) c, Bool)
     seqAlg con cut l r =
       let (l', handled) = doCut l cut
           (r', handled') = doCut r (cut && not handled)
       in (In (con l' r'), handled || handled')
 
-    rewrap :: (Fix Combinator a -> Combinator (Fix Combinator) b) -> Bool -> CutAnalysis a -> (Fix Combinator b, Bool)
+    rewrap :: (Fix (Combinator t) a -> Combinator t (Fix (Combinator t)) b) -> Bool -> CutAnalysis t a -> (Fix (Combinator t) b, Bool)
     rewrap con cut p = let (p', handled) = doCut p cut in (In (con p'), handled)
 
-    alg :: Combinator (CutAnalysis :*: Compliance) a -> Bool -> (Fix Combinator a, Bool)
+    alg :: Combinator t (CutAnalysis t :*: Compliance) a -> Bool -> (Fix (Combinator t) a, Bool)
     alg (Pure x) _ = (In (Pure x), False)
     alg (Satisfy f) cut = (mkCut cut (In (Satisfy f)), True)
     alg Empty _ = (In Empty, False)
@@ -176,7 +176,7 @@ branching (Prop Some f _) ps = Prop (foldr (|||) Some (map success ps)) f False
 
 --data InferredTerm = Loops | Safe | Undecidable
 newtype Termination a = Termination {runTerm :: ReaderT (Set IMVar) (State (Map IMVar Prop)) Prop}
-terminationAnalysis :: Fix Combinator a -> Fix Combinator a
+terminationAnalysis :: Fix (Combinator t) a -> Fix (Combinator t) a
 terminationAnalysis p = if not (looping (evalState (runReaderT (runTerm (cata (Termination . alg) p)) Set.empty) Map.empty)) then p
                         else error "Parser will loop indefinitely: either it is left-recursive or iterates over pure computations"
   where

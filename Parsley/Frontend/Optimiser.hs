@@ -10,14 +10,14 @@ import Parsley.Common             (Fix(In), code, Quapplicative(..))
 import Parsley.Core.CombinatorAST (Combinator(..))
 import Parsley.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H, pattern FLIP_CONST)
 
-pattern (:<$>:) :: Defunc (a -> b) -> Fix Combinator a -> Combinator (Fix Combinator) b
+pattern (:<$>:) :: Defunc (a -> b) -> Fix (Combinator t) a -> Combinator t (Fix (Combinator t)) b
 pattern f :<$>: p = In (Pure f) :<*>: p
-pattern (:$>:) :: Fix Combinator a -> Defunc b -> Combinator (Fix Combinator) b
+pattern (:$>:) :: Fix (Combinator t) a -> Defunc b -> Combinator t (Fix (Combinator t)) b
 pattern p :$>: x = p :*>: In (Pure x)
-pattern (:<$:) :: Defunc a -> Fix Combinator b -> Combinator (Fix Combinator) a
+pattern (:<$:) :: Defunc a -> Fix (Combinator t) b -> Combinator t (Fix (Combinator t)) a
 pattern x :<$: p = In (Pure x) :<*: p
 
-optimise :: Combinator (Fix Combinator) a -> Fix Combinator a
+optimise :: Combinator t (Fix (Combinator t)) a -> Fix (Combinator t) a
 -- DESTRUCTIVE OPTIMISATION
 -- Right Absorption Law: empty <*> u                    = empty
 optimise (In Empty :<*>: _)                             = In Empty
@@ -172,7 +172,7 @@ optimise p                                                           = In p
 
 -- try (lookAhead p *> p *> lookAhead q) = lookAhead (p *> q) <* try p
 
-{-(>?>) :: Fix Combinator a -> Defunc (a -> Bool) -> Fix Combinator a
+{-(>?>) :: Fix (Combinator t) a -> Defunc (a -> Bool) -> Fix (Combinator t) a
 p >?> f = In (Branch (In (makeQ g qg :<$>: p)) (In Empty) (In (Pure ID)))
   where
     g x = if _val f x then Right x else Left ()

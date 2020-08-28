@@ -12,23 +12,23 @@ import Parsley.Core         (Parser, Defunc(UNIT, EMPTY), ParserOps)
 import Parsley.Core.Primitives as Primitives ((<|>), empty)
 
 infixl 3 <+>
-(<+>) :: Parser a -> Parser b -> Parser (Either a b)
+(<+>) :: Parser t a -> Parser t b -> Parser t (Either a b)
 p <+> q = code Left <$> p <|> code Right <$> q
 
-optionally :: ParserOps rep => Parser a -> rep b -> Parser b
+optionally :: ParserOps rep => Parser t a -> rep b -> Parser t b
 optionally p x = p $> x <|> pure x
 
-optional :: Parser a -> Parser ()
+optional :: Parser t a -> Parser t ()
 optional = flip optionally UNIT
 
-option :: ParserOps rep => rep a -> Parser a -> Parser a
+option :: ParserOps rep => rep a -> Parser t a -> Parser t a
 option x p = p <|> pure x
 
-choice :: [Parser a] -> Parser a
+choice :: [Parser t a] -> Parser t a
 choice = foldr (<|>) empty
 
-maybeP :: Parser a -> Parser (Maybe a)
+maybeP :: Parser t a -> Parser t (Maybe a)
 maybeP p = option (makeQ Nothing [||Nothing||]) (code Just <$> p)
 
-manyTill :: Parser a -> Parser b -> Parser [a]
+manyTill :: Parser t a -> Parser t b -> Parser t [a]
 manyTill p end = let go = end $> EMPTY <|> p <:> go in go

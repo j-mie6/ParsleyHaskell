@@ -38,7 +38,7 @@ import qualified Data.HashSet        as HashSet (member, insert, empty)
 import qualified Data.Map            as Map     ((!))
 import qualified Data.Set            as Set     (empty)
 
-compile :: forall compiled a. Parser a -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
+compile :: forall compiled t a. Parser t a -> (forall x. Maybe (MVar x) -> Fix (Combinator t) x -> Set IΣVar -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
 compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") $ (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
   where
     (p', μs, maxV) = preprocess p
@@ -47,20 +47,20 @@ compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.s
     freeRegs :: Maybe (MVar x) -> Set IΣVar
     freeRegs = maybe Set.empty (\(MVar v) -> frs Map.! v)
 
-    codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
+    codeGen' :: Maybe (MVar x) -> Fix (Combinator t) x -> compiled x
     codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = isJust letBound}) p) (freeRegs letBound) (maxV + 1) (maxΣ + 1)
 
-preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
+preprocess :: Fix (Combinator t :+: ScopeRegister) a -> (Fix (Combinator t) a, DMap MVar (Fix (Combinator t)), IMVar)
 preprocess p =
   let q = tagParser p
       (lets, recs) = findLets q
       (p', μs, maxV) = letInsertion lets recs q
   in (p', μs, maxV)
 
-data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
+data ParserName = forall t a. ParserName (StableName# (Fix (Combinator t :+: ScopeRegister) a))
 data Tag t f (k :: Type -> Type) a = Tag {tag :: t, tagged :: f k a}
 
-tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combinator) a
+tagParser :: Fix (Combinator t :+: ScopeRegister) a -> Fix (Tag ParserName (Combinator t)) a
 tagParser p = cata' tagAlg p
   where
     tagAlg p = In . Tag (makeParserName p) . (id \/ descope)
@@ -74,7 +74,7 @@ data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
 type LetFinderCtx   = HashSet ParserName
 newtype LetFinder a = LetFinder { doLetFinder :: StateT LetFinderState (Reader LetFinderCtx) () }
 
-findLets :: Fix (Tag ParserName Combinator) a -> (HashSet ParserName, HashSet ParserName)
+findLets :: Fix (Tag ParserName (Combinator t)) a -> (HashSet ParserName, HashSet ParserName)
 findLets p = (lets, recs)
   where
     state = LetFinderState HashMap.empty HashSet.empty HashSet.empty
@@ -82,7 +82,7 @@ findLets p = (lets, recs)
     LetFinderState preds recs _ = runReader (execStateT (doLetFinder (cata findLetsAlg p)) state) ctx
     lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
 
-findLetsAlg :: Tag ParserName Combinator LetFinder a -> LetFinder a
+findLetsAlg :: Tag ParserName (Combinator t) LetFinder a -> LetFinder a
 findLetsAlg p = LetFinder $ do
   let name = tag p
   addPred name
@@ -92,19 +92,19 @@ findLetsAlg p = LetFinder $ do
       (do addName name (traverseCombinator (fmap Const1 . doLetFinder) (tagged p))
           doNotProcessAgain name))
 
-newtype LetInserter a =
+newtype LetInserter t a =
   LetInserter {
       doLetInserter :: HFreshT IMVar
                        (State ( HashMap ParserName IMVar
-                              , DMap MVar (Fix Combinator)))
-                       (Fix Combinator a)
+                              , DMap MVar (Fix (Combinator t))))
+                       (Fix (Combinator t) a)
     }
-letInsertion :: HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName Combinator) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
+letInsertion :: HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName (Combinator t)) a -> (Fix (Combinator t) a, DMap MVar (Fix (Combinator t)), IMVar)
 letInsertion lets recs p = (p', μs, μMax)
   where
     m = cata alg p
     ((p', μMax), (_, μs)) = runState (runFreshT (doLetInserter m) 0) (HashMap.empty, DMap.empty)
-    alg :: Tag ParserName Combinator LetInserter a -> LetInserter a
+    alg :: Tag ParserName (Combinator t) (LetInserter t) a -> LetInserter t a
     alg p = LetInserter $ do
       let name = tag p
       let q = tagged p
@@ -121,7 +121,7 @@ letInsertion lets recs p = (p', μs, μMax)
           return $! optimise (Let recu μ q')
       else do doLetInserter (postprocess q)
 
-postprocess :: Combinator LetInserter a -> LetInserter a
+postprocess :: Combinator t (LetInserter t) a -> LetInserter t a
 postprocess = LetInserter . fmap optimise . traverseCombinator doLetInserter
 
 getBefore :: MonadState LetFinderState m => m (HashSet ParserName)
@@ -154,7 +154,7 @@ doNotProcessAgain x = modifyBefore (HashSet.insert x)
 addName :: MonadReader LetFinderCtx m => ParserName -> m b -> m b
 addName x = local (HashSet.insert x)
 
-makeParserName :: Fix (Combinator :+: ScopeRegister) a -> ParserName
+makeParserName :: Fix (Combinator t :+: ScopeRegister) a -> ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time
 makeParserName !p = unsafePerformIO (fmap (\(StableName name) -> ParserName name) (makeStableName p))
 

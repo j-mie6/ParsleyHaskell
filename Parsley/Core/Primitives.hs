@@ -11,9 +11,9 @@ import Parsley.Common.Indexed     (Fix(In), (:+:)(..))
 import Parsley.Common.Utils       (WQ)
 
 class ParserOps rep where
-  pure :: rep a -> Parser a
-  satisfy :: rep (Char -> Bool) -> Parser Char
-  conditional :: [(rep (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+  pure :: rep a -> Parser t a
+  satisfy :: rep (Char -> Bool) -> Parser Char Char
+  conditional :: [(rep (a -> Bool), Parser t b)] -> Parser t a -> Parser t b -> Parser t b
 
 instance ParserOps WQ where
   pure = pure . BLACK
@@ -27,64 +27,64 @@ instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
 
 -- Core smart constructors
 {-# INLINE _pure #-}
-_pure :: Defunc a -> Parser a
+_pure :: Defunc a -> Parser t a
 _pure = Parser . In . L . Pure
 
 infixl 4 <*>
-(<*>) :: Parser (a -> b) -> Parser a -> Parser b
+(<*>) :: Parser t (a -> b) -> Parser t a -> Parser t b
 Parser p <*> Parser q = Parser (In (L (p :<*>: q)))
 
 infixl 4 <*
-(<*) :: Parser a -> Parser b -> Parser a
+(<*) :: Parser t a -> Parser t b -> Parser t a
 Parser p <* Parser q = Parser (In (L (p :<*: q)))
 
 infixl 4 *>
-(*>) :: Parser a -> Parser b -> Parser b
+(*>) :: Parser t a -> Parser t b -> Parser t b
 Parser p *> Parser q = Parser (In (L (p :*>: q)))
 
-empty :: Parser a
+empty :: Parser t a
 empty = Parser (In (L Empty))
 
 infixr 3 <|>
-(<|>) :: Parser a -> Parser a -> Parser a
+(<|>) :: Parser t a -> Parser t a -> Parser t a
 Parser p <|> Parser q = Parser (In (L (p :<|>: q)))
 
 {-# INLINE _satisfy #-}
-_satisfy :: Defunc (Char -> Bool) -> Parser Char
+_satisfy :: Defunc (Char -> Bool) -> Parser Char Char
 _satisfy = Parser . In . L . Satisfy
 
-lookAhead :: Parser a -> Parser a
+lookAhead :: Parser t a -> Parser t a
 lookAhead = Parser . In . L . LookAhead . unParser
 
-notFollowedBy :: Parser a -> Parser ()
+notFollowedBy :: Parser t a -> Parser t ()
 notFollowedBy = Parser . In . L . NotFollowedBy . unParser
 
-try :: Parser a -> Parser a
+try :: Parser t a -> Parser t a
 try = Parser . In . L . Try . unParser
 
 {-# INLINE _conditional #-}
-_conditional :: [(Defunc (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+_conditional :: [(Defunc (a -> Bool), Parser t b)] -> Parser t a -> Parser t b -> Parser t b
 _conditional cs (Parser p) (Parser def) =
   let (fs, qs) = unzip cs
   in Parser (In (L (Match p fs (map unParser qs) def)))
 
-branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
+branch :: Parser t (Either a b) -> Parser t (a -> c) -> Parser t (b -> c) -> Parser t c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (L (Branch c p q)))
 
-chainPre :: Parser (a -> a) -> Parser a -> Parser a
+chainPre :: Parser t (a -> a) -> Parser t a -> Parser t a
 chainPre (Parser op) (Parser p) = Parser (In (L (ChainPre op p)))
 
-chainPost :: Parser a -> Parser (a -> a) -> Parser a
+chainPost :: Parser t a -> Parser t (a -> a) -> Parser t a
 chainPost (Parser p) (Parser op) = Parser (In (L (ChainPost p op)))
 
-newRegister :: Parser a -> (forall r. Reg r a -> Parser b) -> Parser b
+newRegister :: Parser t a -> (forall r. Reg r a -> Parser t b) -> Parser t b
 newRegister (Parser p) f = Parser (In (R (ScopeRegister p (unParser . f))))
 
-get :: Reg r a -> Parser a
+get :: Reg r a -> Parser t a
 get (Reg reg) = Parser (In (L (GetRegister reg)))
 
-put :: Reg r a -> Parser a -> Parser ()
+put :: Reg r a -> Parser t a -> Parser t ()
 put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
 
-debug :: String -> Parser a -> Parser a
+debug :: String -> Parser t a -> Parser t a
 debug name (Parser p) = Parser (In (L (Debug name p)))

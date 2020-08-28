@@ -28,24 +28,24 @@ runCodeGenStack m μ0 φ0 σ0 =
 newtype CodeGen o t a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o t) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o t) xs (Succ n) r a)}
 
-codeGen :: PositionOps o => Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> LetBinding o Char a x
+codeGen :: PositionOps o => Maybe (MVar x) -> Fix (Combinator t) x -> Set IΣVar -> IMVar -> IΣVar -> LetBinding o t a x
 codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (map ΣVar (elems rs)) ++ " => " ++ show m) $ makeLetBinding m rs
   where
     name = maybe "TOP LEVEL" show letBound
     m = finalise (histo alg p)
-    alg :: PositionOps o => Combinator (Cofree Combinator (CodeGen o Char a)) x -> CodeGen o Char a x
+    alg :: PositionOps o => Combinator t (Cofree (Combinator t) (CodeGen o t a)) x -> CodeGen o t a x
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg =
       let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
       in if isJust letBound then m else addCoins (coinsNeeded m) m
 
-pattern (:<$>:) :: Core.Defunc (a -> b) -> k a -> Combinator (Cofree Combinator k) b
+pattern (:<$>:) :: Core.Defunc (a -> b) -> k a -> Combinator t (Cofree (Combinator t) k) b
 pattern f :<$>: p <- (_ :< Pure f) :<*>: (p :< _)
-pattern (:$>:) :: Combinator (Cofree Combinator k) a -> Core.Defunc b -> Combinator (Cofree Combinator k) b
+pattern (:$>:) :: Combinator t (Cofree (Combinator t) k) a -> Core.Defunc b -> Combinator t (Cofree (Combinator t) k) b
 pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
-pattern LiftA2 :: Core.Defunc (a -> b -> c) -> k a -> k b -> Combinator (Cofree Combinator k) c
+pattern LiftA2 :: Core.Defunc (a -> b -> c) -> k a -> k b -> Combinator t (Cofree (Combinator t) k) c
 pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
-pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
+pattern TryOrElse ::  k a -> k a -> Combinator t (Cofree (Combinator t) k) a
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
 rollbackHandler :: Fix4 (Instr o t) (o : xs) (Succ n) r a
@@ -54,7 +54,7 @@ rollbackHandler = In4 (Seek (In4 Empt))
 parsecHandler :: PositionOps o => Fix4 (Instr o t) xs (Succ n) r a -> Fix4 (Instr o t) (o : xs) (Succ n) r a
 parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (If k (In4 Empt))))))
 
-peephole :: PositionOps o => Combinator (Cofree Combinator (CodeGen o t a)) x -> Maybe (CodeGen o t a x)
+peephole :: PositionOps o => Combinator t (Cofree (Combinator t) (CodeGen o t a)) x -> Maybe (CodeGen o t a x)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (USER f) m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (In4 (Lift2 (USER f) m))
@@ -94,7 +94,7 @@ peephole (MetaCombinator Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGe
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
-direct :: PositionOps o => Combinator (CodeGen o Char a) x -> Fix4 (Instr o Char) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o Char) xs (Succ n) r a)
+direct :: PositionOps o => Combinator t (CodeGen o t a) x -> Fix4 (Instr o t) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o t) xs (Succ n) r a)
 direct (Pure x)      m = do return $! In4 (Push (USER x) m)
 direct (Satisfy p)   m = do return $! In4 (Sat (USER p) m)
 direct (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (App m)); runCodeGen pf pxc

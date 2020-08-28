@@ -10,7 +10,7 @@ import Parsley.Common                      (IFunctor4, Fix4(In4), Const4(..), im
 import Parsley.Backend.Machine.Defunc as Machine (Defunc(USER))
 import Parsley.Core.Defunc            as Core    (Defunc(APP, ID), pattern FLIP_H)
 
-data Instr o t (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
+data Instr (o :: Type) (t :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
   Ret       :: Instr o t k '[x] n x a
   Push      :: Machine.Defunc x -> k (x : xs) n r a -> Instr o t k xs n r a
   Pop       :: k xs n r a -> Instr o t k (x : xs) n r a

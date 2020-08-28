@@ -23,7 +23,7 @@ data Asgn = Asgn String Expr deriving Show
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving (Show, Eq)
 deriving instance Lift BrainFuckOp
 
-cinput :: Parser String
+cinput :: Parser Char String
 cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac") --(char 'a' <|> char 'b') *> string "ab"
   where
     --m = match "ab" (lookAhead item) op empty
@@ -33,25 +33,25 @@ cinput = m --try (string "aaa") <|> string "db" --(string "aab" <|> string "aac"
     bf = match ">" item op empty
     op '>' = string ">"
 
-regTest :: Parser Int
+regTest :: Parser Char Int
 regTest = newRegister_ (code 7) (\r -> modify_ r (makeQ (succ @Int) [||succ @Int||]) *> (let g = get r in g *> g))
 
-defuncTest :: Parser (Maybe Int)
+defuncTest :: Parser Char (Maybe Int)
 defuncTest = code Just <$> (code (+) <$> (item $> code 1) <*> (item $> code 8))
 
-manyTest :: Parser [Char]
+manyTest :: Parser Char [Char]
 manyTest = many (string "ab" $> (code 'c'))
 
-nfb :: Parser ()
+nfb :: Parser Char ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")
 
-abc :: Parser ()
+abc :: Parser Char ()
 abc = skipMany (try (string "abc" <|> string "defg"))
 
-skipManyInspect :: Parser ()
+skipManyInspect :: Parser Char ()
 skipManyInspect = skipMany (char 'a')
 
-boom :: Parser ()
+boom :: Parser Char ()
 boom = let foo = newRegister_ UNIT (\r0 ->
             let goo = newRegister_ UNIT (\r1 ->
                   let hoo = get r0 <~> get r1 *> hoo in hoo
@@ -59,7 +59,7 @@ boom = let foo = newRegister_ UNIT (\r0 ->
             in goo) *> pure UNIT
        in foo *> foo
 
-brainfuck :: Parser [BrainFuckOp]
+brainfuck :: Parser Char [BrainFuckOp]
 brainfuck = whitespace *> bf
   where
     whitespace = skipMany (noneOf "<>+-[],.$")
@@ -100,7 +100,7 @@ toInt = toEnum . ord
 toChar :: Int -> Char
 toChar = chr . fromEnum
 
-evalBf :: Parser [BrainFuckOp] -> Parser [Char]
+evalBf :: Parser Char [BrainFuckOp] -> Parser Char [Char]
 evalBf loader =
   -- first step is to place the program into a register and read the delimiter, then set up the state
   newRegister loader $ \instrs ->
@@ -109,10 +109,10 @@ evalBf loader =
            eval instrs tape out
         *> gets_ out (code reverse))
   where
-    delim :: Parser Char
+    delim :: Parser Char Char
     delim = char '$'
 
-    eval :: Reg r1 [BrainFuckOp] -> Reg r2 Tape -> Reg r3 [Char] -> Parser ()
+    eval :: Reg r1 [BrainFuckOp] -> Reg r2 Tape -> Reg r3 [Char] -> Parser Char ()
     eval instrs tape out =
       let go = predicate (code null) (get instrs) unit $
             bind (gets_ instrs (code head)) $ \op ->
@@ -127,7 +127,7 @@ evalBf loader =
               *> go
       in go
       where
-        evalOp' :: BrainFuckOp -> Parser ()
+        evalOp' :: BrainFuckOp -> Parser Char ()
         evalOp' RightPointer = move (code right)
         evalOp' LeftPointer  = move (code left)
         evalOp' Increment    = update (code inc)
@@ -136,13 +136,13 @@ evalBf loader =
         evalOp' Input        = write (code toInt <$> item)
 
         -- Operations
-        move :: Defunc (Tape -> Tape) -> Parser ()
+        move :: Defunc (Tape -> Tape) -> Parser Char ()
         move = modify_ tape
-        print :: Parser Char -> Parser ()
+        print :: Parser Char Char -> Parser Char ()
         print x = modify out (CONS <$> x)
-        read :: Parser Int
+        read :: Parser Char Int
         read = gets_ tape (code readTape)
-        write :: Parser Int -> Parser ()
+        write :: Parser Char Int -> Parser Char ()
         write px = modify tape (code writeTape <$> px)
-        update :: Defunc (Int -> Int) -> Parser ()
+        update :: Defunc (Int -> Int) -> Parser Char ()
         update f = write (f <$> read)

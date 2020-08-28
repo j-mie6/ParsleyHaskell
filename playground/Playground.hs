@@ -77,6 +77,9 @@ abcTalk = $$(Parsley.runParser Parsers.abc)
 regTest :: String -> Maybe Int
 regTest = $$(Parsley.runParser Parsers.regTest)
 
+tokTest :: String -> Maybe Char
+tokTest = $$(Parsley.runParser Parsers.tokTest)
+
 main :: IO ()
 main =
   {-do res <- parseBrainfuck "inputs/helloworld.bf"

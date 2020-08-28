@@ -3,7 +3,7 @@
              TypeFamilyDependencies,
              UnboxedTuples #-}
 module Parsley.Backend.Machine.InputRep (
-    Unboxed, Rep, Token,
+    Unboxed, Rep, Item,
     OffWith(..), offWith, offWithSame, offWithShiftRight,
     OffWithStreamAnd(..),
     UnpackedLazyByteString(..), emptyUnpackedLazyByteString,
@@ -62,15 +62,15 @@ type family Rep input where
   --Rep Lazy.ByteString = OffWith Lazy.ByteString
   Rep Stream = OffWith Stream
 
-type family Token input where
-  Token [t] = t
-  Token (UArray Int t) = t
-  Token Text16 = Char
-  Token ByteString = Char
-  Token CharList = Char
-  Token Text = Char
-  Token Lazy.ByteString = Char
-  Token Stream = Char
+type family Item input where
+  Item [t] = t
+  Item (UArray Int t) = t
+  Item Text16 = Char
+  Item ByteString = Char
+  Item CharList = Char
+  Item Text = Char
+  Item Lazy.ByteString = Char
+  Item Stream = Char
 
 type family RepKind rep where
   RepKind Int = IntRep

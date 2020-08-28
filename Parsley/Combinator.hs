@@ -41,7 +41,7 @@ more = lookAhead (void item)
 char :: Char -> Parser Char Char
 char c = satisfy (EQ_H (CHAR c)) $> CHAR c
 
-item :: Parser Char Char
+item :: Parser t t
 item = satisfy (APP_H CONST (code True))
 
 -- Composite Combinators

@@ -1,3 +1,5 @@
+{-# LANGUAGE UndecidableInstances #-}
+{-# GHC_OPTIONS Wno-redundant-constraints #-}
 module Parsley (
     module Parsley,
     module Core,
@@ -12,8 +14,9 @@ module Parsley (
 
 import Prelude hiding   (readFile)
 import Data.Text.IO     (readFile)
-import Parsley.Backend  (codeGen, Input, Token, eval, prepare)
+import Parsley.Backend  (codeGen, Input, Item, eval, prepare)
 import Parsley.Frontend (compile)
+import GHC.TypeLits     (TypeError, ErrorMessage(Text))
 
 import Parsley.Alternative     as Alternative
 import Parsley.Applicative     as Applicative
@@ -24,7 +27,12 @@ import Parsley.Fold            as Fold        (many, some)
 import Parsley.Selective       as Selective
 import Parsley.Core.Primitives as Primitives  (debug)
 
-runParser :: (Input input, Token input ~ Char) => Parser Char a -> Code (input -> Maybe a)
+class Token t
+
+instance Token Char
+instance {-# INCOHERENT #-} TypeError (Text "Token types must have a `Token` instance and must not be polymorphic") => Token t
+
+runParser :: (Input input, Token (Item input)) => Parser (Item input) a -> Code (input -> Maybe a)
 runParser p = [||\input -> $$(eval (prepare [||input||]) (compile p codeGen))||]
 
 parseFromFile :: Parser Char a -> Code (FilePath -> IO (Maybe a))

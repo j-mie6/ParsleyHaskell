@@ -76,7 +76,7 @@ executable benchmarks
 executable playground
   build-depends:       base >=4.10 && <5,
                        parsley,
-                       dump-core,
+                       --dump-core,
                        lift-plugin,
                        template-haskell,
                        text,
@@ -87,8 +87,8 @@ executable playground
   hs-source-dirs:      ./playground
   main-is:             Playground.hs
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=LiftPlugin -fno-spec-constr -fplugin=DumpCore -fforce-recomp
-  ---dverbose-core2core -drule-check =defunctionalised
+  ghc-options:         -rtsopts -fplugin=LiftPlugin -fno-spec-constr
+  --fplugin=DumpCore -fforce-recomp
 
 library
   -- Modules exported by the library.

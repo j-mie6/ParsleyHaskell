@@ -38,7 +38,7 @@ data InputDependant rep tok = InputDependant {-next-} (rep -> (# tok, rep #))
 
 {- Typeclasses -}
 class InputPrep input where
-  prepare :: Code input -> Code (InputDependant (Rep input) (Token input))
+  prepare :: Code input -> Code (InputDependant (Rep input) (Item input))
 
 class PositionOps rep where
   same :: Code (rep -> rep -> Bool)

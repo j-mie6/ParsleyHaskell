@@ -48,6 +48,10 @@ nfb = notFollowedBy (char 'a') <|> void (string "ab")
 abc :: Parser Char ()
 abc = skipMany (try (string "abc" <|> string "defg"))
 
+instance Token Int
+tokTest :: Parser t t
+tokTest = item
+
 skipManyInspect :: Parser Char ()
 skipManyInspect = skipMany (char 'a')
 

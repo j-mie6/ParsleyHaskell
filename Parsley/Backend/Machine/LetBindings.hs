@@ -15,11 +15,11 @@ import Parsley.Backend.Machine.Instructions (Instr)
 import Parsley.Common                       (Fix4, One)
 import Unsafe.Coerce                        (unsafeCoerce)
 
-type Binding o a x = Fix4 (Instr o) '[] One x a
-data LetBinding o a x = forall rs. LetBinding (Binding o a x) (Regs rs)
-deriving instance Show (LetBinding o a x)
+type Binding o t a x = Fix4 (Instr o t) '[] One x a
+data LetBinding o t a x = forall rs. LetBinding (Binding o t a x) (Regs rs)
+deriving instance Show (LetBinding o t a x)
 
-makeLetBinding :: Binding o a x -> Set IΣVar -> LetBinding o a x
+makeLetBinding :: Binding o t a x -> Set IΣVar -> LetBinding o t a x
 makeLetBinding m rs = LetBinding m (unsafeMakeRegs rs)
 
 data Regs (rs :: [Type]) where

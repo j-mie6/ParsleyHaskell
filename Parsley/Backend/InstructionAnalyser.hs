@@ -8,7 +8,7 @@ import Parsley.Backend.Machine (Instr(..), MetaInstr(..))
 import Parsley.Common.Indexed  (cata4, Fix4, Const4(..))
 import Parsley.Common.Vec      (Vec(..), Nat(..), SNat(..), SingNat(..), zipWithVec, replicateVec)
 
-coinsNeeded :: Fix4 (Instr o) xs n r a -> Int
+coinsNeeded :: Fix4 (Instr o t) xs n r a -> Int
 coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
   where
     algCatch :: (Int, Bool) -> (Int, Bool) -> (Int, Bool)
@@ -16,7 +16,7 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
     algCatch (_, True) k = k
     algCatch (k1, _) (k2, _) = (min k1 k2, False)
 
-    alg :: Instr o (Const4 (Int, Bool)) xs n r a -> (Int, Bool)
+    alg :: Instr o t (Const4 (Int, Bool)) xs n r a -> (Int, Bool)
     alg Ret                                    = (0, False)
     alg (Push _ (Const4 k))                    = (fst k, False)
     alg (Pop k)                                = getConst4 k
@@ -89,13 +89,13 @@ type family Length (xs :: [Type]) :: Nat where
 
 newtype RelevancyStack xs (n :: Nat) r a = RelevancyStack { getStack :: SNat (Length xs) -> Vec (Length xs) Bool }
 
-relevancy :: SingNat (Length xs) => Fix4 (Instr o) xs n r a -> Vec (Length xs) Bool
+relevancy :: SingNat (Length xs) => Fix4 (Instr o t) xs n r a -> Vec (Length xs) Bool
 relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
   where
     zipRelevancy = zipWithVec (||)
 
     -- This algorithm is over-approximating: join and ret aren't _always_ relevant
-    alg :: Instr o RelevancyStack xs n r a -> SNat (Length xs) -> Vec (Length xs) Bool
+    alg :: Instr o t RelevancyStack xs n r a -> SNat (Length xs) -> Vec (Length xs) Bool
     alg Ret                _         = VCons True VNil
     alg (Push _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
     alg (Pop k)            (SSucc n) = VCons False (getStack k n)

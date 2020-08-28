@@ -6,7 +6,7 @@ import Parsley.Backend.Machine
 import Parsley.Common.Indexed
 
 -- We'll come back here later ;)
-optimise :: Instr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a
+optimise :: Instr o t (Fix4 (Instr o t)) xs n r a -> Fix4 (Instr o t) xs n r a
 optimise (Push _ (In4 (Pop m))) = m
 optimise (Get _ _ (In4 (Pop m))) = m
 optimise (Dup (In4 (Pop m))) = m

@@ -59,24 +59,24 @@ returnST = return @(ST s)
 
 {- Register Operations -}
 newΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
-newΣ σ Soft x k ctx = dup x $ \dupx -> k $! insertNewΣ σ Nothing dupx ctx
+newΣ σ Soft x k ctx = dup x $ \dupx -> k (insertNewΣ σ Nothing dupx ctx)
 newΣ σ Hard x k ctx = dup x $ \dupx -> [||
     do ref <- newSTRef $$dupx
-       $$(k $! insertNewΣ σ (Just [||ref||]) dupx ctx)
+       $$(k (insertNewΣ σ (Just [||ref||]) dupx ctx))
   ||]
 
 writeΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
-writeΣ σ Soft x k ctx = dup x $ \dupx -> k $! cacheΣ σ dupx ctx
+writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$dupx
-       $$(k $! cacheΣ σ dupx ctx)
+       $$(k (cacheΣ σ dupx ctx))
   ||]
 
 readΣ :: ΣVar x -> Access -> (Code x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
-readΣ σ Soft k ctx = (k $! cachedΣ σ ctx) $! ctx
+readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
-       $$(k [||x||] $! cacheΣ σ [||x||] ctx)
+       $$(k [||x||] (cacheΣ σ [||x||] ctx))
   ||]
 
 {- Handler Operations -}

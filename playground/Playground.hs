@@ -60,16 +60,19 @@ manyTest :: String -> Maybe String
 manyTest = const Nothing -- $$(Parsley.runParser Parsers.manyTest)
 
 skipManyInspect :: String -> Maybe ()
-skipManyInspect = $$(Parsley.runParser Parsers.skipManyInspect)
+skipManyInspect = const Nothing -- $$(Parsley.runParser Parsers.skipManyInspect)
 
 evalBf' :: String -> Maybe [Char]
-evalBf' = $$(Parsley.runParser (Parsers.evalBf Parsers.brainfuck))
+evalBf' = const Nothing -- $$(Parsley.runParser (Parsers.evalBf Parsers.brainfuck))
 
 boom :: String -> Maybe ()
-boom = $$(Parsley.runParser Parsers.boom)
+boom = const Nothing -- $$(Parsley.runParser Parsers.boom)
 
 --nfb :: String -> Maybe ()
 --nfb = $$(Parsley.runParser Parsers.nfb)
+
+abcTalk :: String -> Maybe ()
+abcTalk = $$(Parsley.runParser Parsers.abc)
 
 regTest :: String -> Maybe Int
 regTest = $$(Parsley.runParser Parsers.regTest)

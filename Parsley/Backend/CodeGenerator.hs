@@ -25,15 +25,15 @@ runCodeGenStack m μ0 φ0 σ0 =
    flip evalFreshT μ0 .
    flip evalFreshT φ0) m
 
-newtype CodeGen o a x =
-  CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
+newtype CodeGen o t a x =
+  CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o t) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o t) xs (Succ n) r a)}
 
-codeGen :: PositionOps o => Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> LetBinding o a x
+codeGen :: PositionOps o => Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> LetBinding o Char a x
 codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (map ΣVar (elems rs)) ++ " => " ++ show m) $ makeLetBinding m rs
   where
     name = maybe "TOP LEVEL" show letBound
     m = finalise (histo alg p)
-    alg :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
+    alg :: PositionOps o => Combinator (Cofree Combinator (CodeGen o Char a)) x -> CodeGen o Char a x
     alg = peephole |> (\x -> CodeGen (direct (imap extract x)))
     finalise cg =
       let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
@@ -48,13 +48,13 @@ pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
 pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
-rollbackHandler :: Fix4 (Instr o) (o : xs) (Succ n) r a
+rollbackHandler :: Fix4 (Instr o t) (o : xs) (Succ n) r a
 rollbackHandler = In4 (Seek (In4 Empt))
 
-parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
+parsecHandler :: PositionOps o => Fix4 (Instr o t) xs (Succ n) r a -> Fix4 (Instr o t) (o : xs) (Succ n) r a
 parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (If k (In4 Empt))))))
 
-peephole :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
+peephole :: PositionOps o => Combinator (Cofree Combinator (CodeGen o t a)) x -> Maybe (CodeGen o t a x)
 peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (USER f) m))
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (In4 (Lift2 (USER f) m))
@@ -94,7 +94,7 @@ peephole (MetaCombinator Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGe
 -- TODO: One more for fmap try
 peephole _ = Nothing
 
-direct :: PositionOps o => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
+direct :: PositionOps o => Combinator (CodeGen o Char a) x -> Fix4 (Instr o Char) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o Char) xs (Succ n) r a)
 direct (Pure x)      m = do return $! In4 (Push (USER x) m)
 direct (Satisfy p)   m = do return $! In4 (Sat (USER p) m)
 direct (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (App m)); runCodeGen pf pxc
@@ -154,13 +154,13 @@ direct (PutRegister σ p)      m = do runCodeGen p (In4 (_Put σ (In4 (Push (USE
 direct (Debug name p)         m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 direct (MetaCombinator Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
 
-tailCallOptimise :: MVar x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+tailCallOptimise :: MVar x -> Fix4 (Instr o t) (x : xs) (Succ n) r a -> Fix4 (Instr o t) xs (Succ n) r a
 tailCallOptimise μ (In4 Ret) = In4 (Jump μ)
 tailCallOptimise μ k         = In4 (Call μ k)
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret
 -- However, I'm not yet sure about the interactions with try yet...
-deadCommitOptimisation :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs (Succ n) r a
+deadCommitOptimisation :: Fix4 (Instr o t) xs n r a -> Fix4 (Instr o t) xs (Succ n) r a
 deadCommitOptimisation (In4 Ret) = In4 Ret
 deadCommitOptimisation m         = In4 (Commit m)
 
@@ -177,7 +177,7 @@ freshM = mapVFreshT newScope
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
-makeΦ :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
+makeΦ :: Fix4 (Instr o t) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o t) xs (Succ n) r a -> Fix4 (Instr o t) xs (Succ n) r a, Fix4 (Instr o t) (x : xs) (Succ n) r a)
 makeΦ m | elidable m = return $! (id, m)
   where
     -- This is double-φ optimisation:   If a φ-node points directly to another φ-node, then it can be elided

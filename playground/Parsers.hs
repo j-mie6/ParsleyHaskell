@@ -45,6 +45,9 @@ manyTest = many (string "ab" $> (code 'c'))
 nfb :: Parser ()
 nfb = notFollowedBy (char 'a') <|> void (string "ab")
 
+abc :: Parser ()
+abc = skipMany (try (string "abc" <|> string "defg"))
+
 skipManyInspect :: Parser ()
 skipManyInspect = skipMany (char 'a')
 

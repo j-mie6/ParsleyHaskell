@@ -13,9 +13,9 @@ import Parsley.Common.Utils                (Code)
 
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
 
-letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o a)
+letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o t a)
                        -> {-nameof-}     (forall x. key x -> String)
-                       -> {-genBinding-} (forall x rs. Binding o a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
+                       -> {-genBinding-} (forall x rs. Binding o t a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
                        -> {-expr-}       (DMap key (QSubRoutine s o a) -> Code b)
                        -> Code b
 letRec bindings nameOf genBinding expr = unsafeTExpCoerce $

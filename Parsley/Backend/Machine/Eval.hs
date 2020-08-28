@@ -22,7 +22,7 @@ import Parsley.Backend.Machine.State
 import Parsley.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                 (color, Color(Green))
 
-eval :: forall o a. Ops o => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
+eval :: forall o a. Ops o => Code (InputDependant o) -> (LetBinding o Char a a, DMap MVar (LetBinding o Char a)) -> Code (Maybe a)
 eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
@@ -35,10 +35,10 @@ eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
     nameLet :: MVar x -> String
     nameLet (MVar i) = "sub" ++ show i
 
-readyMachine :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
+readyMachine :: (?ops :: InputOps o, Ops o) => Fix4 (Instr o Char) xs n r a -> Machine s o xs n r a
 readyMachine = cata4 (Machine . alg)
   where
-    alg :: (?ops :: InputOps o, Ops o) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
+    alg :: (?ops :: InputOps o, Ops o) => Instr o Char (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = evalRet
     alg (Call μ k)          = evalCall μ k
     alg (Jump μ)            = evalJump μ
@@ -93,7 +93,7 @@ evalSat p (Machine k) = do
   where
     maybeEmitCheck Nothing mk γ = sat (genDefunc p) mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc p) mk [||bad||]) [||bad||] γ)||]
+      [|| let !bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc p) mk [||bad||]) [||bad||] γ)||]
 
 evalEmpt :: (BoxOps o, HandlerOps o) => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise

@@ -10,32 +10,32 @@ import Parsley.Common                      (IFunctor4, Fix4(In4), Const4(..), im
 import Parsley.Backend.Machine.Defunc as Machine (Defunc(USER))
 import Parsley.Core.Defunc            as Core    (Defunc(APP, ID), pattern FLIP_H)
 
-data Instr o (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
-  Ret       :: Instr o k '[x] n x a
-  Push      :: Machine.Defunc x -> k (x : xs) n r a -> Instr o k xs n r a
-  Pop       :: k xs n r a -> Instr o k (x : xs) n r a
-  Lift2     :: Machine.Defunc (x -> y -> z) -> k (z : xs) n r a -> Instr o k (y : x : xs) n r a
-  Sat       :: Machine.Defunc (Char -> Bool) -> k (Char : xs) (Succ n) r a -> Instr o k xs (Succ n) r a
-  Call      :: MVar x -> k (x : xs) (Succ n) r a -> Instr o k xs (Succ n) r a
-  Jump      :: MVar x -> Instr o k '[] (Succ n) x a
-  Empt      :: Instr o k xs (Succ n) r a
-  Commit    :: k xs n r a -> Instr o k xs (Succ n) r a
-  Catch     :: k xs (Succ n) r a -> k (o : xs) n r a -> Instr o k xs n r a
-  Tell      :: k (o : xs) n r a -> Instr o k xs n r a
-  Seek      :: k xs n r a -> Instr o k (o : xs) n r a
-  Case      :: k (x : xs) n r a -> k (y : xs) n r a -> Instr o k (Either x y : xs) n r a
-  Choices   :: [Machine.Defunc (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr o k (x : xs) n r a
-  Iter      :: MVar Void -> k '[] One Void a -> k (o : xs) n r a -> Instr o k xs n r a
-  Join      :: ΦVar x -> Instr o k (x : xs) n r a
-  MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr o k xs n r a
-  Swap      :: k (x : y : xs) n r a -> Instr o k (y : x : xs) n r a
-  Dup       :: k (x : x : xs) n r a -> Instr o k (x : xs) n r a
-  Make      :: ΣVar x -> Access -> k xs n r a -> Instr o k (x : xs) n r a
-  Get       :: ΣVar x -> Access -> k (x : xs) n r a -> Instr o k xs n r a
-  Put       :: ΣVar x -> Access -> k xs n r a -> Instr o k (x : xs) n r a
-  LogEnter  :: String -> k xs (Succ (Succ n)) r a -> Instr o k xs (Succ n) r a
-  LogExit   :: String -> k xs n r a -> Instr o k xs n r a
-  MetaInstr :: MetaInstr n -> k xs n r a -> Instr o k xs n r a
+data Instr o t (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
+  Ret       :: Instr o t k '[x] n x a
+  Push      :: Machine.Defunc x -> k (x : xs) n r a -> Instr o t k xs n r a
+  Pop       :: k xs n r a -> Instr o t k (x : xs) n r a
+  Lift2     :: Machine.Defunc (x -> y -> z) -> k (z : xs) n r a -> Instr o t k (y : x : xs) n r a
+  Sat       :: Machine.Defunc (t -> Bool) -> k (t : xs) (Succ n) r a -> Instr o t k xs (Succ n) r a
+  Call      :: MVar x -> k (x : xs) (Succ n) r a -> Instr o t k xs (Succ n) r a
+  Jump      :: MVar x -> Instr o t k '[] (Succ n) x a
+  Empt      :: Instr o t k xs (Succ n) r a
+  Commit    :: k xs n r a -> Instr o t k xs (Succ n) r a
+  Catch     :: k xs (Succ n) r a -> k (o : xs) n r a -> Instr o t k xs n r a
+  Tell      :: k (o : xs) n r a -> Instr o t k xs n r a
+  Seek      :: k xs n r a -> Instr o t k (o : xs) n r a
+  Case      :: k (x : xs) n r a -> k (y : xs) n r a -> Instr o t k (Either x y : xs) n r a
+  Choices   :: [Machine.Defunc (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr o t k (x : xs) n r a
+  Iter      :: MVar Void -> k '[] One Void a -> k (o : xs) n r a -> Instr o t k xs n r a
+  Join      :: ΦVar x -> Instr o t k (x : xs) n r a
+  MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr o t k xs n r a
+  Swap      :: k (x : y : xs) n r a -> Instr o t k (y : x : xs) n r a
+  Dup       :: k (x : x : xs) n r a -> Instr o t k (x : xs) n r a
+  Make      :: ΣVar x -> Access -> k xs n r a -> Instr o t k (x : xs) n r a
+  Get       :: ΣVar x -> Access -> k (x : xs) n r a -> Instr o t k xs n r a
+  Put       :: ΣVar x -> Access -> k xs n r a -> Instr o t k (x : xs) n r a
+  LogEnter  :: String -> k xs (Succ (Succ n)) r a -> Instr o t k xs (Succ n) r a
+  LogExit   :: String -> k xs n r a -> Instr o t k xs n r a
+  MetaInstr :: MetaInstr n -> k xs n r a -> Instr o t k xs n r a
 
 data Access = Hard | Soft deriving Show
 
@@ -44,40 +44,40 @@ data MetaInstr (n :: Nat) where
   RefundCoins :: Int -> MetaInstr n
   DrainCoins  :: Int -> MetaInstr (Succ n)
 
-mkCoin :: (Int -> MetaInstr n) -> Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
+mkCoin :: (Int -> MetaInstr n) -> Int -> Fix4 (Instr o t) xs n r a -> Fix4 (Instr o t) xs n r a
 mkCoin _    0 = id
 mkCoin meta n = In4 . MetaInstr (meta n)
 
-addCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+addCoins :: Int -> Fix4 (Instr o t) xs (Succ n) r a -> Fix4 (Instr o t) xs (Succ n) r a
 addCoins = mkCoin AddCoins
-refundCoins :: Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
+refundCoins :: Int -> Fix4 (Instr o t) xs n r a -> Fix4 (Instr o t) xs n r a
 refundCoins = mkCoin RefundCoins
-drainCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+drainCoins :: Int -> Fix4 (Instr o t) xs (Succ n) r a -> Fix4 (Instr o t) xs (Succ n) r a
 drainCoins = mkCoin DrainCoins
 
-pattern App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
+pattern App :: Fix4 (Instr o t) (y : xs) n r a -> Instr o t (Fix4 (Instr o t)) (x : (x -> y) : xs) n r a
 pattern App k = Lift2 (USER APP) k
 
-pattern Fmap :: Machine.Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
+pattern Fmap :: Machine.Defunc (x -> y) -> Fix4 (Instr o t) (y : xs) n r a -> Instr o t (Fix4 (Instr o t)) (x : xs) n r a
 pattern Fmap f k = Push f (In4 (Lift2 (USER (FLIP_H APP)) k))
 
-_Modify :: ΣVar x -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) ((x -> x) : xs) n r a
+_Modify :: ΣVar x -> Fix4 (Instr o t) xs n r a -> Instr o t (Fix4 (Instr o t)) ((x -> x) : xs) n r a
 _Modify σ  = _Get σ . In4 . App . In4 . _Put σ
 
-_Make :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+_Make :: ΣVar x -> k xs n r a -> Instr o t k (x : xs) n r a
 _Make σ = Make σ Hard
 
-_Put :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+_Put :: ΣVar x -> k xs n r a -> Instr o t k (x : xs) n r a
 _Put σ = Put σ Hard
 
-_Get :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
+_Get :: ΣVar x -> k (x : xs) n r a -> Instr o t k xs n r a
 _Get σ = Get σ Hard
 
 -- This this is a nice little trick to get this instruction to generate optimised code
-pattern If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) (Bool : xs) n r a
+pattern If :: Fix4 (Instr o t) xs n r a -> Fix4 (Instr o t) xs n r a -> Instr o t (Fix4 (Instr o t)) (Bool : xs) n r a
 pattern If t e = Choices [USER ID] [t] e
 
-instance IFunctor4 (Instr o) where
+instance IFunctor4 (Instr o t) where
   imap4 _ Ret                 = Ret
   imap4 f (Push x k)          = Push x (f k)
   imap4 f (Pop k)             = Pop (f k)
@@ -104,10 +104,10 @@ instance IFunctor4 (Instr o) where
   imap4 f (LogExit name k)    = LogExit name (f k)
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
 
-instance Show (Fix4 (Instr o) xs n r a) where
+instance Show (Fix4 (Instr o t) xs n r a) where
   show = ($ "") . getConst4 . cata4 (Const4 . alg)
     where
-      alg :: forall xs n r a. Instr o (Const4 (String -> String)) xs n r a -> String -> String
+      alg :: forall xs n r a. Instr o t (Const4 (String -> String)) xs n r a -> String -> String
       alg Ret                 = "Ret"
       alg (Call μ k)          = "(Call " . shows μ . " " . getConst4 k . ")"
       alg (Jump μ)            = "(Jump " . shows μ . ")"

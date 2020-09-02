@@ -65,7 +65,7 @@ executable benchmarks
                        mtl,
                        array,
                        containers
-  other-modules:       ParsleyParsers, YodaParsers, ParsecParsers, MegaparsecParsers, AttoparsecParsers, NativeParsers, Happys.Brainfuck, Happys.Javascript, Bisons.Bison, CommonFunctions
+  other-modules:       ParsleyCharParsers, ParsleyTokenParsers, YodaParsers, ParsecParsers, MegaparsecParsers, AttoparsecParsers, NativeParsers, Happys.Brainfuck, Happys.Javascript, Bisons.Bison, CommonFunctions
   other-extensions:    TemplateHaskell
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs

@@ -20,7 +20,7 @@ import Parsley.Frontend (compile)
 import Parsley.Alternative     as Alternative
 import Parsley.Applicative     as Applicative
 import Parsley.Core            as Core
-import Parsley.Combinator      as Combinator  (item, char, string, satisfy, notFollowedBy, lookAhead, try)
+import Parsley.Combinator      as Combinator  (item, char, string, token, tokens, satisfy, notFollowedBy, lookAhead, try)
 import Parsley.Common.Utils    as THUtils     (code, Quapplicative(..), WQ, Code)
 import Parsley.Fold            as Fold        (many, some)
 import Parsley.Selective       as Selective

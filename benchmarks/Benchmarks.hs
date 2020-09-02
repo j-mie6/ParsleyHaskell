@@ -17,7 +17,8 @@ import Control.Monad.Identity (Identity)
 import Data.Text              (Text)
 import Data.ByteString        (ByteString)
 import Parsley                (Text16(..), TokList(..), Stream)
-import qualified ParsleyParsers
+import qualified ParsleyCharParsers
+import qualified ParsleyTokenParsers
 import qualified YodaParsers
 import qualified ParsecParsers
 import qualified MegaparsecParsers
@@ -40,7 +41,7 @@ import qualified Data.ByteString.Char8 (pack)
 import CommonFunctions
 
 brainfuckParsleyF :: FilePath -> IO (Maybe [BrainFuckOp])
-brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyParsers.brainfuck)
+brainfuckParsleyF = $$(Parsley.parseFromFile ParsleyCharParsers.brainfuck)
 
 main :: IO ()
 main = do
@@ -66,7 +67,7 @@ deriving instance Generic Pred
 deriving instance NFData Pred
 
 predbenchP :: String -> Maybe Pred
-predbenchP = $$(Parsley.runParser ParsleyParsers.pred)
+predbenchP = $$(Parsley.runParser ParsleyCharParsers.pred)
 
 predbench :: Benchmark
 predbench = env (return (concat ("f" : replicate 100_000 " && t"), take 500_000 (concat ("f" : replicate 100_000 " && t")))) $ \(~(good, bad)) ->
@@ -86,7 +87,7 @@ iterbench = env (return (concat (replicate 100_000 "ab"), take 199_999 (concat (
 
 -- Regex Wars 2019
 regexP :: ByteString -> Maybe Bool
-regexP = $$(Parsley.runParser ParsleyParsers.regex)
+regexP = $$(Parsley.runParser ParsleyCharParsers.regex)
 
 regex :: Benchmark
 regex = env (return ( Data.ByteString.Char8.pack (concat (replicate 1000 "ab"))
@@ -102,19 +103,19 @@ deriving instance Generic BrainFuckOp
 deriving instance NFData BrainFuckOp
 
 brainfuckParsleyS :: String -> Maybe [BrainFuckOp]
-brainfuckParsleyS = $$(Parsley.runParser ParsleyParsers.brainfuck)
+brainfuckParsleyS = $$(Parsley.runParser ParsleyCharParsers.brainfuck)
 
 brainfuckParsleyT :: Text16 -> Maybe [BrainFuckOp]
-brainfuckParsleyT = $$(Parsley.runParser ParsleyParsers.brainfuck)
+brainfuckParsleyT = $$(Parsley.runParser ParsleyCharParsers.brainfuck)
 
 brainfuckParsleyB :: ByteString -> Maybe [BrainFuckOp]
-brainfuckParsleyB = $$(Parsley.runParser ParsleyParsers.brainfuck)
+brainfuckParsleyB = $$(Parsley.runParser ParsleyCharParsers.brainfuck)
 
 brainfuckParsleySS :: TokList Char -> Maybe [BrainFuckOp]
-brainfuckParsleySS = $$(Parsley.runParser ParsleyParsers.brainfuck)
+brainfuckParsleySS = $$(Parsley.runParser ParsleyCharParsers.brainfuck)
 
 brainfuckParsleyLB :: Data.ByteString.Lazy.ByteString -> Maybe [BrainFuckOp]
-brainfuckParsleyLB = $$(Parsley.runParser ParsleyParsers.brainfuck)
+brainfuckParsleyLB = $$(Parsley.runParser ParsleyCharParsers.brainfuck)
 
 brainfuck :: Benchmark
 brainfuck =
@@ -155,10 +156,13 @@ deriving instance NFData JSCons
 deriving instance NFData JSAtom
 
 jsParsleyT :: Text -> Maybe JSProgram
-jsParsleyT = $$(Parsley.runParser ParsleyParsers.javascript)
+jsParsleyT = $$(Parsley.runParser ParsleyCharParsers.javascript)
 
 jsParsleyS :: String -> Maybe JSProgram
-jsParsleyS = $$(Parsley.runParser ParsleyParsers.javascript)
+jsParsleyS = $$(Parsley.runParser ParsleyCharParsers.javascript)
+
+jsParsleyTok :: String -> Maybe JSProgram
+jsParsleyTok cs = ParsleyTokenParsers.lex cs >>= $$(Parsley.runParser ParsleyTokenParsers.javascript)
 
 javascript :: Benchmark
 javascript =
@@ -167,6 +171,7 @@ javascript =
   in bgroup "Javascript"
        [ jsTest text   "Parsley (Text)"       jsParsleyT
        , jsTest string "Parsley (String)"     jsParsleyS
+       , jsTest string "Parsley (Token)"      jsParsleyTok
        , jsTest text   "Atto"                 (attoParse AttoparsecParsers.javascript)
        , jsTest string "Happy"                (Happys.Javascript.runParser Happys.Javascript.javascript)
        , jsTest string "Parsec (String)"      (parsecParse ParsecParsers.javascript)
@@ -178,7 +183,7 @@ javascript =
 -- Nandlang
 
 nandParsleyB :: ByteString -> Maybe ()
-nandParsleyB = $$(Parsley.runParser ParsleyParsers.nandlang)
+nandParsleyB = $$(Parsley.runParser ParsleyCharParsers.nandlang)
 
 nandlang :: Benchmark
 nandlang =

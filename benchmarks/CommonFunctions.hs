@@ -9,7 +9,6 @@ import Text.Read (readMaybe)
 import Data.Set (fromList, member)
 import Control.Monad.Reader (MonadReader, ask, local)
 import Control.Applicative
-import Parsley (Token, Lift)
 
 data Pred = And Pred Pred | Not Pred | T | F deriving Show
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show

@@ -5,10 +5,11 @@
 module ParsleyTokenParsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
-import Parsley
+import Parsley hiding (when)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
 import CommonFunctions
+import Control.Monad (when)
 import Control.Monad.Reader (ReaderT, runReaderT, MonadReader)
 import Control.Monad.Writer (WriterT, execWriterT, MonadWriter, tell)
 import qualified Control.Applicative as App
@@ -140,8 +141,8 @@ newtype Lexer a = Lexer (ReaderT String (WriterT [JSToken] Maybe) a)
 runLexer :: Lexer () -> String -> Maybe [JSToken]
 runLexer (Lexer p) ts = execWriterT (runReaderT p ts)
 
-lex :: String -> Maybe [JSToken]
-lex cs = runLexer go cs
+lexJavascript :: String -> Maybe [JSToken]
+lexJavascript cs = runLexer go cs
   where
     go :: Lexer ()
-    go = lexer (\tok -> do tell [tok]; go)
+    go = lexer (\tok -> do tell [tok]; when (tok /= Eof) go)

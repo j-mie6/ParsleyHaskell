@@ -47,8 +47,9 @@ main :: IO ()
 main = do
   --input <- readFile "inputs/big.js"
   --print (Happys.Javascript.runParser Happys.Javascript.javascript input)
-  print (iterbenchP "abababababab")
-  print (iterbenchP "abababababa")
+  --print (iterbenchP "abababababab")
+  --print (iterbenchP "abababababa")
+  print (ParsleyTokenParsers.lexJavascript "if true then foo(6, 7) else return x")
   defaultMain [ predbench,iterbench
               , javascript
               , brainfuck
@@ -162,7 +163,7 @@ jsParsleyS :: String -> Maybe JSProgram
 jsParsleyS = $$(Parsley.runParser ParsleyCharParsers.javascript)
 
 jsParsleyTok :: String -> Maybe JSProgram
-jsParsleyTok cs = ParsleyTokenParsers.lex cs >>= $$(Parsley.runParser ParsleyTokenParsers.javascript)
+jsParsleyTok cs = ParsleyTokenParsers.lexJavascript cs >>= $$(Parsley.runParser ParsleyTokenParsers.javascript)
 
 javascript :: Benchmark
 javascript =

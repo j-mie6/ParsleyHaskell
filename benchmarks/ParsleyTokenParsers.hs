@@ -9,7 +9,7 @@ import Parsley hiding (when)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
 import CommonFunctions
-import Control.Monad (when)
+import Control.Monad (when, liftM)
 import Control.Monad.Reader (ReaderT, runReaderT, MonadReader)
 import Control.Monad.Writer (WriterT, execWriterT, MonadWriter, tell)
 import qualified Control.Applicative as App
@@ -135,14 +135,23 @@ javascript = many element <* token Eof
     commaSep1 :: Parser JSToken a -> Parser JSToken [a]
     commaSep1 p = sepBy1 p comma
 
-newtype Lexer a = Lexer (ReaderT String (WriterT [JSToken] Maybe) a)
-  deriving (Functor, App.Applicative, App.Alternative, Monad, MonadReader String, MonadWriter [JSToken])
+newtype DList a = DList ([a] -> [a])
+instance Semigroup (DList a) where DList dxs <> DList dys = DList (dxs . dys)
+instance Monoid (DList a) where
+  mempty = DList id
+  mappend = (<>)
+
+toList :: DList a -> [a]
+toList (DList dxs) = dxs []
+
+newtype Lexer a = Lexer (ReaderT String (WriterT (DList JSToken) Maybe) a)
+  deriving (Functor, App.Applicative, App.Alternative, Monad, MonadReader String, MonadWriter (DList JSToken))
 
 runLexer :: Lexer () -> String -> Maybe [JSToken]
-runLexer (Lexer p) ts = execWriterT (runReaderT p ts)
+runLexer (Lexer p) ts = liftM toList (execWriterT (runReaderT p ts))
 
 lexJavascript :: String -> Maybe [JSToken]
 lexJavascript cs = runLexer go cs
   where
     go :: Lexer ()
-    go = lexerJavascript (\tok -> do tell [tok]; when (tok /= Eof) go)
+    go = lexerJavascript (\tok -> do tell (DList (tok :)); when (tok /= Eof) go)

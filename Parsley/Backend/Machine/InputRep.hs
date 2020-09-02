@@ -14,6 +14,7 @@ module Parsley.Backend.Machine.InputRep (
     byteStringShiftRight, byteStringShiftLeft
   ) where
 
+import Data.Array               (Array)
 import Data.Array.Unboxed       (UArray)
 import Data.ByteString.Internal (ByteString(..))
 import Data.Text.Internal       (Text(..))
@@ -53,6 +54,7 @@ emptyUnpackedLazyByteString i = UnpackedLazyByteString i nullAddr# (error "nullF
 type family Rep input where
   Rep [_] = Int
   Rep (UArray Int _) = Int
+  Rep (Array Int _) = Int
   Rep Text16 = Int
   Rep ByteString = Int
   Rep (TokList t) = OffWith [t]
@@ -65,6 +67,7 @@ type family Rep input where
 type family Item input where
   Item [t] = t
   Item (UArray Int t) = t
+  Item (Array Int t) = t
   Item Text16 = Char
   Item ByteString = Char
   Item (TokList t) = t

@@ -23,13 +23,14 @@ import Parsley.Core.InputTypes
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
 
 class (InputPrep input, Ops (Rep input)) => Input input
-instance Input [Char]
-instance Input (UArray Int Char)
-instance Input Text16
-instance Input ByteString
-instance Input (TokList t)
-instance Input Text
---instance Input CacheText
-instance Input Lazy.ByteString
---instance Input Lazy.ByteString
-instance Input Stream
+instance {-# OVERLAPS #-}     Input [Char]
+instance {-# OVERLAPPABLE #-} Input [t]
+instance                      Input (UArray Int Char)
+instance                      Input Text16
+instance                      Input ByteString
+instance                      Input (TokList t)
+instance                      Input Text
+--instance                      Input CacheText
+instance                      Input Lazy.ByteString
+--instance                      Input Lazy.ByteString
+instance                      Input Stream

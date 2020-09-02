@@ -13,9 +13,10 @@ import Data.ByteString.Internal         (ByteString(..))
 import Data.Text.Array                  (aBA{-, empty-})
 import Data.Text.Internal               (Text(..))
 import Data.Text.Unsafe                 (iter, Iter(..){-, iter_, reverseIter_-})
+import GHC.Arr                          (Array(..))
 import GHC.Exts                         (Int(..), Char(..))
 import GHC.ForeignPtr                   (ForeignPtr(..))
-import GHC.Prim                         (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
+import GHC.Prim                         (indexArray#, indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
 import Parsley.Backend.Machine.InputRep
 import Parsley.Common.Utils             (Code)
 import Parsley.Core.InputTypes
@@ -62,8 +63,11 @@ next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||
 
 {- INSTANCES -}
 -- InputPrep Instances
-instance InputPrep [Char] where
+instance {-# OVERLAPS #-} InputPrep [Char] where
   prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
+
+instance {-# OVERLAPPABLE #-} InputPrep [t] where
+  prepare input = prepare @(Array Int t) [||listArray (0, length $$input-1) $$input||]
 
 instance InputPrep (UArray Int Char) where
   prepare qinput = [||
@@ -71,6 +75,12 @@ instance InputPrep (UArray Int Char) where
           next (I# i#) = (# C# (indexWideCharArray# input# i#), I# (i# +# 1#) #)
       in InputDependant next (< size) 0
     ||]
+
+instance InputPrep (Array Int t) where
+  prepare qinput = [||
+      let Array _ _ size input# = $$qinput
+          next (I# i#) = case indexArray# input# i# of (# t #) -> (# t, I# (i# +# 1#) #)
+      in InputDependant next (< size) 0 ||]
 
 instance InputPrep Text16 where
   prepare qinput = [||

@@ -79,7 +79,7 @@ regTest :: String -> Maybe Int
 regTest = $$(Parsley.runParser Parsers.regTest)
 
 tokTest :: [Int] -> Maybe Int
-tokTest = $$(Parsley.runParser @(Parsley.TokList Int) Parsers.tokTest) . Parsley.TokList
+tokTest = $$(Parsley.runParser Parsers.tokTest)
 
 main :: IO ()
 main =

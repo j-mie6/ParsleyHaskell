@@ -145,4 +145,4 @@ lexJavascript :: String -> Maybe [JSToken]
 lexJavascript cs = runLexer go cs
   where
     go :: Lexer ()
-    go = lexer (\tok -> do tell [tok]; when (tok /= Eof) go)
+    go = lexerJavascript (\tok -> do tell [tok]; when (tok /= Eof) go)

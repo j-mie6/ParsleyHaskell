@@ -55,6 +55,7 @@ executable benchmarks
                        criterion >=1.5 && <1.6,
                        yoda,
                        deepseq,
+                       dump-core,
                        lift-plugin,
                        template-haskell,
                        parsec,
@@ -70,8 +71,7 @@ executable benchmarks
   hs-source-dirs:      ./benchmarks
   main-is:             Benchmarks.hs
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=LiftPlugin -fno-spec-constr
-  --fplugin=DumpCore
+  ghc-options:         -rtsopts -fplugin=LiftPlugin -fno-spec-constr -fplugin=DumpCore
 
 executable playground
   build-depends:       base >=4.10 && <5,

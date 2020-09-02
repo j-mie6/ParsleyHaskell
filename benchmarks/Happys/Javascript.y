@@ -227,4 +227,7 @@ failParse _ = Parser empty
 
 runParser :: Parser a -> String -> Maybe a
 runParser (Parser p) = runReaderT p
+
+lexer :: (JSToken -> Parser a) -> Parser a
+lexer = lexerJavascript
 }

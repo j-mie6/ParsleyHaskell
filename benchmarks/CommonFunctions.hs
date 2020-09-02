@@ -224,8 +224,9 @@ isString :: JSToken -> Bool
 isString (TokenString _) = True
 isString _               = False
 
-lexer :: forall m a. (MonadReader String m, Monad m, Alternative m) => (JSToken -> m a) -> m a
-lexer k = do
+{-# INLINE lexerJavascript #-}
+lexerJavascript :: forall m a. (MonadReader String m, Monad m, Alternative m) => (JSToken -> m a) -> m a
+lexerJavascript k = do
   input <- ask
   case whiteSpace input of
     [] -> k Eof

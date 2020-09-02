@@ -2,6 +2,8 @@
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE RankNTypes #-}
 module ParsleyTokenParsers where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -9,9 +11,9 @@ import Parsley hiding (when)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
 import CommonFunctions
-import Control.Monad (when, liftM)
+import Control.Monad (when, ap, liftM)
+import qualified Control.Monad.Trans as Trans
 import Control.Monad.Reader (ReaderT, runReaderT, MonadReader)
-import Control.Monad.Writer (WriterT, execWriterT, MonadWriter, tell)
 import qualified Control.Applicative as App
 
 deriving instance Lift JSElement
@@ -135,23 +137,55 @@ javascript = many element <* token Eof
     commaSep1 :: Parser JSToken a -> Parser JSToken [a]
     commaSep1 p = sepBy1 p comma
 
-newtype DList a = DList ([a] -> [a])
+{-newtype DList a = DList ([a] -> [a])
 instance Semigroup (DList a) where DList dxs <> DList dys = DList (dxs . dys)
 instance Monoid (DList a) where
   mempty = DList id
   mappend = (<>)
 
 toList :: DList a -> [a]
-toList (DList dxs) = dxs []
+toList (DList dxs) = dxs []-}
 
-newtype Lexer a = Lexer (ReaderT String (WriterT (DList JSToken) Maybe) a)
-  deriving (Functor, App.Applicative, App.Alternative, Monad, MonadReader String, MonadWriter (DList JSToken))
+newtype EmitterT e m a = EmitterT (forall r. (a -> ([e] -> [e]) -> m r) -> m r) deriving Functor
+
+{-# INLINE execEmitterT #-}
+execEmitterT :: Monad m => EmitterT e m a -> m [e]
+execEmitterT (EmitterT k) = k (\_ des -> return (des []))
+
+instance Monad m => App.Applicative (EmitterT e m) where
+  {-# INLINE pure #-}
+  pure = return
+  {-# INLINE (<*>) #-}
+  (<*>) = ap
+
+instance (Monad m, App.Alternative m) => App.Alternative (EmitterT e m) where
+  {-# INLINE empty #-}
+  empty = Trans.lift App.empty
+  {-# INLINE (<|>) #-}
+  EmitterT m <|> EmitterT n = EmitterT (\k -> m k App.<|> n k)
+
+instance Monad m => Monad (EmitterT e m) where
+  {-# INLINE return #-}
+  return x = EmitterT (\k -> k x id)
+  {-# INLINE (>>=) #-}
+  EmitterT m >>= f = EmitterT (\k -> m (\x es -> let EmitterT n = f x in n (\y es' -> k y (es . es'))))
+
+instance Trans.MonadTrans (EmitterT e) where
+  {-# INLINE lift #-}
+  lift m = EmitterT (\k -> m >>= (\x -> k x id))
+
+{-# INLINE emit #-}
+emit :: Monad m => e -> EmitterT e m ()
+emit x = EmitterT (\k -> k () (x :))
+
+newtype Lexer a = Lexer (ReaderT String (EmitterT JSToken Maybe) a)
+  deriving (Functor, App.Applicative, App.Alternative, Monad, MonadReader String)
 
 runLexer :: Lexer () -> String -> Maybe [JSToken]
-runLexer (Lexer p) ts = liftM toList (execWriterT (runReaderT p ts))
+runLexer (Lexer p) ts = execEmitterT (runReaderT p ts)
 
 lexJavascript :: String -> Maybe [JSToken]
 lexJavascript cs = runLexer go cs
   where
     go :: Lexer ()
-    go = lexerJavascript (\tok -> do tell (DList (tok :)); when (tok /= Eof) go)
+    go = lexerJavascript (\tok -> do Lexer (Trans.lift (emit tok)); when (tok /= Eof) go)

@@ -23,15 +23,24 @@ inop (In x) = x
 inop4 :: Fix4 f i j k l -> f (Fix4 f) i j k l
 inop4 (In4 x) = x
 
-cata :: IFunctor f => (forall j. f a j -> a j) -> Fix f i -> a i
-cata alg (In x)  = alg (imap (cata alg) x)
+cata :: forall f a i. IFunctor f => (forall j. f a j -> a j) -> Fix f i -> a i
+cata alg = go where
+  go :: Fix f j -> a j
+  go (In x) = alg (imap go x)
 
-cata' :: IFunctor f => (forall j. Fix f j -> f a j -> a j)
-                    -> Fix f i -> a i
-cata' alg i@(In x) = alg i (imap (cata' alg) x)
+cata' :: forall f a i. IFunctor f =>
+         (forall j. Fix f j -> f a j -> a j) ->
+         Fix f i -> a i
+cata' alg = go where
+  go :: Fix f j -> a j
+  go i@(In x) = alg i (imap go x)
 
-cata4 :: IFunctor4 f => (forall i' j' k'. f a i' j' k' x -> a i' j' k' x) -> Fix4 f i j k x -> a i j k x
-cata4 alg (In4 x)  = alg (imap4 (cata4 alg) x)
+cata4 :: forall f a i j k x. IFunctor4 f =>
+         (forall i' j' k'. f a i' j' k' x -> a i' j' k' x) ->
+         Fix4 f i j k x -> a i j k x
+cata4 alg = go where
+  go :: Fix4 f i' j' k' x -> a i' j' k' x
+  go (In4 x) = alg (imap4 go x)
 
 data (f :+: g) k a where
   L :: f k a -> (f :+: g) k a

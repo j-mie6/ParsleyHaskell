@@ -17,8 +17,9 @@ import Data.Kind                           (Type)
 import Data.Maybe                          (isJust)
 import Data.Set                            (Set)
 import Debug.Trace                         (trace)
-import Control.Monad.Reader                (Reader, runReader, local, ask, MonadReader)
-import Control.Monad.State.Strict          (State, StateT, get, gets, put, runState, execStateT, modify', MonadState)
+import Control.Monad                       (void, when)
+import Control.Monad.Reader                (Reader, runReader, local, ask)
+import Control.Monad.State.Strict          (State, StateT, get, put, runState, execStateT, modify', MonadState)
 import GHC.Exts                            (Int(..))
 import GHC.Prim                            (StableName#, unsafeCoerce#)
 import GHC.StableName                      (StableName(..), makeStableName, hashStableName, eqStableName)
@@ -33,7 +34,7 @@ import Parsley.Frontend.Dependencies       (dependencyAnalysis)
 import System.IO.Unsafe                    (unsafePerformIO)
 
 import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, mapWithKey, size)
-import qualified Data.HashMap.Strict as HashMap (lookup, insert, empty, insertWith, foldrWithKey)
+import qualified Data.HashMap.Strict as HashMap (lookup, insert, empty, insertWith, foldrWithKey, alterF)
 import qualified Data.HashSet        as HashSet (member, insert, empty)
 import qualified Data.Map            as Map     ((!))
 import qualified Data.Set            as Set     (empty)
@@ -70,27 +71,32 @@ tagParser p = cata' tagAlg p
 
 data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
                                      , recs   :: HashSet ParserName
-                                     , before :: HashSet ParserName }
+                                     }
 type LetFinderCtx   = HashSet ParserName
 newtype LetFinder a = LetFinder { doLetFinder :: StateT LetFinderState (Reader LetFinderCtx) () }
 
 findLets :: Fix (Tag ParserName Combinator) a -> (HashSet ParserName, HashSet ParserName)
 findLets p = (lets, recs)
   where
-    state = LetFinderState HashMap.empty HashSet.empty HashSet.empty
+    state = LetFinderState HashMap.empty HashSet.empty
     ctx = HashSet.empty
-    LetFinderState preds recs _ = runReader (execStateT (doLetFinder (cata findLetsAlg p)) state) ctx
+    LetFinderState preds recs = runReader (execStateT (doLetFinder (cata findLetsAlg p)) state) ctx
     lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
 
 findLetsAlg :: Tag ParserName Combinator LetFinder a -> LetFinder a
 findLetsAlg p = LetFinder $ do
   let name = tag p
-  addPred name
-  ifSeen name
-    (do addRec name)
-    (ifNotProcessedBefore name
-      (do addName name (traverseCombinator (fmap Const1 . doLetFinder) (tagged p))
-          doNotProcessAgain name))
+  st <- get
+  let (before, preds') = HashMap.alterF (\v -> (v, Just (maybe 1 (+ 1) v))) name (preds st)
+  seen <- ask
+  if HashSet.member name seen
+   then
+     put st{preds=preds', recs = HashSet.insert name (recs st)}
+   else do
+     put st{preds=preds'}
+     when (before == Nothing) $
+       local (HashSet.insert name) $
+         void $ traverseCombinator (fmap Const1 . doLetFinder) (tagged p)
 
 newtype LetInserter a =
   LetInserter {
@@ -123,36 +129,6 @@ letInsertion lets recs p = (p', μs, μMax)
 
 postprocess :: Combinator LetInserter a -> LetInserter a
 postprocess = LetInserter . fmap optimise . traverseCombinator doLetInserter
-
-getBefore :: MonadState LetFinderState m => m (HashSet ParserName)
-getBefore = gets before
-
-modifyPreds :: MonadState LetFinderState m => (HashMap ParserName Int -> HashMap ParserName Int) -> m ()
-modifyPreds f = modify' (\st -> st {preds = f (preds st)})
-
-modifyRecs :: MonadState LetFinderState m => (HashSet ParserName -> HashSet ParserName) -> m ()
-modifyRecs f = modify' (\st -> st {recs = f (recs st)})
-
-modifyBefore :: MonadState LetFinderState m => (HashSet ParserName -> HashSet ParserName) -> m ()
-modifyBefore f = modify' (\st -> st {before = f (before st)})
-
-addPred :: MonadState LetFinderState m => ParserName -> m ()
-addPred k = modifyPreds (HashMap.insertWith (+) k 1)
-
-addRec :: MonadState LetFinderState m => ParserName -> m ()
-addRec = modifyRecs . HashSet.insert
-
-ifSeen :: MonadReader LetFinderCtx m => ParserName -> m a -> m a -> m a
-ifSeen x yes no = do seen <- ask; if HashSet.member x seen then yes else no
-
-ifNotProcessedBefore :: MonadState LetFinderState m => ParserName -> m () -> m ()
-ifNotProcessedBefore x m = do !before <- getBefore; if HashSet.member x before then return () else m
-
-doNotProcessAgain :: MonadState LetFinderState m => ParserName -> m ()
-doNotProcessAgain x = modifyBefore (HashSet.insert x)
-
-addName :: MonadReader LetFinderCtx m => ParserName -> m b -> m b
-addName x = local (HashSet.insert x)
 
 makeParserName :: Fix (Combinator :+: ScopeRegister) a -> ParserName
 -- Force evaluation of p to ensure that the stableName is correct first time

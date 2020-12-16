@@ -1,6 +1,4 @@
 packages:.
---	 ../lift-plugin/lift-plugin
---profiling:true
 optimization:2
 allow-newer:yoda:all
 profiling-detail:none

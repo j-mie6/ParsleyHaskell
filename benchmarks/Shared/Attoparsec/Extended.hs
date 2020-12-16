@@ -1,9 +1,9 @@
-module Attoparsec.Extended (
+module Shared.Attoparsec.Extended (
     module Data.Functor,
     module Control.Applicative,
     module Data.Attoparsec.Text,
     module Control.Monad,
-    module Attoparsec.Extended
+    module Shared.Attoparsec.Extended
   ) where
 
 import Data.Attoparsec.Text hiding (match, string)

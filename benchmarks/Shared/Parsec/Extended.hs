@@ -1,11 +1,11 @@
 {-# LANGUAGE FlexibleContexts #-}
-module Parsec.Extended (
+module Shared.Parsec.Extended (
     module Text.Parsec,
     module Data.Functor,
     module Control.Monad,
     module Control.Monad.Identity,
     module Control.Applicative,
-    module Parsec.Extended
+    module Shared.Parsec.Extended
   ) where
 
 import Text.Parsec hiding (token)

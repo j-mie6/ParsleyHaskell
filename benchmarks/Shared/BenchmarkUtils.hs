@@ -13,13 +13,13 @@ import qualified Data.Attoparsec.Text       as Attoparsec
 import qualified Data.Text.IO
 import qualified Data.ByteString
 import qualified Data.ByteString.Lazy
-import qualified Parsec.Extended
-import qualified Megaparsec.Extended
+import qualified Shared.Parsec.Extended
+import qualified Shared.Megaparsec.Extended
 
-parsecParse :: Parsec.Stream s Identity Char => Parsec.Extended.Parser s a -> s -> Maybe a
+parsecParse :: Parsec.Stream s Identity Char => Shared.Parsec.Extended.Parser s a -> s -> Maybe a
 parsecParse p = either (const Nothing) Just  . Parsec.parse p ""
 
-megaParse :: (Megaparsec.Stream s, Megaparsec.Token s ~ Char) => Megaparsec.Extended.Parser s a -> s -> Maybe a
+megaParse :: (Megaparsec.Stream s, Megaparsec.Token s ~ Char) => Shared.Megaparsec.Extended.Parser s a -> s -> Maybe a
 megaParse = Megaparsec.parseMaybe
 
 attoParse :: Attoparsec.Parser a -> Text -> Maybe a

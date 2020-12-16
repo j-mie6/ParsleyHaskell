@@ -1,10 +1,10 @@
 {-# LANGUAGE TypeFamilies #-}
-module Megaparsec.Extended (
+module Shared.Megaparsec.Extended (
     module Text.Megaparsec,
     module Text.Megaparsec.Char,
     module Control.Monad,
     module Control.Applicative,
-    module Megaparsec.Extended
+    module Shared.Megaparsec.Extended
   ) where
 import Text.Megaparsec hiding (token, match)
 import Text.Megaparsec.Char hiding (string)

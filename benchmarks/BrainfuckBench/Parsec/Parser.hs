@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module BrainfuckBench.Parsec.Parser where
 
-import Parsec.Extended
+import Shared.Parsec.Extended
 import BrainfuckBench.Shared
 
 brainfuck :: Stream s Identity Char => Parser s [BrainFuckOp]

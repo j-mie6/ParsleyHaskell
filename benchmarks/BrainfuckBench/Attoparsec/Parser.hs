@@ -1,6 +1,6 @@
 module BrainfuckBench.Attoparsec.Parser where
 
-import Attoparsec.Extended
+import Shared.Attoparsec.Extended
 import BrainfuckBench.Shared
 
 brainfuck :: Parser [BrainFuckOp]

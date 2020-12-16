@@ -1,8 +1,8 @@
 {-# LANGUAGE ScopedTypeVariables, TypeFamilies #-}
 module BrainfuckBench.Megaparsec.Parser where
 
+import Shared.Megaparsec.Extended
 import BrainfuckBench.Shared
-import Megaparsec.Extended
 
 brainfuck :: forall s. (Stream s, Token s ~ Char) => Parser s [BrainFuckOp]
 brainfuck = whitespace *> bf <* eof

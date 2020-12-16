@@ -3,7 +3,7 @@
 
 module JavascriptBench.Megaparsec.Parser where
 import JavascriptBench.Shared
-import Megaparsec.Extended
+import Shared.Megaparsec.Extended
 import Data.Char (isSpace, isUpper, digitToInt)
 import Data.Maybe (catMaybes)
 import Text.Read (readMaybe)

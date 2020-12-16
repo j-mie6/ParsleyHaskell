@@ -2,8 +2,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module JavascriptBench.Parsec.Parser where
 
+import Shared.Parsec.Extended
 import JavascriptBench.Shared
-import Parsec.Extended
 
 import Data.Char (isSpace, isUpper, digitToInt)
 import Data.Maybe (catMaybes)

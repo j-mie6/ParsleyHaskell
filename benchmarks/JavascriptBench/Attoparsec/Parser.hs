@@ -1,6 +1,6 @@
 module JavascriptBench.Attoparsec.Parser where
 
-import Attoparsec.Extended
+import Shared.Attoparsec.Extended
 import JavascriptBench.Shared
 
 import Data.Char (isSpace, isUpper, digitToInt)

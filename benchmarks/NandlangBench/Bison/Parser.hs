@@ -1,5 +1,5 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
-module Bisons.Bison where
+module NandlangBench.Bison.Parser where
 
 import Foreign.C
 import Foreign.Ptr

@@ -1,6 +1,6 @@
 {
-module Happys.Brainfuck where
-import CommonFunctions (BrainFuckOp(..))
+module BrainfuckBench.Happy.Parser where
+import BrainfuckBench.Shared (BrainFuckOp(..))
 }
 
 %name brainfuck Bf
@@ -31,4 +31,3 @@ Bf : inc Bf      { Increment    : $2 }
    | lb Bf rb Bf { Loop $2 : $4 }
    | ws Bf       { $2 }
    | { [] }
-

@@ -1,71 +1,19 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
-module ParsleyParsers where
+module JavascriptBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
 import Parsley.Combinator (token, oneOf, noneOf, eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
-import CommonFunctions
+import JavascriptBench.Shared
 import Data.Char (isSpace, isUpper, digitToInt, isDigit)
 import Data.Maybe (catMaybes)
 import Text.Read (readMaybe)
 import Control.Monad (liftM)
 
-digit :: Parser Int
-digit = code digitToInt <$> satisfy (code isDigit)
-
-plus :: Parser (Int -> Int -> Int)
-plus = char '+' $> code (+)
-
-selectTest :: Parser (Either Int String)
-selectTest = pure (code (Left 10))
-
-showi :: Int -> String
-showi = show
-
-deriving instance Lift Pred
-
-pred :: Parser Pred
-pred = precedence (monolith [ prefix [token "!" $> code Not]
-                            , infixR [token "&&" $> code And]])
-                  ( token "t" $> code T
-                <|> token "f" $> code F)
-
--- Brainfuck benchmark
-deriving instance Lift BrainFuckOp
-
-brainfuck :: Parser [BrainFuckOp]
-brainfuck = whitespace *> bf <* eof
-  where
-    whitespace = skipMany (noneOf "<>+-[],.")
-    lexeme p = p <* whitespace
-    {-bf = many ( lexeme ((token ">" $> code RightPointer)
-                    <|> (token "<" $> code LeftPointer)
-                    <|> (token "+" $> code Increment)
-                    <|> (token "-" $> code Decrement)
-                    <|> (token "." $> code Output)
-                    <|> (token "," $> code Input)
-                    <|> (between (lexeme (token "[")) (token "]") (code Loop <$> bf))))-}
-    bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
-    op '>' = item $> code RightPointer
-    op '<' = item $> code LeftPointer
-    op '+' = item $> code Increment
-    op '-' = item $> code Decrement
-    op '.' = item $> code Output
-    op ',' = item $> code Input
-    op '[' = between (lexeme item) (try (char ']')) (code Loop <$> bf)
-
--- Regex Benchmark
-regex :: Parser Bool
-regex = skipMany (aStarb *> aStarb) *> char 'a' $> code True <|> pure (code False)
-  where
-    aStarb = aStar *> char 'b'
-    aStar = skipMany (char 'a')
-
--- Javascript
 deriving instance Lift JSElement
 deriving instance Lift JSStm
 deriving instance Lift JSVar
@@ -315,93 +263,3 @@ javascript = whitespace *> many element <* eof
         escCode 'V' = token "T" $> code ('\VT')
         -- TODO numeric
         escCode _ = empty--error "numeric escape codes not supported"
-
-nandlang :: Parser ()
-nandlang = whitespace *> skipMany funcdef <* eof
-  where
-    index :: Parser ()
-    index = brackets nat
-    identifier :: Parser ()
-    identifier = try (identStart *> skipMany identLetter) *> whitespace--try ((identStart <:> many identLetter) >?> code nandUnreservedName) *> whitespace
-    variable :: Parser ()
-    variable = identifier *> optional index
-
-    literal :: Parser ()
-    literal = bit <|> charLit
-
-    keyword :: String -> Parser ()
-    keyword s = try (string s *> notIdentLetter) *> whitespace
-
-    identStart = satisfy (code nandIdentStart)
-    identLetter = satisfy (code nandIdentLetter)
-    notIdentLetter = notFollowedBy identLetter
-
-    bit :: Parser ()
-    bit = (char '0' <|> char '1') *> whitespace
-
-    nat :: Parser ()
-    nat = decimal
-
-    charLit :: Parser ()
-    charLit = between (char '\'') (symbol '\'') charChar
-
-    charChar :: Parser ()
-    charChar = void (satisfy (code jsStringLetter)) <|> esc
-
-    esc :: Parser ()
-    esc = char '\\' *> void (oneOf "0tnvfr")
-
-    expr :: Parser ()
-    expr = nandexpr *> skipMany (symbol '!' *> nandexpr)
-
-    nandexpr :: Parser ()
-    nandexpr = literal <|> funccallOrVar
-
-    funccallOrVar :: Parser ()
-    funccallOrVar = identifier *> optional (parens exprlist <|> index)
-
-    exprlist = commaSep expr
-    exprlist1 = commaSep1 expr
-    varlist = commaSep variable
-    varlist1 = commaSep1 variable
-
-    funcparam = varlist *> optional (symbol ':' *> varlist)
-    varstmt = optional (keyword "var") *> varlist1 *> symbol '=' *> exprlist1 <* semi
-    ifstmt = keyword "if" *> expr *> block *> optional (keyword "else" *> block)
-    whilestmt = keyword "while" *> expr *> block
-    statement = ifstmt <|> whilestmt <|> try varstmt <|> expr <* semi
-    block = braces (skipMany statement)
-    funcdef = keyword "function" *> identifier *> parens funcparam *> block
-
-    decimal :: Parser ()
-    decimal = number (oneOf ['0'..'9'])
-    hexadecimal = oneOf "xX" *> number (oneOf (['a'..'f'] ++ ['A'..'F'] ++ ['0'..'9']))
-    octal = oneOf "oO" *> number (oneOf ['0'..'7'])
-    number :: Parser a -> Parser ()
-    number digit = skipSome digit
-
-    symbol :: Char -> Parser Char
-    symbol c = char c <* whitespace
-    parens :: Parser a -> Parser a
-    parens = between (symbol '(') (symbol ')')
-    brackets :: Parser a -> Parser a
-    brackets = between (symbol '[') (symbol ']')
-    braces :: Parser a -> Parser a
-    braces = between (symbol '{') (symbol '}')
-    semi :: Parser Char
-    semi = symbol ';'
-    comma :: Parser Char
-    comma = symbol ','
-    commaSep :: Parser a -> Parser ()
-    commaSep p = optional (commaSep1 p)
-    commaSep1 :: Parser a -> Parser ()
-    commaSep1 p = p *> skipMany (comma *> p)
-
-    space :: Parser ()
-    space = void (satisfy (code isSpace))
-    whitespace :: Parser ()
-    whitespace = skipMany (spaces <|> oneLineComment)
-    spaces :: Parser ()
-    spaces = skipSome space
-    oneLineComment :: Parser ()
-    oneLineComment = void (token "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))

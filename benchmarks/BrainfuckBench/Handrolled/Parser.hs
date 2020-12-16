@@ -1,8 +1,8 @@
-module NativeParsers where
-import CommonFunctions
+module BrainfuckBench.Handrolled.Parser where
+import BrainfuckBench.Shared
 
 brainfuck :: String -> Maybe [BrainFuckOp]
-brainfuck input = 
+brainfuck input =
   let walk :: String -> [BrainFuckOp] -> Maybe ([BrainFuckOp], String)
       walk [] acc            = return (reverse acc, [])
       walk input@(']':_) acc = return (reverse acc, input)
@@ -16,7 +16,7 @@ brainfuck input =
         '[' -> do (body, rest') <- loop rest; walk rest' (Loop body:acc)
         _   -> walk rest acc
       loop :: String -> Maybe ([BrainFuckOp], String)
-      loop input = do 
+      loop input = do
         (body, rest) <- walk input []
         case rest of
           ']':rest' -> return (body, rest')
@@ -24,10 +24,3 @@ brainfuck input =
   in  do
     (res, []) <- walk input []
     return res
-        
-tailTest :: String -> Maybe Char
-tailTest [] = Nothing
-tailTest (c:cs) = case c of
-  'a' -> tailTest cs
-  'b' -> Just 'b'
-  _   -> Nothing

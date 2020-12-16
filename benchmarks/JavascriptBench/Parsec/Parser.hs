@@ -1,104 +1,23 @@
-module AttoparsecParsers where
-import CommonFunctions
-import Data.Attoparsec.Text hiding (match, string)
-import Data.Functor (void)
-import Control.Monad.Identity (Identity)
-import Control.Monad (MonadPlus)
-import Control.Applicative (liftA2, liftA3, empty, Alternative, (<**>), (<|>), many)
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+module JavascriptBench.Parsec.Parser where
+
+import JavascriptBench.Shared
+import Parsec.Extended
+
 import Data.Char (isSpace, isUpper, digitToInt)
 import Data.Maybe (catMaybes)
 import Text.Read (readMaybe)
-import Data.List (foldl')
 
-($>) :: Functor f => f a -> b -> f b
-($>) = flip (<$)
-
-string = traverse char
-
-token :: String -> Parser String
-token = try . string
-
-between o c p = o *> p <* c
-
-oneOf = satisfy . inClass
-noneOf = satisfy . notInClass
-
-brainfuck :: Parser [BrainFuckOp]
-brainfuck = whitespace *> bf <* endOfInput
+javascript :: forall s. Stream s Identity Char => Parser s JSProgram
+javascript = whitespace *> many element <* eof
   where
-    bf = many ( lexeme (char '>' $> RightPointer)
-      <|> lexeme (char '<' $> LeftPointer)
-      <|> lexeme (char '+' $> Increment)
-      <|> lexeme (char '-' $> Decrement)
-      <|> lexeme (char '.' $> Output)
-      <|> lexeme (char ',' $> Input)
-      <|> between (lexeme (char '[')) (lexeme (char ']')) (Loop <$> bf))
-    whitespace = skipMany (noneOf "<>+-.,[]")
-    lexeme p = p <* whitespace
-
-match :: (Monad m, Eq a) => [a] -> m a -> (a -> m b) -> m b -> m b
-match xs p f def = p >>= (\x -> if elem x xs then f x else def)
-
-skipSome :: Parser a -> Parser ()
-skipSome p = void (some p)
-
-some = many1
-
-maybeP :: Parser a -> Parser (Maybe a)
-maybeP p = option Nothing (Just <$> p)
-
-fromMaybeP :: Monad m => m (Maybe a) -> m a -> m a
-fromMaybeP mmx d = mmx >>= maybe d return
-
-(<+>) :: Parser a -> Parser b -> Parser (Either a b)
-p <+> q = Left <$> p <|> Right <$> q
-
-(<:>) :: Parser a -> Parser [a] -> Parser [a]
-(<:>) = liftA2 (:)
-
-(<~>) :: Parser a -> Parser b -> Parser (a, b)
-(<~>) = liftA2 (,)
-
-pfoldl1 :: (b -> a -> b) -> b -> Parser a -> Parser b
-pfoldl1 f k p = foldl' f k <$> some p
-
-(>?>) :: MonadPlus m => m a -> (a -> Bool) -> m a
-m >?> f = m >>= \x -> if f x then return x else empty
-
-chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre op p = flip (foldr ($)) <$> many op <*> p
-
-chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost p op = foldl' (flip ($)) <$> p <*> many op
-
-chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
-chainl1 p op = chainPost p (flip <$> op <*> p)
-
-chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
-chainr1 p op = let go = p <**> ((flip <$> op <*> go) <|> pure id) in go
-
-data Level s a = InfixL  [Parser (a -> a -> a)]
-               | InfixR  [Parser (a -> a -> a)]
-               | Prefix  [Parser (a -> a)]
-               | Postfix [Parser (a -> a)]
-
-precedence :: [Level s a] -> Parser a -> Parser a
-precedence levels atom = foldl' convert atom levels
-  where
-    convert x (InfixL ops)  = chainl1 x (choice ops)
-    convert x (InfixR ops)  = chainr1 x (choice ops)
-    convert x (Prefix ops)  = chainPre (choice ops) x
-    convert x (Postfix ops) = chainPost x (choice ops)
-
-javascript :: Parser JSProgram
-javascript = whitespace *> many element <* endOfInput
-  where
-    element :: Parser JSElement
+    element :: Parser s JSElement
     element = keyword "function" *> liftA3 JSFunction identifier (parens (commaSep identifier)) compound
           <|> JSStm <$> stmt
-    compound :: Parser JSCompoundStm
+    compound :: Parser s JSCompoundStm
     compound = braces (many stmt)
-    stmt :: Parser JSStm
+    stmt :: Parser s JSStm
     stmt = semi $> JSSemi
        <|> keyword "if" *> liftA3 JSIf parensExpr stmt (maybeP (keyword "else" *> stmt))
        <|> keyword "while" *> liftA2 JSWhile parensExpr stmt
@@ -112,21 +31,21 @@ javascript = whitespace *> many element <* endOfInput
        <|> keyword "return" *> (JSReturn <$> optExpr)
        <|> JSBlock <$> compound
        <|> JSNaked <$> varsOrExprs
-    varsOrExprs :: Parser (Either [JSVar] JSExpr)
+    varsOrExprs :: Parser s (Either [JSVar] JSExpr)
     varsOrExprs = (keyword "var" *> commaSep1 variable) <+> expr
-    variable :: Parser JSVar
+    variable :: Parser s JSVar
     variable = liftA2 JSVar identifier (maybeP (symbol '=' *> asgn))
-    parensExpr :: Parser JSExpr
+    parensExpr :: Parser s JSExpr
     parensExpr = parens expr
-    optExpr :: Parser (Maybe JSExpr)
+    optExpr :: Parser s (Maybe JSExpr)
     optExpr = maybeP expr
-    expr :: Parser JSExpr
+    expr :: Parser s JSExpr
     expr = commaSep1 asgn
-    asgn :: Parser JSExpr'
+    asgn :: Parser s JSExpr'
     asgn = chainl1 condExpr (symbol '=' $> JSAsgn)
-    condExpr :: Parser JSExpr'
+    condExpr :: Parser s JSExpr'
     condExpr = liftA2 jsCondExprBuild expr' (maybeP ((symbol '?' *> asgn) <~> (symbol ':' *> asgn)))
-    expr' :: Parser JSExpr'
+    expr' :: Parser s JSExpr'
     expr' = precedence
       [ Prefix  [ operator "--" $> jsDec, operator "++" $> jsInc
                 , operator "-" $> jsNeg, operator "+" $> jsPlus
@@ -146,24 +65,24 @@ javascript = whitespace *> many element <* endOfInput
       , InfixL  [ operator "||" $> JSOr ]
       ]
       (JSUnary <$> memOrCon)
-    memOrCon :: Parser JSUnary
+    memOrCon :: Parser s JSUnary
     memOrCon = keyword "delete" *> (JSDel <$> member)
            <|> keyword "new" *> (JSCons <$> con)
            <|> JSMember <$> member
-    con :: Parser JSCons
+    con :: Parser s JSCons
     con = liftA2 JSQual (keyword "this" $> "this") (dot *> conCall) <|> conCall
-    conCall :: Parser JSCons
+    conCall :: Parser s JSCons
     conCall = identifier <**>
                 (dot *> (flip JSQual <$> conCall)
              <|> flip JSConCall <$> parens (commaSep asgn)
              <|> pure (\name -> JSConCall name []))
-    member :: Parser JSMember
+    member :: Parser s JSMember
     member = primaryExpr <**>
                 (flip JSCall <$> parens (commaSep asgn)
              <|> flip JSIndex <$> brackets expr
              <|> dot *> ((flip JSAccess) <$> member)
              <|> pure JSPrimExp)
-    primaryExpr :: Parser JSAtom
+    primaryExpr :: Parser s JSAtom
     primaryExpr = JSParens <$> parens expr
               <|> JSArray <$> brackets (commaSep asgn)
               <|> JSId <$> identifier
@@ -175,88 +94,88 @@ javascript = whitespace *> many element <* endOfInput
               <|> JSThis <$ keyword "this"
 
     -- Token Parsers
-    space :: Parser ()
+    space :: Parser s ()
     space = void (satisfy isSpace)
-    whitespace :: Parser ()
+    whitespace :: Parser s ()
     whitespace = skipMany (spaces <|> oneLineComment <|> multiLineComment)
-    keyword :: String -> Parser ()
+    keyword :: String -> Parser s ()
     keyword s = try (string s *> notIdentLetter) *> whitespace
-    operator :: String -> Parser ()
+    operator :: String -> Parser s ()
     operator op = try (string op *> notOpLetter) *> whitespace
-    identifier :: Parser String
+    identifier :: Parser s String
     identifier = try ((identStart <:> many identLetter) >?> jsUnreservedName) <* whitespace
-    naturalOrFloat :: Parser (Either Int Double)
+    naturalOrFloat :: Parser s (Either Int Double)
     naturalOrFloat = natFloat <* whitespace
 
     -- Nonsense to deal with floats and ints
-    natFloat :: Parser (Either Int Double)
+    natFloat :: Parser s (Either Int Double)
     natFloat = char '0' *> zeroNumFloat <|> decimalFloat
 
-    zeroNumFloat :: Parser (Either Int Double)
+    zeroNumFloat :: Parser s (Either Int Double)
     zeroNumFloat = Left <$> (hexadecimal <|> octal)
                <|> decimalFloat
                <|> (fromMaybeP (fractFloat <*> pure 0) empty)
                <|> pure (Left 0)
 
-    decimalFloat :: Parser (Either Int Double)
+    decimalFloat :: Parser s (Either Int Double)
     decimalFloat = fromMaybeP (decimal <**> (option (Just . Left) fractFloat)) empty
 
-    fractFloat :: Parser (Int -> Maybe (Either Int Double))
+    fractFloat :: Parser s (Int -> Maybe (Either Int Double))
     fractFloat = f <$> fractExponent
       where
         f g x = fmap Right (g x)
 
-    fractExponent :: Parser (Int -> Maybe Double)
+    fractExponent :: Parser s (Int -> Maybe Double)
     fractExponent = f <$> fraction <*> option "" exponent'
                 <|> f <$> pure "" <*> exponent'
       where
         f fract exp n = readMaybe (show n ++ fract ++ exp)
 
-    fraction :: Parser [Char]
+    fraction :: Parser s [Char]
     fraction = char '.' <:> some (oneOf ['0'..'9'])
 
-    exponent' :: Parser [Char]
-    exponent' = ('e' :) <$> (oneOf "eE" 
+    exponent' :: Parser s [Char]
+    exponent' = ('e' :) <$> (oneOf "eE"
              *> ((((:) <$> oneOf "+-") <|> pure id)
              <*> (show <$> decimal)))
 
-    decimal :: Parser Int
+    decimal :: Parser s Int
     decimal = number 10 (oneOf ['0'..'9'])
     hexadecimal = oneOf "xX" *> number 16 (oneOf (['a'..'f'] ++ ['A'..'F'] ++ ['0'..'9']))
     octal = oneOf "oO" *> number 8 (oneOf ['0'..'7'])
 
-    number :: Int -> Parser Char -> Parser Int
+    number :: Int -> Parser s Char -> Parser s Int
     number base = pfoldl1 (\x d -> base * x + digitToInt d) 0
 
-    stringLiteral :: Parser String
+    stringLiteral :: Parser s String
     stringLiteral = catMaybes <$> between (token "\"") (token "\"") (many stringChar) <* whitespace
-    symbol :: Char -> Parser Char
+    symbol :: Char -> Parser s Char
     symbol c = try (char c) <* whitespace
-    parens :: Parser a -> Parser a
+    parens :: Parser s a -> Parser s a
     parens = between (symbol '(') (symbol ')')
-    brackets :: Parser a -> Parser a
+    brackets :: Parser s a -> Parser s a
     brackets = between (symbol '[') (symbol ']')
-    braces :: Parser a -> Parser a
+    braces :: Parser s a -> Parser s a
     braces = between (symbol '{') (symbol '}')
-    dot :: Parser Char
+    dot :: Parser s Char
     dot = symbol '.'
-    semi :: Parser Char
+    semi :: Parser s Char
     semi = symbol ';'
-    comma :: Parser Char
+    comma :: Parser s Char
     comma = symbol ','
-    commaSep :: Parser a -> Parser [a]
+    commaSep :: Parser s a -> Parser s [a]
     commaSep p = sepBy p comma
-    commaSep1 :: Parser a -> Parser [a]
+    commaSep1 :: Parser s a -> Parser s [a]
     commaSep1 p = sepBy1 p comma
 
     -- Let bindings
-    spaces :: Parser ()
+    spaces :: Parser s ()
     spaces = skipSome space
 
-    oneLineComment :: Parser ()
+    oneLineComment :: Parser s ()
     oneLineComment = void (token "//" *> skipMany (satisfy (/= '\n')))
 
-    multiLineComment :: Parser ()
+    multiLineComment :: Parser s ()
     multiLineComment =
       let inComment = void (token "*/")
                   <|> skipSome (satisfy (/= '*')) *> inComment
@@ -265,21 +184,21 @@ javascript = whitespace *> many element <* endOfInput
 
     identStart = satisfy jsIdentStart
     identLetter = satisfy jsIdentLetter
-    notIdentLetter = peekChar >?> (maybe True (not . jsIdentLetter))
-    notOpLetter = peekChar >?> (maybe True (notInClass "+-*/=<>!~&|.%^"))
+    notIdentLetter = notFollowedBy identLetter
+    notOpLetter = notFollowedBy (oneOf "+-*/=<>!~&|.%^")
 
     escChrs :: [Char]
     escChrs = "abfntv\\\"'0123456789xo^ABCDEFGHLNRSUV"
 
-    stringChar :: Parser (Maybe Char)
+    stringChar :: Parser s (Maybe Char)
     stringChar = Just <$> satisfy jsStringLetter <|> stringEscape
 
-    stringEscape :: Parser (Maybe Char)
+    stringEscape :: Parser s (Maybe Char)
     stringEscape = token "\\" *> (token "&" $> Nothing
                               <|> spaces *> token "\\" $> Nothing
                               <|> Just <$> escapeCode)
 
-    escapeCode :: Parser Char
+    escapeCode :: Parser s Char
     escapeCode = match escChrs (oneOf escChrs) escCode empty
       where
         escCode 'a' = pure ('\a')

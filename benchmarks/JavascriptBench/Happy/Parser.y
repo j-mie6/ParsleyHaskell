@@ -1,7 +1,7 @@
 {
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Happys.Javascript where
-import CommonFunctions
+module JavascriptBench.Happy.Parser where
+import JavascriptBench.Shared
 import Control.Monad.Reader
 import Control.Applicative
 import Data.Char (isSpace, isAlpha, isDigit, isAlphaNum, isUpper, isHexDigit, isOctDigit)
@@ -385,7 +385,7 @@ lexer k = do
     exponent x ('+':cs) = fractExpMaker ('e':) x cs
     exponent x ('-':cs) = fractExpMaker (('e':) . ('-':)) x cs
     exponent x cs = fractExpMaker ('e':) x cs
-    
+
     fractExpMaker :: (String -> String) -> Int -> String -> (Either Int Double -> String -> Parser a) -> Maybe (Parser a)
     fractExpMaker conv x cs k = let (y, rest) = span isDigit cs in fmap (flip k rest . Right) (readMaybe (show x ++ conv y))
 

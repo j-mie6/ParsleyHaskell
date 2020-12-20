@@ -16,6 +16,7 @@ import Data.STRef                                    (writeSTRef, readSTRef, new
 import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
+import Parsley.Internal.Backend.Machine.Defunc       (Defunc(FREEVAR), genDefunc)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
@@ -36,9 +37,9 @@ derivation(Text)
 type Ops o = (LogHandler o, ContOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o) => Code (Char -> Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps o) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 sat p k bad γ@Γ{..} = next input $ \c input' -> [||
-    if $$p $$c then $$(k (γ {operands = Op c operands, input = input'}))
+    if $$(p c) then $$(k (γ {operands = Op (FREEVAR c) operands, input = input'}))
     else $$bad
   ||]
 
@@ -50,33 +51,33 @@ emitLengthCheck n good bad γ = [||
   else $$bad ||]
 
 {- General Operations -}
-dup :: Code x -> (Code x -> Code r) -> Code r
-dup x k = [|| let !dupx = $$x in $$(k [||dupx||]) ||]
+dup :: Defunc x -> (Defunc x -> Code r) -> Code r
+dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
 
 {-# INLINE returnST #-}
 returnST :: forall s a. a -> ST s a
 returnST = return @(ST s)
 
 {- Register Operations -}
-newΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+newΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
 newΣ σ Soft x k ctx = dup x $ \dupx -> k $! insertNewΣ σ Nothing dupx ctx
 newΣ σ Hard x k ctx = dup x $ \dupx -> [||
-    do ref <- newSTRef $$dupx
+    do ref <- newSTRef $$(genDefunc dupx)
        $$(k $! insertNewΣ σ (Just [||ref||]) dupx ctx)
   ||]
 
-writeΣ :: ΣVar x -> Access -> Code x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+writeΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k $! cacheΣ σ dupx ctx
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
-    do writeSTRef $$ref $$dupx
+    do writeSTRef $$ref $$(genDefunc dupx)
        $$(k $! cacheΣ σ dupx ctx)
   ||]
 
-readΣ :: ΣVar x -> Access -> (Code x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+readΣ :: ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
 readΣ σ Soft k ctx = (k $! cachedΣ σ ctx) $! ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
-       $$(k [||x||] $! cacheΣ σ [||x||] ctx)
+       $$(let fv = FREEVAR [||x||] in k fv $! cacheΣ σ fv ctx)
   ||]
 
 {- Handler Operations -}
@@ -96,15 +97,15 @@ setupHandler γ h k = [||
     in $$(k (γ {handlers = VCons [||handler||] (handlers γ)}))
   ||]
 
-#define deriveHandlerOps(_o)                      \
-instance HandlerOps _o where                      \
-{                                                 \
-  buildHandler γ h c = [||\o# ->                  \
-    $$(h (γ {operands = Op c (operands γ),        \
-             input = [||$$box o#||]}))||];        \
-  fatal = [||\(!_) -> returnST Nothing ||];       \
-  raise γ = let VCons h _ = handlers γ            \
-            in [|| $$h ($$unbox $$(input γ)) ||]; \
+#define deriveHandlerOps(_o)                         \
+instance HandlerOps _o where                         \
+{                                                    \
+  buildHandler γ h c = [||\o# ->                     \
+    $$(h (γ {operands = Op (FREEVAR c) (operands γ), \
+             input = [||$$box o#||]}))||];           \
+  fatal = [||\(!_) -> returnST Nothing ||];          \
+  raise γ = let VCons h _ = handlers γ               \
+            in [|| $$h ($$unbox $$(input γ)) ||];    \
 };
 inputInstances(deriveHandlerOps)
 
@@ -121,9 +122,9 @@ class ReturnOps o where
 #define deriveContOps(_o)                                                                      \
 instance ContOps _o where                                                                      \
 {                                                                                              \
-  suspend m γ = [|| \x (!o#) -> $$(m (γ {operands = Op [||x||] (operands γ),                   \
+  suspend m γ = [|| \x (!o#) -> $$(m (γ {operands = Op (FREEVAR [||x||]) (operands γ),         \
                                          input = [||$$box o#||]})) ||];                        \
-  resume k γ = let Op x _ = operands γ in [|| $$k $$x ($$unbox $$(input γ)) ||];               \
+  resume k γ = let Op x _ = operands γ in [|| $$k $$(genDefunc x) ($$unbox $$(input γ)) ||];   \
   callWithContinuation sub ret input (VCons h _) = [||$$sub $$ret ($$unbox $$input) $! $$h||]; \
 };
 inputInstances(deriveContOps)
@@ -149,15 +150,15 @@ class BoxOps o => RecBuilder o where
             -> Machine s o '[] One r a
             -> Code (Func rs s o a r)
 
-#define deriveJoinBuilder(_o)                                                   \
-instance JoinBuilder _o where                                                   \
-{                                                                               \
-  setupJoinPoint φ (Machine k) mx =                                             \
-    liftM2 (\mk ctx γ -> [||                                                    \
-      let join x !(o# :: Unboxed _o) =                                          \
-        $$(mk (γ {operands = Op [||x||] (operands γ), input = [||$$box o#||]})) \
-      in $$(run mx γ (insertΦ φ [||join||] ctx))                                \
-    ||]) (local voidCoins k) ask;                                               \
+#define deriveJoinBuilder(_o)                                                             \
+instance JoinBuilder _o where                                                             \
+{                                                                                         \
+  setupJoinPoint φ (Machine k) mx =                                                       \
+    liftM2 (\mk ctx γ -> [||                                                              \
+      let join x !(o# :: Unboxed _o) =                                                    \
+        $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = [||$$box o#||]})) \
+      in $$(run mx γ (insertΦ φ [||join||] ctx))                                          \
+    ||]) (local voidCoins k) ask;                                                         \
 };
 inputInstances(deriveJoinBuilder)
 

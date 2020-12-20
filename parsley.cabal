@@ -128,6 +128,20 @@ source-repository head
   type:                git
   location:            https://github.com/j-mie6/HaskellParsley
 
+common test-common
+  build-depends:       base >=4.10 && <5,
+                       parsley,
+                       tasty,
+                       lift-plugin
+  hs-source-dirs:      test
+  default-language:    Haskell2010
+
+test-suite parsley-test
+  import:              test-common
+  type:                exitcode-stdio-1.0
+  build-depends:       tasty-hunit, tasty-quickcheck
+  main-is:             Test.hs
+
 common benchmark-common
   build-tool-depends:  happy:happy
   build-depends:       base >=4.10 && <5,

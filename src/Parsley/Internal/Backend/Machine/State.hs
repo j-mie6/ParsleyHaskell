@@ -22,6 +22,7 @@ import Data.STRef                                   (STRef)
 import Data.Dependent.Map                           (DMap)
 import Data.Kind                                    (Type)
 import Data.Maybe                                   (fromMaybe)
+import Parsley.Internal.Backend.Machine.Defunc      (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.InputRep    (Unboxed)
 import Parsley.Internal.Backend.Machine.LetBindings (Regs(..))
@@ -49,10 +50,10 @@ run = flip . runReader . getMachine
 
 data OpStack xs where
   Empty :: OpStack '[]
-  Op :: Code x -> OpStack xs -> OpStack (x ': xs)
+  Op :: Defunc x -> OpStack xs -> OpStack (x ': xs)
 
 data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
-                   , getCached :: Maybe (Code x) }
+                   , getCached :: Maybe (Defunc x) }
 
 data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , retCont  :: Code (Cont s o a r)
@@ -75,21 +76,21 @@ insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q NoRegs) (μs ctx)}
 insertΦ :: ΦVar x -> Code (Cont s o a x) -> Ctx s o a -> Ctx s o a
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 
-insertNewΣ :: ΣVar x -> Maybe (Code (STRef s x)) -> Code x -> Ctx s o a -> Ctx s o a
-insertNewΣ σ qref qx ctx = ctx {σs = DMap.insert σ (Reg qref (Just qx)) (σs ctx)}
+insertNewΣ :: ΣVar x -> Maybe (Code (STRef s x)) -> Defunc x -> Ctx s o a -> Ctx s o a
+insertNewΣ σ qref x ctx = ctx {σs = DMap.insert σ (Reg qref (Just x)) (σs ctx)}
 
 insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
 insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing) (σs ctx)}
 
-cacheΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
-cacheΣ σ qx ctx = case DMap.lookup σ (σs ctx) of
-  Just (Reg ref _) -> ctx {σs = DMap.insert σ (Reg ref (Just qx)) (σs ctx)}
+cacheΣ :: ΣVar x -> Defunc x -> Ctx s o a -> Ctx s o a
+cacheΣ σ x ctx = case DMap.lookup σ (σs ctx) of
+  Just (Reg ref _) -> ctx {σs = DMap.insert σ (Reg ref (Just x)) (σs ctx)}
   Nothing          -> throw (outOfScopeRegister σ)
 
 concreteΣ :: ΣVar x -> Ctx s o a -> Code (STRef s x)
 concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (>>= getReg) . DMap.lookup σ . σs
 
-cachedΣ :: ΣVar x -> Ctx s o a -> Code x
+cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (>>= getCached) . DMap.lookup σ . σs
 
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))

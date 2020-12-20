@@ -10,7 +10,7 @@ import Data.Void                                      (Void)
 import Control.Monad                                  (forM, liftM2)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc, genDefunc, genDefunc1, genDefunc2)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc(FREEVAR), genDefunc, genDefunc1, ap2)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
@@ -77,13 +77,13 @@ evalJump :: ContOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
 evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation sub retCont input handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
-evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op (genDefunc x) (operands γ)})
+evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
 
 evalPop :: Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ in xs})
 
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
-evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (genDefunc2 f x y) xs})
+evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
 evalSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o, Trace) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p (Machine k) = do
@@ -93,9 +93,9 @@ evalSat p (Machine k) = do
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
-    maybeEmitCheck Nothing mk γ = sat (genDefunc p) mk (raise γ) γ
+    maybeEmitCheck Nothing mk γ = sat (genDefunc1 p) mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc p) mk [||bad||]) [||bad||] γ)||]
+      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc1 p) mk [||bad||]) [||bad||] γ)||]
 
 evalEmpt :: (BoxOps o, HandlerOps o) => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -107,17 +107,17 @@ evalCatch :: (BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine 
 evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandler γ (buildHandler γ mh) mk) k h
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
-evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (input γ) (operands γ)})
+evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (FREEVAR (input γ)) (operands γ)})
 
 evalSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
-evalSeek (Machine k) = k <&> \mk γ -> let Op input xs = operands γ in mk (γ {operands = xs, input = input})
+evalSeek (Machine k) = k <&> \mk γ -> let Op input xs = operands γ in mk (γ {operands = xs, input = genDefunc input})
 
 evalCase :: Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
 evalCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
   let Op e xs = operands γ
-  in [||case $$e of
-    Left x -> $$(mp (γ {operands = Op [||x||] xs}))
-    Right y  -> $$(mq (γ {operands = Op [||y||] xs}))||]) p q
+  in [||case $$(genDefunc e) of
+    Left x -> $$(mp (γ {operands = Op (FREEVAR [||x||]) xs}))
+    Right y  -> $$(mq (γ {operands = Op (FREEVAR [||y||]) xs}))||]) p q
 
 evalChoices :: [Defunc (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands γ in go x fs mks mdef (γ {operands = xs}))
@@ -125,7 +125,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
   (forM ks getMachine)
   where
     go x (f:fs) (mk:mks) def γ = [||
-        if $$(genDefunc1 f x) then $$(mk γ)
+        if $$(genDefunc1 f (genDefunc x)) then $$(mk γ)
         else $$(go x fs mks def γ)
       ||]
     go _ _ _ def γ = def γ

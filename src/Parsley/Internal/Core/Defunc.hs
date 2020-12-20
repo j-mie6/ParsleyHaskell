@@ -40,6 +40,9 @@ pattern FLIP_H f      = APP_H FLIP f
 pattern FLIP_CONST :: () => (x ~ (a -> b -> b)) => Defunc x
 pattern FLIP_CONST    = FLIP_H CONST
 
+ap :: Defunc (a -> b) -> Defunc a -> Defunc b
+ap f x = APP_H f x
+
 genDefunc :: Defunc a -> Code a
 genDefunc APP             = [|| \f x -> f x ||]
 genDefunc COMPOSE         = [|| \f g x -> f (g x) ||]
@@ -48,9 +51,9 @@ genDefunc (COMPOSE_H f g) = [|| \x -> $$(genDefunc1 (COMPOSE_H f g) [||x||]) ||]
 genDefunc CONST           = [|| \x _ -> x ||]
 genDefunc FLIP_CONST      = [|| \_ y -> y ||]
 genDefunc (FLIP_H f)      = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
-genDefunc (APP_H f x)     = genDefunc2 APP (genDefunc f) (genDefunc x)
+genDefunc (APP_H f x)     = genDefunc1 f (genDefunc x)
 genDefunc (CHAR c)        = [|| c ||]
-genDefunc (EQ_H x)        = [|| \y -> $$(genDefunc x) == y ||]
+genDefunc (EQ_H x)        = [|| \y -> $$(genDefunc1 (EQ_H x) [||y||]) ||]
 genDefunc ID              = [|| \x -> x ||]
 genDefunc CONS            = [|| \x xs -> x : xs ||]
 genDefunc EMPTY           = [|| [] ||]
@@ -61,7 +64,9 @@ genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
 genDefunc1 APP             qf = [|| \x -> $$qf x ||]
 genDefunc1 COMPOSE         qf = [|| \g x -> $$qf (g x) ||]
 genDefunc1 FLIP            qf = [|| \x y -> $$qf y x ||]
-genDefunc1 (COMPOSE_H f g) qx = [|| $$(genDefunc1 f (genDefunc1 g qx)) ||]
+genDefunc1 (COMPOSE_H f g) qx = genDefunc1 f (genDefunc1 g qx)
+genDefunc1 (APP_H APP f)   qx = genDefunc1 f qx
+genDefunc1 (APP_H f x)     qy = genDefunc2 f (genDefunc x) qy
 genDefunc1 CONST           qx = [|| \_ -> $$qx ||]
 genDefunc1 FLIP_CONST      _  = genDefunc ID
 genDefunc1 (FLIP_H f)      qx = [|| \y -> $$(genDefunc2 (FLIP_H f) qx [||y||]) ||]
@@ -70,14 +75,15 @@ genDefunc1 ID              qx = qx
 genDefunc1 f               qx = [|| $$(genDefunc f) $$qx ||]
 
 genDefunc2 :: Defunc (a -> b -> c) -> Code a -> Code b -> Code c
-genDefunc2 APP        qf qx  = [|| $$qf $$qx ||]
-genDefunc2 COMPOSE    qf qg  = [|| \x -> $$qf ($$qg x) ||]
-genDefunc2 FLIP       qf qx  = [|| \y -> $$qf y $$qx ||]
-genDefunc2 CONST      qx _   = qx
-genDefunc2 FLIP_CONST _  qy  = qy
-genDefunc2 (FLIP_H f) qx qy  = genDefunc2 f qy qx
-genDefunc2 CONS       qx qxs = [|| $$qx : $$qxs ||]
-genDefunc2 f          qx qy  = [|| $$(genDefunc f) $$qx $$qy ||]
+genDefunc2 APP             qf qx  = [|| $$qf $$qx ||]
+genDefunc2 COMPOSE         qf qg  = [|| \x -> $$qf ($$qg x) ||]
+genDefunc2 FLIP            qf qx  = [|| \y -> $$qf y $$qx ||]
+genDefunc2 (COMPOSE_H f g) qx qy  = genDefunc2 f (genDefunc1 g qx) qy
+genDefunc2 CONST           qx _   = qx
+genDefunc2 FLIP_CONST      _  qy  = qy
+genDefunc2 (FLIP_H f)      qx qy  = genDefunc2 f qy qx
+genDefunc2 CONS            qx qxs = [|| $$qx : $$qxs ||]
+genDefunc2 f               qx qy  = [|| $$(genDefunc f) $$qx $$qy ||]
 
 instance Show (Defunc a) where
   show APP = "($)"

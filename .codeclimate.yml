@@ -1,0 +1,15 @@
+version: "2"
+exclude_patterns:
+- "benchmarks/inputs"
+engines:
+  hlint:
+    enabled: true
+    exclude_fingerprints:
+    - 3e7d6f4736abf5505671c3a2eb395cbc
+    checks:
+      HLint/ParseError:
+        enabled: false
+      HLint/RedundantDo:
+        enabled: false
+      HLint/Redundant$!:
+        enabled: false

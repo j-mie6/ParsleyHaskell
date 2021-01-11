@@ -154,7 +154,7 @@ freeRegistersAlg :: Combinator FreeRegisters a -> FreeRegisters a
 freeRegistersAlg (GetRegister σ)      = FreeRegisters $ do uses σ
 freeRegistersAlg (PutRegister σ p)    = FreeRegisters $ do uses σ; doFreeRegisters p
 freeRegistersAlg (MakeRegister σ p q) = FreeRegisters $ do defs σ; doFreeRegisters p; doFreeRegisters q
-freeRegistersAlg (Let {})             = FreeRegisters $ do return () -- TODO This can be removed when Let doesn't have the body in it...
+freeRegistersAlg Let{}                = FreeRegisters $ do return () -- TODO This can be removed when Let doesn't have the body in it...
 freeRegistersAlg p                    = FreeRegisters $ do traverseCombinator (fmap Const1 . doFreeRegisters) p; return ()
 
 uses :: MonadState (Set IΣVar, vs) m => ΣVar a -> m ()

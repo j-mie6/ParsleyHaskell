@@ -121,7 +121,7 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (Tell k)            = "(Tell " . getConst4 k . ")"
       alg (Seek k)            = "(Seek " . getConst4 k . ")"
       alg (Case p q)          = "(Case " . getConst4 p . " " . getConst4 q . ")"
-      alg (Choices fs ks def) = "(Choices " . shows fs . " [" . intercalateDiff (", ") (map getConst4 ks) . "] " . getConst4 def . ")"
+      alg (Choices fs ks def) = "(Choices " . shows fs . " [" . intercalateDiff ", " (map getConst4 ks) . "] " . getConst4 def . ")"
       alg (Iter μ l h)        = "{Iter " . shows μ . " " . getConst4 l . " " . getConst4 h . "}"
       alg (Join φ)            = shows φ
       alg (MkJoin φ p k)      = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"

@@ -81,7 +81,7 @@ instance Show (Fix Combinator a) where
       alg (Let True v _)                            = "(rec " . shows v . ")"
       alg (NotFollowedBy (Const1 p))                = "(notFollowedBy " . p . ")"
       alg (Branch (Const1 b) (Const1 p) (Const1 q)) = "(branch " . b . " " . p . " " . q . ")"
-      alg (Match (Const1 p) fs qs (Const1 def))     = "(match " . p . " " . shows fs . " [" . intercalateDiff (", ") (map getConst1 qs) . "] "  . def . ")"
+      alg (Match (Const1 p) fs qs (Const1 def))     = "(match " . p . " " . shows fs . " [" . intercalateDiff ", " (map getConst1 qs) . "] "  . def . ")"
       alg (ChainPre (Const1 op) (Const1 p))         = "(chainPre " . op . " " . p . ")"
       alg (ChainPost (Const1 p) (Const1 op))        = "(chainPost " . p . " " . op . ")"
       alg (MakeRegister σ (Const1 p) (Const1 q))    = "(make " . shows σ . " " . p . " " . q . ")"

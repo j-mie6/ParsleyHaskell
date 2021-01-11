@@ -31,7 +31,7 @@ size :: Queue a -> Int
 size q = insz q + outsz q
 
 toList :: Queue a -> [a]
-toList q = (outs q ++ reverse (ins q))
+toList q = outs q ++ reverse (ins q)
 
 foldr :: (a -> b -> b) -> b -> Queue a -> b
 foldr f k = Prelude.foldr f k . toList

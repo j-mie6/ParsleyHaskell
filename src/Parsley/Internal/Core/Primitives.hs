@@ -18,7 +18,7 @@ class ParserOps rep where
 instance ParserOps WQ where
   pure = pure . BLACK
   satisfy = satisfy . BLACK
-  conditional cs p def = conditional (map (\(f, t) -> (BLACK f, t)) cs) p def
+  conditional = conditional . map (\(f, t) -> (BLACK f, t))
 
 instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
   pure = _pure

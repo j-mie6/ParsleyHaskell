@@ -3,7 +3,6 @@
              MultiParamTypeClasses,
              MultiWayIf,
              RecursiveDo,
-             TupleSections,
              UndecidableInstances #-}
 module Parsley.Internal.Frontend.Compiler (compile) where
 
@@ -67,7 +66,7 @@ tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combina
 tagParser p = cata' tagAlg p
   where
     tagAlg p = In . Tag (makeParserName p) . (id \/ descope)
-    descope (ScopeRegister p f) = freshReg regMaker (\(reg@(Reg σ)) -> MakeRegister σ p (f reg))
+    descope (ScopeRegister p f) = freshReg regMaker (\reg@(Reg σ) -> MakeRegister σ p (f reg))
     regMaker :: IORef IΣVar
     regMaker = newRegMaker p
 

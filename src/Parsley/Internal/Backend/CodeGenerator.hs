@@ -64,7 +64,7 @@ peephole (TryOrElse p q) = Just $ CodeGen $ \m -> -- FIXME!
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
      fmap (binder . In4 . Catch pc . In4 . Seek) (freshΦ (runCodeGen q φ))
-peephole ((_ :< ((Try (p :< _)) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ \m ->
+peephole ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (In4 (Pop (In4 (Push (USER x) φ))))))
      fmap (binder . In4 . Catch pc . In4 . Seek) (freshΦ (runCodeGen q φ))
@@ -108,8 +108,8 @@ direct (p :<|>: q) m =
      qc <- freshΦ (runCodeGen q φ)
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
-     let dp = np - (min np nq)
-     let dq = nq - (min np nq)
+     let dp = np - min np nq
+     let dq = nq - min np nq
      return $! binder (In4 (Catch (addCoins dp pc) (parsecHandler (addCoins dq qc))))
 direct (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 direct (LookAhead p) m =

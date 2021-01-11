@@ -42,7 +42,7 @@ import qualified Data.Set            as Set     (empty)
 
 {-# INLINEABLE compile #-}
 compile :: forall compiled a. Trace => Parser a -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
-compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") $ (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
+compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
   where
     (p', μs, maxV) = preprocess p
     (μs', frs, maxΣ) = dependencyAnalysis p' μs

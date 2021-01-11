@@ -33,7 +33,7 @@ newtype StateT s m a = StateT {unStateT :: forall r. s -> (a -> s -> m r) -> m r
 
 {-# INLINE runStateT #-}
 runStateT :: Monad m => StateT s m a -> s -> m (a, s)
-runStateT (StateT f) s = f s (\x s' -> return (x, s'))
+runStateT (StateT f) s = f s (curry return)
 
 {-# INLINE evalStateT #-}
 evalStateT :: Monad m => StateT s m a -> s -> m a
@@ -61,7 +61,7 @@ instance MonadFix m => MonadFix (StateT s m) where
 
 instance MonadTrans (StateT s) where
   {-# INLINE lift #-}
-  lift m = StateT (\s k -> m >>= (\x -> k x s))
+  lift m = StateT (\s k -> m >>= (`k` s))
 
 instance MonadIO m => MonadIO (StateT s m) where liftIO = lift . liftIO
 instance MonadFail m => MonadFail (StateT s m) where fail msg = StateT (\_ _ -> Fail.fail msg)

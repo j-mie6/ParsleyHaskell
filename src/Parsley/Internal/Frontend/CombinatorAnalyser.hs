@@ -14,7 +14,7 @@ import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 --import qualified Data.Map.Strict as Map
 --import qualified Data.Set        as Set
 
-data AnalysisFlags = AnalysisFlags {
+newtype AnalysisFlags = AnalysisFlags {
   letBound :: Bool
 }
 emptyFlags :: AnalysisFlags
@@ -42,7 +42,7 @@ compliance :: Combinator Compliance a -> Compliance a
 compliance (Pure _)                 = FullPure
 compliance (Satisfy _)              = NonComp
 compliance Empty                    = FullPure
-compliance (Let _ _ _)              = DomComp
+compliance Let{}                    = DomComp
 compliance (Try _)                  = DomComp
 compliance (NonComp :<|>: FullPure) = Comp
 compliance (_ :<|>: _)              = NonComp
@@ -90,7 +90,7 @@ cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . alg) com
     alg (Satisfy f) cut = (mkCut cut (In (Satisfy f)), True)
     alg Empty _ = (In Empty, False)
     alg (Let r μ p) cut = (mkCut (not cut) (In (Let r μ (fst (doCut (ifst p) True)))), False) -- If there is no cut, we generate a piggy for the continuation
-    alg (Try p) _ = fmap (const False) $ rewrap Try False (ifst p)
+    alg (Try p) _ = False <$ rewrap Try False (ifst p)
     alg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (requiresCut (In (fst (doCut p True) :<|>: fst (doCut q False))), True)
     alg (p :<|>: q) cut =
       let (q', handled) = doCut (ifst q) cut
@@ -99,7 +99,7 @@ cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . alg) com
     alg (l :<*: r) cut = seqAlg (:<*:) cut (ifst l) (ifst r)
     alg (l :*>: r) cut = seqAlg (:*>:) cut (ifst l) (ifst r)
     alg (LookAhead p) cut = rewrap LookAhead cut (ifst p)
-    alg (NotFollowedBy p) _ = fmap (const False) $ rewrap NotFollowedBy False (ifst p)
+    alg (NotFollowedBy p) _ = False <$ rewrap NotFollowedBy False (ifst p)
     alg (Debug msg p) cut = rewrap (Debug msg) cut (ifst p)
     alg (ChainPre (op :*: NonComp) p) _ =
       let (op', _) = doCut op True

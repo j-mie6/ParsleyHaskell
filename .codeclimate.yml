@@ -1,6 +1,15 @@
 version: "2"
 exclude_patterns:
-- "benchmarks/inputs"
+- "benchmarks"
+- "LICENSE"
+- "*.md"
+- ".codeclimate.yml"
+- ".gitignore"
+- "test"
+- ".github"
+- "Setup.hs"
+- "*.cabal"
+- "*.project"
 engines:
   hlint:
     enabled: true

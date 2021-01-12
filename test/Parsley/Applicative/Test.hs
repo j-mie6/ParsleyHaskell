@@ -24,8 +24,8 @@ unit' = $$(runParser unit)
 
 unitTests :: TestTree
 unitTests = testGroup "unit should" [
-    testCase "not need to consume input" (assertEqual "" (unit' "") (Just ())),
-    testCase "not fail if there is input" (assertEqual "" (unit' "a") (Just ()))
+    testCase "not need to consume input" (unit' "" @?= Just ()),
+    testCase "not fail if there is input" (unit' "a" @?= Just ())
   ]
 
 fmapTests :: TestTree

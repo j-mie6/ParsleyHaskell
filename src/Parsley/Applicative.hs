@@ -20,7 +20,7 @@ infixl 4 <$>
 (<$>) = fmap
 
 void :: Parser a -> Parser ()
-void p = p *> unit
+void p = p $> UNIT
 
 infixl 4 <$
 (<$) :: ParserOps rep => rep b -> Parser a -> Parser b

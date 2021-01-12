@@ -15,14 +15,14 @@ infixl 3 <+>
 (<+>) :: Parser a -> Parser b -> Parser (Either a b)
 p <+> q = code Left <$> p <|> code Right <$> q
 
+option :: ParserOps rep => rep a -> Parser a -> Parser a
+option x p = p <|> pure x
+
 optionally :: ParserOps rep => Parser a -> rep b -> Parser b
-optionally p x = p $> x <|> pure x
+optionally p x = option x (p $> x)
 
 optional :: Parser a -> Parser ()
 optional = flip optionally UNIT
-
-option :: ParserOps rep => rep a -> Parser a -> Parser a
-option x p = p <|> pure x
 
 choice :: [Parser a] -> Parser a
 choice = foldr (<|>) empty

@@ -1,7 +1,8 @@
 cabal-version:       2.2
 name:                parsley
 -- https://wiki.haskell.org/Package_versioning_policy
--- PVP summary:      +-+------- breaking API changes
+-- PVP summary:      +--------- breaking API changes
+--                   | +------- breaking internal API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
 version:             0.1.0.0
@@ -132,15 +133,22 @@ common test-common
   build-depends:       base >=4.10 && <5,
                        parsley,
                        tasty,
+                       template-haskell,
                        lift-plugin
+  other-extensions:    TemplateHaskell
   hs-source-dirs:      test
   default-language:    Haskell2010
+  ghc-options:         -fplugin=LiftPlugin
 
 test-suite parsley-test
   import:              test-common
   type:                exitcode-stdio-1.0
   build-depends:       tasty-hunit, tasty-quickcheck
-  main-is:             Test.hs
+  main-is:             ParsleyTest.hs
+  other-modules:       Parsley.Alternative.Test, Parsley.Applicative.Test, Parsley.Combinator.Test, Parsley.Fold.Test,
+                       Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test, Parsley.Primitive.Test,
+                       Parsley.Alternative.Parsers, Parsley.Applicative.Parsers, Parsley.Combinator.Parsers, Parsley.Fold.Parsers,
+                       Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers, Parsley.Primitive.Parsers
 
 common benchmark-common
   build-tool-depends:  happy:happy

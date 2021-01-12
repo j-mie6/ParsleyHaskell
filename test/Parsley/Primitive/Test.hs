@@ -2,9 +2,9 @@
 module Parsley.Primitive.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
+import qualified Parsley.Primitive.Parsers as Parsers
 
-import Prelude hiding (pure)
-import Parsley (runParser, pure, empty, code)
+import Parsley (runParser, empty)
 
 tests :: TestTree
 tests = testGroup "Primitive" [ pureTests
@@ -22,7 +22,7 @@ tests = testGroup "Primitive" [ pureTests
                               ]
 
 pure7 :: String -> Maybe Int
-pure7 = $$(runParser (pure (code 7)))
+pure7 = $$(runParser Parsers.pure7)
 
 pureTests :: TestTree
 pureTests = testGroup "pure should"
@@ -51,8 +51,20 @@ emptyTests = testGroup "empty should"
   , testCase "fail the parser with input" (assertEqual "" (constNothing "a") Nothing)
   ]
 
+digit :: String -> Maybe Char
+digit = $$(runParser Parsers.digit)
+
+twoDigits :: String -> Maybe Char
+twoDigits = $$(runParser Parsers.twoDigits)
+
 satisfyTests :: TestTree
-satisfyTests = testGroup "satisfy should" []
+satisfyTests = testGroup "satisfy should"
+  [ testCase "fail when given no input" (assertEqual "" (digit "") Nothing)
+  , testCase "fail when given incorrect input" (assertEqual "" (digit "a") Nothing)
+  , testCase "succeed when given correct input" (assertEqual "" (digit "1") (Just '1'))
+  , testCase "actually consume input" (assertEqual "" (twoDigits "1") (Nothing))
+  , testCase "consume more than 1 piece of input with two" (assertEqual "" (twoDigits "12") (Just '2'))
+  ]
 
 lookAheadTests :: TestTree
 lookAheadTests = testGroup "lookAhead should" []

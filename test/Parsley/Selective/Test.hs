@@ -1,6 +1,9 @@
 {-# LANGUAGE TemplateHaskell, UnboxedTuples #-}
 module Parsley.Selective.Test where
 import Test.Tasty
+import Test.Tasty.HUnit
+import TestUtils
+import qualified Parsley.Selective.Parsers as Parsers
 
 tests :: TestTree
 tests = testGroup "Selective" [ selectTests

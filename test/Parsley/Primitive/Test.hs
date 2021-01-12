@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, UnboxedTuples #-}
+{-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables #-}
 module Parsley.Primitive.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -27,8 +27,8 @@ pure7 = $$(runParserMocked Parsers.pure7 [||Parsers.pure7||])
 
 pureTests :: TestTree
 pureTests = testGroup "pure should"
-  [ testCase "not need to consume input" (pure7 "" @?= Just 7)
-  , testCase "not fail if there is input" (pure7 "a" @?= Just 7)
+  [ testCase "not need to consume input" $ pure7 "" @?= Just 7
+  , testCase "not fail if there is input" $ pure7 "a" @?= Just 7
   ]
 
 apTests :: TestTree
@@ -40,16 +40,25 @@ thenTests = testGroup "*> should" []
 prevTests :: TestTree
 prevTests = testGroup "<* should" []
 
+abOrC :: String -> Maybe String
+abOrC = $$(runParserMocked Parsers.abOrC [||Parsers.abOrC||])
+
 altTests :: TestTree
-altTests = testGroup "<|> should" []
+altTests = testGroup "<|> should"
+  [ testCase "take the left branch if it succeeds" $ abOrC "ab" @?= Just "ab"
+  , testCase "take the right branch if left failed without consumption" $ do
+      abOrC "c" @?= Just "c"
+      abOrC "d" @?= Nothing
+  , testCase "fail if the left branch fails and consumes input" $ abOrC "a" @?= Nothing
+  ]
 
 constNothing :: String -> Maybe ()
 constNothing = $$(runParserMocked empty [||empty||])
 
 emptyTests :: TestTree
 emptyTests = testGroup "empty should"
-  [ testCase "fail the parser with no input" (constNothing "" @?= Nothing)
-  , testCase "fail the parser with input" (constNothing "a" @?= Nothing)
+  [ testCase "fail the parser with no input" $ constNothing "" @?= Nothing
+  , testCase "fail the parser with input" $ constNothing "a" @?= Nothing
   ]
 
 digit :: String -> Maybe Char
@@ -60,11 +69,11 @@ twoDigits = $$(runParserMocked Parsers.twoDigits [||Parsers.twoDigits||])
 
 satisfyTests :: TestTree
 satisfyTests = testGroup "satisfy should"
-  [ testCase "fail when given no input" (digit "" @?= Nothing)
-  , testCase "fail when given incorrect input" (digit "a" @?= Nothing)
-  , testCase "succeed when given correct input" (digit "1" @?= Just '1')
-  , testCase "actually consume input" (twoDigits "1" @?= Nothing)
-  , testCase "consume more than 1 piece of input with two" (twoDigits "12" @?= Just '2')
+  [ testCase "fail when given no input" $ digit "" @?= Nothing
+  , testCase "fail when given incorrect input" $ digit "a" @?= Nothing
+  , testCase "succeed when given correct input" $ digit "1" @?= Just '1'
+  , testCase "actually consume input" $ twoDigits "1" @?= Nothing
+  , testCase "consume more than 1 piece of input with two" $ twoDigits "12" @?= Just '2'
   ]
 
 lookAheadTests :: TestTree
@@ -81,3 +90,11 @@ branchTests = testGroup "branch should" []
 
 conditionalTests :: TestTree
 conditionalTests = testGroup "conditional should" []
+
+manyAny :: String -> Maybe String
+manyAny = $$(runParserMocked Parsers.recursive [||Parsers.recursive||])
+
+recursionTests :: TestTree
+recursionTests = testGroup "recursion should"
+  [ testCase "work properly" $ manyAny "abc" @?= Just "abc"
+  ]

@@ -3,6 +3,7 @@ module Parsley.Applicative.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
 import TestUtils
+import qualified Parsley.Applicative.Parsers as Parsers
 
 import Prelude hiding ()
 import Parsley (runParser, code)
@@ -24,9 +25,9 @@ unit' :: String -> Maybe ()
 unit' = $$(runParserMocked unit [||unit||])
 
 unitTests :: TestTree
-unitTests = testGroup "unit should" [
-    testCase "not need to consume input" (unit' "" @?= Just ()),
-    testCase "not fail if there is input" (unit' "a" @?= Just ())
+unitTests = testGroup "unit should"
+  [ testCase "not need to consume input" $ unit' "" @?= Just ()
+  , testCase "not fail if there is input" $ unit' "a" @?= Just ()
   ]
 
 fmapTests :: TestTree

@@ -2,6 +2,8 @@
 module Parsley.Alternative.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
+import TestUtils
+import qualified Parsley.Alternative.Parsers as Parsers
 
 import Prelude hiding ()
 import Parsley (runParser, code)

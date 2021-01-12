@@ -2,6 +2,7 @@
 module TestUtils where
 
 import Parsley (runParser, Parser, Code)
+import Parsley.Internal.Verbose ()
 import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.TestUtils
 import Language.Haskell.TH.TestUtils.QMode

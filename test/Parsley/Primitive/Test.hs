@@ -4,8 +4,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Prelude hiding (pure)
-import Parsley (runParser, pure, code)
-import Parsley.Applicative (unit)
+import Parsley (runParser, pure, empty, code)
 
 tests :: TestTree
 tests = testGroup "Primitive" [ pureTests
@@ -26,9 +25,9 @@ pure7 :: String -> Maybe Int
 pure7 = $$(runParser (pure (code 7)))
 
 pureTests :: TestTree
-pureTests = testGroup "pure should" [
-    testCase "not need to consume input" (assertEqual "" (pure7 "") (Just 7)),
-    testCase "not fail if there is input" (assertEqual "" (pure7 "a") (Just 7))
+pureTests = testGroup "pure should"
+  [ testCase "not need to consume input" (assertEqual "" (pure7 "") (Just 7))
+  , testCase "not fail if there is input" (assertEqual "" (pure7 "a") (Just 7))
   ]
 
 apTests :: TestTree
@@ -43,8 +42,14 @@ prevTests = testGroup "<* should" []
 altTests :: TestTree
 altTests = testGroup "<|> should" []
 
+constNothing :: String -> Maybe ()
+constNothing = $$(runParser empty)
+
 emptyTests :: TestTree
-emptyTests = testGroup "empty should" []
+emptyTests = testGroup "empty should"
+  [ testCase "fail the parser with no input" (assertEqual "" (constNothing "") Nothing)
+  , testCase "fail the parser with input" (assertEqual "" (constNothing "a") Nothing)
+  ]
 
 satisfyTests :: TestTree
 satisfyTests = testGroup "satisfy should" []

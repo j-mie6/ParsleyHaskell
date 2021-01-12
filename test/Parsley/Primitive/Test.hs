@@ -2,6 +2,7 @@
 module Parsley.Primitive.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
+import TestUtils
 import qualified Parsley.Primitive.Parsers as Parsers
 
 import Parsley (runParser, empty)
@@ -22,7 +23,7 @@ tests = testGroup "Primitive" [ pureTests
                               ]
 
 pure7 :: String -> Maybe Int
-pure7 = $$(runParser Parsers.pure7)
+pure7 = $$(runParserMocked Parsers.pure7 [||Parsers.pure7||])
 
 pureTests :: TestTree
 pureTests = testGroup "pure should"
@@ -43,7 +44,7 @@ altTests :: TestTree
 altTests = testGroup "<|> should" []
 
 constNothing :: String -> Maybe ()
-constNothing = $$(runParser empty)
+constNothing = $$(runParserMocked empty [||empty||])
 
 emptyTests :: TestTree
 emptyTests = testGroup "empty should"
@@ -52,10 +53,10 @@ emptyTests = testGroup "empty should"
   ]
 
 digit :: String -> Maybe Char
-digit = $$(runParser Parsers.digit)
+digit = $$(runParserMocked Parsers.digit [||Parsers.digit||])
 
 twoDigits :: String -> Maybe Char
-twoDigits = $$(runParser Parsers.twoDigits)
+twoDigits = $$(runParserMocked Parsers.twoDigits [||Parsers.twoDigits||])
 
 satisfyTests :: TestTree
 satisfyTests = testGroup "satisfy should"

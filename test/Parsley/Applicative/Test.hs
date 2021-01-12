@@ -2,6 +2,7 @@
 module Parsley.Applicative.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
+import TestUtils
 
 import Prelude hiding ()
 import Parsley (runParser, code)
@@ -20,7 +21,7 @@ tests = testGroup "Applicative" [ unitTests
                                 ]
 
 unit' :: String -> Maybe ()
-unit' = $$(runParser unit)
+unit' = $$(runParserMocked unit [||unit||])
 
 unitTests :: TestTree
 unitTests = testGroup "unit should" [

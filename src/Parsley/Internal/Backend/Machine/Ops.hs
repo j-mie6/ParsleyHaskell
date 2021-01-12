@@ -100,7 +100,7 @@ setupHandler γ h k = [||
 #define deriveHandlerOps(_o)                         \
 instance HandlerOps _o where                         \
 {                                                    \
-  buildHandler γ h c = [||\o# ->                     \
+  buildHandler γ h c = [||\(o# :: Unboxed _o) ->     \
     $$(h (γ {operands = Op (FREEVAR c) (operands γ), \
              input = [||$$box o#||]}))||];           \
   fatal = [||\(!_) -> returnST Nothing ||];          \

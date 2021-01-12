@@ -20,6 +20,7 @@ tests = testGroup "Primitive" [ pureTests
                               , tryTests
                               , branchTests
                               , conditionalTests
+                              , recursionTests
                               ]
 
 pure7 :: String -> Maybe Int

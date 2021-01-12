@@ -5,9 +5,9 @@ import Test.Tasty.HUnit
 import TestUtils
 import qualified Parsley.Combinator.Parsers as Parsers
 
-import Prelude hiding ()
-import Parsley (runParser, code)
-import Parsley.Combinator (eof, more)
+import Prelude hiding ((*>))
+import Parsley (runParser, code, (*>))
+import Parsley.Combinator (eof, more, char, item)
 
 tests :: TestTree
 tests = testGroup "Combinator" [ stringTests
@@ -59,11 +59,25 @@ eofTests = testGroup "eof should"
 notNull :: String -> Maybe ()
 notNull = $$(runParserMocked more [||more||])
 
+notNullThenA :: String -> Maybe Char
+notNullThenA = $$(runParserMocked (more *> char 'a') [||more *> char 'a'||])
+
 moreTests :: TestTree
-moreTests = testGroup "more should" []
+moreTests = testGroup "more should"
+  [ testCase "fail on empty input" $ notNull "" @?= Nothing
+  , testCase "succeed on non-empty input" $ notNull "a" @?= Just ()
+  , testCase "not consume input" $ notNullThenA "a" @?= Just 'a'
+  ]
+
+charA :: String -> Maybe Char
+charA = $$(runParserMocked (char 'a') [||char 'a'||])
 
 charTests :: TestTree
-charTests = testGroup "char should" []
+charTests = testGroup "char should"
+  [ testCase "fail on empty input" $ charA "" @?= Nothing
+  , testCase "succeed on correct char" $ charA "a" @?= Just 'a'
+  , testCase "fail on wrong char" $ charA "b" @?= Nothing
+  ]
 
 itemTests :: TestTree
 itemTests = testGroup "item should" []

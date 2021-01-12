@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-hpc #-}
 {-# LANGUAGE AllowAmbiguousTypes,
              MagicHash,
              MultiParamTypeClasses,

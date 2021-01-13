@@ -44,12 +44,19 @@ prevTests = testGroup "<* should" []
 abOrC :: String -> Maybe String
 abOrC = $$(runParserMocked Parsers.abOrC [||Parsers.abOrC||])
 
+abOrCThenD :: String -> Maybe String
+abOrCThenD = $$(runParserMocked Parsers.abOrCThenD [||Parsers.abOrCThenD||])
+
 altTests :: TestTree
 altTests = testGroup "<|> should"
-  [ testCase "take the left branch if it succeeds" $ abOrC "ab" @?= Just "ab"
+  [ testCase "take the left branch if it succeeds" $ do
+      abOrC "ab" @?= Just "ab"
+      abOrCThenD "abd" @?= Just "ab"
   , testCase "take the right branch if left failed without consumption" $ do
       abOrC "c" @?= Just "c"
       abOrC "d" @?= Nothing
+      abOrCThenD "cd" @?= Just "c"
+      abOrCThenD "d" @?= Nothing
   , testCase "fail if the left branch fails and consumes input" $ abOrC "a" @?= Nothing
   ]
 

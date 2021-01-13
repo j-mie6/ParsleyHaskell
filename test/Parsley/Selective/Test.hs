@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, UnboxedTuples #-}
+{-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables #-}
 module Parsley.Selective.Test where
 import Test.Tasty
 import Test.Tasty.HUnit

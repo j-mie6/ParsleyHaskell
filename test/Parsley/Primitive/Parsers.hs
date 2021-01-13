@@ -2,7 +2,7 @@ module Parsley.Primitive.Parsers where
 
 import Prelude hiding (pure, (<*>), (*>), (<*))
 import Data.Char (isDigit)
-import Parsley (Parser, pure, empty, satisfy, (<*>), (*>), (<*), (<|>), string, item, (<:>), Defunc(EMPTY), code)
+import Parsley
 
 pure7 :: Parser Int
 pure7 = pure (code 7)
@@ -15,6 +15,9 @@ twoDigits = digit *> digit
 
 abOrC :: Parser String
 abOrC = string "ab" <|> string "c"
+
+abOrCThenD :: Parser String
+abOrCThenD = abOrC <* char 'd'
 
 recursive :: Parser [Char]
 recursive =

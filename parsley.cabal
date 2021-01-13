@@ -143,7 +143,7 @@ common test-common
 test-suite parsley-test
   import:              test-common
   type:                exitcode-stdio-1.0
-  build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, mtl, transformers
+  build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq
   main-is:             ParsleyTest.hs
   other-modules:       Parsley.Alternative.Test, Parsley.Applicative.Test, Parsley.Combinator.Test, Parsley.Fold.Test,
                        Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test, Parsley.Primitive.Test,

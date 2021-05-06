@@ -4,7 +4,8 @@
              DeriveAnyClass,
              DeriveGeneric,
              TypeFamilies,
-             UnboxedTuples #-}
+             UnboxedTuples,
+             TypeApplications #-}
 module Main where
 import Criterion.Main         (Benchmark, bgroup, defaultMain)
 import Control.DeepSeq        (NFData)

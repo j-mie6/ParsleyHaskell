@@ -23,7 +23,7 @@ import Parsley.Applicative              as Applicative
 import Parsley.Combinator               as Combinator  (item, char, string, satisfy, notFollowedBy, lookAhead, try)
 import Parsley.Fold                     as Fold        (many, some)
 import Parsley.Internal.Core            as Core
-import Parsley.Internal.Common.Utils    as THUtils     ({-code, -}Quapplicative(makeQ), WQ, Code)
+import Parsley.Internal.Common.Utils    as THUtils     ({-code, -}Quapplicative(..), WQ, Code)
 import Parsley.Internal.Core.Primitives as Primitives  (debug)
 import Parsley.Selective                as Selective
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# OPTIONS_GHC -fplugin=IdiomsPlugin #-}
 module JavascriptBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -8,6 +9,7 @@ import Parsley
 import Parsley.Combinator (token, oneOf, noneOf, eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
+import Parsley.Garnish
 import JavascriptBench.Shared
 import Data.Char (isSpace, isUpper, digitToInt, isDigit)
 import Data.Maybe (catMaybes)

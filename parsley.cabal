@@ -93,17 +93,18 @@ library
                        NoStarIsType
 
   build-depends:       base >=4.10 && <5,
+                       ghc <8.8,
                        mtl,
                        hashable,
                        unordered-containers,
-                       array,
+                       array >=0.5.3 && <0.6,
                        ghc-prim,
-                       template-haskell,
+                       template-haskell >=2.14,
                        containers,
                        dependent-map,
                        dependent-sum,
-                       lift-plugin,
-                       idioms-plugin,
+                       --lift-plugin,
+                       --idioms-plugin,
                        pretty-terminal,
                        text,
                        bytestring

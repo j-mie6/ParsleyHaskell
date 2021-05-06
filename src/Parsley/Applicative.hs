@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -fplugin=LiftPlugin #-}
+{- OPTIONS_GHC -fplugin=LiftPlugin #-}
 {-# LANGUAGE PatternSynonyms #-}
 module Parsley.Applicative (
     module Parsley.Applicative,
@@ -6,7 +6,7 @@ module Parsley.Applicative (
   ) where
 
 import Prelude hiding                (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence)
-import Parsley.Internal.Common.Utils (code)
+import Parsley.Internal.Common.Utils ({-code, -}makeQ)
 import Parsley.Internal.Core         (Parser, Defunc(UNIT, CONS, APP, CONST, EMPTY), pattern FLIP_H, ParserOps)
 
 import Parsley.Internal.Core.Primitives as Primitives (pure, (<*>), (*>), (<*))
@@ -48,7 +48,7 @@ unit = pure UNIT
 
 infixl 4 <~>
 (<~>) :: Parser a -> Parser b -> Parser (a, b)
-(<~>) = liftA2 (code (,))
+(<~>) = liftA2 (makeQ (,) [||(,)||])--(code (,))
 
 infixl 4 <~
 (<~) :: Parser a -> Parser b -> Parser a

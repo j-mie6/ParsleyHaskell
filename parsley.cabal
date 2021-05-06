@@ -129,6 +129,9 @@ library
                        -Wno-incomplete-uni-patterns
                        -pgmP cpphs -optP --cpp
                        -freverse-errors
+  if impl(ghc >= 8.10)
+    ghc-options:       -Wno-missing-safe-haskell-mode
+                       -Wprepositive-qualified-module
 
 source-repository head
   type:                git

@@ -62,7 +62,7 @@ type family Rep input where
   --Rep Lazy.ByteString = OffWith Lazy.ByteString
   Rep Stream = OffWith Stream
 
-type family RepKind rep where
+type family RepKind rep :: RuntimeRep where
   RepKind Int = IntRep
   RepKind Text = LiftedRep
   RepKind UnpackedLazyByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]

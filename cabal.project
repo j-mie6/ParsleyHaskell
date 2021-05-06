@@ -8,9 +8,9 @@ source-repository-package
     type: git
     location: https://github.com/J-mie6/lift-plugin.git
     subdir: lift-plugin
-    tag: 1aa3a6776fdd2a33326f6a593dcf4cf30210c0a0
-
-source-repository-package
-    type: git
-    location: https://github.com/J-mie6/idioms-plugins.git
-    tag: 1ca37d047d5c8568bee6caf5a506995cd53265f5
+    tag: 8e7b95d6c1c1d8ca2395e8572375e2b73166c1a2
+    
+--source-repository-package
+--    type: git
+--    location: https://github.com/J-mie6/idioms-plugins.git
+--    tag: 1ca37d047d5c8568bee6caf5a506995cd53265f5

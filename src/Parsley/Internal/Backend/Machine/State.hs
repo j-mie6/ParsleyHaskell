@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass,
              ExistentialQuantification,
-             TypeFamilies #-}
+             TypeFamilies,
+             DerivingStrategies #-}
 module Parsley.Internal.Backend.Machine.State (
     HandlerStack, Handler, Cont, SubRoutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
@@ -139,10 +140,10 @@ voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
 liquidate :: Ctx s o a -> Int
 liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
 
-newtype MissingDependency = MissingDependency IMVar deriving Exception
-newtype OutOfScopeRegister = OutOfScopeRegister IΣVar deriving Exception
-newtype IntangibleRegister = IntangibleRegister IΣVar deriving Exception
-newtype RegisterFault = RegisterFault IΣVar deriving Exception
+newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception
+newtype OutOfScopeRegister = OutOfScopeRegister IΣVar deriving anyclass Exception
+newtype IntangibleRegister = IntangibleRegister IΣVar deriving anyclass Exception
+newtype RegisterFault = RegisterFault IΣVar deriving anyclass Exception
 
 missingDependency :: MVar x -> MissingDependency
 missingDependency (MVar v) = MissingDependency v

@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, TypeApplications #-}
 module Parsley.Register.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -6,7 +6,7 @@ import TestUtils
 import qualified Parsley.Register.Parsers as Parsers
 
 import Prelude hiding ()
-import Parsley (runParser, code)
+import Parsley (runParser)
 
 -- NewRegister is required for any test and can only be tested with another component
 -- so it is omitted

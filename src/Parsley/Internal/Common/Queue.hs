@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns,
+             DerivingStrategies #-}
 module Parsley.Internal.Common.Queue (Queue, empty, enqueue, dequeue, null, size, foldr) where
 
 import Prelude hiding (null, foldr)
@@ -11,7 +12,7 @@ data Queue a = Queue {
   outs  :: [a],
   insz  :: Int,
   ins   :: [a]
-} deriving Eq
+} deriving stock Eq
 
 empty :: Queue a
 empty = Queue 0 [] 0 []

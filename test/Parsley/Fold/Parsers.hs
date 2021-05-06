@@ -3,6 +3,7 @@ module Parsley.Fold.Parsers where
 import Prelude hiding (pure, (<*>), (*>), (<*))
 import Parsley
 import Parsley.Fold
+import Parsley.Garnish
 
 plusOne :: Parser Int
 plusOne = chainPre (string "++" $> code succ) (char '1' $> code 1)

@@ -6,7 +6,7 @@ import TestUtils
 import qualified Parsley.Applicative.Parsers as Parsers
 
 import Prelude hiding ()
-import Parsley (runParser, code)
+import Parsley (runParser)
 import Parsley.Applicative (unit)
 
 tests :: TestTree

@@ -6,7 +6,7 @@ import TestUtils
 import qualified Parsley.Combinator.Parsers as Parsers
 
 import Prelude hiding ((*>))
-import Parsley (runParser, code, (*>))
+import Parsley (runParser, (*>))
 import Parsley.Combinator (eof, more, char, item)
 
 tests :: TestTree

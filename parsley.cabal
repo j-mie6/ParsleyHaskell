@@ -189,13 +189,13 @@ benchmark brainfuck-bench
                        BrainfuckBench.Attoparsec.Parser, BrainfuckBench.Handrolled.Parser, BrainfuckBench.Happy.Parser
   main-is:             BrainfuckBench/Main.hs
 
---benchmark javascript-bench
---  import:              benchmark-common
---  type:                exitcode-stdio-1.0
---  build-depends:       idioms-plugin
---  other-modules:       JavascriptBench.Shared, JavascriptBench.Parsley.Parser, JavascriptBench.Parsec.Parser, JavascriptBench.Megaparsec.Parser,
---                       JavascriptBench.Attoparsec.Parser, JavascriptBench.Happy.Parser
---  main-is:             JavascriptBench/Main.hs
+benchmark javascript-bench
+  import:              benchmark-common
+  type:                exitcode-stdio-1.0
+  build-depends:       idioms-plugin
+  other-modules:       JavascriptBench.Shared, JavascriptBench.Parsley.Parser, JavascriptBench.Parsec.Parser, JavascriptBench.Megaparsec.Parser,
+                       JavascriptBench.Attoparsec.Parser, JavascriptBench.Happy.Parser
+  main-is:             JavascriptBench/Main.hs
 
 benchmark nandlang-bench
   import:              benchmark-common

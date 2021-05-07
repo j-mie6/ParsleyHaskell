@@ -1,13 +1,23 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE UndecidableInstances,
+             CPP #-}
 module Parsley.Internal.Common.Utils ({-code, -}WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff) where
 
 import Data.List (intersperse)
 import Data.String (IsString(..))
+#if __GLASGOW_HASKELL__ < 900
 import Language.Haskell.TH (TExpQ)
+#else
+import qualified Language.Haskell.TH as TH (Code, Q)
+#endif
+
 --import LiftPlugin (LiftTo, code)
 
+#if __GLASGOW_HASKELL__ < 900
 type Code a = TExpQ a
+#else
+type Code a = TH.Code TH.Q a
+#endif
 data WQ a = WQ { __val :: a, __code :: Code a }
 --instance Quapplicative q => LiftTo q where code x = makeQ x [||x||]
 

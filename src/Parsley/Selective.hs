@@ -9,7 +9,7 @@ import Data.Function                 (fix)
 import Language.Haskell.TH.Syntax    (Lift(..))
 import Parsley.Alternative           (empty)
 import Parsley.Applicative           (pure, (<$>), liftA2, unit, constp)
-import Parsley.Internal.Common.Utils ({-code, -}makeQ)
+import Parsley.Internal.Common.Utils ({-code, -}makeQ, Code)
 import Parsley.Internal.Core         (Parser, Defunc(ID, EQ_H), ParserOps)
 
 import Parsley.Internal.Core.Primitives as Primitives (conditional, branch)
@@ -22,7 +22,9 @@ infixl 4 >??>
 (>??>) :: Parser a -> Parser (a -> Bool) -> Parser a
 px >??> pf = select (liftA2 (makeQ g qg) pf px) empty
   where
+    g :: (a -> Bool) -> a -> Either () a
     g f x = if f x then Right x else Left ()
+    qg :: Code ((a -> Bool) -> a -> Either () a)
     qg = [||\f x -> if f x then Right x else Left ()||]
 
 filteredBy :: ParserOps rep => Parser a -> rep (a -> Bool) -> Parser a

@@ -1,7 +1,11 @@
 {-# LANGUAGE MagicHash,
              TypeFamilies,
              TypeFamilyDependencies,
-             UnboxedTuples #-}
+             UnboxedTuples,
+             CPP #-}
+#if __GLASGOW_HASKELL__ >= 810
+{-# LANGUAGE StandaloneKindSignatures #-}
+#endif
 module Parsley.Internal.Backend.Machine.InputRep (
     Unboxed, Rep,
     OffWith(..), offWith, offWithSame, offWithShiftRight,
@@ -16,16 +20,19 @@ module Parsley.Internal.Backend.Machine.InputRep (
 
 import Data.Array.Unboxed                (UArray)
 import Data.ByteString.Internal          (ByteString(..))
+#if __GLASGOW_HASKELL__ >= 810
+import Data.Kind                         (Type)
+#endif
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
 import GHC.Exts                          (TYPE, RuntimeRep(..))
 import GHC.ForeignPtr                    (ForeignPtr(..), ForeignPtrContents)
 import GHC.Prim                          (Int#, Addr#, nullAddr#)
-import Language.Haskell.TH               (Q, Type)
 import Parsley.Internal.Common.Utils     (Code)
 import Parsley.Internal.Core.InputTypes  (Text16, CharList, Stream(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
+import qualified Language.Haskell.TH           as TH   (Q, Type)
 
 {- Representation Types -}
 data OffWith ts = OffWith {-# UNPACK #-} !Int ts
@@ -38,7 +45,7 @@ data UnpackedLazyByteString = UnpackedLazyByteString
   {-# UNPACK #-} !Int
   Lazy.ByteString
 
-representationTypes :: [Q Type]
+representationTypes :: [TH.Q TH.Type]
 representationTypes = [[t|Int|], [t|OffWith [Char]|], [t|OffWith Stream|], [t|UnpackedLazyByteString|], [t|Text|]]
 
 offWith :: Code (ts -> OffWith ts)
@@ -62,7 +69,10 @@ type family Rep input where
   --Rep Lazy.ByteString = OffWith Lazy.ByteString
   Rep Stream = OffWith Stream
 
-type family RepKind rep :: RuntimeRep where
+#if __GLASGOW_HASKELL__ >= 810
+type RepKind :: Type -> RuntimeRep
+#endif
+type family RepKind rep where
   RepKind Int = IntRep
   RepKind Text = LiftedRep
   RepKind UnpackedLazyByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
@@ -70,6 +80,9 @@ type family RepKind rep :: RuntimeRep where
   RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
   RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
 
+#if __GLASGOW_HASKELL__ >= 810
+type Unboxed :: forall (rep :: Type) -> TYPE (RepKind rep)
+#endif
 type family Unboxed rep = (urep :: TYPE (RepKind rep)) | urep -> rep where
   Unboxed Int = Int#
   Unboxed Text = Text

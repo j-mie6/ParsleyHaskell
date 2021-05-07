@@ -95,7 +95,7 @@ library
 
   build-depends:       base                 >= 4.10    && < 5,
                        -- This isn't needed, but is useful since we know Parsley's supported bounds
-                       ghc                  >= 8.6     && < 8.10,
+                       ghc                  >= 8.6     && < 9,
                        mtl                  >= 2.2.1   && < 2.3,
                        hashable             >= 1.2.7.0 && < 1.4,
                        unordered-containers >= 0.2.13  && < 0.3,
@@ -131,7 +131,8 @@ library
                        -freverse-errors
   if impl(ghc >= 8.10)
     ghc-options:       -Wno-missing-safe-haskell-mode
-                       -Wprepositive-qualified-module
+                       -Wno-prepositive-qualified-module
+                       -Wno-unused-packages
 
 source-repository head
   type:                git

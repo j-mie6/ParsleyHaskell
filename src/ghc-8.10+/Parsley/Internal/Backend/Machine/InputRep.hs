@@ -1,7 +1,8 @@
 {-# LANGUAGE MagicHash,
              TypeFamilies,
              TypeFamilyDependencies,
-             UnboxedTuples #-}
+             UnboxedTuples,
+             StandaloneKindSignatures #-}
 module Parsley.Internal.Backend.Machine.InputRep (
     Unboxed, Rep,
     OffWith(..), offWith, offWithSame, offWithShiftRight,
@@ -16,6 +17,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
 
 import Data.Array.Unboxed                (UArray)
 import Data.ByteString.Internal          (ByteString(..))
+import Data.Kind                         (Type)
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
 import GHC.Exts                          (TYPE, RuntimeRep(..))
@@ -62,6 +64,7 @@ type family Rep input where
   --Rep Lazy.ByteString = OffWith Lazy.ByteString
   Rep Stream = OffWith Stream
 
+type RepKind :: Type -> RuntimeRep
 type family RepKind rep where
   RepKind Int = IntRep
   RepKind Text = LiftedRep
@@ -70,7 +73,8 @@ type family RepKind rep where
   RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
   RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
 
-type family Unboxed rep = (urep :: TYPE (RepKind rep)) | urep -> rep where
+type Unboxed :: forall (rep :: Type) -> TYPE (RepKind rep)
+type family Unboxed rep = urep | urep -> rep where
   Unboxed Int = Int#
   Unboxed Text = Text
   Unboxed UnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)

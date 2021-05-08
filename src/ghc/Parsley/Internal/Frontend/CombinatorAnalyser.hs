@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingStrategies #-}
 module Parsley.Internal.Frontend.CombinatorAnalyser (analyse, compliance, Compliance(..), emptyFlags, AnalysisFlags(..)) where
 
 --import Control.Applicative                 (liftA2)
@@ -23,7 +24,7 @@ emptyFlags = AnalysisFlags False
 analyse :: AnalysisFlags -> Fix Combinator a -> Fix Combinator a
 analyse flags = cutAnalysis (letBound flags) {-. terminationAnalysis-}
 
-data Compliance (k :: Type) = DomComp | NonComp | Comp | FullPure deriving (Show, Eq)
+data Compliance (k :: Type) = DomComp | NonComp | Comp | FullPure deriving stock (Show, Eq)
 
 seqCompliance :: Compliance a -> Compliance b -> Compliance c
 seqCompliance c FullPure = coerce c

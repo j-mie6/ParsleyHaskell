@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, TypeApplications #-}
 module Parsley.Fold.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -6,7 +6,7 @@ import TestUtils
 import qualified Parsley.Fold.Parsers as Parsers
 
 import Prelude hiding ()
-import Parsley (runParser, code)
+import Parsley (runParser)
 
 tests :: TestTree
 tests = testGroup "Fold" [ chainPreTests

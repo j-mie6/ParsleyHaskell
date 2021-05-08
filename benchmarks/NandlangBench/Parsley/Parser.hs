@@ -7,6 +7,7 @@ import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
 import Parsley.Combinator (token, oneOf, eof)
 import Parsley.Fold (skipMany, skipSome)
+import Parsley.Garnish
 import NandlangBench.Parsley.Functions
 import Data.Char (isSpace)
 

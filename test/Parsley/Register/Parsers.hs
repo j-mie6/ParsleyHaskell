@@ -2,8 +2,9 @@ module Parsley.Register.Parsers where
 
 import Prelude hiding ((*>), (<*))
 import Data.Char (isDigit)
-import Parsley (Parser, item, char, (*>), (<*), (<|>), code)
+import Parsley (Parser, item, char, (*>), (<*), (<|>))
 import Parsley.Register
+import Parsley.Garnish
 
 getPure :: Parser Int
 getPure = newRegister_ (code 8) get

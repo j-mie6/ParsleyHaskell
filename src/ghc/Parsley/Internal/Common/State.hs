@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveFunctor,
-             MultiParamTypeClasses #-}
+             MultiParamTypeClasses,
+             DerivingStrategies,
+             CPP #-}
 module Parsley.Internal.Common.State (
     State, StateT,
     runState, evalState, execState,
@@ -8,13 +10,17 @@ module Parsley.Internal.Common.State (
   ) where
 
 import Control.Applicative       (liftA2, Alternative(..))
+#if __GLASGOW_HASKELL__ < 808
 import Control.Monad.Fail        (MonadFail(..))
+#endif
 import Control.Monad.Fix         (MonadFix(..))
 import Control.Monad.Identity    (Identity, runIdentity)
 import Control.Monad.State.Class
 import Control.Monad.Trans       (MonadTrans(..), MonadIO(..))
 
+#if __GLASGOW_HASKELL__ < 808
 import qualified Control.Monad.Fail as Fail (MonadFail(fail))
+#endif
 
 type State s = StateT s Identity
 {-# INLINE runState #-}
@@ -29,7 +35,7 @@ evalState mx = runIdentity . evalStateT mx
 execState :: State s a -> s -> s
 execState mx = runIdentity . execStateT mx
 
-newtype StateT s m a = StateT {unStateT :: forall r. s -> (a -> s -> m r) -> m r} deriving Functor
+newtype StateT s m a = StateT {unStateT :: forall r. s -> (a -> s -> m r) -> m r} deriving stock Functor
 
 {-# INLINE runStateT #-}
 runStateT :: Monad m => StateT s m a -> s -> m (a, s)
@@ -64,7 +70,13 @@ instance MonadTrans (StateT s) where
   lift m = StateT (\s k -> m >>= (`k` s))
 
 instance MonadIO m => MonadIO (StateT s m) where liftIO = lift . liftIO
-instance MonadFail m => MonadFail (StateT s m) where fail msg = StateT (\_ _ -> Fail.fail msg)
+
+instance MonadFail m => MonadFail (StateT s m) where
+#if __GLASGOW_HASKELL__ < 808
+  fail msg = StateT (\_ _ -> Fail.fail msg)
+#else
+  fail msg = StateT (\_ _ -> fail msg)
+#endif
 
 instance Alternative m => Alternative (StateT s m) where
   empty = StateT (\_ _ -> empty)

@@ -6,7 +6,7 @@ import TestUtils
 import qualified Parsley.Precedence.Parsers as Parsers
 
 import Prelude hiding ()
-import Parsley (runParser, code)
+import Parsley (runParser)
 
 tests :: TestTree
 tests = testGroup "Precedence should" [

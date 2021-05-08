@@ -1,5 +1,6 @@
 {-# LANGUAGE ExistentialQuantification,
-             StandaloneDeriving #-}
+             StandaloneDeriving,
+             DerivingStrategies #-}
 module Parsley.Internal.Backend.Machine.LetBindings (
     LetBinding(..),
     Regs(..),
@@ -17,7 +18,7 @@ import Unsafe.Coerce                                 (unsafeCoerce)
 
 type Binding o a x = Fix4 (Instr o) '[] One x a
 data LetBinding o a x = forall rs. LetBinding (Binding o a x) (Regs rs)
-deriving instance Show (LetBinding o a x)
+deriving stock instance Show (LetBinding o a x)
 
 makeLetBinding :: Binding o a x -> Set IΣVar -> LetBinding o a x
 makeLetBinding m rs = LetBinding m (unsafeMakeRegs rs)
@@ -25,7 +26,7 @@ makeLetBinding m rs = LetBinding m (unsafeMakeRegs rs)
 data Regs (rs :: [Type]) where
   NoRegs :: Regs '[]
   FreeReg :: ΣVar r -> Regs rs -> Regs (r : rs)
-deriving instance Show (Regs rs)
+deriving stock instance Show (Regs rs)
 
 unsafeMakeRegs :: Set IΣVar -> Regs rs
 unsafeMakeRegs =  foldr (\σ rs -> unsafeCoerce (FreeReg (ΣVar σ) rs)) (unsafeCoerce NoRegs)

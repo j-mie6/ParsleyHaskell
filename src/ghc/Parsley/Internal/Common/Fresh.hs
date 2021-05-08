@@ -1,5 +1,6 @@
 {-# LANGUAGE FunctionalDependencies,
              GeneralisedNewtypeDeriving,
+             DerivingStrategies,
              UndecidableInstances #-}
 module Parsley.Internal.Common.Fresh (
     VFreshT, HFreshT, VFresh, HFresh,
@@ -40,8 +41,8 @@ execFreshT m init = snd <$> runFreshT m init
 type HFresh x = HFreshT x Identity
 type VFresh x = VFreshT x Identity
 -- TODO Nominals
-newtype VFreshT x m a = VFreshT (FreshT x m a) deriving (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m)
-newtype HFreshT x m a = HFreshT (FreshT x m a) deriving (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m)
+newtype VFreshT x m a = VFreshT (FreshT x m a) deriving newtype (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m)
+newtype HFreshT x m a = HFreshT (FreshT x m a) deriving newtype (Functor, Applicative, Monad, MonadFix, MonadTrans, MonadIO, MonadReader r, MonadState s, RunFreshT x m)
 newtype FreshT x m a = FreshT {unFreshT :: x -> x -> m (a, x, x)}
 
 instance Monad n => RunFreshT x n (FreshT x n) where

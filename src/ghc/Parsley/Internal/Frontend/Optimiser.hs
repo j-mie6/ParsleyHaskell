@@ -1,12 +1,12 @@
-{-# OPTIONS_GHC -fplugin=IdiomsPlugin
-                -fplugin=LiftPlugin #-}
+{- OPTIONS_GHC -fplugin=LiftPlugin
+                -fplugin=IdiomsPlugin #-}
 {-# LANGUAGE LambdaCase,
              PatternSynonyms,
              ViewPatterns #-}
 module Parsley.Internal.Frontend.Optimiser (optimise) where
 
 import Prelude hiding                      ((<$>))
-import Parsley.Internal.Common             (Fix(In), code, Quapplicative(..))
+import Parsley.Internal.Common             (Fix(In), {-code, -}Quapplicative(..))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..))
 import Parsley.Internal.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H, pattern FLIP_CONST)
 
@@ -131,11 +131,11 @@ optimise (Branch (In (Pure (l@(_val -> Left x)))) p _)  = optimise (p :<*>: In (
 -- pure Right law: branch (pure (Right x)) p q          = q <*> pure x
 optimise (Branch (In (Pure (r@(_val -> Right x)))) _ q) = optimise (q :<*>: In (Pure (makeQ x qx))) where qx = [||case $$(_code r) of Right x -> x||]
 -- Generalised Identity law: branch b (pure f) (pure g) = either f g <$> b
-optimise (Branch b (In (Pure f)) (In (Pure g)))         = optimise (([either f g]) :<$>: b)
+optimise (Branch b (In (Pure f)) (In (Pure g)))         = optimise ({-([either f g])-}makeQ (either (_val f) (_val g)) [||either $$(_code f) $$(_code g)||] :<$>: b)
 -- Interchange law: branch (x *> y) p q                 = x *> branch y p q
 optimise (Branch (In (x :*>: y)) p q)                   = optimise (x :*>: optimise (Branch y p q))
 -- Negated Branch law: branch b p empty                 = branch (swapEither <$> b) empty p
-optimise (Branch b p (In Empty))                        = In (Branch (In (In (Pure ([either (code Right) (code Left)])) :<*>: b)) (In Empty) p)
+optimise (Branch b p (In Empty))                        = In (Branch (In (In (Pure {-([either (code Right) (code Left)])-} (makeQ (either Right Left) [||either Right Left||])) :<*>: b)) (In Empty) p)
 -- Branch Fusion law: branch (branch b empty (pure f)) empty k                  = branch (g <$> b) empty k where g is a monad transforming (>>= f)
 optimise (Branch (In (Branch b (In Empty) (In (Pure f)))) (In Empty) k) = optimise (Branch (optimise (In (Pure (makeQ g qg)) :<*>: b)) (In Empty) k)
   where

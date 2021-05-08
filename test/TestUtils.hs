@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, TypeApplications, DeriveAnyClass, StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell, TypeApplications, DeriveAnyClass, StandaloneDeriving, CPP #-}
 module TestUtils where
 
 import Parsley (runParser, Parser, Code)
@@ -7,6 +7,10 @@ import Language.Haskell.TH.Syntax
 import Language.Haskell.TH.TestUtils
 import Language.Haskell.TH.TestUtils.QMode
 import Control.DeepSeq
+
+#if __GLASGOW_HASKELL__ >= 810
+import GHC.ForeignPtr
+#endif
 
 -- TODO Use WQ: requires lift plugin to not require any Lift instance for variables (if missing)
 runParserMocked :: Parser a -> Code (Parser a) -> Code (String -> Maybe a)
@@ -25,6 +29,10 @@ deriving instance NFData ModName
 deriving instance NFData NameSpace
 deriving instance NFData PkgName
 deriving instance NFData Lit
+#if __GLASGOW_HASKELL__ >= 810
+deriving instance NFData Bytes
+instance NFData (ForeignPtr a) where rnf = rwhnf
+#endif
 deriving instance NFData Type
 deriving instance NFData TyVarBndr
 deriving instance NFData Pat

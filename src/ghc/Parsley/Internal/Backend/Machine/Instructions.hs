@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings,
-             PatternSynonyms #-}
+             PatternSynonyms,
+             DerivingStrategies #-}
 module Parsley.Internal.Backend.Machine.Instructions (module Parsley.Internal.Backend.Machine.Instructions) where
 
 import Data.Kind                                    (Type)
@@ -37,7 +38,7 @@ data Instr o (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: N
   LogExit   :: String -> k xs n r a -> Instr o k xs n r a
   MetaInstr :: MetaInstr n -> k xs n r a -> Instr o k xs n r a
 
-data Access = Hard | Soft deriving Show
+data Access = Hard | Soft deriving stock Show
 
 data MetaInstr (n :: Nat) where
   AddCoins    :: Int -> MetaInstr (Succ n)

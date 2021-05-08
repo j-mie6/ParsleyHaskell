@@ -8,6 +8,7 @@ import BrainfuckBench.Shared
 import Parsley
 import Parsley.Combinator (noneOf, eof)
 import Parsley.Fold (skipMany)
+import Parsley.Garnish
 
 deriving instance Lift BrainFuckOp
 

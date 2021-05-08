@@ -2,15 +2,15 @@ packages:.
 optimization:2
 allow-newer:yoda:all
 profiling-detail:none
-coverage: True
+--coverage: True
 
 source-repository-package
     type: git
     location: https://github.com/J-mie6/lift-plugin.git
     subdir: lift-plugin
-    tag: e7bf0b4ee361a17c55170ce234a5542544625991
+    tag: 8d24da5ead127b61a151ce38edbbf3187253c0b9
 
 source-repository-package
     type: git
     location: https://github.com/J-mie6/idioms-plugins.git
-    tag: 1ca37d047d5c8568bee6caf5a506995cd53265f5
+    tag: 429dd952f6abeed423e69c6a914d34bffcbdb772

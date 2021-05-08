@@ -58,7 +58,7 @@ data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
 
 data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , retCont  :: Code (Cont s o a r)
-                        , input    :: Code o
+                        , input    :: Code (Unboxed o)
                         , handlers :: HandlerStack n s o a }
 
 data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)

@@ -8,7 +8,7 @@ source-repository-package
     type: git
     location: https://github.com/J-mie6/lift-plugin.git
     subdir: lift-plugin
-    tag: d92540f744c6355c32ab7f2d6019f9cb0ea9223a
+    tag: 8d24da5ead127b61a151ce38edbbf3187253c0b9
 
 source-repository-package
     type: git

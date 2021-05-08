@@ -19,7 +19,7 @@ import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
 import Parsley.Internal.Backend.Machine.Defunc       (Defunc(FREEVAR, OFFSET), genDefunc)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
@@ -35,7 +35,7 @@ derivation((OffWith Stream))       \
 derivation(UnpackedLazyByteString) \
 derivation(Text)
 
-type Ops o = (LogHandler o, ContOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
+type Ops o = (LogHandler o, ContOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, LogOps (Unboxed o))
 
 {- Input Operations -}
 sat :: (?ops :: InputOps o) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
@@ -44,11 +44,11 @@ sat p k bad γ@Γ{..} = next input $ \c input' -> [||
     else $$bad
   ||]
 
-emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o, BoxOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
 emitLengthCheck n good bad γ = [||
-  if $$more $$(unbox [||$$shiftRight $$(box @o (input γ)) (n - 1)||]) then $$(good γ)
+  if $$more $$(shiftRight (Proxy @o) (input γ) [||n - 1||]) then $$(good γ)
   else $$bad ||]
 
 {- General Operations -}
@@ -186,26 +186,27 @@ takeFreeRegisters NoRegs ctx body = body ctx
 takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
 {- Debugger Operations -}
-class (PositionOps o, LogOps o) => LogHandler o where
+class (PositionOps o, LogOps (Unboxed o)) => LogHandler o where
   logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code (Unboxed o) -> Code (Handler s o a)
 
-preludeString :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o, LogOps o, BoxOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
+preludeString :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o, LogOps (Unboxed o)) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    offset     = box @o (input γ)
+    offset     = input γ
+    proxy      = Proxy @o
     indent     = replicate (debugLevel ctx * 2) ' '
-    start      = [|| $$shiftLeft $$offset 5 ||]
-    end        = [|| $$shiftRight $$offset 5 ||]
+    start      = shiftLeft offset [||5||]
+    end        = shiftRight proxy offset [||5||]
     inputTrace = [|| let replace '\n' = color Green "↙"
                          replace ' '  = color White "·"
                          replace c    = return c
                          go i#
-                           | $$(same (Proxy @o) [||i#||] (unbox end)) || not ($$more i#) = []
+                           | $$(same proxy [||i#||] end) || not ($$more i#) = []
                            | otherwise = $$(next [||i#||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
-                     in go $$(unbox start) ||]
-    eof        = [|| if $$more $$(unbox end) then $$inputTrace else $$inputTrace ++ color Red "•" ||]
-    prelude    = [|| concat [indent, dir : name, dir : " (", show ($$offToInt $$offset), "): "] ||]
-    caretSpace = [|| replicate (length $$prelude + $$offToInt $$offset - $$offToInt $$start) ' ' ||]
+                     in go $$start ||]
+    eof        = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]
+    prelude    = [|| concat [indent, dir : name, dir : " (", show ($$(offToInt offset)), "): "] ||]
+    caretSpace = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
 
 #define deriveLogHandler(_o)                                                                   \
 instance LogHandler _o where                                                                   \

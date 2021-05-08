@@ -1,9 +1,10 @@
 {-# LANGUAGE ImplicitParams,
              MagicHash,
+             StandaloneKindSignatures,
              TypeApplications,
              UnboxedTuples #-}
 module Parsley.Internal.Backend.Machine.InputOps (
-    InputPrep(..), PositionOps(..), BoxOps(..), LogOps(..),
+    InputPrep(..), PositionOps(..), LogOps(..),
     InputOps(..), more, next,
     InputDependant,
   ) where
@@ -14,7 +15,7 @@ import Data.Text.Array                           (aBA{-, empty-})
 import Data.Text.Internal                        (Text(..))
 import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, reverseIter_-})
 import Data.Proxy                                (Proxy)
-import GHC.Exts                                  (Int(..), Char(..))
+import GHC.Exts                                  (Int(..), Char(..), Constraint, TYPE, Int#)
 import GHC.ForeignPtr                            (ForeignPtr(..))
 import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
 import Parsley.Internal.Backend.Machine.InputRep
@@ -36,15 +37,16 @@ class InputPrep input where
 
 class PositionOps rep where
   same :: Proxy rep -> Code (Unboxed rep) -> Code (Unboxed rep) -> Code Bool
-  shiftRight :: Code (rep -> Int -> rep)
+  shiftRight :: Proxy rep -> Code (Unboxed rep) -> Code Int -> Code (Unboxed rep)
 
 class BoxOps rep where
   box   :: Code (Unboxed rep) -> Code rep
   unbox :: Code rep -> Code (Unboxed rep)
 
-class LogOps rep where
-  shiftLeft :: Code (rep -> Int -> rep)
-  offToInt  :: Code (rep -> Int)
+type LogOps :: forall rep. TYPE rep -> Constraint
+class LogOps urep where
+  shiftLeft :: Code urep -> Code Int -> Code urep
+  offToInt  :: Code urep -> Code Int
 
 data InputOps rep = InputOps { _more       :: Code (Unboxed rep -> Bool)
                              , _next       :: Code (Unboxed rep -> (# Char, Unboxed rep #))
@@ -134,19 +136,19 @@ instance InputPrep Stream where
 -- PositionOps Instances
 instance PositionOps Int where
   same _ = intSame
-  shiftRight = [||(+) @Int||]
+  shiftRight _ qo# qi = unbox [||(+) @Int $$(box qo#) $$qi||]
 
 instance PositionOps (OffWith String) where
   same _ = offWithSame
-  shiftRight = offWithShiftRight [||drop||]
+  shiftRight _ qo# qi = unbox [||$$(offWithShiftRight [||drop||]) $$(box qo#) $$qi||]
 
 instance PositionOps (OffWith Stream) where
   same _ = offWithSame
-  shiftRight = offWithShiftRight [||dropStream||]
+  shiftRight _ qo# qi = unbox [||$$(offWithShiftRight [||dropStream||]) $$(box qo#) $$qi||]
 
 instance PositionOps Text where
   same _ qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
-  shiftRight = [||textShiftRight||]
+  shiftRight _ qo# qi = [||textShiftRight $$(qo#) $$qi||]
 
 instance PositionOps UnpackedLazyByteString where
   same _ qx# qy# = [||
@@ -154,7 +156,7 @@ instance PositionOps UnpackedLazyByteString where
         (# i#, _, _, _, _, _ #) -> case $$(qy#) of
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
-  shiftRight = [||byteStringShiftRight||]
+  shiftRight _ qo# qi = unbox [||byteStringShiftRight $$(box qo#) $$qi||]
 
 -- BoxOps Instances
 instance BoxOps Int where
@@ -174,21 +176,21 @@ instance BoxOps UnpackedLazyByteString where
   unbox qo = [||case $$qo of UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs -> (# i#, addr#, final, off#, size#, cs #)||]
 
 -- LogOps Instances
-instance LogOps Int where
-  shiftLeft = [||\o i -> max (o - i) 0||]
-  offToInt = [||id||]
+instance LogOps Int# where
+  shiftLeft qo# qi = unbox [||max ($$(box qo#) - $$qi) 0||]
+  offToInt qi# = [||I# $$(qi#)||]
 
-instance LogOps (OffWith ts) where
-  shiftLeft = [||const||]
-  offToInt = [||\(OffWith i _) -> i||]
+instance LogOps (# Int#, ts #) where
+  shiftLeft qo# _ = qo#
+  offToInt qo# = [||case $$(qo#) of (# i#, _ #) -> I# i#||]
 
 instance LogOps Text where
-  shiftLeft = [||textShiftLeft||]
-  offToInt = [||\(Text _ off _) -> div off 2||]
+  shiftLeft qo qi = [||textShiftLeft $$qo $$qi||]
+  offToInt qo = [||case $$qo of Text _ off _ -> div off 2||]
 
-instance LogOps UnpackedLazyByteString where
-  shiftLeft = [||byteStringShiftLeft||]
-  offToInt = [||\(UnpackedLazyByteString i _ _ _ _ _) -> i||]
+instance LogOps UnboxedUnpackedLazyByteString where
+  shiftLeft qo# qi = unbox [||byteStringShiftLeft $$(box qo#) $$qi||]
+  offToInt qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> I# i# ||]
 
 {- Old Instances -}
 {-instance Input CacheText (Text, Stream) where

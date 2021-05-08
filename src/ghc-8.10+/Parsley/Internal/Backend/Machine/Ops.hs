@@ -13,6 +13,7 @@ import Control.Monad                                 (liftM2)
 import Control.Monad.Reader                          (ask, local)
 import Control.Monad.ST                              (ST)
 import Data.STRef                                    (writeSTRef, readSTRef, newSTRef)
+import Data.Proxy                                    (Proxy(Proxy))
 import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
@@ -188,7 +189,7 @@ takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters
 class (PositionOps o, LogOps o) => LogHandler o where
   logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code (Unboxed o) -> Code (Handler s o a)
 
-preludeString :: (?ops :: InputOps o, PositionOps o, LogOps o, BoxOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
+preludeString :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o, LogOps o, BoxOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset     = box (input γ)
@@ -199,7 +200,7 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
                          replace ' '  = color White "·"
                          replace c    = return c
                          go i
-                           | $$same i $$end || not ($$more i) = []
+                           | $$(same (Proxy @o) (unbox [||i||]) (unbox end)) || not ($$more i) = []
                            | otherwise = $$(next [||i||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
                      in go $$start ||]
     eof        = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]

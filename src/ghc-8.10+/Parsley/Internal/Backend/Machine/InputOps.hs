@@ -13,6 +13,7 @@ import Data.ByteString.Internal                  (ByteString(..))
 import Data.Text.Array                           (aBA{-, empty-})
 import Data.Text.Internal                        (Text(..))
 import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, reverseIter_-})
+import Data.Proxy                                (Proxy)
 import GHC.Exts                                  (Int(..), Char(..))
 import GHC.ForeignPtr                            (ForeignPtr(..))
 import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
@@ -41,7 +42,7 @@ class InputPrep input where
   prepare :: Code input -> Code (InputDependant (Rep input))
 
 class PositionOps rep where
-  same :: Code (rep -> rep -> Bool)
+  same :: Proxy rep -> Code (Unboxed rep) -> Code (Unboxed rep) -> Code Bool
   shiftRight :: Code (rep -> Int -> rep)
 
 class BoxOps rep where
@@ -135,23 +136,27 @@ instance InputPrep Stream where
 
 -- PositionOps Instances
 instance PositionOps Int where
-  same = [||(==) @Int||]
+  same _ = intSame
   shiftRight = [||(+) @Int||]
 
 instance PositionOps (OffWith String) where
-  same = offWithSame
+  same _ = offWithSame
   shiftRight = offWithShiftRight [||drop||]
 
 instance PositionOps (OffWith Stream) where
-  same = offWithSame
+  same _ = offWithSame
   shiftRight = offWithShiftRight [||dropStream||]
 
 instance PositionOps Text where
-  same = [||\(Text _ i _) (Text _ j _) -> i == j||]
+  same _ qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
   shiftRight = [||textShiftRight||]
 
 instance PositionOps UnpackedLazyByteString where
-  same = [||\(UnpackedLazyByteString i _ _ _ _ _) (UnpackedLazyByteString j _ _ _ _ _) -> i == j||]
+  same _ qx# qy# = [||
+      case $$(qx#) of
+        (# i#, _, _, _, _, _ #) -> case $$(qy#) of
+          (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
+    ||]
   shiftRight = [||byteStringShiftRight||]
 
 -- BoxOps Instances

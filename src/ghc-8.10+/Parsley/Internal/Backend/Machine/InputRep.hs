@@ -5,10 +5,12 @@
              StandaloneKindSignatures #-}
 module Parsley.Internal.Backend.Machine.InputRep (
     Unboxed, Rep,
+    intSame,
     OffWith(..), offWith, offWithSame, offWithShiftRight,
     OffWithStreamAnd(..),
     UnpackedLazyByteString(..), emptyUnpackedLazyByteString,
     Stream, dropStream,
+    offsetText,
     representationTypes,
     -- These must be exposed
     textShiftRight, textShiftLeft,
@@ -20,7 +22,7 @@ import Data.ByteString.Internal          (ByteString(..))
 import Data.Kind                         (Type)
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
-import GHC.Exts                          (TYPE, RuntimeRep(..))
+import GHC.Exts                          (TYPE, RuntimeRep(..), (==#), isTrue#)
 import GHC.ForeignPtr                    (ForeignPtr(..), ForeignPtrContents)
 import GHC.Prim                          (Int#, Addr#, nullAddr#)
 import Parsley.Internal.Common.Utils     (Code)
@@ -83,8 +85,21 @@ type family Unboxed rep = urep | urep -> rep where
   Unboxed (Text, Stream) = (# Text, Stream #)
 
 {- Generic Representation Operations -}
-offWithSame :: Code (OffWith ts -> OffWith ts -> Bool)
-offWithSame = [||\(OffWith i _) (OffWith j _) -> i == j||]
+--offWithSame :: Code (OffWith ts -> OffWith ts -> Bool)
+--offWithSame = [||\(OffWith i _) (OffWith j _) -> i == j||]
+
+intSame :: Code Int# -> Code Int# -> Code Bool
+intSame qi# qj# = [||isTrue# ($$(qi#) ==# $$(qj#))||]
+
+offsetText :: Code Text -> Code Int
+offsetText qt = [||case $$qt of Text _ off _ -> off||]
+
+offWithSame :: Code (# Int#, ts #) -> Code (# Int#, ts #) -> Code Bool
+offWithSame qi# qj# = [||
+    case $$(qi#) of
+      (# i#, _ #) -> case $$(qj#) of
+        (# j#, _ #) -> $$(intSame [||i#||] [||j#||])
+  ||]
 
 offWithShiftRight :: Code (Int -> ts -> ts) -> Code (OffWith ts -> Int -> OffWith ts)
 offWithShiftRight drop = [||\(OffWith o ts) i -> OffWith (o + i) ($$drop i ts)||]

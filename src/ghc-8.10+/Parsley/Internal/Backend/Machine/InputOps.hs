@@ -37,15 +37,11 @@ class InputPrep input where
 
 class PositionOps rep where
   same :: Proxy rep -> Code (Unboxed rep) -> Code (Unboxed rep) -> Code Bool
-  shiftRight :: Proxy rep -> Code (Unboxed rep) -> Code Int -> Code (Unboxed rep)
-
-class BoxOps rep where
-  box   :: Code (Unboxed rep) -> Code rep
-  unbox :: Code rep -> Code (Unboxed rep)
+  shiftRight :: Proxy rep -> Code (Unboxed rep) -> Code Int# -> Code (Unboxed rep)
 
 type LogOps :: forall rep. TYPE rep -> Constraint
 class LogOps urep where
-  shiftLeft :: Code urep -> Code Int -> Code urep
+  shiftLeft :: Code urep -> Code Int# -> Code urep
   offToInt  :: Code urep -> Code Int
 
 data InputOps rep = InputOps { _more       :: Code (Unboxed rep -> Bool)
@@ -94,7 +90,7 @@ instance InputPrep CharList where
           more (# i#, _ #) = $$(intLess [||i#||] [||size#||])
           --more (OffWith _ []) = False
           --more _              = True
-      in (# next, more, $$(offWith' [||input||]) #)
+      in (# next, more, $$(offWith [||input||]) #)
     ||]
 
 instance InputPrep Text where
@@ -114,7 +110,7 @@ instance InputPrep Lazy.ByteString where
                     else case cs of
                       Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->
                         (# i# +# 1#, addr'#, final', off'#, size'#, cs' #)
-                      Lazy.Empty -> $$(emptyUnpackedLazyByteString' [||i# +# 1#||])
+                      Lazy.Empty -> $$(emptyUnpackedLazyByteString [||i# +# 1#||])
                   #)
           more :: UnboxedUnpackedLazyByteString -> Bool
           more (# _, _, _, _, 0#, _ #) = False
@@ -123,32 +119,32 @@ instance InputPrep Lazy.ByteString where
           initial :: UnboxedUnpackedLazyByteString
           initial = case $$qinput of
             Lazy.Chunk (PS (ForeignPtr addr# final) (I# off#) (I# size#)) cs -> (# 0#, addr#, final, off#, size#, cs #)
-            Lazy.Empty -> $$(emptyUnpackedLazyByteString' [||0#||])
+            Lazy.Empty -> $$(emptyUnpackedLazyByteString [||0#||])
       in (# next, more, initial #)
     ||]
 
 instance InputPrep Stream where
   prepare qinput = [||
       let next (# o#, c :> cs #) = (# c, (# o# +# 1#, cs #) #)
-      in (# next, \_ -> True, $$(offWith' qinput) #)
+      in (# next, \_ -> True, $$(offWith qinput) #)
     ||]
 
 -- PositionOps Instances
 instance PositionOps Int where
   same _ = intSame
-  shiftRight _ qo# qi = unbox [||(+) @Int $$(box qo#) $$qi||]
+  shiftRight _ qo# qi# = [||$$(qo#) +# $$(qi#)||]
 
 instance PositionOps (OffWith String) where
   same _ = offWithSame
-  shiftRight _ qo# qi = unbox [||$$(offWithShiftRight [||drop||]) $$(box qo#) $$qi||]
+  shiftRight _ qo# qi# = offWithShiftRight [||drop||] qo# qi#
 
 instance PositionOps (OffWith Stream) where
   same _ = offWithSame
-  shiftRight _ qo# qi = unbox [||$$(offWithShiftRight [||dropStream||]) $$(box qo#) $$qi||]
+  shiftRight _ qo# qi# = offWithShiftRight [||dropStream||] qo# qi#
 
 instance PositionOps Text where
   same _ qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
-  shiftRight _ qo# qi = [||textShiftRight $$(qo#) $$qi||]
+  shiftRight _ qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
 
 instance PositionOps UnpackedLazyByteString where
   same _ qx# qy# = [||
@@ -156,28 +152,11 @@ instance PositionOps UnpackedLazyByteString where
         (# i#, _, _, _, _, _ #) -> case $$(qy#) of
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
-  shiftRight _ qo# qi = unbox [||byteStringShiftRight $$(box qo#) $$qi||]
-
--- BoxOps Instances
-instance BoxOps Int where
-  box qi# = [||I# $$(qi#)||]
-  unbox qi = [||case $$qi of I# i# -> i#||]
-
-instance BoxOps (OffWith ts) where
-  box qo# = [||case $$(qo#) of (# i#, ts #) -> OffWith (I# i#) ts||]
-  unbox qo = [||case $$qo of OffWith (I# i#) ts -> (# i#, ts #)||]
-
-instance BoxOps Text where
-  box = id
-  unbox = id
-
-instance BoxOps UnpackedLazyByteString where
-  box qo# = [||case $$(qo#) of (# i#, addr#, final, off#, size#, cs #) -> UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs||]
-  unbox qo = [||case $$qo of UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs -> (# i#, addr#, final, off#, size#, cs #)||]
+  shiftRight _ qo# qi# = [||byteStringShiftRight $$(qo#) $$(qi#)||]
 
 -- LogOps Instances
 instance LogOps Int# where
-  shiftLeft qo# qi = unbox [||max ($$(box qo#) - $$qi) 0||]
+  shiftLeft qo# qi# = [||max# ($$(qo#) -# $$(qi#)) 0#||]
   offToInt qi# = [||I# $$(qi#)||]
 
 instance LogOps (# Int#, ts #) where
@@ -185,11 +164,11 @@ instance LogOps (# Int#, ts #) where
   offToInt qo# = [||case $$(qo#) of (# i#, _ #) -> I# i#||]
 
 instance LogOps Text where
-  shiftLeft qo qi = [||textShiftLeft $$qo $$qi||]
+  shiftLeft qo qi# = [||textShiftLeft $$qo (I# $$(qi#))||]
   offToInt qo = [||case $$qo of Text _ off _ -> div off 2||]
 
 instance LogOps UnboxedUnpackedLazyByteString where
-  shiftLeft qo# qi = unbox [||byteStringShiftLeft $$(box qo#) $$qi||]
+  shiftLeft qo# qi# = [||byteStringShiftLeft $$(qo#) $$(qi#)||]
   offToInt qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> I# i# ||]
 
 {- Old Instances -}

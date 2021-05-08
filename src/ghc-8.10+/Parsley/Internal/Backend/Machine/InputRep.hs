@@ -5,10 +5,10 @@
              StandaloneKindSignatures #-}
 module Parsley.Internal.Backend.Machine.InputRep (
     Unboxed, Rep,
-    intSame, intLess,
-    OffWith(..), offWith, offWith', offWithSame, offWithShiftRight,
+    intSame, intLess, min#, max#,
+    OffWith(..), offWith, offWithSame, offWithShiftRight,
     OffWithStreamAnd(..),
-    UnpackedLazyByteString(..), UnboxedUnpackedLazyByteString, emptyUnpackedLazyByteString, emptyUnpackedLazyByteString',
+    UnpackedLazyByteString(..), UnboxedUnpackedLazyByteString, emptyUnpackedLazyByteString,
     Stream, dropStream,
     offsetText,
     representationTypes,
@@ -22,7 +22,7 @@ import Data.ByteString.Internal          (ByteString(..))
 import Data.Kind                         (Type)
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
-import GHC.Exts                          (TYPE, RuntimeRep(..), (==#), (<#), isTrue#)
+import GHC.Exts                          (Int(..), TYPE, RuntimeRep(..), (==#), (<#), (+#), (-#), isTrue#)
 import GHC.ForeignPtr                    (ForeignPtr(..), ForeignPtrContents)
 import GHC.Prim                          (Int#, Addr#, nullAddr#)
 import Parsley.Internal.Common.Utils     (Code)
@@ -45,20 +45,13 @@ data UnpackedLazyByteString = UnpackedLazyByteString
 representationTypes :: [TH.Q TH.Type]
 representationTypes = [[t|Int|], [t|OffWith [Char]|], [t|OffWith Stream|], [t|UnpackedLazyByteString|], [t|Text|]]
 
-offWith :: Code (ts -> OffWith ts)
-offWith = [||OffWith 0||]
-
-offWith' :: Code ts -> Code (Unboxed (OffWith ts))
-offWith' qts = [||(# 0#, $$qts #)||]
+offWith :: Code ts -> Code (Unboxed (OffWith ts))
+offWith qts = [||(# 0#, $$qts #)||]
 
 type UnboxedUnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)
 
-{-# INLINE emptyUnpackedLazyByteString #-}
-emptyUnpackedLazyByteString :: Int -> UnpackedLazyByteString
-emptyUnpackedLazyByteString i = UnpackedLazyByteString i nullAddr# (error "nullForeignPtr") 0 0 Lazy.Empty
-
-emptyUnpackedLazyByteString' :: Code Int# -> Code (Unboxed UnpackedLazyByteString)
-emptyUnpackedLazyByteString' qi# = [|| (# $$(qi#), nullAddr#, error "nullForeignPtr", 0#, 0#, Lazy.Empty #) ||]
+emptyUnpackedLazyByteString :: Code Int# -> Code (Unboxed UnpackedLazyByteString)
+emptyUnpackedLazyByteString qi# = [|| (# $$(qi#), nullAddr#, error "nullForeignPtr", 0#, 0#, Lazy.Empty #) ||]
 
 {- Representation Mappings -}
 -- When a new input type is added here, it needs an Input instance in Parsley.Backend.Machine
@@ -112,8 +105,10 @@ offWithSame qi# qj# = [||
         (# j#, _ #) -> $$(intSame [||i#||] [||j#||])
   ||]
 
-offWithShiftRight :: Code (Int -> ts -> ts) -> Code (OffWith ts -> Int -> OffWith ts)
-offWithShiftRight drop = [||\(OffWith o ts) i -> OffWith (o + i) ($$drop i ts)||]
+offWithShiftRight :: Code (Int -> ts -> ts) -> Code (# Int#, ts #) -> Code Int# -> Code (# Int#, ts #)
+offWithShiftRight drop qo# qi# = [||
+    case $$(qo#) of (# o#, ts #) -> (# (o# +# $$(qi#)), ($$drop (I# $$(qi#)) ts) #)
+  ||]
 
 {-offWithStreamAnd :: ts -> OffWithStreamAnd ts
 offWithStreamAnd ts = OffWithStreamAnd 0 nomore ts
@@ -148,14 +143,28 @@ textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
       | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
       | otherwise = Text arr off' unconsumed'
 
-byteStringShiftRight :: UnpackedLazyByteString -> Int -> UnpackedLazyByteString
-byteStringShiftRight !(UnpackedLazyByteString i addr# final off size cs) j
-  | j < size  = UnpackedLazyByteString (i + j) addr# final (off + j) (size - j) cs
-  | otherwise = case cs of
-    Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> byteStringShiftRight (UnpackedLazyByteString (i + size) addr'# final' off' size' cs') (j - size)
-    Lazy.Empty -> emptyUnpackedLazyByteString (i + size)
+{-# INLINE emptyUnpackedLazyByteString' #-}
+emptyUnpackedLazyByteString' :: Int# -> UnboxedUnpackedLazyByteString
+emptyUnpackedLazyByteString' i# = (# i#, nullAddr#, error "nullForeignPtr", 0#, 0#, Lazy.Empty #)
 
-byteStringShiftLeft :: UnpackedLazyByteString -> Int -> UnpackedLazyByteString
-byteStringShiftLeft (UnpackedLazyByteString i addr# final off size cs) j =
-  let d = min off j
-  in UnpackedLazyByteString (i - d) addr# final (off - d) (size + d) cs
+byteStringShiftRight :: UnboxedUnpackedLazyByteString -> Int# -> UnboxedUnpackedLazyByteString
+byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
+  | isTrue# (j# <# size#)  = (# i# +# j#, addr#, final, off# +# j#, size# -# j#, cs #)
+  | otherwise = case cs of
+    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
+    Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# size#)
+
+byteStringShiftLeft :: UnboxedUnpackedLazyByteString -> Int# -> UnboxedUnpackedLazyByteString
+byteStringShiftLeft (# i#, addr#, final, off#, size#, cs #) j# =
+  let d# = min# off# j#
+  in (# i# -# d#, addr#, final, off# -# d#, size# +# d#, cs #)
+
+min# :: Int# -> Int# -> Int#
+min# i# j# = case i# <# j# of
+  0# -> j#
+  _  -> i#
+
+max# :: Int# -> Int# -> Int#
+max# i# j# = case i# <# j# of
+  0# -> i#
+  _  -> j#

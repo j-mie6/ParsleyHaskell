@@ -17,6 +17,7 @@ import Data.Proxy                                    (Proxy(Proxy))
 import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
+import GHC.Exts                                      (Int(..), (-#))
 import Parsley.Internal.Backend.Machine.Defunc       (Defunc(FREEVAR, OFFSET), genDefunc)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..), InputOps, next, more)
@@ -47,8 +48,8 @@ sat p k bad γ@Γ{..} = next input $ \c input' -> [||
 emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
-emitLengthCheck n good bad γ = [||
-  if $$more $$(shiftRight (Proxy @o) (input γ) [||n - 1||]) then $$(good γ)
+emitLengthCheck (I# n) good bad γ = [||
+  if $$more $$(shiftRight (Proxy @o) (input γ) [||n -# 1#||]) then $$(good γ)
   else $$bad ||]
 
 {- General Operations -}
@@ -195,8 +196,8 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     offset     = input γ
     proxy      = Proxy @o
     indent     = replicate (debugLevel ctx * 2) ' '
-    start      = shiftLeft offset [||5||]
-    end        = shiftRight proxy offset [||5||]
+    start      = shiftLeft offset [||5#||]
+    end        = shiftRight proxy offset [||5#||]
     inputTrace = [|| let replace '\n' = color Green "↙"
                          replace ' '  = color White "·"
                          replace c    = return c

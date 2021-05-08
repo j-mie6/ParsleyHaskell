@@ -38,17 +38,17 @@ derivation(Text)
 type Ops o = (LogHandler o, ContOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, BoxOps o, LogOps o)
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o, BoxOps o) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
-sat p k bad γ@Γ{..} = next (box input) $ \c input' -> [||
-    if $$(p c) then $$(k (γ {operands = Op (FREEVAR c) operands, input = unbox input'}))
+sat :: (?ops :: InputOps o) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat p k bad γ@Γ{..} = next input $ \c input' -> [||
+    if $$(p c) then $$(k (γ {operands = Op (FREEVAR c) operands, input = input'}))
     else $$bad
   ||]
 
-emitLengthCheck :: (?ops :: InputOps o, PositionOps o, BoxOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o, BoxOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
-emitLengthCheck 1 good bad γ = [|| if $$more $$(box (input γ)) then $$(good γ) else $$bad ||]
+emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
 emitLengthCheck n good bad γ = [||
-  if $$more ($$shiftRight $$(box (input γ)) (n - 1)) then $$(good γ)
+  if $$more $$(unbox [||$$shiftRight $$(box @o (input γ)) (n - 1)||]) then $$(good γ)
   else $$bad ||]
 
 {- General Operations -}
@@ -192,18 +192,18 @@ class (PositionOps o, LogOps o) => LogHandler o where
 preludeString :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o, LogOps o, BoxOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    offset     = box (input γ)
+    offset     = box @o (input γ)
     indent     = replicate (debugLevel ctx * 2) ' '
     start      = [|| $$shiftLeft $$offset 5 ||]
     end        = [|| $$shiftRight $$offset 5 ||]
     inputTrace = [|| let replace '\n' = color Green "↙"
                          replace ' '  = color White "·"
                          replace c    = return c
-                         go i
-                           | $$(same (Proxy @o) (unbox [||i||]) (unbox end)) || not ($$more i) = []
-                           | otherwise = $$(next [||i||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
-                     in go $$start ||]
-    eof        = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]
+                         go i#
+                           | $$(same (Proxy @o) [||i#||] (unbox end)) || not ($$more i#) = []
+                           | otherwise = $$(next [||i#||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
+                     in go $$(unbox start) ||]
+    eof        = [|| if $$more $$(unbox end) then $$inputTrace else $$inputTrace ++ color Red "•" ||]
     prelude    = [|| concat [indent, dir : name, dir : " (", show ($$offToInt $$offset), "): "] ||]
     caretSpace = [|| replicate (length $$prelude + $$offToInt $$offset - $$offToInt $$start) ' ' ||]
 

@@ -1,5 +1,5 @@
 module Parsley.Internal.Backend.Machine (
-    Input, prepare, eval,
+    Input, Rep, prepare, eval,
     PositionOps,
     module Parsley.Internal.Backend.Machine.Instructions,
     module Parsley.Internal.Backend.Machine.Defunc,

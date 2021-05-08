@@ -5,7 +5,7 @@
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), BoxOps(..), LogOps(..),
     InputOps(..), more, next,
-    InputDependant(..),
+    InputDependant,
   ) where
 
 import Data.Array.Base                           (UArray(..), listArray)
@@ -16,7 +16,7 @@ import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, rever
 import Data.Proxy                                (Proxy)
 import GHC.Exts                                  (Int(..), Char(..))
 import GHC.ForeignPtr                            (ForeignPtr(..))
-import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
+import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
 import Parsley.Internal.Backend.Machine.InputRep
 import Parsley.Internal.Common.Utils             (Code)
 import Parsley.Internal.Core.InputTypes
@@ -25,17 +25,10 @@ import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
 
 {- Auxillary Representation -}
-{- This requires GHC 8.10.1 - might be a while till we get there?
-   Indeed, 8.10.1 would allow us to basically remove box and unbox I think
-type InputDependant rep = (# {-next-} rep -> (# Char, rep #)
-                           , {-more-} rep -> Bool
-                           , {-init-} rep
+type InputDependant rep = (# {-next-} Unboxed rep -> (# Char, Unboxed rep #)
+                           , {-more-} Unboxed rep -> Bool
+                           , {-init-} Unboxed rep
                            #)
--}
-
-data InputDependant rep = InputDependant {-next-} (rep -> (# Char, rep #))
-                                         {-more-} (rep -> Bool)
-                                         {-init-} rep
 
 {- Typeclasses -}
 class InputPrep input where
@@ -53,12 +46,12 @@ class LogOps rep where
   shiftLeft :: Code (rep -> Int -> rep)
   offToInt  :: Code (rep -> Int)
 
-data InputOps rep = InputOps { _more       :: Code (rep -> Bool)
-                             , _next       :: Code (rep -> (# Char, rep #))
+data InputOps rep = InputOps { _more       :: Code (Unboxed rep -> Bool)
+                             , _next       :: Code (Unboxed rep -> (# Char, Unboxed rep #))
                              }
-more :: (?ops :: InputOps rep) => Code (rep -> Bool)
+more :: (?ops :: InputOps rep) => Code (Unboxed rep -> Bool)
 more = _more ?ops
-next :: (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code r) -> Code r
+next :: (?ops :: InputOps rep) => Code (Unboxed rep) -> (Code Char -> Code (Unboxed rep) -> Code r) -> Code r
 next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
 
 {- INSTANCES -}
@@ -68,70 +61,74 @@ instance InputPrep [Char] where
 
 instance InputPrep (UArray Int Char) where
   prepare qinput = [||
-      let UArray _ _ size input# = $$qinput
-          next (I# i#) = (# C# (indexWideCharArray# input# i#), I# (i# +# 1#) #)
-      in InputDependant next (< size) 0
+      let UArray _ _ (I# size#) input# = $$qinput
+          next i# = (# C# (indexWideCharArray# input# i#), i# +# 1# #)
+      in (# next, \qi -> $$(intLess [||qi||] [||size#||]), 0# #)
     ||]
 
 instance InputPrep Text16 where
   prepare qinput = [||
-      let Text16 (Text arr off size) = $$qinput
+      let Text16 (Text arr (I# off#) (I# size#)) = $$qinput
           arr# = aBA arr
-          next (I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), I# (i# +# 1#) #)
-      in InputDependant next (< size) off
+          next i# = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), i# +# 1# #)
+      in (# next, \qi -> $$(intLess [||qi||] [||size#||]), off# #)
     ||]
 
 instance InputPrep ByteString where
   prepare qinput = [||
-      let PS (ForeignPtr addr# final) off size = $$qinput
-          next i@(I# i#) =
+      let PS (ForeignPtr addr# final) (I# off#) (I# size#) = $$qinput
+          next i# =
             case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# x)), i + 1 #)
-      in InputDependant next (< size) off
+                _ -> (# C# (chr# (word2Int# x)), i# +# 1# #)
+      in  (# next, \qi -> $$(intLess [||qi||] [||size#||]), off# #)
     ||]
 
 instance InputPrep CharList where
   prepare qinput = [||
       let CharList input = $$qinput
-          next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
-          size = length input
-          more (OffWith i _) = i < size
+          next (# i#, c:cs #) = (# c, (# i# +# 1#, cs #) #)
+          I# size# = length input
+          more (# i#, _ #) = $$(intLess [||i#||] [||size#||])
           --more (OffWith _ []) = False
           --more _              = True
-      in InputDependant next more ($$offWith input)
+      in (# next, more, $$(offWith' [||input||]) #)
     ||]
 
 instance InputPrep Text where
   prepare qinput = [||
       let next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off+d) (unconsumed-d) #)
           more (Text _ _ unconsumed) = unconsumed > 0
-      in InputDependant next more $$qinput
+      in (# next, more, $$qinput #)
     ||]
 
 instance InputPrep Lazy.ByteString where
   prepare qinput = [||
-      let next (UnpackedLazyByteString i addr# final off@(I# off#) size cs) =
+      let next (# i#, addr#, final, off#, size#, cs #) =
             case readWord8OffAddr# addr# off# realWorld# of
               (# s', x #) -> case touch# final s' of
                 _ -> (# C# (chr# (word2Int# x)),
-                    if size /= 1 then UnpackedLazyByteString (i+1) addr# final (off+1) (size-1) cs
+                    if I# size# /= 1 then (# i# +# 1#, addr#, final, off# +# 1#, size# -# 1#, cs #)
                     else case cs of
-                      Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> UnpackedLazyByteString (i+1) addr'# final' off' size' cs'
-                      Lazy.Empty -> emptyUnpackedLazyByteString (i+1)
+                      Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->
+                        (# i# +# 1#, addr'#, final', off'#, size'#, cs' #)
+                      Lazy.Empty -> $$(emptyUnpackedLazyByteString' [||i# +# 1#||])
                   #)
-          more (UnpackedLazyByteString _ _ _ _ 0 _) = False
-          more _ = True
+          more :: UnboxedUnpackedLazyByteString -> Bool
+          more (# _, _, _, _, 0#, _ #) = False
+          more (# _, _, _, _, _, _ #) = True
+
+          initial :: UnboxedUnpackedLazyByteString
           initial = case $$qinput of
-            Lazy.Chunk (PS (ForeignPtr addr# final) off size) cs -> UnpackedLazyByteString 0 addr# final off size cs
-            Lazy.Empty -> emptyUnpackedLazyByteString 0
-      in InputDependant next more initial
+            Lazy.Chunk (PS (ForeignPtr addr# final) (I# off#) (I# size#)) cs -> (# 0#, addr#, final, off#, size#, cs #)
+            Lazy.Empty -> $$(emptyUnpackedLazyByteString' [||0#||])
+      in (# next, more, initial #)
     ||]
 
 instance InputPrep Stream where
   prepare qinput = [||
-      let next (OffWith o (c :> cs)) = (# c, OffWith (o + 1) cs #)
-      in InputDependant next (const True) ($$offWith $$qinput)
+      let next (# o#, c :> cs #) = (# c, (# o# +# 1#, cs #) #)
+      in (# next, \_ -> True, $$(offWith' qinput) #)
     ||]
 
 -- PositionOps Instances

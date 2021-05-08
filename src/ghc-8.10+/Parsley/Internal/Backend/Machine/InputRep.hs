@@ -5,10 +5,10 @@
              StandaloneKindSignatures #-}
 module Parsley.Internal.Backend.Machine.InputRep (
     Unboxed, Rep,
-    intSame,
-    OffWith(..), offWith, offWithSame, offWithShiftRight,
+    intSame, intLess,
+    OffWith(..), offWith, offWith', offWithSame, offWithShiftRight,
     OffWithStreamAnd(..),
-    UnpackedLazyByteString(..), emptyUnpackedLazyByteString,
+    UnpackedLazyByteString(..), UnboxedUnpackedLazyByteString, emptyUnpackedLazyByteString, emptyUnpackedLazyByteString',
     Stream, dropStream,
     offsetText,
     representationTypes,
@@ -22,7 +22,7 @@ import Data.ByteString.Internal          (ByteString(..))
 import Data.Kind                         (Type)
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
-import GHC.Exts                          (TYPE, RuntimeRep(..), (==#), isTrue#)
+import GHC.Exts                          (TYPE, RuntimeRep(..), (==#), (<#), isTrue#)
 import GHC.ForeignPtr                    (ForeignPtr(..), ForeignPtrContents)
 import GHC.Prim                          (Int#, Addr#, nullAddr#)
 import Parsley.Internal.Common.Utils     (Code)
@@ -48,9 +48,17 @@ representationTypes = [[t|Int|], [t|OffWith [Char]|], [t|OffWith Stream|], [t|Un
 offWith :: Code (ts -> OffWith ts)
 offWith = [||OffWith 0||]
 
+offWith' :: Code ts -> Code (Unboxed (OffWith ts))
+offWith' qts = [||(# 0#, $$qts #)||]
+
+type UnboxedUnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)
+
 {-# INLINE emptyUnpackedLazyByteString #-}
 emptyUnpackedLazyByteString :: Int -> UnpackedLazyByteString
 emptyUnpackedLazyByteString i = UnpackedLazyByteString i nullAddr# (error "nullForeignPtr") 0 0 Lazy.Empty
+
+emptyUnpackedLazyByteString' :: Code Int# -> Code (Unboxed UnpackedLazyByteString)
+emptyUnpackedLazyByteString' qi# = [|| (# $$(qi#), nullAddr#, error "nullForeignPtr", 0#, 0#, Lazy.Empty #) ||]
 
 {- Representation Mappings -}
 -- When a new input type is added here, it needs an Input instance in Parsley.Backend.Machine
@@ -79,7 +87,7 @@ type Unboxed :: forall (rep :: Type) -> TYPE (RepKind rep)
 type family Unboxed rep = urep | urep -> rep where
   Unboxed Int = Int#
   Unboxed Text = Text
-  Unboxed UnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)
+  Unboxed UnpackedLazyByteString = UnboxedUnpackedLazyByteString
   Unboxed (OffWith ts) = (# Int#, ts #)
   Unboxed (OffWithStreamAnd ts) = (# Int#, Stream, ts #)
   Unboxed (Text, Stream) = (# Text, Stream #)
@@ -90,6 +98,9 @@ type family Unboxed rep = urep | urep -> rep where
 
 intSame :: Code Int# -> Code Int# -> Code Bool
 intSame qi# qj# = [||isTrue# ($$(qi#) ==# $$(qj#))||]
+
+intLess :: Code Int# -> Code Int# -> Code Bool
+intLess qi# qj# = [||isTrue# ($$(qi#) <# $$(qj#))||]
 
 offsetText :: Code Text -> Code Int
 offsetText qt = [||case $$qt of Text _ off _ -> off||]

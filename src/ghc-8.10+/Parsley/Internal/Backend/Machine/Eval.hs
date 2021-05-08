@@ -1,7 +1,8 @@
 {-# LANGUAGE ImplicitParams,
              MultiWayIf,
              RecordWildCards,
-             TypeApplications #-}
+             TypeApplications,
+             UnboxedTuples #-}
 module Parsley.Internal.Backend.Machine.Eval (eval) where
 
 import Data.Dependent.Map                             (DMap)
@@ -12,7 +13,7 @@ import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc(FREEVAR, OFFSET), genDefunc, genDefunc1, ap2)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps(unbox), LogOps, InputOps(InputOps))
+import Parsley.Internal.Backend.Machine.InputOps      (InputDependant, PositionOps, BoxOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
@@ -26,12 +27,12 @@ import qualified Debug.Trace (trace)
 
 eval :: forall o a. (Trace, Ops o) => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
 eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
-  do let !(InputDependant next more offset) = $$input
+  do let (# next, more, offset #) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
              (\exp rs names -> buildRec rs (emptyCtx names) (readyMachine exp))
-             (\names -> run (readyMachine p) (Γ Empty (halt @o) (unbox [||offset||]) (VCons (fatal @o) VNil)) (emptyCtx names)))
+             (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx names)))
   ||]
   where
     nameLet :: MVar x -> String

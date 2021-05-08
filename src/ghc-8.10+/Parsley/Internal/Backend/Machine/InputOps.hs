@@ -45,8 +45,8 @@ class PositionOps rep where
   shiftRight :: Code (rep -> Int -> rep)
 
 class BoxOps rep where
-  box   :: Code (Unboxed rep -> rep)
-  unbox :: Code (rep -> Unboxed rep)
+  box   :: Code (Unboxed rep) -> Code rep
+  unbox :: Code rep -> Code (Unboxed rep)
 
 class LogOps rep where
   shiftLeft :: Code (rep -> Int -> rep)
@@ -156,20 +156,20 @@ instance PositionOps UnpackedLazyByteString where
 
 -- BoxOps Instances
 instance BoxOps Int where
-  box = [||\i# -> I# i#||]
-  unbox = [||\(I# i#) -> i#||]
+  box qi# = [||I# $$(qi#)||]
+  unbox qi = [||case $$qi of I# i# -> i#||]
 
 instance BoxOps (OffWith ts) where
-  box = [||\(# i#, ts #) -> OffWith (I# i#) ts||]
-  unbox = [||\(OffWith (I# i#) ts) -> (# i#, ts #)||]
+  box qo# = [||case $$(qo#) of (# i#, ts #) -> OffWith (I# i#) ts||]
+  unbox qo = [||case $$qo of OffWith (I# i#) ts -> (# i#, ts #)||]
 
 instance BoxOps Text where
-  box = [||id||]
-  unbox = [||id||]
+  box = id
+  unbox = id
 
 instance BoxOps UnpackedLazyByteString where
-  box = [||\(!(# i#, addr#, final, off#, size#, cs #)) -> UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs||]
-  unbox = [||\(UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs) -> (# i#, addr#, final, off#, size#, cs #)||]
+  box qo# = [||case $$(qo#) of (# i#, addr#, final, off#, size#, cs #) -> UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs||]
+  unbox qo = [||case $$qo of UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs -> (# i#, addr#, final, off#, size#, cs #)||]
 
 -- LogOps Instances
 instance LogOps Int where

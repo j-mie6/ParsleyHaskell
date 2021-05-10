@@ -32,11 +32,11 @@ type InputDependant (rep :: TYPE r) = (# {-next-} rep -> (# Char, rep #)
 
 {- Typeclasses -}
 class InputPrep input where
-  prepare :: rep ~ Unboxed (Rep input) => Code input -> Code (InputDependant rep)
+  prepare :: rep ~ Rep input => Code input -> Code (InputDependant rep)
 
 class PositionOps input where
-  same :: rep ~ Unboxed input => Proxy input -> Code rep -> Code rep -> Code Bool
-  shiftRight :: rep ~ Unboxed input => Proxy input -> Code rep -> Code Int# -> Code rep
+  same :: rep ~ Rep input => Proxy input -> Code rep -> Code rep -> Code Bool
+  shiftRight :: rep ~ Rep input => Proxy input -> Code rep -> Code Int# -> Code rep
 
 class LogOps (rep :: TYPE r) where
   shiftLeft :: Code rep -> Code Int# -> Code rep
@@ -110,11 +110,11 @@ instance InputPrep Lazy.ByteString where
                         (# i# +# 1#, addr'#, final', off'#, size'#, cs' #)
                       Lazy.Empty -> $$(emptyUnpackedLazyByteString [||i# +# 1#||])
                   #)
-          more :: UnboxedUnpackedLazyByteString -> Bool
+          more :: UnpackedLazyByteString -> Bool
           more (# _, _, _, _, 0#, _ #) = False
           more (# _, _, _, _, _, _ #) = True
 
-          initial :: UnboxedUnpackedLazyByteString
+          initial :: UnpackedLazyByteString
           initial = case $$qinput of
             Lazy.Chunk (PS (ForeignPtr addr# final) (I# off#) (I# size#)) cs -> (# 0#, addr#, final, off#, size#, cs #)
             Lazy.Empty -> $$(emptyUnpackedLazyByteString [||0#||])
@@ -127,16 +127,28 @@ instance InputPrep Stream where
       in (# next, \_ -> True, $$(offWith qinput) #)
     ||]
 
--- PositionOps Instances
-instance PositionOps Int where
-  same _ = intSame
-  shiftRight _ qo# qi# = [||$$(qo#) +# $$(qi#)||]
+shiftRightInt :: Code Int# -> Code Int# -> Code Int#
+shiftRightInt qo# qi# = [||$$(qo#) +# $$(qi#)||]
 
-instance PositionOps (OffWith String) where
+-- PositionOps Instances
+instance PositionOps [Char] where
+  same _ = intSame
+  shiftRight _ = shiftRightInt
+instance PositionOps (UArray Int Char) where
+  same _ = intSame
+  shiftRight _ = shiftRightInt
+instance PositionOps Text16 where
+  same _ = intSame
+  shiftRight _ = shiftRightInt
+instance PositionOps ByteString where
+  same _ = intSame
+  shiftRight _ = shiftRightInt
+
+instance PositionOps CharList where
   same _ = offWithSame
   shiftRight _ qo# qi# = offWithShiftRight [||drop||] qo# qi#
 
-instance PositionOps (OffWith Stream) where
+instance PositionOps Stream where
   same _ = offWithSame
   shiftRight _ qo# qi# = offWithShiftRight [||dropStream||] qo# qi#
 
@@ -144,7 +156,7 @@ instance PositionOps Text where
   same _ qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
   shiftRight _ qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
 
-instance PositionOps UnpackedLazyByteString where
+instance PositionOps Lazy.ByteString where
   same _ qx# qy# = [||
       case $$(qx#) of
         (# i#, _, _, _, _, _ #) -> case $$(qy#) of
@@ -165,7 +177,7 @@ instance LogOps Text where
   shiftLeft qo qi# = [||textShiftLeft $$qo (I# $$(qi#))||]
   offToInt qo = [||case $$qo of Text _ off _ -> div off 2||]
 
-instance LogOps UnboxedUnpackedLazyByteString where
+instance LogOps UnpackedLazyByteString where
   shiftLeft qo# qi# = [||byteStringShiftLeft $$(qo#) $$(qi#)||]
   offToInt qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> I# i# ||]
 

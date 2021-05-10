@@ -1,14 +1,13 @@
 {-# LANGUAGE MagicHash,
              TypeFamilies,
-             TypeFamilyDependencies,
              UnboxedTuples,
              StandaloneKindSignatures #-}
 module Parsley.Internal.Backend.Machine.InputRep (
-    Unboxed, Rep,
+    Rep,
     intSame, intLess, min#, max#,
-    OffWith(..), offWith, offWithSame, offWithShiftRight,
-    OffWithStreamAnd(..),
-    UnpackedLazyByteString(..), UnboxedUnpackedLazyByteString, emptyUnpackedLazyByteString,
+    offWith, offWithSame, offWithShiftRight,
+    --OffWithStreamAnd(..),
+    UnpackedLazyByteString, emptyUnpackedLazyByteString,
     Stream, dropStream,
     offsetText,
     representationTypes,
@@ -32,63 +31,55 @@ import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 import qualified Language.Haskell.TH           as TH   (Q, Type)
 
 {- Representation Types -}
-data OffWith ts = OffWith {-# UNPACK #-} !Int ts
-data OffWithStreamAnd ts = OffWithStreamAnd {-# UNPACK #-} !Int !Stream ts
-data UnpackedLazyByteString = UnpackedLazyByteString
-  {-# UNPACK #-} !Int
-  !Addr#
-  ForeignPtrContents
-  {-# UNPACK #-} !Int
-  {-# UNPACK #-} !Int
-  Lazy.ByteString
+type OffWith ts = (# Int#, ts #)
+--data OffWithStreamAnd ts = OffWithStreamAnd {-# UNPACK #-} !Int !Stream ts
+type UnpackedLazyByteString = (#
+    Int#,
+    Addr#,
+    ForeignPtrContents,
+    Int#,
+    Int#,
+    Lazy.ByteString
+  #)
 
 representationTypes :: [TH.Q TH.Type]
-representationTypes = [[t|Int|], [t|OffWith [Char]|], [t|OffWith Stream|], [t|UnpackedLazyByteString|], [t|Text|]]
+representationTypes = [[t|[Char]|], [t|UArray Int Char|], [t|Text16|], [t|ByteString|], [t|CharList|], [t|Stream|], [t|Lazy.ByteString|], [t|Text|]]
 
-offWith :: Code ts -> Code (Unboxed (OffWith ts))
+offWith :: Code ts -> Code (OffWith ts)
 offWith qts = [||(# 0#, $$qts #)||]
 
-type UnboxedUnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)
-
-emptyUnpackedLazyByteString :: Code Int# -> Code (Unboxed UnpackedLazyByteString)
+emptyUnpackedLazyByteString :: Code Int# -> Code UnpackedLazyByteString
 emptyUnpackedLazyByteString qi# = [|| (# $$(qi#), nullAddr#, error "nullForeignPtr", 0#, 0#, Lazy.Empty #) ||]
 
 {- Representation Mappings -}
 -- When a new input type is added here, it needs an Input instance in Parsley.Backend.Machine
-type family Rep input where
-  Rep [Char] = Int
-  Rep (UArray Int Char) = Int
-  Rep Text16 = Int
-  Rep ByteString = Int
-  Rep CharList = OffWith String
-  Rep Text = Text
-  --Rep CacheText = (Text, Stream)
-  Rep Lazy.ByteString = UnpackedLazyByteString
-  --Rep Lazy.ByteString = OffWith Lazy.ByteString
-  Rep Stream = OffWith Stream
-
 type RepKind :: Type -> RuntimeRep
-type family RepKind rep where
-  RepKind Int = IntRep
+type family RepKind input where
+  RepKind [Char] = IntRep
+  RepKind (UArray Int Char) = IntRep
+  RepKind Text16 = IntRep
+  RepKind ByteString = IntRep
   RepKind Text = LiftedRep
-  RepKind UnpackedLazyByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
-  RepKind (OffWith _) = 'TupleRep '[IntRep, LiftedRep]
-  RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
-  RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
+  RepKind Lazy.ByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
+  RepKind CharList = 'TupleRep '[IntRep, LiftedRep]
+  RepKind Stream = 'TupleRep '[IntRep, LiftedRep]
+  --RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep] --REMOVE
+  --RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep] --REMOVE
 
-type Unboxed :: forall (rep :: Type) -> TYPE (RepKind rep)
-type family Unboxed rep = urep | urep -> rep where
-  Unboxed Int = Int#
-  Unboxed Text = Text
-  Unboxed UnpackedLazyByteString = UnboxedUnpackedLazyByteString
-  Unboxed (OffWith ts) = (# Int#, ts #)
-  Unboxed (OffWithStreamAnd ts) = (# Int#, Stream, ts #)
-  Unboxed (Text, Stream) = (# Text, Stream #)
+type Rep :: forall (rep :: Type) -> TYPE (RepKind rep)
+type family Rep input where
+  Rep [Char] = Int#
+  Rep (UArray Int Char) = Int#
+  Rep Text16 = Int#
+  Rep ByteString = Int#
+  Rep Text = Text
+  Rep Lazy.ByteString = UnpackedLazyByteString
+  Rep CharList = (# Int#, String #)
+  Rep Stream = (# Int#, Stream #)
+  --Rep (OffWithStreamAnd ts) = (# Int#, Stream, ts #)
+  --Rep (Text, Stream) = (# Text, Stream #)
 
 {- Generic Representation Operations -}
---offWithSame :: Code (OffWith ts -> OffWith ts -> Bool)
---offWithSame = [||\(OffWith i _) (OffWith j _) -> i == j||]
-
 intSame :: Code Int# -> Code Int# -> Code Bool
 intSame qi# qj# = [||isTrue# ($$(qi#) ==# $$(qj#))||]
 
@@ -112,12 +103,6 @@ offWithShiftRight drop qo# qi# = [||
 
 {-offWithStreamAnd :: ts -> OffWithStreamAnd ts
 offWithStreamAnd ts = OffWithStreamAnd 0 nomore ts
-
-offWithStreamAndBox :: (# Int#, Stream, ts #) -> OffWithStreamAnd ts
-offWithStreamAndBox (# i#, ss, ts #) = OffWithStreamAnd (I# i#) ss ts
-
-offWithStreamAndUnbox :: OffWithStreamAnd ts -> (# Int#, Stream, ts #)
-offWithStreamAndUnbox (OffWithStreamAnd (I# i#) ss ts) = (# i#, ss, ts #)
 
 offWithStreamAndToInt :: OffWithStreamAnd ts -> Int
 offWithStreamAndToInt (OffWithStreamAnd i _ _) = i-}
@@ -144,17 +129,17 @@ textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
       | otherwise = Text arr off' unconsumed'
 
 {-# INLINE emptyUnpackedLazyByteString' #-}
-emptyUnpackedLazyByteString' :: Int# -> UnboxedUnpackedLazyByteString
+emptyUnpackedLazyByteString' :: Int# -> UnpackedLazyByteString
 emptyUnpackedLazyByteString' i# = (# i#, nullAddr#, error "nullForeignPtr", 0#, 0#, Lazy.Empty #)
 
-byteStringShiftRight :: UnboxedUnpackedLazyByteString -> Int# -> UnboxedUnpackedLazyByteString
+byteStringShiftRight :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
 byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
   | isTrue# (j# <# size#)  = (# i# +# j#, addr#, final, off# +# j#, size# -# j#, cs #)
   | otherwise = case cs of
     Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
     Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# size#)
 
-byteStringShiftLeft :: UnboxedUnpackedLazyByteString -> Int# -> UnboxedUnpackedLazyByteString
+byteStringShiftLeft :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
 byteStringShiftLeft (# i#, addr#, final, off#, size#, cs #) j# =
   let d# = min# off# j#
   in (# i# -# d#, addr#, final, off# -# d#, size# +# d#, cs #)

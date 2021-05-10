@@ -25,7 +25,7 @@ import Data.Kind                                    (Type)
 import Data.Maybe                                   (fromMaybe)
 import Parsley.Internal.Backend.Machine.Defunc      (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
-import Parsley.Internal.Backend.Machine.InputRep    (Unboxed)
+import Parsley.Internal.Backend.Machine.InputRep    (Rep)
 import Parsley.Internal.Backend.Machine.LetBindings (Regs(..))
 import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
@@ -33,9 +33,9 @@ import qualified Data.Dependent.Map as DMap             ((!), insert, empty, loo
 import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
 
 type HandlerStack n s o a = Vec n (Code (Handler s o a))
-type Handler s o a = Unboxed o -> ST s (Maybe a)
-type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
-type SubRoutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
+type Handler s o a = Rep o -> ST s (Maybe a)
+type Cont s o a x = x -> Rep o -> ST s (Maybe a)
+type SubRoutine s o a x = Cont s o a x -> Rep o -> Handler s o a -> ST s (Maybe a)
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
 type family Func (rs :: [Type]) s o a x where
@@ -58,7 +58,7 @@ data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
 
 data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , retCont  :: Code (Cont s o a r)
-                        , input    :: Code (Unboxed o)
+                        , input    :: Code (Rep o)
                         , handlers :: HandlerStack n s o a }
 
 data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)

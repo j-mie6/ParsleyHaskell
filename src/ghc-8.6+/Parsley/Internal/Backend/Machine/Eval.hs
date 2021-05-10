@@ -24,8 +24,8 @@ import System.Console.Pretty                          (color, Color(Green))
 
 import qualified Debug.Trace (trace)
 
-eval :: forall o a. (Trace, Ops o) => Code (InputDependant o) -> (LetBinding o a a, DMap MVar (LetBinding o a)) -> Code (Maybe a)
-eval input (LetBinding !p _, fs) = trace ("EVALUATING TOP LEVEL") [|| runST $
+eval :: forall o a. (Trace, Ops o) => Code (InputDependant o) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
+eval input (LetBinding !p _) fs = trace ("EVALUATING TOP LEVEL") [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs

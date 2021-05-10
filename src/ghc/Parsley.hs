@@ -1,6 +1,5 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE MultiParamTypeClasses,
-             TypeApplications #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Parsley (
     module Parsley,
     module Core,
@@ -15,7 +14,7 @@ module Parsley (
 
 import Prelude hiding            (readFile)
 import Data.Text.IO              (readFile)
-import Parsley.Internal.Backend  (codeGen, Input, Rep, eval, prepare)
+import Parsley.Internal.Backend  (codeGen, Input, eval)
 import Parsley.Internal.Frontend (compile)
 import Parsley.Internal.Trace    (Trace(trace))
 
@@ -28,8 +27,8 @@ import Parsley.Internal.Common.Utils    as THUtils     ({-code, -}Quapplicative(
 import Parsley.Internal.Core.Primitives as Primitives  (debug)
 import Parsley.Selective                as Selective
 
-runParser :: forall input a. (Trace, Input input) => Parser a -> Code (input -> Maybe a)
-runParser p = [||\input -> $$(eval @(Rep input) (prepare [||input||]) (compile p codeGen))||]
+runParser :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
+runParser p = [||\input -> $$(eval [||input||] (compile p codeGen))||]
 
 parseFromFile :: Trace => Parser a -> Code (FilePath -> IO (Maybe a))
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]

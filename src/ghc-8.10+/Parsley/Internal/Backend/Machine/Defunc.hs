@@ -3,7 +3,7 @@ module Parsley.Internal.Backend.Machine.Defunc (module Parsley.Internal.Backend.
 
 import Data.Proxy                                (Proxy(Proxy))
 import Parsley.Internal.Backend.Machine.InputOps (PositionOps(same))
-import Parsley.Internal.Backend.Machine.InputRep (Unboxed)
+import Parsley.Internal.Backend.Machine.InputRep (Rep)
 import Parsley.Internal.Common.Utils             (Code, WQ(WQ))
 
 import qualified Parsley.Internal.Core.Defunc as Core (Defunc(BLACK), ap, genDefunc, genDefunc1, genDefunc2)
@@ -13,12 +13,12 @@ data Defunc a where
   BOTTOM  :: Defunc a
   SAME    :: PositionOps o => Defunc (o -> o -> Bool)
   FREEVAR :: Code a -> Defunc a
-  OFFSET  :: Code (Unboxed o) -> Defunc o
+  OFFSET  :: Code (Rep o) -> Defunc o
 
 ap2 :: Defunc (a -> b -> c) -> Defunc a -> Defunc b -> Defunc c
 ap2 f@SAME (OFFSET o1) (OFFSET o2) = USER (black (apSame f o1 o2))
   where
-    apSame :: forall o. Defunc (o -> o -> Bool) -> Code (Unboxed o) -> Code (Unboxed o) -> Code Bool
+    apSame :: forall o. Defunc (o -> o -> Bool) -> Code (Rep o) -> Code (Rep o) -> Code Bool
     apSame SAME = same (Proxy @o)
     apSame _    = undefined
 ap2 f x y = USER (Core.ap (Core.ap (seal f) (seal x)) (seal y))

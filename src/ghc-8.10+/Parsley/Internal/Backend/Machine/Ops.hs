@@ -39,13 +39,13 @@ derivation(Text)
 type Ops o = (LogHandler o, ContOps o, HandlerOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, LogOps (Unboxed o))
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps (Unboxed o)) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 sat p k bad γ@Γ{..} = next input $ \c input' -> [||
     if $$(p c) then $$(k (γ {operands = Op (FREEVAR c) operands, input = input'}))
     else $$bad
   ||]
 
-emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps (Unboxed o), PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
 emitLengthCheck (I# n) good bad γ = [||
@@ -188,9 +188,9 @@ takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters
 
 {- Debugger Operations -}
 class (PositionOps o, LogOps (Unboxed o)) => LogHandler o where
-  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code (Unboxed o) -> Code (Handler s o a)
+  logHandler :: (?ops :: InputOps (Unboxed o)) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code (Unboxed o) -> Code (Handler s o a)
 
-preludeString :: forall s o xs n r a. (?ops :: InputOps o, PositionOps o, LogOps (Unboxed o)) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
+preludeString :: forall s o xs n r a. (?ops :: InputOps (Unboxed o), PositionOps o, LogOps (Unboxed o)) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset     = input γ

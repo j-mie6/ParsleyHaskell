@@ -1,6 +1,5 @@
 {-# LANGUAGE ImplicitParams,
              MagicHash,
-             StandaloneKindSignatures,
              TypeApplications,
              UnboxedTuples #-}
 module Parsley.Internal.Backend.Machine.InputOps (
@@ -15,7 +14,7 @@ import Data.Text.Array                           (aBA{-, empty-})
 import Data.Text.Internal                        (Text(..))
 import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, reverseIter_-})
 import Data.Proxy                                (Proxy)
-import GHC.Exts                                  (Int(..), Char(..), Constraint, TYPE, Int#)
+import GHC.Exts                                  (Int(..), Char(..), TYPE, Int#)
 import GHC.ForeignPtr                            (ForeignPtr(..))
 import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
 import Parsley.Internal.Backend.Machine.InputRep
@@ -26,30 +25,29 @@ import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
 
 {- Auxillary Representation -}
-type InputDependant rep = (# {-next-} Unboxed rep -> (# Char, Unboxed rep #)
-                           , {-more-} Unboxed rep -> Bool
-                           , {-init-} Unboxed rep
-                           #)
+type InputDependant (rep :: TYPE r) = (# {-next-} rep -> (# Char, rep #)
+                                       , {-more-} rep -> Bool
+                                       , {-init-} rep
+                                       #)
 
 {- Typeclasses -}
 class InputPrep input where
-  prepare :: Code input -> Code (InputDependant (Rep input))
+  prepare :: rep ~ Unboxed (Rep input) => Code input -> Code (InputDependant rep)
 
-class PositionOps rep where
-  same :: Proxy rep -> Code (Unboxed rep) -> Code (Unboxed rep) -> Code Bool
-  shiftRight :: Proxy rep -> Code (Unboxed rep) -> Code Int# -> Code (Unboxed rep)
+class PositionOps input where
+  same :: rep ~ Unboxed input => Proxy input -> Code rep -> Code rep -> Code Bool
+  shiftRight :: rep ~ Unboxed input => Proxy input -> Code rep -> Code Int# -> Code rep
 
-type LogOps :: forall rep. TYPE rep -> Constraint
-class LogOps urep where
-  shiftLeft :: Code urep -> Code Int# -> Code urep
-  offToInt  :: Code urep -> Code Int
+class LogOps (rep :: TYPE r) where
+  shiftLeft :: Code rep -> Code Int# -> Code rep
+  offToInt  :: Code rep -> Code Int
 
-data InputOps rep = InputOps { _more       :: Code (Unboxed rep -> Bool)
-                             , _next       :: Code (Unboxed rep -> (# Char, Unboxed rep #))
-                             }
-more :: (?ops :: InputOps rep) => Code (Unboxed rep -> Bool)
+data InputOps (rep :: TYPE r) = InputOps { _more       :: Code (rep -> Bool)
+                                         , _next       :: Code (rep -> (# Char, rep #))
+                                         }
+more :: forall r (rep :: TYPE r). (?ops :: InputOps rep) => Code (rep -> Bool)
 more = _more ?ops
-next :: (?ops :: InputOps rep) => Code (Unboxed rep) -> (Code Char -> Code (Unboxed rep) -> Code r) -> Code r
+next :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a
 next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
 
 {- INSTANCES -}

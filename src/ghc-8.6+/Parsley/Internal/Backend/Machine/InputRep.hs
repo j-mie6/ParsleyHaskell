@@ -1,11 +1,7 @@
 {-# LANGUAGE MagicHash,
              TypeFamilies,
              TypeFamilyDependencies,
-             UnboxedTuples,
-             CPP #-}
-#if __GLASGOW_HASKELL__ >= 810
-{-# LANGUAGE StandaloneKindSignatures #-}
-#endif
+             UnboxedTuples #-}
 module Parsley.Internal.Backend.Machine.InputRep (
     Unboxed, Rep,
     OffWith(..), offWith, offWithSame, offWithShiftRight,
@@ -20,9 +16,6 @@ module Parsley.Internal.Backend.Machine.InputRep (
 
 import Data.Array.Unboxed                (UArray)
 import Data.ByteString.Internal          (ByteString(..))
-#if __GLASGOW_HASKELL__ >= 810
-import Data.Kind                         (Type)
-#endif
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
 import GHC.Exts                          (TYPE, RuntimeRep(..))
@@ -69,9 +62,6 @@ type family Rep input where
   --Rep Lazy.ByteString = OffWith Lazy.ByteString
   Rep Stream = OffWith Stream
 
-#if __GLASGOW_HASKELL__ >= 810
-type RepKind :: Type -> RuntimeRep
-#endif
 type family RepKind rep where
   RepKind Int = IntRep
   RepKind Text = LiftedRep
@@ -80,9 +70,6 @@ type family RepKind rep where
   RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
   RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
 
-#if __GLASGOW_HASKELL__ >= 810
-type Unboxed :: forall (rep :: Type) -> TYPE (RepKind rep)
-#endif
 type family Unboxed rep = (urep :: TYPE (RepKind rep)) | urep -> rep where
   Unboxed Int = Int#
   Unboxed Text = Text

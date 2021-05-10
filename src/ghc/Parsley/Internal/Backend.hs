@@ -4,4 +4,4 @@ module Parsley.Internal.Backend (
   ) where
 
 import Parsley.Internal.Backend.CodeGenerator (codeGen)
-import Parsley.Internal.Backend.Machine       (Input, prepare, eval)
+import Parsley.Internal.Backend.Machine       (Input, eval)

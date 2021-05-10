@@ -186,8 +186,8 @@ common benchmark-common
   default-language:    Haskell2010
   ghc-options:         -rtsopts -fplugin=LiftPlugin -fno-spec-constr
   if flag(dump-core)
-    build-depends: dump-core
-    ghc-options: -fplugin=DumpCore
+    build-depends:     dump-core
+    ghc-options:       -fplugin=DumpCore
 
 benchmark brainfuck-bench
   import:              benchmark-common

@@ -182,18 +182,54 @@ branch :: Parser (Either a b) -- ^ The first parser to execute
        -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (L (Branch c p q)))
 
+{-|
+This combinator parses repeated applications of an operator to a single final operand. This is
+primarily used to parse prefix operators in expressions.
+
+@since 0.1.0.0
+-}
 chainPre :: Parser (a -> a) -> Parser a -> Parser a
 chainPre (Parser op) (Parser p) = Parser (In (L (ChainPre op p)))
 
+{-|
+This combinator parses repeated applications of an operator to a single initial operand. This is
+primarily used to parse postfix operators in expressions.
+
+@since 0.1.0.0
+-}
 chainPost :: Parser a -> Parser (a -> a) -> Parser a
 chainPost (Parser p) (Parser op) = Parser (In (L (ChainPost p op)))
 
-newRegister :: Parser a -> (forall r. Reg r a -> Parser b) -> Parser b
+{-|
+Creates a new register initialised with the value obtained from parsing the first
+argument. This register is provided to the second argument, a function that generates a parser
+depending on operations derived from the register. This parser is then performed.
+
+Note: The rank-2 type here serves a similar purpose to that in the @ST@ monad. It prevents the
+register from leaking outside of the scope of the function, safely encapsulating the stateful
+effect of the register.
+
+@since 0.1.0.0
+-}
+newRegister :: Parser a                        -- ^ Parser with which to initialise the register
+            -> (forall r. Reg r a -> Parser b) -- ^ Used to generate the second parser to execute
+            -> Parser b
 newRegister (Parser p) f = Parser (In (R (ScopeRegister p (unParser . f))))
 
+{-|
+Fetches a value from a register and returns it as its result.
+
+@since 0.1.0.0
+-}
 get :: Reg r a -> Parser a
 get (Reg reg) = Parser (In (L (GetRegister reg)))
 
+{-|
+Puts the result of the given parser into the given register. The old value in the register will be
+lost.
+
+@since 0.1.0.0
+-}
 put :: Reg r a -> Parser a -> Parser ()
 put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
 

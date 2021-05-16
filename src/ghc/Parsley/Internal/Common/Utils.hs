@@ -49,7 +49,7 @@ representations. It can be used to construct these values as well as extract the
 and code representation on demand.
 
 It is named after the @Applicative@ class, with the @Q@ standing for \"code\". The @(`>*<`)@ operator
-is analogous to @(<*>)@ and `makeQ` analogous to @pure@.
+is analogous to @(\<*>)@ and `makeQ` analogous to @pure@.
 
 @since 0.1.0.0
 -}

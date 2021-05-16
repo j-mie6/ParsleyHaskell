@@ -109,9 +109,8 @@ item = satisfy (APP_H CONST ((makeQ True [||True||])))
 
 -- Composite Combinators
 {-|
-The combinator @someTill p end@ will try and parse @p@ as many times as possible so long as @end@
-cannot be successfully parsed. It will return the results from the successful parses of @p@, and
-will not consume any input in the process of matching @end@.
+The combinator @someTill p end@ will try and parse @p@ as many times as possible (but at least once)
+so long as @end@ cannot be successfully parsed. It will return the results from the successful parses of @p@.
 
 @since 0.1.0.0
 -}

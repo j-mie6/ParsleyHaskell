@@ -63,37 +63,49 @@ instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
 _pure :: Defunc a -> Parser a
 _pure = Parser . In . L . Pure
 
-infixl 4 <*>
 {-|
 Sequential application of one parser's result to another's. The parsers must both succeed, one after
 the other to combine their results. If either parser fails then the combinator will fail.
 
 @since 0.1.0.0
 -}
+infixl 4 <*>
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
 Parser p <*> Parser q = Parser (In (L (p :<*>: q)))
 
-infixl 4 <*
 {-|
 Sequence two parsers, keeping the result of the second and discarding the result of the first.
 
 @since 0.1.0.0
 -}
+infixl 4 <*
 (<*) :: Parser a -> Parser b -> Parser a
 Parser p <* Parser q = Parser (In (L (p :<*: q)))
 
-infixl 4 *>
 {-|
 Sequence two parsers, keeping the result of the first and discarding the result of the second.
 
 @since 0.1.0.0
 -}
+infixl 4 *>
 (*>) :: Parser a -> Parser b -> Parser b
 Parser p *> Parser q = Parser (In (L (p :*>: q)))
 
+{-|
+This combinator always fails.
+
+@since 0.1.0.0
+-}
 empty :: Parser a
 empty = Parser (In (L Empty))
 
+{-|
+This combinator implements branching within a parser. It is left-biased, so that if the first branch
+succeeds, the second will not be attempted. In accordance with @parsec@ semantics, if the first
+branch failed having consumed input the second branch cannot be taken. (see `try`)
+
+@since 0.1.0.0
+-}
 infixr 3 <|>
 (<|>) :: Parser a -> Parser a -> Parser a
 Parser p <|> Parser q = Parser (In (L (p :<|>: q)))

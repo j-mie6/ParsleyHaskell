@@ -35,7 +35,17 @@ class ParserOps rep where
   satisfy :: rep (Char -> Bool) -- ^ The predicate that a character must satisfy to be parsed
           -> Parser Char        -- ^ A parser that matches a single character matching the predicate
 
-  conditional :: [(rep (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
+  {-|
+  @conditional fqs p def@ first parses @p@, then it will try each of the predicates in @fqs@ in turn
+  until one of them returns @True@. The corresponding parser for the first predicate that succeeded
+  is then executes, or if none of the predicates succeeded then the @def@ parser is executed.
+
+  @since 0.1.0.0
+  -}
+  conditional :: [(rep (a -> Bool), Parser b)] -- ^ A list of predicates and their outcomes
+              -> Parser a                      -- ^ A parser whose result is used to choose an outcome
+              -> Parser b                      -- ^ A parser who will be executed if no predicates succeed
+              -> Parser b
 
 {-|
 This is the default representation used for user-level functions and values: plain old code.
@@ -156,7 +166,20 @@ _conditional cs (Parser p) (Parser def) =
   let (fs, qs) = unzip cs
   in Parser (In (L (Match p fs (map unParser qs) def)))
 
-branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
+{-|
+One of the core @Selective@ operations. The behaviour of @branch p l r@ is to first to parse
+@p@, if it fails then the combinator fails. If @p@ succeeded then if its result is a @Left@, then
+the parser @l@ is executed and applied to the result of @p@, otherwise @r@ is executed and applied
+to the right from a @Right@.
+
+Crucially, only one of @l@ or @r@ will be executed on @p@'s success.
+
+@since 0.1.0.0
+-}
+branch :: Parser (Either a b) -- ^ The first parser to execute
+       -> Parser (a -> c)     -- ^ The parser to execute if the first returned a @Left@
+       -> Parser (b -> c)     -- ^ The parser to execute if the first returned a @Right@
+       -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (L (Branch c p q)))
 
 chainPre :: Parser (a -> a) -> Parser a -> Parser a

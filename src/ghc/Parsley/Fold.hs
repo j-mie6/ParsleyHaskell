@@ -1,4 +1,16 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-|
+Module      : Parsley.Fold
+Description : The "folding" combinators: chains and iterators
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : stable
+
+This module contains the combinator concerned with some form of iteration or input folding. Notably,
+this includes the traditional `many` and `some` combinators. 
+
+@since 0.1.0.0
+-}
 module Parsley.Fold (
     module Parsley.Fold,
     module Primitives

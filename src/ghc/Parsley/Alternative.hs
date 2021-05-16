@@ -1,3 +1,17 @@
+{-|
+Module      : Parsley.Alterative
+Description : The @Alternative@ combinators
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : stable
+
+This modules contains the @Alternative@ combinators that would normally be found in
+@Control.Applicative@. However, since Parsley makes use of staging, the signatures
+of these combinators do not correctly match the signatures of those in base Haskell (due to a lack
+of @Applicative@ constraint).
+
+@since 0.1.0.0
+-}
 module Parsley.Alternative (
     module Parsley.Alternative,
     module Primitives

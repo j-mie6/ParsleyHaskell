@@ -1,4 +1,17 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-|
+Module      : Parsley.Applicative
+Description : The @Applicative@ combinators
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : stable
+
+This modules contains all of the @Applicative@ combinators that would normally be found in
+@Data.Functor@ or @Control.Applicative@. However, since Parsley makes use of staging, the signatures
+of these combinators do not correctly match the signatures of those in base Haskell.
+
+@since 0.1.0.0
+-}
 module Parsley.Applicative (
     module Parsley.Applicative,
     module Primitives
@@ -6,7 +19,7 @@ module Parsley.Applicative (
 
 import Prelude hiding                (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence)
 import Parsley.Internal.Common.Utils (makeQ)
-import Parsley.Internal.Core         (Parser, Defunc(UNIT, CONS, APP, CONST, EMPTY), pattern FLIP_H, ParserOps)
+import Parsley.Internal.Core         (Parser, Defunc(UNIT, CONS, CONST, ID, EMPTY), pattern FLIP_H, ParserOps)
 
 import Parsley.Internal.Core.Primitives as Primitives (pure, (<*>), (*>), (<*))
 
@@ -71,7 +84,7 @@ infixl 4 <:>
 
 infixl 4 <**>
 (<**>) :: Parser a -> Parser (a -> b) -> Parser b
-(<**>) = liftA2 (FLIP_H APP)
+(<**>) = liftA2 (FLIP_H ID)
 
 -- Auxillary functions
 sequence :: [Parser a] -> Parser [a]

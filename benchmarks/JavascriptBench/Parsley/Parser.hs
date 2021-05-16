@@ -15,6 +15,7 @@ import Data.Char (isSpace, isUpper, digitToInt, isDigit)
 import Data.Maybe (catMaybes)
 import Text.Read (readMaybe)
 import Control.Monad (liftM)
+import Language.Haskell.TH.Syntax (Lift(..))
 
 deriving instance Lift JSElement
 deriving instance Lift JSStm

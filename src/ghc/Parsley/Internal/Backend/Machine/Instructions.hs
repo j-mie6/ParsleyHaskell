@@ -9,7 +9,7 @@ import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 
 import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc(USER))
-import Parsley.Internal.Core.Defunc            as Core    (Defunc(APP, ID), pattern FLIP_H)
+import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
 
 data Instr (o :: rep) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
   Ret       :: Instr o k '[x] n x a
@@ -57,10 +57,10 @@ drainCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n
 drainCoins = mkCoin DrainCoins
 
 pattern App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
-pattern App k = Lift2 (USER APP) k
+pattern App k = Lift2 (USER ID) k
 
 pattern Fmap :: Machine.Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
-pattern Fmap f k = Push f (In4 (Lift2 (USER (FLIP_H APP)) k))
+pattern Fmap f k = Push f (In4 (Lift2 (USER (FLIP_H ID)) k))
 
 _Modify :: ΣVar x -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) ((x -> x) : xs) n r a
 _Modify σ  = _Get σ . In4 . App . In4 . _Put σ

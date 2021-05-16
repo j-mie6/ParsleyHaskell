@@ -1,4 +1,16 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-|
+Module      : Parsley.Combinator
+Description : The parsing combinators
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : stable
+
+This module contains the classic parser combinator operations specific to parsers themselves.
+This means any combinators that deal with input consumption at a primitive level. 
+
+@since 0.1.0.0
+-}
 module Parsley.Combinator (
     char, item,
     string, token,

@@ -7,11 +7,22 @@ name:                parsley
 --                   | | | +--- code changes with no API change
 version:             0.1.0.0
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
-
 description:         Parsley is a staged selective parser combinator library, which means
                      it does not support monadic operations, and relies on Typed Template
                      Haskell to generate very fast code. Currently there are no error messages
                      but there are plans for this in the works.
+                     .
+                     Based on the work found in [/Staged Selective Parser Combinators/
+                     (Willis et al. 2020)](https://dl.acm.org/doi/10.1145/3409002)
+                     .
+                     While this library adheres to the Haskell PVP, it additionally
+                     enforces an additional constraint: the version @M.I.m.p@ represents
+                     a breaking change to the /user/ API @M@, a breaking change
+                     to the /internal/ API @I@ (which will not affect most users), an addition
+                     to either API @m@, and patches or performance improvements @p@.
+                     As such, users should feel free to bound themselves on the next @M@
+                     version of the library as opposed to the second @I@ version if they
+                     do not make use of the "Parsley.Internal" package or any of its children.
 
 
 homepage:            https://github.com/j-mie6/ParsleyHaskell
@@ -36,10 +47,12 @@ library
   exposed-modules:     Parsley,
                        Parsley.Applicative,
                        Parsley.Alternative,
+                       Parsley.Defunctionalized,
                        Parsley.Selective,
                        Parsley.Register,
                        Parsley.Combinator,
                        Parsley.Fold,
+                       Parsley.InputExtras,
                        Parsley.Precedence
 
                        Parsley.Internal.Trace,

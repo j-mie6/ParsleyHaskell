@@ -1,3 +1,19 @@
+{-|
+Module      : Parsley.Register
+Description : The register combinators
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : stable
+
+This module exposes combinators designed to work with /registers/. These are small pieces of state
+that are carried through the parsing process. They can be used, for example, to perform indentation
+sensitive parsing. In fact, they are a flexible replacement for the monadic combinators, in conjunction
+with the "Parsley.Selective" combinators. In particular, the `bind` combinator implements a limited form
+of the @(>>=)@ operation, where the structure of the resulting parser will still be statically
+determinable. Registers paired with "Parsley.Selective" combinators are Turing-Compete.
+
+@since 0.1.0.0
+-}
 module Parsley.Register (
     module Parsley.Register,
     module Primitives

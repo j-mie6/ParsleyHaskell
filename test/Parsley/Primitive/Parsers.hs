@@ -3,6 +3,7 @@ module Parsley.Primitive.Parsers where
 import Prelude hiding (pure, (<*>), (*>), (<*))
 import Data.Char (isDigit)
 import Parsley
+import Parsley.Defunctionalized (Defunc(EMPTY))
 import Parsley.Garnish
 
 pure7 :: Parser Int

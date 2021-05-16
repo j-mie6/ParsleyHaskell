@@ -11,7 +11,7 @@ import Criterion.Main         (Benchmark, bgroup, defaultMain)
 import Control.DeepSeq        (NFData)
 import GHC.Generics           (Generic)
 import Data.ByteString        (ByteString)
-import Parsley                (Text16(..), CharList(..))
+import Parsley.InputExtras    (Text16(..), CharList(..))
 --import Parsley.Internal.Verbose ()
 import qualified BrainfuckBench.Parsley.Parser
 import qualified BrainfuckBench.Parsec.Parser

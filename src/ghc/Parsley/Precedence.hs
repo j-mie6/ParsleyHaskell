@@ -1,5 +1,20 @@
 {-# LANGUAGE AllowAmbiguousTypes,
              MultiParamTypeClasses #-}
+{-|
+Module      : Parsley.Precedence
+Description : The precedence parser functionality
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : stable
+
+This module exposes the required machinery for parsing expressions given by a precedence
+table. Unlike those found in
+[parser-combinators](https://hackage.haskell.org/package/parser-combinators-1.3.0/docs/Control-Monad-Combinators-Expr.html)
+or [parsec](https://hackage.haskell.org/package/parsec-3.1.14.0/docs/Text-Parsec-Expr.html), this
+implementation allows the precedence layers to change type in the table. 
+
+@since 0.1.0.0
+-}
 module Parsley.Precedence (module Parsley.Precedence) where
 
 import Prelude hiding                ((<$>))

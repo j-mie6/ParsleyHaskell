@@ -1,15 +1,95 @@
+{-# LANGUAGE CPP,
+             PatternSynonyms,
+             ViewPatterns #-}
 module Parsley.Patterns (
+    deriveLiftedConstructors, deriveSingletonConstuctors,
     deriveSubtype, deriveSubtypeUsing
   ) where
 
-import Data.List     (intercalate)
-import Language.Haskell.TH (Name, Q, reify, Info(TyConI), varE, varP, conE, conP, conT, newName)
-import Language.Haskell.TH.Syntax (Type(ConT), Con(NormalC, RecC, GadtC, RecGadtC), Dec(TySynD, NewtypeD, DataD))
+import Prelude hiding ((<$>), pure, (<*>))
+
+import Data.List     (intercalate, elemIndex)
+import Language.Haskell.TH (Name, Q, reify, Info(TyConI, DataConI), Extension(KindSignatures), newName, mkName, isExtEnabled)
+import Language.Haskell.TH.Syntax (Type(ConT, AppT, TupleT, ArrowT, ForallT, StarT), Con(NormalC, RecC, GadtC, RecGadtC), Dec(TySynD, NewtypeD, DataD), TyVarBndr(PlainTV, KindedTV), Exp(VarE, AppE), Lift(..))
+import Language.Haskell.TH.Lib (varE, varP, conE, conP, conT, forallT, funD, sigD, clause, normalB)
+import Parsley (Parser)
+import Parsley.Combinator (pos)
 import Parsley.Precedence (Subtype(..))
+import Parsley.Applicative (pure, (<$>), (<*>), (<**>))
 
--- Builder Generators
+instance Lift a => Lift (Q a) where
+  lift qe = do
+    e <- qe
+    [|return $(lift e)|]
 
--- Subtype Generators
+{- Builder Generators -}
+deriveLiftedConstructors :: String -> [Name] -> Q [Dec]
+deriveLiftedConstructors prefix = fmap concat . traverse deriveCon
+  where
+    deriveCon :: Name -> Q [Dec]
+    deriveCon con = do
+      DataConI _ ty _ <- reify con
+      (forall, tys) <- splitFun ty
+      posIdx <- findPosIdx con tys
+      let tys' = maybe id deleteAt posIdx tys
+      --ty' <- buildType forall (map return tys')
+      --fail (show (posIdx, ty'))
+      args <- sequence (replicate (length tys' - 1) (newName "x"))
+      let posAp = maybe [|id|] (const [|(pos <**>)|]) posIdx
+      let con' = mkName (prefix ++ pretty con)
+      sequence [ sigD con' (buildType forall (map return tys'))
+               , funD con' [clause (map varP args) (normalB [e|$posAp undefined|]) []]
+               ]
+
+deleteAt :: Int -> [a] -> [a]
+deleteAt 0 (_:xs) = xs
+deleteAt n (x:xs) = x : deleteAt (n-1) xs
+deleteAt _ []     = []
+
+deriveSingletonConstuctors :: String -> [Name] -> Q [Dec]
+deriveSingletonConstuctors prefix cons = undefined
+
+pattern PosTy :: Type
+pattern PosTy <- AppT (AppT (TupleT 2) (ConT ((== ''Int) -> True))) (ConT ((== ''Int) -> True))
+  where
+    PosTy = AppT (AppT (TupleT 2) (ConT ''Int)) (ConT ''Int)
+
+pattern FunTy :: Type -> Type -> Type
+pattern FunTy x y = AppT (AppT ArrowT x) y
+
+data PosIdx = Idx Int | Ambiguous | Absent deriving Show
+findPosIdx :: Name -> [Type] -> Q (Maybe Int)
+findPosIdx con tys = case maybe
+  Absent
+  (\idx -> if length (filter (== PosTy) tys) > 1 then Ambiguous else Idx idx)
+  (elemIndex PosTy tys) of
+     Ambiguous -> fail ("constructor " ++ pretty con ++ " has multiple occurrences of (Int, Int)")
+     Absent -> return Nothing
+     Idx idx -> return (Just idx)
+
+splitFun :: Type -> Q (Q Type -> Q Type, [Type])
+splitFun (ForallT bndrs ctx ty) = do
+  kindSigs <- isExtEnabled KindSignatures
+  let bndrs' = if kindSigs then bndrs else map sanitiseStarT bndrs
+  return (forallT bndrs' (return ctx), splitFun' ty)
+splitFun ty                     = return (id, splitFun' ty)
+
+splitFun' :: Type -> [Type]
+splitFun' (FunTy a b) = a : splitFun' b
+splitFun' ty          = [ty]
+
+buildType :: (Q Type -> Q Type) -> [Q Type] -> Q Type
+buildType forall tys = forall (foldr (\ty rest -> [t|Parser $ty -> $rest|]) [t|Parser $(last tys)|] (init tys))
+
+-- When KindSignatures is off, the default (a :: *) that TH generates is broken!
+#if __GLASGOW_HASKELL__ < 900
+sanitiseStarT (KindedTV ty StarT) = PlainTV ty
+#else
+sanitiseStarT (KindedTV ty flag StarT) = PlainTV ty flag
+#endif
+sanitiseStarT ty = ty
+
+{- Subtype Generators -}
 deriveSubtype :: Name -> Name -> Q [Dec]
 deriveSubtype sub sup = determineWrap sub sup >>= deriveSubtypeUsing sub sup
 
@@ -56,8 +136,9 @@ determineWrap sub sup = do
     conjunct [con1, con2] = pretty con1 ++ " and " ++ pretty con2
     conjunct others =
       intercalate ", " (map pretty (init others)) ++ ", and " ++ pretty (last others)
-    pretty :: Name -> String
-    pretty = reverse . takeWhile (/= '.') . reverse . show
+
+pretty :: Name -> String
+pretty = reverse . takeWhile (/= '.') . reverse . show
 
 deriveSubtypeUsing :: Name -> Name -> Name -> Q [Dec]
 deriveSubtypeUsing sub sup wrap = do

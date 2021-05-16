@@ -10,16 +10,49 @@ import Parsley.Internal.Core.Defunc        (Defunc(BLACK))
 import Parsley.Internal.Common.Indexed     (Fix(In), (:+:)(..))
 import Parsley.Internal.Common.Utils       (WQ)
 
+{-|
+This typeclass is used to allow abstraction of the representation of user-level functions.
+See the instances for information on what these representations are. This may be required
+as a constraint on custom built combinators that make use of one of the minimal required methods
+of this class.
+
+@since 0.1.0.0
+-}
 class ParserOps rep where
+  {-|
+  Lift a value into the parser world without consuming input or having any other effect.
+
+  @since 0.1.0.0
+  -}
   pure :: rep a -> Parser a
-  satisfy :: rep (Char -> Bool) -> Parser Char
+
+  {-|
+  Attempts to read a single character matching the provided predicate. If it succeeds, the
+  character will be returned and consumed, otherwise the parser will fail having consumed no input.
+
+  @since 0.1.0.0
+  -}
+  satisfy :: rep (Char -> Bool) -- ^ The predicate that a character must satisfy to be parsed
+          -> Parser Char        -- ^ A parser that matches a single character matching the predicate
+
   conditional :: [(rep (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
 
+{-|
+This is the default representation used for user-level functions and values: plain old code.
+
+@since 0.1.0.0
+-}
 instance ParserOps WQ where
   pure = pure . BLACK
   satisfy = satisfy . BLACK
   conditional = conditional . map (\(f, t) -> (BLACK f, t))
 
+{-|
+This is used to allow defunctionalised versions of many standard Haskell functions to be used
+directly as an argument to relevant combinators.
+
+@since 0.1.0.0
+-}
 instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
   pure = _pure
   satisfy = _satisfy
@@ -31,14 +64,30 @@ _pure :: Defunc a -> Parser a
 _pure = Parser . In . L . Pure
 
 infixl 4 <*>
+{-|
+Sequential application of one parser's result to another's. The parsers must both succeed, one after
+the other to combine their results. If either parser fails then the combinator will fail.
+
+@since 0.1.0.0
+-}
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
 Parser p <*> Parser q = Parser (In (L (p :<*>: q)))
 
 infixl 4 <*
+{-|
+Sequence two parsers, keeping the result of the second and discarding the result of the first.
+
+@since 0.1.0.0
+-}
 (<*) :: Parser a -> Parser b -> Parser a
 Parser p <* Parser q = Parser (In (L (p :<*: q)))
 
 infixl 4 *>
+{-|
+Sequence two parsers, keeping the result of the first and discarding the result of the second.
+
+@since 0.1.0.0
+-}
 (*>) :: Parser a -> Parser b -> Parser b
 Parser p *> Parser q = Parser (In (L (p :*>: q)))
 
@@ -53,12 +102,39 @@ Parser p <|> Parser q = Parser (In (L (p :<|>: q)))
 _satisfy :: Defunc (Char -> Bool) -> Parser Char
 _satisfy = Parser . In . L . Satisfy
 
+{-|
+This combinator will attempt to parse a given parser. If it succeeds, the result is returned without
+having consumed any input. If it fails, however, any consumed input remains consumed.
+
+@since 0.1.0.0
+-}
 lookAhead :: Parser a -> Parser a
 lookAhead = Parser . In . L . LookAhead . unParser
 
+{-|
+This combinator will ensure that a given parser fails. If the parser does fail, a @()@ is returned
+and no input is consumed. If the parser succeeded, then this combinator will fail, however it will
+not consume any input.
+
+@since 0.1.0.0
+-}
 notFollowedBy :: Parser a -> Parser ()
 notFollowedBy = Parser . In . L . NotFollowedBy . unParser
 
+{-|
+This combinator allows a parser to backtrack on failure, which is to say that it will
+not have consumed any input if it were to fail. This is important since @parsec@ semantics demand
+that the second branch of @(`<|>`)@ can only be taken if the first did not consume input on failure.
+
+Excessive use of `try` will reduce the efficiency of the parser and effect the generated error
+messages. It should only be used in one of two circumstances:
+
+* When two branches of a parser share a common leading prefix (in which case, it is often better
+  to try and factor this out).
+* When a parser needs to be executed atomically (for example, tokens).
+
+@since 0.1.0.0
+-}
 try :: Parser a -> Parser a
 try = Parser . In . L . Try . unParser
 
@@ -86,5 +162,15 @@ get (Reg reg) = Parser (In (L (GetRegister reg)))
 put :: Reg r a -> Parser a -> Parser ()
 put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
 
-debug :: String -> Parser a -> Parser a
+{-|
+This combinator can be used to debug parsers that have gone wrong. Simply
+wrap a parser with @debug name@ and when that parser is executed it will
+print a debug trace on entry and exit along with the current context of the
+input.
+
+@since 0.1.0.0
+-}
+debug :: String   -- ^ The name that identifies the wrapped parser in the debug trace
+      -> Parser a -- ^ The parser to track during execution
+      -> Parser a
 debug name (Parser p) = Parser (In (L (Debug name p)))

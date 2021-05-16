@@ -7,7 +7,11 @@ import Parsley.Internal.Common           (IFunctor(..), Fix, Const1(..), cata, i
 import Parsley.Internal.Core.Identifiers (MVar, ΣVar)
 import Parsley.Internal.Core.Defunc      (Defunc)
 
--- Parser wrapper type
+{-|
+The opaque datatype that represents parsers.
+
+@since 0.1.0.0
+-}
 newtype Parser a = Parser {unParser :: Fix (Combinator :+: ScopeRegister) a}
 
 -- Core datatype

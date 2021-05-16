@@ -16,6 +16,11 @@ data Defunc a where
   UNIT    :: Defunc ()
   BLACK   :: WQ a -> Defunc a
 
+{-|
+This instance is used to manipulate values of `Defunc`.
+
+@since 0.1.0.0
+-}
 instance Quapplicative Defunc where
   makeQ x qx       = BLACK (makeQ x qx)
   _val ID          = id

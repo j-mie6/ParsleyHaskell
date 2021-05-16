@@ -42,11 +42,54 @@ import Parsley.Internal.Common.Utils    as THUtils     (Quapplicative(..), WQ, C
 import Parsley.Internal.Core.Primitives as Primitives  (debug)
 import Parsley.Selective                as Selective
 
-runParser :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
+{-|
+The standard way to compile a parser, it returns `Code`, which means
+that it must be /spliced/ into a function definition to produce a
+function of type @input -> Maybe a@ for a chosen input type. As an example:
+
+/In @Parser.hs@/:
+
+> helloParsley :: Parser String
+> helloParsley = string "hello Parsley!"
+
+/In @Main.hs@/:
+
+> parseHelloParsley :: String -> Maybe String
+> parseHelloParsley = $$(runParser helloParsley)
+
+Note that the definition of the parser __must__ be in a separate module to
+the splice (@$$@).
+
+See `Input` for what the valid input types for Parsley are.
+
+The `Trace` instance is used to enable verbose debugging output for
+the compilation pipeline when "Parsley.Internal.Verbose" is imported.
+
+@since 0.1.0.0
+-}
+runParser :: (Trace, Input input)
+          => Parser a                -- ^ The parser to be compiled
+          -> Code (input -> Maybe a) -- ^ The generated parsing function
 runParser p = [||\input -> $$(eval [||input||] (compile p codeGen))||]
 
-parseFromFile :: Trace => Parser a -> Code (FilePath -> IO (Maybe a))
+{-|
+This function generates a function that reads input from a file
+and parses it. The input files contents are treated as `Text16`.
+
+See `runParser` for more information.
+
+@since 0.1.0.0
+-}
+parseFromFile :: Trace
+              => Parser a                        -- ^ The parser to be compiled
+              -> Code (FilePath -> IO (Maybe a)) -- ^ The generated parsing function
 parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]
 
+{-|
+The default instance for `Trace`, which disables all debugging output about the parser compilation
+process. If "Parsley.Internal.Verbose" is imported, this instance will be supersceded.
+
+@since 0.1.0.0
+-}
 instance {-# INCOHERENT #-} Trace where
   trace = flip const

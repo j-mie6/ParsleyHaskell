@@ -7,7 +7,7 @@ Maintainer  : Jamie Willis
 Stability   : stable
 
 This module contains the combinator concerned with some form of iteration or input folding. Notably,
-this includes the traditional `many` and `some` combinators. 
+this includes the traditional `many` and `some` combinators.
 
 @since 0.1.0.0
 -}
@@ -73,12 +73,24 @@ chainl :: ParserOps rep => Parser a -> Parser (a -> a -> a) -> rep a -> Parser a
 chainl p op x = option x (chainl1 p op)
 
 -- Derived Combinators
+{-|
+Attempts to parse the given parser __zero__ or more times, collecting all of the successful results
+into a list.
+
+@since 0.1.0.0
+-}
 many :: Parser a -> Parser [a]
 many = pfoldr CONS EMPTY
 
 manyN :: Int -> Parser a -> Parser [a]
 manyN n p = foldr (const (p <:>)) (many p) [1..n]
 
+{-|
+Attempts to parse the given parser __one__ or more times, collecting all of the successful results
+into a list.
+
+@since 0.1.0.0
+-}
 some :: Parser a -> Parser [a]
 some = manyN 1
 

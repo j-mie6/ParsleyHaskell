@@ -5,8 +5,8 @@ License     : BSD-3-Clause
 Maintainer  : Jamie Willis
 Stability   : stable
 
-A version of the @Selective@ combinators as described in
-[/Selective Applicative Functors/ (Mokhov et al. 2019)](https://dl.acm.org/doi/10.1145/3341694).
+A version of the @Selective@ combinators as described in [/Selective Applicative Functors/
+(Mokhov et al. 2019)](https://dl.acm.org/doi/10.1145/3341694).
 
 Like the @Applicative@ and @Alternative@ combinators, these cannot be properly described by the
 @Selective@ typeclass, since the API relies on Template Haskell code being used by @Applicative@.

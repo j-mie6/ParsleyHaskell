@@ -8,8 +8,11 @@ name:                parsley
 version:             0.1.0.0
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
 
--- TODO: A longer description of the package.
--- description:
+description:         Parsley is a staged selective parser combinator library, which means
+                     it does not support monadic operations, and relies on Typed Template
+                     Haskell to generate very fast code. Currently there are no error messages
+                     but there are plans for this in the works.
+
 
 homepage:            https://github.com/j-mie6/ParsleyHaskell
 bug-reports:         https://github.com/j-mie6/ParsleyHaskell/issues
@@ -17,10 +20,10 @@ license:             BSD-3-Clause
 license-file:        LICENSE
 author:              Jamie Willis
 maintainer:          j.willis19@imperial.ac.uk
-category:            Text
+category:            Parsing
 build-type:          Simple
--- TODO: Add README.md (and examples?)
-extra-source-files:  ChangeLog.md
+extra-doc-files:     ChangeLog.md
+                     README.md
 tested-with:         GHC == 8.6.1, GHC == 8.6.2, GHC == 8.6.3, GHC == 8.6.4, GHC == 8.6.5,
                      GHC == 8.8.1, GHC == 8.8.2, GHC == 8.8.3, GHC == 8.8.4,
                      GHC == 8.10.4
@@ -105,8 +108,6 @@ library
                        containers           >= 0.6     && < 0.7,
                        dependent-map        >= 0.4.0   && < 0.5,
                        dependent-sum        >= 0.7.1   && < 0.8,
-                       --lift-plugin          ,
-                       --idioms-plugin        ,
                        pretty-terminal      >= 0.1.0   && < 0.2,
                        text                 >= 1.2.3   && < 1.3,
                        -- Not sure about this one, 0.11.0.0 introduced a type synonym for PS, so it _should_ work

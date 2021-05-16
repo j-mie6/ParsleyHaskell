@@ -9,6 +9,6 @@
 *.verbose-core2core
 log
 .ghc.environment*
-benchmarks/Benchmarks
 hie.*
-sync.py
+*.c
+*.h

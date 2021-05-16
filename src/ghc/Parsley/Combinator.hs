@@ -11,7 +11,7 @@ module Parsley.Combinator (
 import Prelude hiding                (traverse, (*>))
 import Parsley.Alternative           (manyTill)
 import Parsley.Applicative           (($>), void, traverse, (<:>), (*>))
-import Parsley.Internal.Common.Utils ({-code, -}Code, makeQ)
+import Parsley.Internal.Common.Utils (Code, makeQ)
 import Parsley.Internal.Core         (Parser, Defunc(CHAR, EQ_H, CONST), pattern APP_H)
 
 import Parsley.Internal.Core.Primitives as Primitives (satisfy, lookAhead, try, notFollowedBy)
@@ -42,7 +42,7 @@ char :: Char -> Parser Char
 char c = satisfy (EQ_H (CHAR c)) $> CHAR c
 
 item :: Parser Char
-item = satisfy (APP_H CONST ({-code True-} makeQ True [||True||]))
+item = satisfy (APP_H CONST ((makeQ True [||True||])))
 
 -- Composite Combinators
 someTill :: Parser a -> Parser b -> Parser [a]

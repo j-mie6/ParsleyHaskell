@@ -4,7 +4,7 @@
 #if __GLASGOW_HASKELL__ >= 810
 {-# LANGUAGE StandaloneKindSignatures #-}
 #endif
-module Parsley.Internal.Common.Utils ({-code, -}WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff) where
+module Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff) where
 
 import Data.List (intersperse)
 import Data.String (IsString(..))
@@ -20,8 +20,6 @@ import Language.Haskell.TH (TExp, Q)
 import qualified Language.Haskell.TH as TH (Code, Q)
 #endif
 
---import LiftPlugin (LiftTo, code)
-
 #if __GLASGOW_HASKELL__ == 810
 type Code :: forall (r :: RuntimeRep). TYPE r -> Type
 #endif
@@ -32,7 +30,6 @@ type Code a = TH.Code TH.Q a
 #endif
 
 data WQ a = WQ { __val :: a, __code :: Code a }
---instance Quapplicative q => LiftTo q where code x = makeQ x [||x||]
 
 class Quapplicative q where
   makeQ :: a -> Code a -> q a

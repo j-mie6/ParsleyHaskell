@@ -9,7 +9,7 @@ import Data.Function                 (fix)
 import Language.Haskell.TH.Syntax    (Lift(..))
 import Parsley.Alternative           (empty)
 import Parsley.Applicative           (pure, (<$>), liftA2, unit, constp)
-import Parsley.Internal.Common.Utils ({-code, -}makeQ, Code)
+import Parsley.Internal.Common.Utils (makeQ, Code)
 import Parsley.Internal.Core         (Parser, Defunc(ID, EQ_H), ParserOps)
 
 import Parsley.Internal.Core.Primitives as Primitives (conditional, branch)
@@ -44,7 +44,7 @@ cond <?:> (p, q) = predicate ID cond p q
 
 -- Match Combinators
 match :: (Eq a, Lift a) => [a] -> Parser a -> (a -> Parser b) -> Parser b -> Parser b
-match vs p f = conditional (map (\v -> (EQ_H ({-code v-} makeQ v [||v||]), f v)) vs) p
+match vs p f = conditional (map (\v -> (EQ_H (makeQ v [||v||]), f v)) vs) p
 
 infixl 1 ||=
 (||=) :: (Enum a, Bounded a, Eq a, Lift a) => Parser a -> (a -> Parser b) -> Parser b

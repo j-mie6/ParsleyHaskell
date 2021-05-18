@@ -19,7 +19,7 @@ module Parsley.Applicative (
 
 import Prelude hiding                (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence)
 import Parsley.Internal.Common.Utils (makeQ)
-import Parsley.Internal.Core         (Parser, Defunc(UNIT, CONS, CONST, ID, EMPTY), pattern FLIP_H, ParserOps)
+import Parsley.Internal.Core         (Parser, Defunc(CONS, CONST, ID, EMPTY), pattern FLIP_H, pattern UNIT, ParserOps)
 
 import Parsley.Internal.Core.Primitives as Primitives (pure, (<*>), (*>), (<*))
 

@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-|
 Module      : Parsley.Alterative
 Description : The @Alternative@ combinators
@@ -20,7 +21,7 @@ module Parsley.Alternative (
 import Prelude hiding                (pure, (<$>))
 import Parsley.Applicative           (pure, (<$>), ($>), (<:>))
 import Parsley.Internal.Common.Utils (makeQ)
-import Parsley.Internal.Core         (Parser, Defunc(UNIT, EMPTY), ParserOps)
+import Parsley.Internal.Core         (Parser, Defunc(EMPTY), pattern UNIT, ParserOps)
 
 import Parsley.Internal.Core.Primitives as Primitives ((<|>), empty)
 

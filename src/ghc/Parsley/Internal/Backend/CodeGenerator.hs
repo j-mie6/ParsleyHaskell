@@ -13,7 +13,7 @@ import Parsley.Internal.Backend.InstructionAnalyser  (coinsNeeded)
 import Parsley.Internal.Common.Fresh                 (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
 import Parsley.Internal.Common.Indexed               (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Parsley.Internal.Core.CombinatorAST           (Combinator(..), MetaCombinator(..))
-import Parsley.Internal.Core.Defunc                  (Defunc(COMPOSE, UNIT, ID), pattern FLIP_H)
+import Parsley.Internal.Core.Defunc                  (Defunc(COMPOSE, ID), pattern FLIP_H, pattern UNIT)
 import Parsley.Internal.Trace                        (Trace(trace))
 
 import Parsley.Internal.Core.Defunc as Core          (Defunc)

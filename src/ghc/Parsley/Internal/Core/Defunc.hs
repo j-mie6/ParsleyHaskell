@@ -1,19 +1,40 @@
 {-# LANGUAGE PatternSynonyms #-}
 module Parsley.Internal.Core.Defunc (module Parsley.Internal.Core.Defunc) where
 
+import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..))
 
+{-|
+This datatype is useful for providing an /inspectable/ representation of common Haskell functions.
+These can be provided in place of `WQ` to any combinator that requires it. The only difference is
+that the Parsley compiler is able to manipulate and match on the constructors, which might lead to
+optimisations. They can also be more convenient than constructing the `WQ` object itself:
+
+> ID ~= WQ id [||id||]
+> APP_H f x ~= WQ (f x) [||f x||]
+
+@since 0.1.0.0
+-}
 data Defunc a where
+  -- | Corresponds to the standard @id@ function
   ID      :: Defunc (a -> a)
+  -- | Corresponds to the standard @(.)@ function applied to no arguments
   COMPOSE :: Defunc ((b -> c) -> (a -> b) -> (a -> c))
+  -- | Corresponds to the standard @flip@ function applied to no arguments
   FLIP    :: Defunc ((a -> b -> c) -> b -> a -> c)
+  -- | Corresponds to function application of two other `Defunc` values
   APP_H   :: Defunc (a -> b) -> Defunc a -> Defunc b
+  -- | Corresponds to the partially applied @(== x)@ for some `Defunc` value @x@
   EQ_H    :: Eq a => Defunc a -> Defunc (a -> Bool)
-  CHAR    :: Char -> Defunc Char
+  -- | Represents a liftable, showable value
+  LIFTED  :: (Show a, Lift a) => a -> Defunc a
+  -- | Represents the standard @(:)@ function applied to no arguments
   CONS    :: Defunc (a -> [a] -> [a])
+  -- | Represents the standard @const@ function applied to no arguments
   CONST   :: Defunc (a -> b -> a)
+  -- | Represents the empty list @[]@
   EMPTY   :: Defunc [a]
-  UNIT    :: Defunc ()
+  -- | Wraps up any value of type `WQ`
   BLACK   :: WQ a -> Defunc a
 
 {-|
@@ -27,21 +48,43 @@ instance Quapplicative Defunc where
   _val COMPOSE     = (.)
   _val FLIP        = flip
   _val (APP_H f x) = (_val f) (_val x)
-  _val (CHAR c)    = c
+  _val (LIFTED x)  = x
   _val (EQ_H x)    = ((_val x) ==)
   _val CONS        = (:)
   _val CONST       = const
   _val EMPTY       = []
-  _val UNIT        = ()
   _val (BLACK f)   = _val f
   _code = genDefunc
+  (>*<) = APP_H
 
-pattern COMPOSE_H :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) => Defunc x -> Defunc y -> Defunc z
+{-|
+This pattern represents fully applied composition of two `Defunc` values
+
+@since 0.1.0.0
+-}
+pattern COMPOSE_H     :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) => Defunc x -> Defunc y -> Defunc z
 pattern COMPOSE_H f g = APP_H (APP_H COMPOSE f) g
-pattern FLIP_H :: () => ((x -> y) ~ ((a -> b -> c) -> b -> a -> c)) => Defunc x -> Defunc y
+{-|
+This pattern corresponds to the standard @flip@ function applied to a single argument
+
+@since 0.1.0.0
+-}
+pattern FLIP_H        :: () => ((x -> y) ~ ((a -> b -> c) -> b -> a -> c)) => Defunc x -> Defunc y
 pattern FLIP_H f      = APP_H FLIP f
-pattern FLIP_CONST :: () => (x ~ (a -> b -> b)) => Defunc x
+{-|
+Represents the flipped standard @const@ function applied to no arguments
+
+@since 0.1.0.0
+-}
+pattern FLIP_CONST    :: () => (x ~ (a -> b -> b)) => Defunc x
 pattern FLIP_CONST    = FLIP_H CONST
+{-|
+This pattern represents the unit value @()@
+
+@since 0.1.0.0
+-}
+pattern UNIT          :: Defunc ()
+pattern UNIT          = LIFTED ()
 
 ap :: Defunc (a -> b) -> Defunc a -> Defunc b
 ap f x = APP_H f x
@@ -55,11 +98,10 @@ genDefunc CONST           = [|| \x _ -> x ||]
 genDefunc FLIP_CONST      = [|| \_ y -> y ||]
 genDefunc (FLIP_H f)      = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
 genDefunc (APP_H f x)     = genDefunc1 f (genDefunc x)
-genDefunc (CHAR c)        = [|| c ||]
+genDefunc (LIFTED x)      = [|| x ||]
 genDefunc (EQ_H x)        = [|| \y -> $$(genDefunc1 (EQ_H x) [||y||]) ||]
 genDefunc CONS            = [|| \x xs -> x : xs ||]
 genDefunc EMPTY           = [|| [] ||]
-genDefunc UNIT            = [|| () ||]
 genDefunc (BLACK f)       = _code f
 
 genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
@@ -92,11 +134,10 @@ instance Show (Defunc a) where
   show (FLIP_H f) = concat ["(flip ", show f, ")"]
   show (COMPOSE_H f g) = concat ["(", show f, " . ", show g, ")"]
   show (APP_H f x) = concat ["(", show f, " ", show x, ")"]
-  show (CHAR c) = show c
+  show (LIFTED x) = show x
   show (EQ_H x) = concat ["(== ", show x, ")"]
   show ID  = "id"
   show EMPTY = "[]"
   show CONS = "(:)"
   show CONST = "const"
-  show UNIT = "()"
   show _ = "x"

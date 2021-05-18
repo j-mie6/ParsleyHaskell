@@ -24,7 +24,7 @@ import Prelude hiding                (traverse, (*>))
 import Parsley.Alternative           (manyTill)
 import Parsley.Applicative           (($>), void, traverse, (<:>), (*>))
 import Parsley.Internal.Common.Utils (Code, makeQ)
-import Parsley.Internal.Core         (Parser, Defunc(CHAR, EQ_H, CONST), pattern APP_H)
+import Parsley.Internal.Core         (Parser, Defunc(LIFTED, EQ_H, CONST), pattern APP_H)
 
 import Parsley.Internal.Core.Primitives as Primitives (satisfy, lookAhead, try, notFollowedBy)
 
@@ -96,7 +96,7 @@ consumed any input.
 @since 0.1.0.0
 -}
 char :: Char -> Parser Char
-char c = satisfy (EQ_H (CHAR c)) $> CHAR c
+char c = satisfy (EQ_H (LIFTED c)) $> LIFTED c
 
 {-|
 Reads any single character. This combinator will only fail if there is no more input remaining.

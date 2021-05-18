@@ -19,7 +19,7 @@ module Parsley.Fold (
 import Prelude hiding        (pure, (<*>), (<$>), (*>), (<*))
 import Parsley.Alternative   ((<|>), option)
 import Parsley.Applicative   (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
-import Parsley.Internal.Core (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST, UNIT), ParserOps, pattern FLIP_H, pattern COMPOSE_H)
+import Parsley.Internal.Core (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), ParserOps, pattern FLIP_H, pattern COMPOSE_H, pattern UNIT)
 import Parsley.Register      (bind, get, modify, newRegister_)
 
 import Parsley.Internal.Core.Primitives as Primitives (chainPre, chainPost)

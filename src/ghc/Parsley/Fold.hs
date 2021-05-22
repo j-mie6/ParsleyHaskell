@@ -12,17 +12,20 @@ this includes the traditional `many` and `some` combinators.
 @since 0.1.0.0
 -}
 module Parsley.Fold (
-    module Parsley.Fold,
-    module Primitives
+    many, some, manyN,
+    skipMany, skipSome, skipManyN,
+    sepBy, sepBy1, endBy, endBy1, sepEndBy, sepEndBy1,
+    chainl1, chainr1, chainl, chainr,
+    chainl1', chainr1', chainPre, chainPost,
+    pfoldr, pfoldl,
+    pfoldr1, pfoldl1
   ) where
 
-import Prelude hiding        (pure, (<*>), (<$>), (*>), (<*))
-import Parsley.Alternative   ((<|>), option)
-import Parsley.Applicative   (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
-import Parsley.Internal.Core (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), ParserOps, pattern FLIP_H, pattern COMPOSE_H, pattern UNIT)
-import Parsley.Register      (bind, get, modify, newRegister_)
-
-import Parsley.Internal.Core.Primitives as Primitives (chainPre, chainPost)
+import Prelude hiding      (pure, (<*>), (<$>), (*>), (<*))
+import Parsley.Alternative ((<|>), option)
+import Parsley.Applicative (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
+import Parsley.Internal    (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), ParserOps, pattern FLIP_H, pattern COMPOSE_H, pattern UNIT, chainPre, chainPost)
+import Parsley.Register    (bind, get, modify, newRegister_)
 
 {-chainPre :: Parser (a -> a) -> Parser a -> Parser a
 chainPre op p = newRegister_ ID $ \acc ->

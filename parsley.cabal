@@ -55,6 +55,7 @@ library
                        Parsley.InputExtras,
                        Parsley.Precedence
 
+                       Parsley.Internal,
                        Parsley.Internal.Trace,
                        Parsley.Internal.Verbose,
 

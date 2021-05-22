@@ -40,6 +40,13 @@ data Combinator (k :: Type -> Type) (a :: Type) where
 data ScopeRegister (k :: Type -> Type) (a :: Type) where
   ScopeRegister :: k a -> (forall r. Reg r a -> k b) -> ScopeRegister k b
 
+{-|
+This is an opaque representation of a parsing register. It cannot be manipulated as a user, and the
+type parameter @r@ is used to ensure that it cannot leak out of the scope it has been created in.
+It is the abstracted representation of a runtime storage location.
+
+@since 0.1.0.0
+-}
 newtype Reg (r :: Type) a = Reg (ΣVar a)
 
 data MetaCombinator where

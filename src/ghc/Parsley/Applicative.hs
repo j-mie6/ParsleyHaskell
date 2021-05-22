@@ -13,15 +13,18 @@ of these combinators do not correctly match the signatures of those in base Hask
 @since 0.1.0.0
 -}
 module Parsley.Applicative (
-    module Primitives,
-    module Parsley.Applicative,
+    pure, (<*>), (*>), (<*),
+    fmap, (<$>), void, (<$), ($>), (<&>), constp,
+    unit, (<~>), (<~), (~>),
+    liftA2, liftA3,
+    (<:>), (<**>),
+    sequence, traverse, repeat,
+    between,
+    (>>)
   ) where
 
-import Prelude hiding                (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence)
-import Parsley.Internal.Common.Utils (makeQ)
-import Parsley.Internal.Core         (Parser, Defunc(CONS, CONST, ID, EMPTY), pattern FLIP_H, pattern UNIT, ParserOps)
-
-import Parsley.Internal.Core.Primitives as Primitives (pure, (<*>), (*>), (<*))
+import Prelude hiding   (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence, repeat)
+import Parsley.Internal (makeQ, Parser, Defunc(CONS, CONST, ID, EMPTY), pattern FLIP_H, pattern UNIT, ParserOps, pure, (<*>), (*>), (<*))
 
 -- Functor Operations
 {-|
@@ -165,7 +168,7 @@ infixl 4 <**>
 
 -- Auxillary functions
 {-|
-Given a list of parsers, `@`sequence`@` will parse each in turn and collect all their results into a
+Given a list of parsers, `sequence` will parse each in turn and collect all their results into a
 list. All the parsers in the list must succeed.
 
 @since 0.1.0.0

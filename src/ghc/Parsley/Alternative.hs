@@ -14,16 +14,13 @@ of @Applicative@ constraint).
 @since 0.1.0.0
 -}
 module Parsley.Alternative (
-    module Primitives,
-    module Parsley.Alternative
+    (<|>), empty,
+    (<+>), option, optionally, optional, choice, maybeP, manyTill
   ) where
 
-import Prelude hiding                (pure, (<$>))
-import Parsley.Applicative           (pure, (<$>), ($>), (<:>))
-import Parsley.Internal.Common.Utils (makeQ)
-import Parsley.Internal.Core         (Parser, Defunc(EMPTY), pattern UNIT, ParserOps)
-
-import Parsley.Internal.Core.Primitives as Primitives ((<|>), empty)
+import Prelude hiding      (pure, (<$>))
+import Parsley.Applicative (pure, (<$>), ($>), (<:>))
+import Parsley.Internal    (makeQ, Parser, Defunc(EMPTY), pattern UNIT, ParserOps, (<|>), empty)
 
 {-|
 This combinator is similar to @(`<|>`)@, except it allows both branches to differ in type by

@@ -14,19 +14,20 @@ Like the @Applicative@ and @Alternative@ combinators, these cannot be properly d
 @since 0.1.0.0
 -}
 module Parsley.Selective (
-    module Primitives,
-    module Parsley.Selective
+    branch, select,
+    (>??>), filteredBy, (>?>),
+    predicate, (<?:>),
+    conditional, match, (||=),
+    when, while,
+    fromMaybeP
   ) where
 
-import Prelude hiding                (pure, (<$>))
-import Data.Function                 (fix)
-import Language.Haskell.TH.Syntax    (Lift(..))
-import Parsley.Alternative           (empty)
-import Parsley.Applicative           (pure, (<$>), liftA2, unit, constp)
-import Parsley.Internal.Common.Utils (makeQ, Code)
-import Parsley.Internal.Core         (Parser, Defunc(ID, EQ_H), ParserOps)
-
-import Parsley.Internal.Core.Primitives as Primitives (conditional, branch)
+import Prelude hiding             (pure, (<$>))
+import Data.Function              (fix)
+import Language.Haskell.TH.Syntax (Lift(..))
+import Parsley.Alternative        (empty)
+import Parsley.Applicative        (pure, (<$>), liftA2, unit, constp)
+import Parsley.Internal           (makeQ, Code, Parser, Defunc(ID, EQ_H), ParserOps, conditional, branch)
 
 {-|
 Similar to `branch`, except the given branch is only executed on a @Left@ returned.
@@ -126,7 +127,7 @@ The problem with the combinator is not so much that it takes linear time to take
 gets too big. For instance, using it for `Char` would generate a 66535-way case split!
 
 The role this combinator fulfils is the branching behaviour that monadic operations can provide.
-For the persistence or duplication of data that monads can provide, `bind` is a much better
+For the persistence or duplication of data that monads can provide, `Parsley.Register.bind` is a much better
 alternative.
 
 @since 0.1.0.0

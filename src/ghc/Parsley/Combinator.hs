@@ -12,21 +12,19 @@ This means any combinators that deal with input consumption at a primitive level
 @since 0.1.0.0
 -}
 module Parsley.Combinator (
-    char, item,
+    satisfy, char, item,
     string, token,
     oneOf, noneOf,
     eof, more,
     someTill,
-    module Primitives
+    try,
+    lookAhead, notFollowedBy
   ) where
 
-import Prelude hiding                (traverse, (*>))
-import Parsley.Alternative           (manyTill)
-import Parsley.Applicative           (($>), void, traverse, (<:>), (*>))
-import Parsley.Internal.Common.Utils (Code, makeQ)
-import Parsley.Internal.Core         (Parser, Defunc(LIFTED, EQ_H, CONST), pattern APP_H)
-
-import Parsley.Internal.Core.Primitives as Primitives (satisfy, lookAhead, try, notFollowedBy)
+import Prelude hiding      (traverse, (*>))
+import Parsley.Alternative (manyTill)
+import Parsley.Applicative (($>), void, traverse, (<:>), (*>))
+import Parsley.Internal    (Code, makeQ, Parser, Defunc(LIFTED, EQ_H, CONST), pattern APP_H, satisfy, lookAhead, try, notFollowedBy)
 
 {-|
 This combinator will attempt match a given string. If the parser fails midway through, this

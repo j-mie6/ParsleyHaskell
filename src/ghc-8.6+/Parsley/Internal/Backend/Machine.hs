@@ -1,3 +1,12 @@
+{-|
+Module      : Parsley.Internal.Backend.Machine
+Description : The implementation of the low level parsing machinery is found here
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : unstable
+
+@since 0.1.0.0
+-}
 module Parsley.Internal.Backend.Machine (
     Input, eval,
     PositionOps,

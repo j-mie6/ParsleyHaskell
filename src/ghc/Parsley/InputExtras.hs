@@ -16,7 +16,7 @@ are exactly 16-bits in width.
 @since 0.1.0.0
 -}
 module Parsley.InputExtras (
-    module Parsley.Internal.Core
+    module Parsley.Internal
   ) where
 
-import Parsley.Internal.Core (Text16(..), CharList(..), Stream(..), nomore)
+import Parsley.Internal (Text16(..), CharList(..), Stream(..), nomore)

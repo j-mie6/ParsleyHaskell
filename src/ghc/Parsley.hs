@@ -15,7 +15,7 @@ important modules and functionality in particular the core set of combinators.
 @since 0.1.0.0
 -}
 module Parsley (
-    module Parsley,
+    runParser, parseFromFile,
     module Core,
     module Primitives,
     module Applicative,

@@ -5,7 +5,7 @@ Parsley is a very fast parser combinator library that outperforms the other libr
 parsec family, as well as Happy. To make this possible, it makes use of Typed Template Haskell
 to generate the code for the parsers.
 
-## How do I use it? ![Hackage Version](https://img.shields.io/hackage/v/parsley)
+## How do I use it? [![Hackage Version](https://img.shields.io/hackage/v/parsley)](https://hackage.haskell.org/package/parsley)
 Parsley is distributed on Hackage, and can be added by depending on the package `parsley`.
 
 The version policy adheres to the regular Haskell PVP, but the two major versions are distinguished

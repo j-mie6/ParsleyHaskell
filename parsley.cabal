@@ -29,7 +29,7 @@ homepage:            https://github.com/j-mie6/ParsleyHaskell
 bug-reports:         https://github.com/j-mie6/ParsleyHaskell/issues
 license:             BSD-3-Clause
 license-file:        LICENSE
-author:              Jamie Willis
+author:              Jamie Willis, Parsley Contributors
 maintainer:          Jamie Willis <j.willis19@imperial.ac.uk>
 category:            Parsing
 build-type:          Simple

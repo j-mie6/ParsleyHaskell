@@ -122,7 +122,7 @@ library
                        text                 >= 1.2.3   && < 1.3,
                        -- Not sure about this one, 0.11.0.0 introduced a type synonym for PS, so it _should_ work
                        bytestring           >= 0.10.8  && < 0.12
-  build-tool-depends:  cpphs:cpphs          >= 1.19
+  build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   hs-source-dirs:      src/ghc
   if impl(ghc >= 8.10)
     hs-source-dirs:    src/ghc-8.10+

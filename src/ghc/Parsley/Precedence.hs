@@ -68,7 +68,7 @@ data Level a b = InfixL  [Parser (b -> a -> b)] (Defunc (a -> b)) -- ^ left-asso
                | Postfix [Parser (b -> b)]      (Defunc (a -> b)) -- ^ postfix unary operators
 
 {-|
-This class provides a way of working with the `Level` datatype without needing to
+This class provides a way of working with the t`Level` datatype without needing to
 provide wrappers, or not providing `Defunc` arguments.
 
 @since 0.1.0.0

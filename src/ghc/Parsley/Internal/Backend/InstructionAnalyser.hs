@@ -1,7 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses,
              TypeFamilies,
              UndecidableInstances #-}
-module Parsley.Internal.Backend.InstructionAnalyser (coinsNeeded, relevancy) where
+module Parsley.Internal.Backend.InstructionAnalyser (coinsNeeded, relevancy, Length) where
 
 import Data.Kind                        (Type)
 import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..))

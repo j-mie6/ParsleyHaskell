@@ -3,9 +3,9 @@
              UnboxedTuples,
              StandaloneKindSignatures #-}
 module Parsley.Internal.Backend.Machine.InputRep (
-    Rep,
+    Rep, RepKind,
     intSame, intLess, min#, max#,
-    offWith, offWithSame, offWithShiftRight,
+    OffWith, offWith, offWithSame, offWithShiftRight,
     --OffWithStreamAnd(..),
     UnpackedLazyByteString, emptyUnpackedLazyByteString,
     Stream, dropStream,

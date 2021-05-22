@@ -7,7 +7,8 @@ module Parsley.Internal.Common.Fresh (
     runFreshT, runFresh,
     evalFreshT, evalFresh,
     execFreshT, execFresh,
-    MonadFresh(..), construct, mapVFreshT
+    MonadFresh(..), construct, mapVFreshT,
+    RunFreshT
   ) where
 
 import Control.Applicative        (liftA2)

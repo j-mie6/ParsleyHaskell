@@ -1,11 +1,10 @@
 version: "2"
 exclude_patterns:
-- "benchmarks"
+- "parsley-tests-and-bench"
 - "LICENSE"
 - "*.md"
 - ".codeclimate.yml"
 - ".gitignore"
-- "test"
 - ".github"
 - "Setup.hs"
 - "*.cabal"

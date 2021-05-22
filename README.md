@@ -1,11 +1,11 @@
-# Parsley ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/j-mie6/ParsleyHaskell/CI) ![GitHub release](https://img.shields.io/github/v/release/j-mie6/ParsleyHaskell?include_prereleases&sort=semver) [![GitHub license](https://img.shields.io/github/license/j-mie6/ParsleyHaskell.svg)](https://github.com/j-mie6/ParsleyHakell/blob/master/LICENSE)
+# Parsley ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/j-mie6/ParsleyHaskell/CI) ![GitHub release](https://img.shields.io/github/v/release/j-mie6/ParsleyHaskell) [![GitHub license](https://img.shields.io/github/license/j-mie6/ParsleyHaskell.svg)](https://github.com/j-mie6/ParsleyHakell/blob/master/LICENSE) ![GitHub commits since latest release (by SemVer)](https://img.shields.io/github/commits-since/j-mie6/ParsleyHaskell/latest)
 
 ## What is Parsley?
 Parsley is a very fast parser combinator library that outperforms the other libraries in both the
 parsec family, as well as Happy. To make this possible, it makes use of Typed Template Haskell
 to generate the code for the parsers.
 
-## How do I use it? [![Hackage Version](https://img.shields.io/hackage/v/parsley)](https://hackage.haskell.org/package/parsley)
+## How do I use it? [![Hackage Version](https://img.shields.io/hackage/v/parsley)](https://hackage.haskell.org/package/parsley) ![Dependent repos (via libraries.io)](https://img.shields.io/librariesio/dependent-repos/hackage/parsley)
 Parsley is distributed on Hackage, and can be added by depending on the package `parsley`.
 
 The version policy adheres to the regular Haskell PVP, but the two major versions are distinguished
@@ -70,3 +70,11 @@ debug dump that I can check out.
 
 ## References
 * This work spawned a paper at ICFP 2020: [**Staged Selective Parser Combinators**](https://dl.acm.org/doi/10.1145/3409002)
+
+### Talks
+For talks on how writing parsers changes when using Parsley see either of these:
+* [*Garnishing Parsec with Parsley*](https://www.youtube.com/watch?v=tJcyY9L2z84) - Berlin Functional Programming Group, January 2021
+* [*Exploring Parsley: Working with Staged Selective Parsers*](https://www.youtube.com/watch?v=Zhu-cPY1eac) - MuniHac 2020
+
+For the technical overview of how Parsley works:
+* [*Staged Selective Parser Combinators*](https://www.youtube.com/watch?v=lH65PvRgm8M) - ICFP 2020

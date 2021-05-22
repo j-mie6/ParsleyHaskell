@@ -19,10 +19,6 @@ for instance.
 To use it, you'll need to write you parsers in another file from where they will be used: this is
 due to Template Haskell.
 
-<!--### Examples
-
-TODO-->
-
 ### How does Parsley being a _Staged Selective_ library change its use?
 By being a _Selective_ Parser Combinator library, Parsley does not support monadic operations such
 as `(>>=)` or `return`. Instead, the most powerful operations are `select` or `branch`. Most monadic
@@ -41,13 +37,13 @@ if `RebindableSyntax` is used.
 Code is provided to the combinators by way of the datatype `WQ` (or `Defunc` if you're feeling fancy),
 which pairs a normal value with its Haskell code representation:
 
-```haskell
+```hs
 data WQ a = WQ a (Code a)
 ```
 
 This gives us combinators like:
 
-```haskell
+```hs
 pure :: WQ a -> Parser a
 satisfy :: WQ a -> Parser a
 

@@ -30,13 +30,13 @@ flag dump-core
 common test-common
   build-depends:       base >=4.10 && <5,
                        parsley,
+                       parsley-garnish,
                        tasty,
-                       template-haskell,
-                       lift-plugin
+                       template-haskell
   other-extensions:    TemplateHaskell
   hs-source-dirs:      test
   default-language:    Haskell2010
-  ghc-options:         -fplugin=LiftPlugin
+  ghc-options:         -fplugin=Parsley.LiftPlugin
 
 test-suite parsley-test
   import:              test-common
@@ -47,16 +47,15 @@ test-suite parsley-test
                        Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test, Parsley.Primitive.Test,
                        Parsley.Alternative.Parsers, Parsley.Applicative.Parsers, Parsley.Combinator.Parsers, Parsley.Fold.Parsers,
                        Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers, Parsley.Primitive.Parsers,
-                       Parsley.Garnish,
                        TestUtils
 
 common benchmark-common
   build-tool-depends:  happy:happy
   build-depends:       base >=4.10 && <5,
                        parsley,
+                       parsley-garnish,
                        criterion >=1.5 && <1.6,
                        deepseq,
-                       lift-plugin,
                        template-haskell,
                        parsec,
                        attoparsec,
@@ -68,9 +67,9 @@ common benchmark-common
                        containers
   hs-source-dirs:      benchmarks
   other-extensions:    TemplateHaskell
-  other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended, Parsley.Garnish
+  other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=LiftPlugin -fno-spec-constr
+  ghc-options:         -rtsopts -fplugin=Parsley.LiftPlugin -fno-spec-constr
   if flag(dump-core)
     build-depends:     dump-core
     ghc-options:       -fplugin=DumpCore

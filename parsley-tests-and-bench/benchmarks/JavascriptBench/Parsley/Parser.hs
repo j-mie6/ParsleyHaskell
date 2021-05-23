@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# OPTIONS_GHC -fplugin=IdiomsPlugin #-}
+--{-# OPTIONS_GHC -fplugin=OverloadedSyntaxPlugin #-}
 module JavascriptBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -90,20 +90,20 @@ javascript = whitespace *> many element <* eof
     con = liftA2 (code JSQual) (keyword "this" $> code "this") (dot *> conCall) <|> conCall
     conCall :: Parser JSCons
     conCall = identifier <**>
-                (dot *> (([flip (code JSQual)]) <$> conCall)
-             <|> ([flip (code JSConCall)]) <$> parens (commaSep asgn)
+                (dot *> (overload ((code flip) (code JSQual)) <$> conCall)
+             <|> overload ((code flip) (code JSConCall)) <$> parens (commaSep asgn)
              <|> pure (makeQ (\name -> JSConCall name []) [||\name -> JSConCall name []||]))
     member :: Parser JSMember
     member = primaryExpr <**>
-                (([flip (code JSCall)]) <$> parens (commaSep asgn)
-             <|> ([flip (code JSIndex)]) <$> brackets expr
-             <|> dot *> (([flip (code JSAccess)]) <$> member)
+                (overload ((code flip) (code JSCall)) <$> parens (commaSep asgn)
+             <|> overload ((code flip) (code JSIndex)) <$> brackets expr
+             <|> dot *> (overload ((code flip) (code JSAccess)) <$> member)
              <|> pure (code JSPrimExp))
     primaryExpr :: Parser JSAtom
     primaryExpr = code JSParens <$> parens expr
               <|> code JSArray <$> brackets (commaSep asgn)
               <|> code JSId <$> identifier
-              <|> ([either (code JSInt) (code JSFloat)]) <$> naturalOrFloat
+              <|> overload ((code either) (code JSInt) (code JSFloat)) <$> naturalOrFloat
               <|> code JSString <$> stringLiteral
               <|> code JSTrue <$ keyword "true"
               <|> code JSFalse <$ keyword "false"
@@ -135,7 +135,7 @@ javascript = whitespace *> many element <* eof
                <|> pure (code (Left 0))
 
     decimalFloat :: Parser (Either Int Double)
-    decimalFloat = fromMaybeP (decimal <**> (option ([(.) (code Just) (code Left)]) fractFloat)) empty
+    decimalFloat = fromMaybeP (decimal <**> (option (overload $ (code (.)) (code Just) (code Left)) fractFloat)) empty
 
     fractFloat :: Parser (Int -> Maybe (Either Int Double))
     fractFloat = makeQ f qf <$> fractExponent
@@ -156,7 +156,7 @@ javascript = whitespace *> many element <* eof
     fraction = char '.' <:> some (oneOf ['0'..'9'])
 
     exponent' :: Parser [Char]
-    exponent' = ([(:) (code 'e')]) <$> (oneOf "eE"
+    exponent' = overload ((code (:)) (code 'e')) <$> (oneOf "eE"
              *> (((code (:) <$> oneOf "+-") <|> pure (code id))
              <*> (code show <$> decimal)))
 

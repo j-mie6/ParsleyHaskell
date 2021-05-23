@@ -10,7 +10,8 @@
 * Removed useless `dump-core` flag (only used by test and bench, not by the library).
 * Fleshed out README properly!
 
-## 0.1.0.2  -- YYYY-mm-dd
+## 0.1.1.0  -- YYYY-mm-dd
 
-* Removed `idioms-plugin` from the test suite in favour of overloaded syntax from `lift-plugin`
-* Switched to the `lift-plugin` implementation found in `parsley-garnish`
+* Added `IF_S`, `LAM_S` and `LET_S` to `Defunc`, which can be used with overloaded syntax
+* Admin: Removed `idioms-plugin` from the test suite in favour of overloaded syntax from `lift-plugin`
+* Admin: Switched to the `lift-plugin` implementation found in `parsley-garnish`

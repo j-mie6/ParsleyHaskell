@@ -103,7 +103,7 @@ The parsed character is returned.
 @since 0.1.0.0
 -}
 item :: Parser Char
-item = satisfy (APP_H CONST ((makeQ True [||True||])))
+item = satisfy (APP_H CONST (LIFTED True))
 
 -- Composite Combinators
 {-|

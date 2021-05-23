@@ -1,7 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
---{-# OPTIONS_GHC -fplugin=OverloadedSyntaxPlugin #-}
+{-# LANGUAGE PatternSynonyms #-}
+--{-# OPTIONS_GHC -fplugin=Parsley.OverloadedSyntaxPlugin #-}
 module JavascriptBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -10,6 +11,7 @@ import Parsley.Combinator (token, oneOf, noneOf, eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
 import Parsley.Garnish
+import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED), pattern FLIP_H, pattern COMPOSE_H)
 import JavascriptBench.Shared
 import Data.Char (isSpace, isUpper, digitToInt, isDigit)
 import Data.Maybe (catMaybes)
@@ -90,14 +92,14 @@ javascript = whitespace *> many element <* eof
     con = liftA2 (code JSQual) (keyword "this" $> code "this") (dot *> conCall) <|> conCall
     conCall :: Parser JSCons
     conCall = identifier <**>
-                (dot *> (overload ((code flip) (code JSQual)) <$> conCall)
-             <|> overload ((code flip) (code JSConCall)) <$> parens (commaSep asgn)
+                (dot *> (FLIP_H (code JSQual) <$> conCall)
+             <|> FLIP_H (code JSConCall) <$> parens (commaSep asgn)
              <|> pure (makeQ (\name -> JSConCall name []) [||\name -> JSConCall name []||]))
     member :: Parser JSMember
     member = primaryExpr <**>
-                (overload ((code flip) (code JSCall)) <$> parens (commaSep asgn)
-             <|> overload ((code flip) (code JSIndex)) <$> brackets expr
-             <|> dot *> (overload ((code flip) (code JSAccess)) <$> member)
+                (FLIP_H (code JSCall) <$> parens (commaSep asgn)
+             <|> FLIP_H (code JSIndex) <$> brackets expr
+             <|> dot *> (FLIP_H (code JSAccess) <$> member)
              <|> pure (code JSPrimExp))
     primaryExpr :: Parser JSAtom
     primaryExpr = code JSParens <$> parens expr
@@ -122,7 +124,7 @@ javascript = whitespace *> many element <* eof
     identifier :: Parser String
     identifier = try ((identStart <:> many identLetter) >?> code jsUnreservedName) <* whitespace
     naturalOrFloat :: Parser (Either Int Double)
-    naturalOrFloat = natFloat <* whitespace--}code Left <$> (code read <$> some (oneOf ['0'..'9'])) <* whitespace
+    naturalOrFloat = natFloat <* whitespace
 
     -- Nonsense to deal with floats and ints
     natFloat :: Parser (Either Int Double)
@@ -131,22 +133,20 @@ javascript = whitespace *> many element <* eof
     zeroNumFloat :: Parser (Either Int Double)
     zeroNumFloat = code Left <$> (hexadecimal <|> octal)
                <|> decimalFloat
-               <|> (fromMaybeP (fractFloat <*> pure (code 0)) empty)
+               <|> (fromMaybeP (fractFloat <*> pure (LIFTED 0)) empty)
                <|> pure (code (Left 0))
 
     decimalFloat :: Parser (Either Int Double)
-    decimalFloat = fromMaybeP (decimal <**> (option (overload $ (code (.)) (code Just) (code Left)) fractFloat)) empty
+    decimalFloat = fromMaybeP (decimal <**> (option (COMPOSE_H (code Just) (code Left)) fractFloat)) empty
 
     fractFloat :: Parser (Int -> Maybe (Either Int Double))
-    fractFloat = makeQ f qf <$> fractExponent
-      where
-        f g x = liftM Right (g x)
-        qf = [||\g x -> liftM Right (g x)||]
+    fractFloat = overload (\g -> \x -> (code liftM) (code Right) (g x)) <$> fractExponent
 
     fractExponent :: Parser (Int -> Maybe Double)
     fractExponent = makeQ f qf <$> fraction <*> option (code "") exponent'
                 <|> makeQ g qg <$> exponent'
       where
+        -- Literally, this would be too long with the overloaded syntax
         f fract exp n = readMaybe (show n ++ fract ++ exp)
         qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
         g exp n = readMaybe (show n ++ exp)
@@ -156,20 +156,19 @@ javascript = whitespace *> many element <* eof
     fraction = char '.' <:> some (oneOf ['0'..'9'])
 
     exponent' :: Parser [Char]
-    exponent' = overload ((code (:)) (code 'e')) <$> (oneOf "eE"
-             *> (((code (:) <$> oneOf "+-") <|> pure (code id))
+    exponent' = overload (CONS (code 'e')) <$> (oneOf "eE"
+             *> (((CONS <$> oneOf "+-") <|> pure ID)
              <*> (code show <$> decimal)))
 
     decimal :: Parser Int
-    decimal = number (code 10) (oneOf ['0'..'9'])
-    hexadecimal = oneOf "xX" *> number (code 16) (oneOf (['a'..'f'] ++ ['A'..'F'] ++ ['0'..'9']))
-    octal = oneOf "oO" *> number (code 8) (oneOf ['0'..'7'])
+    decimal = number (LIFTED 10) (oneOf ['0'..'9'])
+    hexadecimal = oneOf "xX" *> number (LIFTED 16) (oneOf (['a'..'f'] ++ ['A'..'F'] ++ ['0'..'9']))
+    octal = oneOf "oO" *> number (LIFTED 8) (oneOf ['0'..'7'])
 
-    number :: WQ Int -> Parser Char -> Parser Int
-    number qbase digit = pfoldl1 (makeQ f qf) (code 0) digit
+    number :: Defunc Int -> Parser Char -> Parser Int
+    number qbase digit = pfoldl1 addDigit (LIFTED 0) digit
       where
-        f x d = _val qbase * x + digitToInt d
-        qf = [||\x d -> $$(_code qbase) * x + digitToInt d||]
+        addDigit = overload $ \x -> \d -> (code (+)) ((code (*)) qbase x) ((code digitToInt) d)
 
     stringLiteral :: Parser String
     stringLiteral = code catMaybes <$> between (token "\"") (token "\"") (many stringChar) <* whitespace

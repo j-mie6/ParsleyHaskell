@@ -27,7 +27,7 @@ import Data.Function              (fix)
 import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Alternative        (empty)
 import Parsley.Applicative        (pure, (<$>), liftA2, unit, constp)
-import Parsley.Internal           (makeQ, Code, Parser, Defunc(ID, EQ_H), ParserOps, conditional, branch)
+import Parsley.Internal           (makeQ, Parser, Defunc(ID, EQ_H, IF_S, LAM_S, LET_S, APP_H), ParserOps, conditional, branch)
 
 {-|
 Similar to `branch`, except the given branch is only executed on a @Left@ returned.
@@ -49,12 +49,16 @@ parser succeeds and returns the result of @px@, otherwise it will fail.
 -}
 infixl 4 >??>
 (>??>) :: Parser a -> Parser (a -> Bool) -> Parser a
-px >??> pf = select (liftA2 (makeQ g qg) pf px) empty
+px >??> pf = select (liftA2 g pf px) empty
   where
-    g :: (a -> Bool) -> a -> Either () a
-    g f x = if f x then Right x else Left ()
-    qg :: Code ((a -> Bool) -> a -> Either () a)
-    qg = [||\f x -> if f x then Right x else Left ()||]
+    -- Not sure if I need the LET_S?
+    g =
+      LAM_S $ \f ->
+        LAM_S $ \x ->
+          LET_S x $ \x ->
+            IF_S (APP_H f x)
+                 (APP_H (makeQ Right [||Right||]) x)
+                 (makeQ (Left ()) [||Left ()||])
 
 {-|
 An alias for @(`>?>`)@.

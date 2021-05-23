@@ -129,7 +129,7 @@ optimise (Branch (In (Pure (l@(_val -> Left x)))) p _)  = optimise (p :<*>: In (
 -- pure Right law: branch (pure (Right x)) p q          = q <*> pure x
 optimise (Branch (In (Pure (r@(_val -> Right x)))) _ q) = optimise (q :<*>: In (Pure (makeQ x qx))) where qx = [||case $$(_code r) of Right x -> x||]
 -- Generalised Identity law: branch b (pure f) (pure g) = either f g <$> b
-optimise (Branch b (In (Pure f)) (In (Pure g)))         = optimise ({-([either f g])-}makeQ (either (_val f) (_val g)) [||either $$(_code f) $$(_code g)||] :<$>: b)
+optimise (Branch b (In (Pure f)) (In (Pure g)))         = optimise (makeQ (either (_val f) (_val g)) [||either $$(_code f) $$(_code g)||] :<$>: b)
 -- Interchange law: branch (x *> y) p q                 = x *> branch y p q
 optimise (Branch (In (x :*>: y)) p q)                   = optimise (x :*>: optimise (Branch y p q))
 -- Negated Branch law: branch b p empty                 = branch (swapEither <$> b) empty p

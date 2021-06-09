@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# OPTIONS_GHC -fplugin=Parsley.OverloadedQuotesPlugin #-}
 module BrainfuckBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -26,10 +27,10 @@ brainfuck = whitespace *> bf <* eof
                     <|> (token "," $> code Input)
                     <|> (between (lexeme (token "[")) (token "]") (code Loop <$> bf))))-}
     bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
-    op '>' = item $> code RightPointer
-    op '<' = item $> code LeftPointer
-    op '+' = item $> code Increment
-    op '-' = item $> code Decrement
-    op '.' = item $> code Output
-    op ',' = item $> code Input
-    op '[' = between (lexeme item) (try (char ']')) (code Loop <$> bf)
+    op '>' = item $> [|RightPointer|]
+    op '<' = item $> [|LeftPointer|]
+    op '+' = item $> [|Increment|]
+    op '-' = item $> [|Decrement|]
+    op '.' = item $> [|Output|]
+    op ',' = item $> [|Input|]
+    op '[' = between (lexeme item) (try (char ']')) ([|Loop|] <$> bf)

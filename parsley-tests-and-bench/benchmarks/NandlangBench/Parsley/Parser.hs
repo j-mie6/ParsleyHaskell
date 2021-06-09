@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# OPTIONS_GHC -fplugin=Parsley.OverloadedQuotesPlugin #-}
 module NandlangBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -27,8 +28,8 @@ nandlang = whitespace *> skipMany funcdef <* eof
     keyword :: String -> Parser ()
     keyword s = try (string s *> notIdentLetter) *> whitespace
 
-    identStart = satisfy (code nandIdentStart)
-    identLetter = satisfy (code nandIdentLetter)
+    identStart = satisfy [|nandIdentStart|]
+    identLetter = satisfy [|nandIdentLetter|]
     notIdentLetter = notFollowedBy identLetter
 
     bit :: Parser ()
@@ -41,7 +42,7 @@ nandlang = whitespace *> skipMany funcdef <* eof
     charLit = between (char '\'') (symbol '\'') charChar
 
     charChar :: Parser ()
-    charChar = void (satisfy (code nandStringLetter)) <|> esc
+    charChar = void (satisfy [|nandStringLetter|]) <|> esc
 
     esc :: Parser ()
     esc = char '\\' *> void (oneOf "0tnvfr")
@@ -93,10 +94,10 @@ nandlang = whitespace *> skipMany funcdef <* eof
     commaSep1 p = p *> skipMany (comma *> p)
 
     space :: Parser ()
-    space = void (satisfy (code isSpace))
+    space = void (satisfy [|isSpace|])
     whitespace :: Parser ()
     whitespace = skipMany (spaces <|> oneLineComment)
     spaces :: Parser ()
     spaces = skipSome space
     oneLineComment :: Parser ()
-    oneLineComment = void (token "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))
+    oneLineComment = void (token "//" *> skipMany (satisfy [|(/= '\n')|]))

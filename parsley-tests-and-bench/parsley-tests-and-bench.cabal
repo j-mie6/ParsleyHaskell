@@ -69,7 +69,7 @@ common benchmark-common
   other-extensions:    TemplateHaskell
   other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fplugin=Parsley.LiftPlugin -fplugin=Parsley.OverloadedSyntaxPlugin -fno-spec-constr
+  ghc-options:         -rtsopts -fno-spec-constr
   if flag(dump-core)
     build-depends:     dump-core
     ghc-options:       -fplugin=DumpCore

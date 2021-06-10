@@ -4,7 +4,7 @@ optimization:2
 profiling-detail:none
 --coverage: True
 
-source-repository-package
-    type: git
-    location: https://github.com/J-mie6/parsley-garnish.git
-    tag: 1988a3b7daa1835b189f0d2829a277a3346112cd
+--source-repository-package
+--    type: git
+--    location: https://github.com/J-mie6/parsley-garnish.git
+--    tag: 1988a3b7daa1835b189f0d2829a277a3346112cd

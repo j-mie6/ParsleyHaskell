@@ -36,7 +36,7 @@ common test-common
   other-extensions:    TemplateHaskell
   hs-source-dirs:      test
   default-language:    Haskell2010
-  ghc-options:         -fplugin=Parsley.LiftPlugin
+  ghc-options:         -fplugin=Parsley.OverloadedQuotesPlugin
 
 test-suite parsley-test
   import:              test-common

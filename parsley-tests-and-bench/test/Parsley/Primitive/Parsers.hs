@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Parsley.Primitive.Parsers where
 
 import Prelude hiding (pure, (<*>), (*>), (<*))
@@ -7,10 +8,10 @@ import Parsley.Defunctionalized (Defunc(EMPTY))
 import Parsley.Garnish
 
 pure7 :: Parser Int
-pure7 = pure (code 7)
+pure7 = pure [|7|]
 
 digit :: Parser Char
-digit = satisfy (code isDigit)
+digit = satisfy [|isDigit|]
 
 twoDigits :: Parser Char
 twoDigits = digit *> digit

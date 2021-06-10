@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Parsley.Fold.Parsers where
 
 import Prelude hiding (pure, (<*>), (*>), (<*))
@@ -6,19 +7,19 @@ import Parsley.Fold
 import Parsley.Garnish
 
 plusOne :: Parser Int
-plusOne = chainPre (string "++" $> code succ) (char '1' $> code 1)
+plusOne = chainPre (string "++" $> [|succ|]) (char '1' $> [|1|])
 
 plusOne' :: Parser Int
-plusOne' = chainPre (try (string "++") $> code succ) (char '1' $> code 1)
+plusOne' = chainPre (try (string "++") $> [|succ|]) (char '1' $> [|1|])
 
 plusOnePure :: Parser Int
-plusOnePure = try (chainPre (string "++" $> code succ) (pure (code 1))) <|> pure (code 0)
+plusOnePure = try (chainPre (string "++" $> [|succ|]) (pure ([|1|]))) <|> pure ([|0|])
 
 onePlus :: Parser Int
-onePlus = chainPost (char '1' $> code 1) (string "++" $> code succ)
+onePlus = chainPost (char '1' $> [|1|]) (string "++" $> [|succ|])
 
 onePlus' :: Parser Int
-onePlus' = chainPost (char '1' $> code 1) (try (string "++") $> code succ)
+onePlus' = chainPost (char '1' $> [|1|]) (try (string "++") $> [|succ|])
 
 manyAA :: Parser [String]
 manyAA = many (string "aa")

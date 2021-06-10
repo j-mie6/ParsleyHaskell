@@ -51,9 +51,10 @@ char :: Char -> Parser a
 char c = satisfy (WQ (== c) [||(== c)||])
 ```
 
-Using `WQ` explicitly like this can get annoying, which is what the `lift-plugin` and the
-`idioms-plugin` are both for: versions compatible with Parsley can be found on my GitHub, and the
-`cabal.project` in this repo shows how these should be installed until they are properly released.
+Using `WQ` explicitly like this can get annoying, which is what the `parsley-garnish` package is for!
+Currently, the garnish provides one plugin called `OverloadedQuotes`, which replaces the behaviour of
+the default _Untyped_ Template Haskell quotes in a file so that they produce one of `WQ` or `Defunc`.
+See the `Parsley.OverloadedQuotesPlugin` module in the [`parsley-garnish`](https://hackage.haskell.org/package/parsley-garnish) package for more information.
 
 ## How does it work?
 In short, Parsley represents all parsers as Abstract Syntax Trees (ASTs). The representation of the

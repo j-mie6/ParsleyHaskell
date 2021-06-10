@@ -25,7 +25,7 @@ A type alias for typed template haskell code, which represents the Haskell AST f
 
 @since 0.1.0.0
 -}
-#if __GLASGOW_HASKELL__ == 810
+#if __GLASGOW_HASKELL__ >= 810
 type Code :: forall (r :: RuntimeRep). TYPE r -> Type
 #endif
 #if __GLASGOW_HASKELL__ < 900

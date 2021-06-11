@@ -1,7 +1,7 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -fplugin=Parsley.OverloadedQuotesPlugin #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# OPTIONS_GHC -fplugin=Parsley.OverloadedQuotesPlugin #-}
 module BrainfuckBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)

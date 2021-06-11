@@ -4,7 +4,7 @@ module Parsley.Fold.Parsers where
 import Prelude hiding (pure, (<*>), (*>), (<*))
 import Parsley
 import Parsley.Fold
-import Parsley.Garnish
+--import Parsley.Garnish
 
 plusOne :: Parser Int
 plusOne = chainPre (string "++" $> [|succ|]) (char '1' $> [|1|])

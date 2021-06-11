@@ -1,15 +1,23 @@
-{-# LANGUAGE TemplateHaskell, TypeApplications, DeriveAnyClass, StandaloneDeriving, CPP #-}
+{-# LANGUAGE TemplateHaskell, TypeApplications, DeriveAnyClass, StandaloneDeriving, CPP, FlexibleInstances #-}
 module TestUtils where
 
 import Parsley (runParser, Parser, Code)
 --import Parsley.Internal.Verbose ()
-import Language.Haskell.TH.Syntax
+import Language.Haskell.TH.Syntax 
+#if MIN_VERSION_template_haskell(2,17,0)
+  hiding (Code)
+#endif
 import Language.Haskell.TH.TestUtils
 import Language.Haskell.TH.TestUtils.QMode
 import Control.DeepSeq
 
-#if __GLASGOW_HASKELL__ >= 810
+#if MIN_VERSION_template_haskell(2,16,0)
 import GHC.ForeignPtr
+#endif
+
+#if MIN_VERSION_template_haskell(2,17,0)
+#else
+unTypeCode = unTypeQ
 #endif
 
 -- TODO Use WQ: requires lift plugin to not require any Lift instance for variables (if missing)
@@ -19,7 +27,7 @@ runParserMocked p qp = [|| \s ->
   ||]
 
 runParserMocked' :: Parser a -> Exp
-runParserMocked' = runTestQ (QState MockQ [] []) . unTypeQ . runParser @String
+runParserMocked' = runTestQ (QState MockQ [] []) . unTypeCode . runParser @String
 
 deriving instance NFData Exp
 deriving instance NFData Name
@@ -29,12 +37,17 @@ deriving instance NFData ModName
 deriving instance NFData NameSpace
 deriving instance NFData PkgName
 deriving instance NFData Lit
-#if __GLASGOW_HASKELL__ >= 810
+#if MIN_VERSION_template_haskell(2,16,0)
 deriving instance NFData Bytes
 instance NFData (ForeignPtr a) where rnf = rwhnf
 #endif
 deriving instance NFData Type
+#if MIN_VERSION_template_haskell(2,17,0)
+deriving instance NFData a => NFData (TyVarBndr a)
+deriving instance NFData Specificity
+#else
 deriving instance NFData TyVarBndr
+#endif
 deriving instance NFData Pat
 deriving instance NFData TyLit
 deriving instance NFData Match

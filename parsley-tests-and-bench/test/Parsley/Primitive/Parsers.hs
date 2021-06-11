@@ -5,7 +5,7 @@ import Prelude hiding (pure, (<*>), (*>), (<*))
 import Data.Char (isDigit)
 import Parsley
 import Parsley.Defunctionalized (Defunc(EMPTY))
-import Parsley.Garnish
+--import Parsley.Garnish
 
 pure7 :: Parser Int
 pure7 = pure [|7|]

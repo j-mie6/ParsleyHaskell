@@ -9,7 +9,7 @@ import BrainfuckBench.Shared
 import Parsley
 import Parsley.Combinator (noneOf, eof)
 import Parsley.Fold (skipMany)
-import Parsley.Garnish
+--import Parsley.Garnish
 import Language.Haskell.TH.Syntax (Lift(..))
 
 deriving instance Lift BrainFuckOp

@@ -10,7 +10,7 @@ import Parsley
 import Parsley.Combinator (token, oneOf, noneOf, eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
-import Parsley.Garnish
+--import Parsley.Garnish
 import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED), pattern FLIP_H, pattern COMPOSE_H)
 import JavascriptBench.Shared
 import Data.Char (isSpace, isUpper, digitToInt, isDigit)

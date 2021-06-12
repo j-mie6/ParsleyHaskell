@@ -10,7 +10,6 @@ import Parsley
 import Parsley.Combinator (token, oneOf, noneOf, eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
---import Parsley.Garnish
 import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED), pattern FLIP_H, pattern COMPOSE_H)
 import JavascriptBench.Shared
 import Data.Char (isSpace, isUpper, digitToInt, isDigit)
@@ -32,28 +31,28 @@ javascript :: Parser JSProgram
 javascript = whitespace *> many element <* eof
   where
     element :: Parser JSElement
-    element = keyword "function" *> liftA3 ([|JSFunction|]) identifier (parens (commaSep identifier)) compound
+    element = keyword "function" *> liftA3 [|JSFunction|] identifier (parens (commaSep identifier)) compound
           <|> [|JSStm|] <$> stmt
     compound :: Parser JSCompoundStm
     compound = braces (many stmt)
     stmt :: Parser JSStm
     stmt = semi $> [|JSSemi|]
-       <|> keyword "if" *> liftA3 ([|JSIf|]) parensExpr stmt (maybeP (keyword "else" *> stmt))
-       <|> keyword "while" *> liftA2 ([|JSWhile|]) parensExpr stmt
+       <|> keyword "if" *> liftA3 [|JSIf|] parensExpr stmt (maybeP (keyword "else" *> stmt))
+       <|> keyword "while" *> liftA2 [|JSWhile|] parensExpr stmt
        <|> (keyword "for" *> parens
-               (try (liftA2 ([|JSForIn|]) varsOrExprs (keyword "in" *> expr))
-            <|> liftA3 ([|JSFor|]) (maybeP varsOrExprs <* semi) (optExpr <* semi) optExpr)
+               (try (liftA2 [|JSForIn|] varsOrExprs (keyword "in" *> expr))
+            <|> liftA3 [|JSFor|] (maybeP varsOrExprs <* semi) (optExpr <* semi) optExpr)
            <*> stmt)
        <|> keyword "break" $> [|JSBreak|]
        <|> keyword "continue" $> [|JSContinue|]
-       <|> keyword "with" *> liftA2 ([|JSWith|]) parensExpr stmt
+       <|> keyword "with" *> liftA2 [|JSWith|] parensExpr stmt
        <|> keyword "return" *> ([|JSReturn|] <$> optExpr)
        <|> [|JSBlock|] <$> compound
        <|> [|JSNaked|] <$> varsOrExprs
     varsOrExprs :: Parser (Either [JSVar] JSExpr)
     varsOrExprs = keyword "var" *> commaSep1 variable <+> expr
     variable :: Parser JSVar
-    variable = liftA2 ([|JSVar|]) identifier (maybeP (symbol '=' *> asgn))
+    variable = liftA2 [|JSVar|] identifier (maybeP (symbol '=' *> asgn))
     parensExpr :: Parser JSExpr
     parensExpr = parens expr
     optExpr :: Parser (Maybe JSExpr)
@@ -63,7 +62,7 @@ javascript = whitespace *> many element <* eof
     asgn :: Parser JSExpr'
     asgn = chainl1 condExpr (symbol '=' $> [|JSAsgn|])
     condExpr :: Parser JSExpr'
-    condExpr = liftA2 ([|jsCondExprBuild|]) expr' (maybeP ((symbol '?' *> asgn) <~> (symbol ':' *> asgn)))
+    condExpr = liftA2 [|jsCondExprBuild|] expr' (maybeP ((symbol '?' *> asgn) <~> (symbol ':' *> asgn)))
     expr' :: Parser JSExpr'
     expr' = precedence (monolith
       [ prefix  [ operator "--" $> [|jsDec|], operator "++" $> [|jsInc|]
@@ -89,23 +88,23 @@ javascript = whitespace *> many element <* eof
            <|> keyword "new" *> ([|JSCons|] <$> con)
            <|> [|JSMember|] <$> member
     con :: Parser JSCons
-    con = liftA2 ([|JSQual|]) (keyword "this" $> [|"this"|]) (dot *> conCall) <|> conCall
+    con = liftA2 [|JSQual|] (keyword "this" $> [|"this"|]) (dot *> conCall) <|> conCall
     conCall :: Parser JSCons
     conCall = identifier <**>
-                (dot *> (FLIP_H ([|JSQual|]) <$> conCall)
-             <|> FLIP_H ([|JSConCall|]) <$> parens (commaSep asgn)
+                (dot *> (FLIP_H [|JSQual|] <$> conCall)
+             <|> FLIP_H [|JSConCall|] <$> parens (commaSep asgn)
              <|> pure (makeQ (\name -> JSConCall name []) [||\name -> JSConCall name []||]))
     member :: Parser JSMember
     member = primaryExpr <**>
-                (FLIP_H ([|JSCall|]) <$> parens (commaSep asgn)
-             <|> FLIP_H ([|JSIndex|]) <$> brackets expr
-             <|> dot *> (FLIP_H ([|JSAccess|]) <$> member)
-             <|> pure ([|JSPrimExp|]))
+                (FLIP_H [|JSCall|] <$> parens (commaSep asgn)
+             <|> FLIP_H [|JSIndex|] <$> brackets expr
+             <|> dot *> (FLIP_H [|JSAccess|] <$> member)
+             <|> pure [|JSPrimExp|])
     primaryExpr :: Parser JSAtom
     primaryExpr = [|JSParens|] <$> parens expr
               <|> [|JSArray|] <$> brackets (commaSep asgn)
               <|> [|JSId|] <$> identifier
-              <|> {-overload ((code either) (code JSInt) (code JSFloat))-} [|either JSInt JSFloat|] <$> naturalOrFloat
+              <|> [|either JSInt JSFloat|] <$> naturalOrFloat
               <|> [|JSString|] <$> stringLiteral
               <|> [|JSTrue|] <$ keyword "true"
               <|> [|JSFalse|] <$ keyword "false"
@@ -114,7 +113,7 @@ javascript = whitespace *> many element <* eof
 
     -- Token Parsers
     space :: Parser ()
-    space = void (satisfy ([|isSpace|]))
+    space = void (satisfy [|isSpace|])
     whitespace :: Parser ()
     whitespace = skipMany (spaces <|> oneLineComment <|> multiLineComment)
     keyword :: String -> Parser ()
@@ -137,28 +136,23 @@ javascript = whitespace *> many element <* eof
                <|> pure [|Left 0|]
 
     decimalFloat :: Parser (Either Int Double)
-    decimalFloat = fromMaybeP (decimal <**> (option (COMPOSE_H ([|Just|]) ([|Left|])) fractFloat)) empty
+    decimalFloat = fromMaybeP (decimal <**> (option (COMPOSE_H [|Just|] [|Left|]) fractFloat)) empty
 
     fractFloat :: Parser (Int -> Maybe (Either Int Double))
-    fractFloat = {-overload (\g -> \x -> (code liftM) (code Right) (g x))-} [|\g x -> liftM Right (g x)|] <$> fractExponent
+    fractFloat = [|\g x -> liftM Right (g x)|] <$> fractExponent
 
     fractExponent :: Parser (Int -> Maybe Double)
-    fractExponent = {-makeQ f qf-} f <$> fraction <*> option [|""|] exponent'
-                <|> {-makeQ g qg-} g <$> exponent'
+    fractExponent = f <$> fraction <*> option [|""|] exponent'
+                <|> g <$> exponent'
       where
         f = [|\fract exp n -> readMaybe (show n ++ fract ++ exp)|]
         g = [|\exp n -> readMaybe (show n ++ exp)|]
-        -- Literally, this would be too long with the overloaded syntax
-        --f fract exp n = readMaybe (show n ++ fract ++ exp)
-        --qf = [||\fract exp n -> readMaybe (show n ++ fract ++ exp)||]
-        --g exp n = readMaybe (show n ++ exp)
-        --qg = [||\exp n -> readMaybe (show n ++ exp)||]
 
     fraction :: Parser [Char]
     fraction = char '.' <:> some (oneOf ['0'..'9'])
 
     exponent' :: Parser [Char]
-    exponent' = {-overload (CONS (code 'e'))-}[|$(CONS) 'e'|] <$> (oneOf "eE"
+    exponent' = [|$(CONS) 'e'|] <$> (oneOf "eE"
              *> (((CONS <$> oneOf "+-") <|> pure ID)
              <*> ([|show|] <$> decimal)))
 
@@ -170,7 +164,6 @@ javascript = whitespace *> many element <* eof
     number :: Defunc Int -> Parser Char -> Parser Int
     number qbase digit = pfoldl1 addDigit (LIFTED 0) digit
       where
-        --addDigit = overload $ \x -> \d -> (code (+)) ((code (*)) qbase x) ((code digitToInt) d)
         addDigit = [|\x d -> $(qbase) * x + (digitToInt d)|]
 
     stringLiteral :: Parser String
@@ -199,7 +192,7 @@ javascript = whitespace *> many element <* eof
     spaces = skipSome space
 
     oneLineComment :: Parser ()
-    oneLineComment = void (token "//" *> skipMany (satisfy (makeQ (/= '\n') [||(/= '\n')||])))
+    oneLineComment = void (token "//" *> skipMany (satisfy [|(/= '\n')|]))
 
     multiLineComment :: Parser ()
     multiLineComment =

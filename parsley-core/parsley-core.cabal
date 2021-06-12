@@ -16,7 +16,7 @@ description:         This package contains the internals of the @parsley@ packag
                      to either API @m@, and patches or performance improvements @p@.
 
 
-homepage:            https://github.com/j-mie6/ParsleyHaskell
+homepage:            https://github.com/j-mie6/ParsleyHaskell/tree/master/parsley-core
 bug-reports:         https://github.com/j-mie6/ParsleyHaskell/issues
 license:             BSD-3-Clause
 license-file:        LICENSE

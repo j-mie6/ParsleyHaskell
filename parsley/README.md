@@ -8,14 +8,6 @@ to generate the code for the parsers.
 ## How do I use it?
 Parsley is distributed on Hackage, and can be added by depending on the package `parsley`.
 
-The version policy adheres to the regular Haskell PVP, but the two major versions are distinguished
-in Parsley: the first is the _User API_ major version, which represents backwards incompatible changes
-in the regular PVP sense that could affect any users of the library; the second version is the
-_Internal API_ major version, which would only effect users who use part of the internal parsley
-modules. As such, for people that are **not** explicitly importing anything from `Parsley.Internal`, or
-its submodules, the second major version does not matter: `0.2.0.0` and `0.3.0.0` would be compatible,
-for instance.
-
 To use it, you'll need to write you parsers in another file from where they will be used: this is
 due to Template Haskell.
 

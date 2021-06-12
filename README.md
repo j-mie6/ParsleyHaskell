@@ -8,13 +8,10 @@ to generate the code for the parsers.
 ## How do I use it? [![Hackage Version](https://img.shields.io/hackage/v/parsley)](https://hackage.haskell.org/package/parsley) ![Dependent repos (via libraries.io)](https://img.shields.io/librariesio/dependent-repos/hackage/parsley)
 Parsley is distributed on Hackage, and can be added by depending on the package `parsley`.
 
-The version policy adheres to the regular Haskell PVP, but the two major versions are distinguished
-in Parsley: the first is the _User API_ major version, which represents backwards incompatible changes
-in the regular PVP sense that could affect any users of the library; the second version is the
+The version policy for `parsley-core` adheres to the regular Haskell PVP, but the two major versions are distinguished: the first is the _Public API_ major version, which represents backwards incompatible changes
+in the regular PVP sense that could affect `parsley` itself (note `parsley` _only_ imports from `Parsley.Internal` itself); the second version is the
 _Internal API_ major version, which would only effect users who use part of the internal parsley
-modules. As such, for people that are **not** explicitly importing anything from `Parsley.Internal`, or
-its submodules, the second major version does not matter: `0.2.0.0` and `0.3.0.0` would be compatible,
-for instance.
+modules. As such, for people that are **not** explicitly importing anything from `Parsley.Internal.*`, the second major version does not matter: `0.2.0.0` and `0.3.0.0` would be compatible, for instance.
 
 To use it, you'll need to write you parsers in another file from where they will be used: this is
 due to Template Haskell.
@@ -66,7 +63,7 @@ version, I'd recommend checking out the paper!
 ## Bug Reports
 If you encounter a bug when using Parsley, try and minimise the example of the parser (and the input)
 that triggers the bug. If possible, make a self contained example: this will help me to identify the
-issue without too much issue. It might be helpful to import `Parsley.Internal.Verbose` to provide a
+issue without too much issue. It might be helpful to import `parsley-core:Parsley.Internal.Verbose` to provide a
 debug dump that I can check out.
 
 ## References

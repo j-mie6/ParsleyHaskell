@@ -25,7 +25,7 @@ jobs:
         run: cabal build parsley
 
       - name: Test
-        run: cabal test parsley-tests-and-bench --enable-tests
+        run: cabal test parsley --enable-tests
 
       - name: Doc
         run: cabal haddock parsley --enable-doc

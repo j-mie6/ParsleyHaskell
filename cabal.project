@@ -1,6 +1,5 @@
 packages: parsley/parsley.cabal
         , parsley-core/parsley-core.cabal
-        , parsley-tests-and-bench/parsley-tests-and-bench.cabal
 optimization:2
 profiling-detail:none
 --coverage: True

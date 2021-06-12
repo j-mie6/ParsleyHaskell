@@ -22,11 +22,11 @@ jobs:
           cabal-version: '3.4.0.0'
 
       - name: Build
-        run: cabal build
+        run: cabal build parsley
 
       - name: Test
         run: cabal test parsley-tests-and-bench --enable-tests
 
       - name: Doc
-        run: cabal haddock --enable-doc
+        run: cabal haddock parsley --enable-doc
 

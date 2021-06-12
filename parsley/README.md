@@ -1,11 +1,11 @@
-# Parsley ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/j-mie6/ParsleyHaskell/CI) ![GitHub release](https://img.shields.io/github/v/release/j-mie6/ParsleyHaskell) [![GitHub license](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://github.com/j-mie6/ParsleyHaskell/blob/master/LICENSE) ![GitHub commits since latest release (by SemVer)](https://img.shields.io/github/commits-since/j-mie6/ParsleyHaskell/latest)
+# Parsley
 
 ## What is Parsley?
 Parsley is a very fast parser combinator library that outperforms the other libraries in both the
 parsec family, as well as Happy. To make this possible, it makes use of Typed Template Haskell
 to generate the code for the parsers.
 
-## How do I use it? [![Hackage Version](https://img.shields.io/hackage/v/parsley)](https://hackage.haskell.org/package/parsley) ![Dependent repos (via libraries.io)](https://img.shields.io/librariesio/dependent-repos/hackage/parsley)
+## How do I use it?
 Parsley is distributed on Hackage, and can be added by depending on the package `parsley`.
 
 The version policy adheres to the regular Haskell PVP, but the two major versions are distinguished
@@ -51,7 +51,7 @@ char :: Char -> Parser a
 char c = satisfy (WQ (== c) [||(== c)||])
 ```
 
-Using `WQ` explicitly like this can get annoying, which is what the `parsley-garnish` package is for!
+Using `WQ` explicitly like this can get annoying, which is what the [`parsley-garnish`](https://hackage.haskell.org/package/parsley-garnish) package is for!
 Currently, the garnish provides one plugin called `OverloadedQuotes`, which replaces the behaviour of
 the default _Untyped_ Template Haskell quotes in a file so that they produce one of `WQ` or `Defunc`.
 See the `Parsley.OverloadedQuotesPlugin` module in the [`parsley-garnish`](https://hackage.haskell.org/package/parsley-garnish) package for more information.

@@ -29,17 +29,15 @@ module Parsley (
 import Prelude hiding            (readFile)
 import Data.Text.IO              (readFile)
 import Parsley.InputExtras       (Text16(..))
-import Parsley.Internal.Backend  (codeGen, Input, eval)
-import Parsley.Internal.Frontend (compile)
-import Parsley.Internal.Trace    (Trace(trace))
+import Parsley.Internal          (codeGen, Input, eval, compile, Trace(trace))
 
 import Parsley.Alternative              as Alternative
 import Parsley.Applicative              as Applicative
 import Parsley.Combinator               as Combinator  (item, char, string, satisfy, notFollowedBy, lookAhead, try)
 import Parsley.Fold                     as Fold        (many, some)
-import Parsley.Internal.Core            as Core        (Parser, ParserOps)
-import Parsley.Internal.Common.Utils    as THUtils     (Quapplicative(..), WQ, Code)
-import Parsley.Internal.Core.Primitives as Primitives  (debug)
+import Parsley.Internal                 as Core        (Parser, ParserOps)
+import Parsley.Internal                 as THUtils     (Quapplicative(..), WQ, Code)
+import Parsley.Internal                 as Primitives  (debug)
 import Parsley.Selective                as Selective
 
 {-|

@@ -2,10 +2,10 @@ cabal-version:       2.2
 name:                parsley
 -- https://wiki.haskell.org/Package_versioning_policy
 -- PVP summary:      +--------- breaking API changes
---                   | +------- breaking internal API changes
+--                   | +------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             0.1.1.0
+version:             1.0.0.0
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
 description:         Parsley is a staged selective parser combinator library, which means
                      it does not support monadic operations, and relies on Typed Template
@@ -14,15 +14,6 @@ description:         Parsley is a staged selective parser combinator library, wh
                      .
                      Based on the work found in [/Staged Selective Parser Combinators/
                      (Willis et al. 2020)](https://dl.acm.org/doi/10.1145/3409002)
-                     .
-                     While this library adheres to the Haskell PVP, it additionally
-                     enforces an additional constraint: the version @M.I.m.p@ represents
-                     a breaking change to the /user/ API @M@, a breaking change
-                     to the /internal/ API @I@ (which will not affect most users), an addition
-                     to either API @m@, and patches or performance improvements @p@.
-                     As such, users should feel free to bound themselves on the next @M@
-                     version of the library as opposed to the second @I@ version if they
-                     do not make use of the "Parsley.Internal" package or any of its children.
 
 
 homepage:            https://github.com/j-mie6/ParsleyHaskell
@@ -52,48 +43,6 @@ library
                        Parsley.InputExtras,
                        Parsley.Precedence
 
-                       Parsley.Internal,
-                       Parsley.Internal.Trace,
-                       Parsley.Internal.Verbose,
-
-                       Parsley.Internal.Common,
-                       Parsley.Internal.Common.Fresh,
-                       Parsley.Internal.Common.Indexed,
-                       Parsley.Internal.Common.Queue,
-                       Parsley.Internal.Common.State,
-                       Parsley.Internal.Common.Utils,
-                       Parsley.Internal.Common.Vec,
-
-                       Parsley.Internal.Core,
-                       Parsley.Internal.Core.CombinatorAST,
-                       Parsley.Internal.Core.Defunc,
-                       Parsley.Internal.Core.Identifiers,
-                       Parsley.Internal.Core.InputTypes,
-                       Parsley.Internal.Core.Primitives,
-
-                       Parsley.Internal.Frontend,
-                       Parsley.Internal.Frontend.CombinatorAnalyser,
-                       Parsley.Internal.Frontend.Compiler,
-                       Parsley.Internal.Frontend.Dependencies,
-                       Parsley.Internal.Frontend.Optimiser,
-
-                       Parsley.Internal.Backend,
-                       Parsley.Internal.Backend.CodeGenerator,
-                       Parsley.Internal.Backend.InstructionAnalyser,
-                       Parsley.Internal.Backend.Optimiser,
-
-                       Parsley.Internal.Backend.Machine,
-                       Parsley.Internal.Backend.Machine.Defunc,
-                       Parsley.Internal.Backend.Machine.Eval,
-                       Parsley.Internal.Backend.Machine.LetBindings,
-                       Parsley.Internal.Backend.Machine.LetRecBuilder,
-                       Parsley.Internal.Backend.Machine.Identifiers,
-                       Parsley.Internal.Backend.Machine.InputOps,
-                       Parsley.Internal.Backend.Machine.InputRep,
-                       Parsley.Internal.Backend.Machine.Instructions,
-                       Parsley.Internal.Backend.Machine.Ops,
-                       Parsley.Internal.Backend.Machine.State
-
   default-extensions:  BangPatterns,
                        DataKinds,
                        GADTs,
@@ -110,25 +59,10 @@ library
 
 --                     ghc                  >= 8.6     && < 9.2,
   build-depends:       base                 >= 4.10    && < 4.16,
-                       mtl                  >= 2.2.1   && < 2.3,
-                       hashable             >= 1.2.7.0 && < 1.4,
-                       unordered-containers >= 0.2.13  && < 0.3,
-                       array                >= 0.5.2   && < 0.6,
-                       ghc-prim             >= 0.5.3   && < 1,
+                       parsley-core         >= 1       && < 2,
                        template-haskell     >= 2.14    && < 3,
-                       containers           >= 0.6     && < 0.7,
-                       dependent-map        >= 0.4.0   && < 0.5,
-                       dependent-sum        >= 0.7.1   && < 0.8,
-                       pretty-terminal      >= 0.1.0   && < 0.2,
                        text                 >= 1.2.3   && < 1.3,
-                       -- Not sure about this one, 0.11.0.0 introduced a type synonym for PS, so it _should_ work
-                       bytestring           >= 0.10.8  && < 0.12
-  build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   hs-source-dirs:      src/ghc
-  if impl(ghc >= 8.10)
-    hs-source-dirs:    src/ghc-8.10+
-  else
-    hs-source-dirs:    src/ghc-8.6+
   default-language:    Haskell2010
   ghc-options:         -Wall -Weverything -Wcompat
                        -Wno-unticked-promoted-constructors
@@ -142,7 +76,6 @@ library
                        -Wno-missed-specialisations
                        -Wno-all-missed-specialisations
                        -Wno-incomplete-uni-patterns
-                       -pgmP cpphs -optP --cpp
                        -freverse-errors
   if impl(ghc >= 8.10)
     ghc-options:       -Wno-missing-safe-haskell-mode

@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-|
 Module      : Parsley.Defunctionalized
 Description : Defunctionalised operators usable in place of plain Haskell equivalents
@@ -13,7 +14,11 @@ improve optimisation opportunities or code generation.
 @since 0.1.0.0
 -}
 module Parsley.Defunctionalized (
-    module Parsley.Internal.Core.Defunc
+    Defunc(..),
+    pattern UNIT,
+    pattern FLIP_CONST,
+    pattern FLIP_H,
+    pattern COMPOSE_H
   ) where
 
-import Parsley.Internal.Core.Defunc hiding (genDefunc, genDefunc1, genDefunc2, ap)
+import Parsley.Internal (Defunc(..), pattern UNIT, pattern FLIP_CONST, pattern FLIP_H, pattern COMPOSE_H)

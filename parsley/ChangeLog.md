@@ -15,3 +15,7 @@
 * Added `IF_S`, `LAM_S` and `LET_S` to `Defunc`, which can be used with overloaded syntax
 * Admin: Removed `idioms-plugin` and `lift-plugin` from the test suite, depending on `parsley-garnish` instead
 * Fixed building with GHC 9
+
+## 1.0.0.0 -- 2021-06-12
+
+* Factored all of the `Parsley.Internal` modules out into `parsley-core` package

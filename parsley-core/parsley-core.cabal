@@ -1,0 +1,134 @@
+cabal-version:       2.2
+name:                parsley-core
+-- https://wiki.haskell.org/Package_versioning_policy
+-- PVP summary:      +--------- breaking public API changes (used by parsley proper)
+--                   | +------- breaking internal API changes
+--                   | | +----- non-breaking API additions
+--                   | | | +--- code changes with no API change
+version:             1.0.0.0
+synopsis:            A fast parser combinator library backed by Typed Template Haskell
+description:         This package contains the internals of the @parsley@ package.
+                     .
+                     While this library adheres to the Haskell PVP, it additionally
+                     enforces an additional constraint: the version @M.I.m.p@ represents
+                     a breaking change to the /public/ API @M@, a breaking change
+                     to the /internal/ API @I@ (which will not affect parsley), an addition
+                     to either API @m@, and patches or performance improvements @p@.
+
+
+homepage:            https://github.com/j-mie6/ParsleyHaskell/tree/master/parsley-core
+bug-reports:         https://github.com/j-mie6/ParsleyHaskell/issues
+license:             BSD-3-Clause
+license-file:        LICENSE
+author:              Jamie Willis, Parsley Contributors
+maintainer:          Jamie Willis <j.willis19@imperial.ac.uk>
+category:            Parsing
+build-type:          Simple
+extra-doc-files:     ChangeLog.md
+                     README.md
+tested-with:         GHC == 8.6.1,  GHC == 8.6.2,  GHC == 8.6.3,  GHC == 8.6.4,  GHC == 8.6.5,
+                     GHC == 8.8.1,  GHC == 8.8.2,  GHC == 8.8.3,  GHC == 8.8.4,
+                     GHC == 8.10.4, GHC == 8.10.5,
+                     GHC == 9.0.1
+
+library
+  exposed-modules:     Parsley.Internal,
+                       Parsley.Internal.Trace,
+                       Parsley.Internal.Verbose,
+
+                       Parsley.Internal.Common,
+                       Parsley.Internal.Common.Fresh,
+                       Parsley.Internal.Common.Indexed,
+                       Parsley.Internal.Common.Queue,
+                       Parsley.Internal.Common.State,
+                       Parsley.Internal.Common.Utils,
+                       Parsley.Internal.Common.Vec,
+
+                       Parsley.Internal.Core,
+                       Parsley.Internal.Core.CombinatorAST,
+                       Parsley.Internal.Core.Defunc,
+                       Parsley.Internal.Core.Identifiers,
+                       Parsley.Internal.Core.InputTypes,
+                       Parsley.Internal.Core.Primitives,
+
+                       Parsley.Internal.Frontend,
+                       Parsley.Internal.Frontend.CombinatorAnalyser,
+                       Parsley.Internal.Frontend.Compiler,
+                       Parsley.Internal.Frontend.Dependencies,
+                       Parsley.Internal.Frontend.Optimiser,
+
+                       Parsley.Internal.Backend,
+                       Parsley.Internal.Backend.CodeGenerator,
+                       Parsley.Internal.Backend.InstructionAnalyser,
+                       Parsley.Internal.Backend.Optimiser,
+
+                       Parsley.Internal.Backend.Machine,
+                       Parsley.Internal.Backend.Machine.Defunc,
+                       Parsley.Internal.Backend.Machine.Eval,
+                       Parsley.Internal.Backend.Machine.LetBindings,
+                       Parsley.Internal.Backend.Machine.LetRecBuilder,
+                       Parsley.Internal.Backend.Machine.Identifiers,
+                       Parsley.Internal.Backend.Machine.InputOps,
+                       Parsley.Internal.Backend.Machine.InputRep,
+                       Parsley.Internal.Backend.Machine.Instructions,
+                       Parsley.Internal.Backend.Machine.Ops,
+                       Parsley.Internal.Backend.Machine.State
+
+  default-extensions:  BangPatterns,
+                       DataKinds,
+                       GADTs,
+                       FlexibleContexts,
+                       FlexibleInstances,
+                       KindSignatures,
+                       PolyKinds,
+                       RankNTypes,
+                       ScopedTypeVariables,
+                       TemplateHaskell,
+                       TypeOperators,
+
+                       NoStarIsType
+
+--                     ghc                  >= 8.6     && < 9.2,
+  build-depends:       base                 >= 4.10    && < 4.16,
+                       mtl                  >= 2.2.1   && < 2.3,
+                       hashable             >= 1.2.7.0 && < 1.4,
+                       unordered-containers >= 0.2.13  && < 0.3,
+                       array                >= 0.5.2   && < 0.6,
+                       ghc-prim             >= 0.5.3   && < 1,
+                       template-haskell     >= 2.14    && < 3,
+                       containers           >= 0.6     && < 0.7,
+                       dependent-map        >= 0.4.0   && < 0.5,
+                       dependent-sum        >= 0.7.1   && < 0.8,
+                       pretty-terminal      >= 0.1.0   && < 0.2,
+                       text                 >= 1.2.3   && < 1.3,
+                       -- Not sure about this one, 0.11.0.0 introduced a type synonym for PS, so it _should_ work
+                       bytestring           >= 0.10.8  && < 0.12
+  build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
+  hs-source-dirs:      src/ghc
+  if impl(ghc >= 8.10)
+    hs-source-dirs:    src/ghc-8.10+
+  else
+    hs-source-dirs:    src/ghc-8.6+
+  default-language:    Haskell2010
+  ghc-options:         -Wall -Weverything -Wcompat
+                       -Wno-unticked-promoted-constructors
+                       -Wno-name-shadowing
+                       -Wno-unused-do-bind
+                       -Wno-implicit-prelude
+                       -Wno-missing-import-lists
+                       -Wno-missing-local-signatures
+                       -Wno-safe
+                       -Wno-unsafe
+                       -Wno-missed-specialisations
+                       -Wno-all-missed-specialisations
+                       -Wno-incomplete-uni-patterns
+                       -pgmP cpphs -optP --cpp
+                       -freverse-errors
+  if impl(ghc >= 8.10)
+    ghc-options:       -Wno-missing-safe-haskell-mode
+                       -Wno-prepositive-qualified-module
+                       -Wno-unused-packages
+
+source-repository head
+  type:                git
+  location:            https://github.com/j-mie6/HaskellParsley

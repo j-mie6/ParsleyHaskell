@@ -58,8 +58,8 @@ version, I'd recommend checking out the paper!
 ## Bug Reports
 If you encounter a bug when using Parsley, try and minimise the example of the parser (and the input)
 that triggers the bug. If possible, make a self contained example: this will help me to identify the
-issue without too much issue. It might be helpful to import `Parsley.Internal.Verbose` to provide a
-debug dump that I can check out.
+issue without too much issue. It might be helpful to import `parsley-core:Parsley.Internal.Verbose` to provide a
+debug dump that I can check out (see [`parsley-core`](https://hackage.haskell.org/package/parsley-core)).
 
 ## References
 * This work spawned a paper at ICFP 2020: [**Staged Selective Parser Combinators**](https://dl.acm.org/doi/10.1145/3409002)

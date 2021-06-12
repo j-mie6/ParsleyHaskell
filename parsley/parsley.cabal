@@ -16,7 +16,7 @@ description:         Parsley is a staged selective parser combinator library, wh
                      (Willis et al. 2020)](https://dl.acm.org/doi/10.1145/3409002)
 
 
-homepage:            https://github.com/j-mie6/ParsleyHaskell
+homepage:            https://github.com/j-mie6/ParsleyHaskell/tree/master/parsley
 bug-reports:         https://github.com/j-mie6/ParsleyHaskell/issues
 license:             BSD-3-Clause
 license-file:        LICENSE

@@ -23,3 +23,10 @@ jobs:
 
       - name: Build
         run: cabal build
+
+      - name: Test
+        run: cabal test parsley-tests-and-bench --enable-tests
+
+      - name: Doc
+        run: cabal haddock --enable-doc
+

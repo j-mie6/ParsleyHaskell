@@ -9,7 +9,7 @@ import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
 import Parsley.Combinator (token, oneOf, noneOf, eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
-import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
+import Parsley.Precedence (precHomo, ops, Fixity(InfixL, Prefix, Postfix))
 import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED, LAM_S), pattern FLIP_H, pattern COMPOSE_H)
 import JavascriptBench.Shared
 import Data.Char (isSpace, isUpper, digitToInt, isDigit)
@@ -64,25 +64,24 @@ javascript = whitespace *> many element <* eof
     condExpr :: Parser JSExpr'
     condExpr = liftA2 [|jsCondExprBuild|] expr' (maybeP ((symbol '?' *> asgn) <~> (symbol ':' *> asgn)))
     expr' :: Parser JSExpr'
-    expr' = precedence (monolith
-      [ prefix  [ operator "--" $> [|jsDec|], operator "++" $> [|jsInc|]
+    expr' = precHomo ([|JSUnary|] <$> memOrCon)
+      [ ops Prefix  [ operator "--" $> [|jsDec|], operator "++" $> [|jsInc|]
                 , operator "-" $> [|jsNeg|], operator "+" $> [|jsPlus|]
                 , operator "~" $> [|jsBitNeg|], operator "!" $> [|jsNot|] ]
-      , postfix [ operator "--" $> [|jsDec|], operator "++" $> [|jsInc|] ]
-      , infixL  [ operator "*" $> [|JSMul|], operator "/" $> [|JSDiv|]
+      , ops Postfix [ operator "--" $> [|jsDec|], operator "++" $> [|jsInc|] ]
+      , ops InfixL  [ operator "*" $> [|JSMul|], operator "/" $> [|JSDiv|]
                 , operator "%" $> [|JSMod|] ]
-      , infixL  [ operator "+" $> [|JSAdd|], operator "-" $> [|JSSub|] ]
-      , infixL  [ operator "<<" $> [|JSShl|], operator ">>" $> [|JSShr|] ]
-      , infixL  [ operator "<=" $> [|JSLe|], operator "<" $> [|JSLt|]
+      , ops InfixL  [ operator "+" $> [|JSAdd|], operator "-" $> [|JSSub|] ]
+      , ops InfixL  [ operator "<<" $> [|JSShl|], operator ">>" $> [|JSShr|] ]
+      , ops InfixL  [ operator "<=" $> [|JSLe|], operator "<" $> [|JSLt|]
                 , operator ">=" $> [|JSGe|], operator ">" $> [|JSGt|] ]
-      , infixL  [ operator "==" $> [|JSEq|], operator "!=" $> [|JSNe|] ]
-      , infixL  [ try (operator "&") $> [|JSBitAnd|] ]
-      , infixL  [ operator "^" $> [|JSBitXor|] ]
-      , infixL  [ try (operator "|") $> [|JSBitOr|] ]
-      , infixL  [ operator "&&" $> [|JSAnd|] ]
-      , infixL  [ operator "||" $> [|JSOr|] ]
-      ])
-      ([|JSUnary|] <$> memOrCon)
+      , ops InfixL  [ operator "==" $> [|JSEq|], operator "!=" $> [|JSNe|] ]
+      , ops InfixL  [ try (operator "&") $> [|JSBitAnd|] ]
+      , ops InfixL  [ operator "^" $> [|JSBitXor|] ]
+      , ops InfixL  [ try (operator "|") $> [|JSBitOr|] ]
+      , ops InfixL  [ operator "&&" $> [|JSAnd|] ]
+      , ops InfixL  [ operator "||" $> [|JSOr|] ]
+      ]
     memOrCon :: Parser JSUnary
     memOrCon = keyword "delete" *> ([|JSDel|] <$> member)
            <|> keyword "new" *> ([|JSCons|] <$> con)

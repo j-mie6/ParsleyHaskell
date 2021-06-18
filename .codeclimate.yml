@@ -1,6 +1,7 @@
 version: "2"
 exclude_patterns:
-- "parsley-tests-and-bench"
+- "parsley/benchmarks"
+- "parsley/test"
 - "LICENSE"
 - "*.md"
 - ".codeclimate.yml"

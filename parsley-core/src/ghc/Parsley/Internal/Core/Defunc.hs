@@ -3,6 +3,7 @@ module Parsley.Internal.Core.Defunc (module Parsley.Internal.Core.Defunc) where
 
 import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..))
+import Parsley.Internal.Core.Lam (reduceAndGen, Lam(..))
 
 {-|
 This datatype is useful for providing an /inspectable/ representation of common Haskell functions.
@@ -113,7 +114,34 @@ pattern UNIT          = LIFTED ()
 ap :: Defunc (a -> b) -> Defunc a -> Defunc b
 ap f x = APP_H f x
 
+lamTerm :: Defunc a -> Lam a
+lamTerm ID = Abs id
+lamTerm COMPOSE = Abs (\f -> Abs (\g -> Abs (\x -> App f (App g x))))
+lamTerm FLIP = Abs (\f -> Abs (\x -> Abs (\y -> App (App f y) x)))
+lamTerm (APP_H f x) = App (lamTerm f) (lamTerm x)
+lamTerm (LIFTED x) = Var [||x||]
+lamTerm (EQ_H x) = Abs (\y -> App (App (Var [||(==)||]) (lamTerm x)) y)
+lamTerm CONS = Var [||(:)||]
+lamTerm EMPTY = Var [||[]||]
+lamTerm CONST = Abs (\x -> Abs (\_ -> x))
+lamTerm (BLACK x) = Var (_code x)
+lamTerm (LAM_S f) = Abs (adaptLam f)
+lamTerm (IF_S c t e) = If (lamTerm c) (lamTerm t) (lamTerm e)
+lamTerm (LET_S x f) = Let (lamTerm x) (adaptLam f)
+
+adaptLam :: (Defunc a -> Defunc b) -> (Lam a -> Lam b)
+adaptLam f = lamTerm . f . BLACK . WQ undefined . reduceAndGen
+
 genDefunc :: Defunc a -> Code a
+genDefunc = reduceAndGen . lamTerm
+
+genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
+genDefunc1 f x = genDefunc (APP_H f (BLACK (WQ undefined x)))
+
+genDefunc2 :: Defunc (a -> b -> c) -> Code a -> Code b -> Code c
+genDefunc2 f x y = genDefunc (APP_H (APP_H f (BLACK (WQ undefined x))) (BLACK (WQ undefined y)))
+
+{-genDefunc :: Defunc a -> Code a
 genDefunc ID                        = [|| \x -> x ||]
 genDefunc COMPOSE                   = [|| \f g x -> f (g x) ||]
 genDefunc FLIP                      = [|| \f x y -> f y x ||]
@@ -156,7 +184,7 @@ genDefunc2 CONST           qx _   = qx
 genDefunc2 FLIP_CONST      _  qy  = qy
 genDefunc2 (FLIP_H f)      qx qy  = genDefunc2 f qy qx
 genDefunc2 CONS            qx qxs = [|| $$qx : $$qxs ||]
-genDefunc2 f               qx qy  = [|| $$(genDefunc1 f qx) $$qy ||]
+genDefunc2 f               qx qy  = [|| $$(genDefunc1 f qx) $$qy ||]-}
 
 instance Show (Defunc a) where
   show COMPOSE = "(.)"

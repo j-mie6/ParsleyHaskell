@@ -62,6 +62,7 @@ emitLengthCheck (I# n) good bad γ = [||
 
 {- General Operations -}
 dup :: Defunc x -> (Defunc x -> Code r) -> Code r
+dup (FREEVAR x) k = k (FREEVAR x)
 dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
 
 {-# INLINE returnST #-}

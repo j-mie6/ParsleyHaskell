@@ -49,6 +49,7 @@ library
                        Parsley.Internal.Core.Defunc,
                        Parsley.Internal.Core.Identifiers,
                        Parsley.Internal.Core.InputTypes,
+                       Parsley.Internal.Core.Lam,
                        Parsley.Internal.Core.Primitives,
 
                        Parsley.Internal.Frontend,

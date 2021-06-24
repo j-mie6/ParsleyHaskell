@@ -17,8 +17,9 @@ import Parsley.Combinator (pos)
 import Parsley.Precedence (Subtype(..))
 import Parsley.Applicative (pure, (<$>), (<*>), (<**>))
 
-instance Lift a => Lift (Q a) where
-  lift qe = do
+-- Can't use the Lift typeclass for this because GHC 9 added polymorphic code...
+liftQ :: Lift a => Q a -> Q Exp
+liftQ qe = do
     e <- qe
     [|return $(lift e)|]
 

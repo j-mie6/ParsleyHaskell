@@ -119,72 +119,39 @@ lamTerm ID = Abs id
 lamTerm COMPOSE = Abs (\f -> Abs (\g -> Abs (\x -> App f (App g x))))
 lamTerm FLIP = Abs (\f -> Abs (\x -> Abs (\y -> App (App f y) x)))
 lamTerm (APP_H f x) = App (lamTerm f) (lamTerm x)
-lamTerm (LIFTED x) = Var [||x||]
-lamTerm (EQ_H x) = Abs (\y -> App (App (Var [||(==)||]) (lamTerm x)) y)
-lamTerm CONS = Var [||(:)||]
-lamTerm EMPTY = Var [||[]||]
+lamTerm (LIFTED x) = Var True [||x||]
+lamTerm (EQ_H x) = Abs (\y -> App (App (Var True [||(==)||]) (lamTerm x)) y)
+lamTerm CONS = Var True [||(:)||]
+lamTerm EMPTY = Var True [||[]||]
 lamTerm CONST = Abs (\x -> Abs (\_ -> x))
-lamTerm (BLACK x) = Var (_code x)
+lamTerm (BLACK x) = Var False (_code x)
 lamTerm (LAM_S f) = Abs (adaptLam f)
 lamTerm (IF_S c t e) = If (lamTerm c) (lamTerm t) (lamTerm e)
 lamTerm (LET_S x f) = Let (lamTerm x) (adaptLam f)
 
 adaptLam :: (Defunc a -> Defunc b) -> (Lam a -> Lam b)
-adaptLam f = lamTerm . f . BLACK . WQ undefined . reduceAndGen
+adaptLam f = lamTerm . f . defuncTerm
+  where
+    defuncTerm :: Lam a -> Defunc a
+    defuncTerm (Abs f)    = LAM_S (defuncTerm . f . lamTerm)
+    defuncTerm (App f x)  = APP_H (defuncTerm f) (defuncTerm x)
+    defuncTerm (Var _ x)  = unsafeBLACK x
+    defuncTerm (If c t e) = IF_S (defuncTerm c) (defuncTerm t) (defuncTerm e)
+    defuncTerm (Let x f)  = LET_S (defuncTerm x) (defuncTerm . f . lamTerm)
+    defuncTerm T          = LIFTED True
+    defuncTerm F          = LIFTED False
 
 genDefunc :: Defunc a -> Code a
 genDefunc = reduceAndGen . lamTerm
 
 genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
-genDefunc1 f x = genDefunc (APP_H f (BLACK (WQ undefined x)))
+genDefunc1 f x = genDefunc (APP_H f (unsafeBLACK x))
 
 genDefunc2 :: Defunc (a -> b -> c) -> Code a -> Code b -> Code c
-genDefunc2 f x y = genDefunc (APP_H (APP_H f (BLACK (WQ undefined x))) (BLACK (WQ undefined y)))
+genDefunc2 f x y = genDefunc (APP_H (APP_H f (unsafeBLACK x)) (unsafeBLACK y))
 
-{-genDefunc :: Defunc a -> Code a
-genDefunc ID                        = [|| \x -> x ||]
-genDefunc COMPOSE                   = [|| \f g x -> f (g x) ||]
-genDefunc FLIP                      = [|| \f x y -> f y x ||]
-genDefunc (COMPOSE_H f g)           = [|| \x -> $$(genDefunc1 (COMPOSE_H f g) [||x||]) ||]
-genDefunc CONST                     = [|| \x _ -> x ||]
-genDefunc FLIP_CONST                = [|| \_ y -> y ||]
-genDefunc (FLIP_H f)                = [|| \x -> $$(genDefunc1 (FLIP_H f) [||x||]) ||]
-genDefunc (APP_H f x)               = genDefunc1 f (genDefunc x)
-genDefunc (LIFTED x)                = [|| x ||]
-genDefunc (EQ_H x)                  = [|| \y -> $$(genDefunc1 (EQ_H x) [||y||]) ||]
-genDefunc CONS                      = [|| \x xs -> x : xs ||]
-genDefunc EMPTY                     = [|| [] ||]
-genDefunc (IF_S (LIFTED True) t _)  = genDefunc t
-genDefunc (IF_S (LIFTED False) _ e) = genDefunc e
-genDefunc (IF_S c t e)              = [|| if $$(genDefunc c) then $$(genDefunc t) else $$(genDefunc e) ||]
-genDefunc (LAM_S f)                 = [|| \x -> $$(genDefunc1 (LAM_S f) [||x||]) ||]
-genDefunc (LET_S x f)               = [|| let y = $$(genDefunc x) in $$(genDefunc (f (makeQ undefined [||y||]))) ||]
-genDefunc (BLACK f)                 = _code f
-
-genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
-genDefunc1 ID              qx = qx
-genDefunc1 COMPOSE         qf = [|| \g x -> $$qf (g x) ||]
-genDefunc1 FLIP            qf = [|| \x y -> $$qf y x ||]
-genDefunc1 (COMPOSE_H f g) qx = genDefunc1 f (genDefunc1 g qx)
-genDefunc1 (APP_H ID f)    qx = genDefunc1 f qx
-genDefunc1 (APP_H f x)     qy = genDefunc2 f (genDefunc x) qy
-genDefunc1 CONST           qx = [|| \_ -> $$qx ||]
-genDefunc1 FLIP_CONST      _  = genDefunc ID
-genDefunc1 (FLIP_H f)      qx = [|| \y -> $$(genDefunc2 (FLIP_H f) qx [||y||]) ||]
-genDefunc1 (EQ_H x)        qy = [|| $$(genDefunc x)  == $$qy ||]
-genDefunc1 (LAM_S f)       qx = genDefunc (f (makeQ undefined qx))
-genDefunc1 f               qx = [|| $$(genDefunc f) $$qx ||]
-
-genDefunc2 :: Defunc (a -> b -> c) -> Code a -> Code b -> Code c
-genDefunc2 ID              qf qx  = [|| $$qf $$qx ||]
-genDefunc2 COMPOSE         qf qg  = [|| \x -> $$qf ($$qg x) ||]
-genDefunc2 FLIP            qf qx  = [|| \y -> $$qf y $$qx ||]
-genDefunc2 (COMPOSE_H f g) qx qy  = genDefunc2 f (genDefunc1 g qx) qy
-genDefunc2 CONST           qx _   = qx
-genDefunc2 FLIP_CONST      _  qy  = qy
-genDefunc2 (FLIP_H f)      qx qy  = genDefunc2 f qy qx
-genDefunc2 CONS            qx qxs = [|| $$qx : $$qxs ||]
-genDefunc2 f               qx qy  = [|| $$(genDefunc1 f qx) $$qy ||]-}
+unsafeBLACK :: Code a -> Defunc a
+unsafeBLACK = BLACK . WQ undefined
 
 instance Show (Defunc a) where
   show COMPOSE = "(.)"

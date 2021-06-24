@@ -60,10 +60,10 @@ peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (USER f) m
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (In4 (Lift2 (USER f) m))
      runCodeGen p qc
-peephole (TryOrElse p q) = Just $ CodeGen $ \m -> -- FIXME!
+{-peephole (TryOrElse p q) = Just $ CodeGen $ \m -> -- FIXME!
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     fmap (binder . In4 . Catch pc . In4 . Seek) (freshΦ (runCodeGen q φ))
+     fmap (binder . In4 . Catch pc . In4 . Seek) (freshΦ (runCodeGen q φ))-}
 peephole ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (In4 (Pop (In4 (Push (USER x) φ))))))

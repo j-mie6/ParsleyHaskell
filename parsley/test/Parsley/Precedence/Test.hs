@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, MultiParamTypeClasses, GADTs #-}
+{-# OPTIONS_GHC -ddump-splices #-}
 module Parsley.Precedence.Test where
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -7,12 +8,12 @@ import qualified Parsley.Precedence.Parsers as Parsers
 
 import Prelude hiding ()
 import Parsley (runParser, empty, Parser)
-import Parsley.Patterns (deriveSubtype, deriveLiftedConstructors)
+import Parsley.Patterns (deriveSubtype, deriveLiftedConstructors, Pos)
 import Parsley.Precedence (Subtype(..))
 
 data Foo where
   Foo :: Bar -> Foo
-  Goo :: String -> (Int, Int) -> Foo
+  Goo :: String -> Pos -> Int -> Foo
   deriving (Eq, Show)
 data Bar = Bar Int deriving (Eq, Show)
 
@@ -25,7 +26,7 @@ deriveLiftedConstructors "mk" ['Bar, 'Goo]
 testParser :: Parser (X a)
 testParser = mkX empty empty
 testParser' :: Parser Foo
-testParser' = mkGoo empty
+testParser' = mkGoo empty empty
 
 tests :: TestTree
 tests = testGroup "Precedence" [

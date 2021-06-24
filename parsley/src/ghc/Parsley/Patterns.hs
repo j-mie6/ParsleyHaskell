@@ -2,29 +2,36 @@
              PatternSynonyms,
              ViewPatterns #-}
 module Parsley.Patterns (
+    Pos,
     deriveLiftedConstructors, deriveSingletonConstuctors,
     deriveSubtype, deriveSubtypeUsing
   ) where
 
-import Prelude hiding ((<$>), pure, (<*>))
+import Prelude hiding (pure, (<*>))
 
 import Data.List     (intercalate, elemIndex)
 import Language.Haskell.TH (Name, Q, reify, Info(TyConI, DataConI), Extension(KindSignatures), newName, mkName, isExtEnabled)
-import Language.Haskell.TH.Syntax (Type(ConT, AppT, TupleT, ArrowT, ForallT, StarT), Con(NormalC, RecC, GadtC, RecGadtC), Dec(TySynD, NewtypeD, DataD), TyVarBndr(PlainTV, KindedTV), Exp(VarE, AppE), Lift(..))
+import Language.Haskell.TH.Syntax (Type(ConT, AppT, ArrowT, ForallT, StarT),
+                                   Con(NormalC, RecC, GadtC, RecGadtC),
+                                   Dec(TySynD, NewtypeD, DataD),
+                                   TyVarBndr(PlainTV, KindedTV),
+                                   Exp(VarE, AppE, ConE, LamE),
+                                   Pat(VarP),
+                                   Name(Name), OccName(OccName), NameFlavour(NameU, NameQ, NameG),
+                                   ModName(ModName), NameSpace(DataName), PkgName(PkgName),
+                                   Lift(lift))
 #if __GLASGOW_HASKELL__ >= 900
-import Language.Haskell.TH.Syntax (Type(MulArrowT, PromotedT))
+import Language.Haskell.TH.Syntax (Type(MulArrowT), unsafeCodeCoerce)
+#else
+import Language.Haskell.TH.Syntax (unsafeTExpCoerce)
 #endif
-import Language.Haskell.TH.Lib (varE, varP, conE, conP, conT, forallT, funD, sigD, clause, normalB)
-import Parsley (Parser)
+import Language.Haskell.TH.Lib (varE, varP, conE, conP, conT, forallT, funD, sigD, clause, normalB, lamE)
+import Parsley (Parser, makeQ)
 import Parsley.Combinator (pos)
 import Parsley.Precedence (Subtype(..))
-import Parsley.Applicative (pure, (<$>), (<*>), (<**>))
+import Parsley.Applicative (pure, (<*>), (<**>))
 
--- Can't use the Lift typeclass for this because GHC 9 added polymorphic code...
-liftQ :: Lift a => Q a -> Q Exp
-liftQ qe = do
-    e <- qe
-    [|return $(lift e)|]
+type Pos = (Int, Int)
 
 {- Builder Generators -}
 deriveLiftedConstructors :: String -> [Name] -> Q [Dec]
@@ -36,14 +43,34 @@ deriveLiftedConstructors prefix = fmap concat . traverse deriveCon
       (forall, tys) <- splitFun ty
       posIdx <- findPosIdx con tys
       let tys' = maybe id deleteAt posIdx tys
-      --ty' <- buildType forall (map return tys')
-      --fail (show (posIdx, ty'))
-      args <- sequence (replicate (length tys' - 1) (newName "x"))
-      let posAp = maybe [|id|] (const [|(pos <**>)|]) posIdx
+      let nargs = length tys' - 1
+      args <- sequence (replicate nargs (newName "x"))
+      let posAp = maybe [e|id|] (const [e|(pos <**>)|]) posIdx
       let con' = mkName (prefix ++ pretty con)
+      let func = buildLiftedLambda con nargs posIdx
       sequence [ sigD con' (buildType forall (map return tys'))
-               , funD con' [clause (map varP args) (normalB [e|$posAp undefined|]) []]
+               , funD con' [clause (map varP args) (normalB [e|$posAp $(applyArgs [|pure $func|] (map varE args)) |]) []]
                ]
+
+    applyArgs :: Q Exp -> [Q Exp] -> Q Exp
+    applyArgs rest [] = rest
+    applyArgs rest (arg:args) = applyArgs [e|$rest <*> $arg|] args
+
+buildLiftedLambda :: Name -> Int -> Maybe Int -> Q Exp
+buildLiftedLambda con nargs posIdx = do
+  args <- sequence (replicate nargs (newName "x"))
+  posArg <- newName "pos"
+  let lam = lamE (map varP args ++ maybe [] (const [varP posArg]) posIdx) (applyArgs (conE con) (varE posArg) (map varE args) posIdx)
+#if __GLASGOW_HASKELL__ >= 900
+  [e|makeQ $lam (unsafeCodeCoerce $(liftQ lam))|]
+#else
+  [e|makeQ $lam (unsafeTExpCoerce $(liftQ lam))|]
+#endif
+  where
+    applyArgs :: Q Exp -> Q Exp -> [Q Exp] -> Maybe Int -> Q Exp
+    applyArgs acc posArg args (Just 0) = applyArgs [e|$acc $posArg|] posArg args Nothing
+    applyArgs acc _ [] _ = acc
+    applyArgs acc posArg (arg:args) idx = applyArgs [e|$acc $arg|] posArg args (fmap pred idx)
 
 deleteAt :: Int -> [a] -> [a]
 deleteAt 0 (_:xs) = xs
@@ -54,9 +81,9 @@ deriveSingletonConstuctors :: String -> [Name] -> Q [Dec]
 deriveSingletonConstuctors prefix cons = undefined
 
 pattern PosTy :: Type
-pattern PosTy <- AppT (AppT (TupleT 2) (ConT ((== ''Int) -> True))) (ConT ((== ''Int) -> True))
+pattern PosTy <- ConT ((== ''Pos) -> True)
   where
-    PosTy = AppT (AppT (TupleT 2) (ConT ''Int)) (ConT ''Int)
+    PosTy = ConT ''Pos
 
 pattern FunTy :: Type -> Type -> Type
 pattern FunTy x y = AppT (AppT ArrowT x) y
@@ -66,16 +93,16 @@ pattern LinearFunTy :: Type -> Type -> Type
 pattern LinearFunTy x y <- AppT (AppT (AppT MulArrowT _) x) y
 #endif
 
-data PosIdx = Idx Int | Ambiguous | Absent deriving Show
+data PosIdx = Idx Int | Ambiguous | Absent
 findPosIdx :: Name -> [Type] -> Q (Maybe Int)
 findPosIdx con tys = case maybe
   Absent
   (\idx -> if length (filter (== PosTy) tys) > 1 then Ambiguous else Idx idx)
   (elemIndex PosTy tys) of
-     Ambiguous -> fail ("constructor " ++ pretty con ++ " has multiple occurrences of (Int, Int)")
+     Ambiguous -> fail ("constructor " ++ pretty con ++ " has multiple occurrences of Parsley.Pattern.Pos")
      Absent -> return Nothing
      Idx idx -> return (Just idx)
-     
+
 splitFun :: Type -> Q (Q Type -> Q Type, [Type])
 splitFun (ForallT bndrs ctx ty) = do
   kindSigs <- isExtEnabled KindSignatures
@@ -160,3 +187,34 @@ deriveSubtypeUsing sub sup wrap = do
       upcast = $(conE wrap)
       downcast $(conP wrap [varP x]) = Just $(varE x)
       downcast _ = Nothing |]
+
+-- Template Haskell Madness :(
+-- Can't use the Lift typeclass for this because GHC 9 added polymorphic code...
+liftQ :: Q Exp -> Q Exp
+liftQ qe = do
+    e <- qe
+    [|return $(liftOurExp e)|]
+
+-- These release us from having to orphan a bunch of Lift instances (and reduces compile time)
+-- We should only need these constructors to do our work :)
+
+liftOurExp :: Exp -> Q Exp
+liftOurExp (VarE name) = [e|VarE $(liftOurName name)|]
+liftOurExp (ConE name) = [e|ConE $(liftOurName name)|]
+liftOurExp (AppE e1 e2) = [e|AppE $(liftOurExp e1) $(liftOurExp e2)|]
+liftOurExp (LamE args body) = [e|LamE $(liftOurArgs args) $(liftOurExp body)|]
+liftOurExp _ = error "well these aren't meant to exist..."
+
+liftOurName :: Name -> Q Exp
+liftOurName (Name (OccName v) (NameU x)) = [e|Name (OccName $(lift v)) (NameU $(lift x))|]
+liftOurName (Name (OccName v) (NameQ (ModName mod))) = [e|Name (OccName $(lift v)) (NameQ (ModName $(lift mod)))|]
+liftOurName (Name (OccName v) (NameG DataName (PkgName pkg) (ModName mod))) = [e|Name (OccName $(lift v)) (NameG DataName (PkgName $(lift pkg)) (ModName $(lift mod)))|]
+liftOurName _ = error "well these aren't meant to exist..."
+
+liftOurVarP :: Pat -> Q Exp
+liftOurVarP (VarP name) = [e|VarP $(liftOurName name)|]
+liftOurVarP _ = error "well these aren't meant to exist..."
+
+liftOurArgs :: [Pat] -> Q Exp
+liftOurArgs [] = [e|[]|]
+liftOurArgs (p:ps) = [e|$(liftOurVarP p) : $(liftOurArgs ps)|]

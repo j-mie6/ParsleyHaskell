@@ -11,6 +11,9 @@ import Prelude hiding ((<$>), pure, (<*>))
 import Data.List     (intercalate, elemIndex)
 import Language.Haskell.TH (Name, Q, reify, Info(TyConI, DataConI), Extension(KindSignatures), newName, mkName, isExtEnabled)
 import Language.Haskell.TH.Syntax (Type(ConT, AppT, TupleT, ArrowT, ForallT, StarT), Con(NormalC, RecC, GadtC, RecGadtC), Dec(TySynD, NewtypeD, DataD), TyVarBndr(PlainTV, KindedTV), Exp(VarE, AppE), Lift(..))
+#if __GLASGOW_HASKELL__ >= 900
+import Language.Haskell.TH.Syntax (Type(MulArrowT, PromotedT))
+#endif
 import Language.Haskell.TH.Lib (varE, varP, conE, conP, conT, forallT, funD, sigD, clause, normalB)
 import Parsley (Parser)
 import Parsley.Combinator (pos)
@@ -58,6 +61,11 @@ pattern PosTy <- AppT (AppT (TupleT 2) (ConT ((== ''Int) -> True))) (ConT ((== '
 pattern FunTy :: Type -> Type -> Type
 pattern FunTy x y = AppT (AppT ArrowT x) y
 
+#if __GLASGOW_HASKELL__ >= 900
+pattern LinearFunTy :: Type -> Type -> Type
+pattern LinearFunTy x y <- AppT (AppT (AppT MulArrowT _) x) y
+#endif
+
 data PosIdx = Idx Int | Ambiguous | Absent deriving Show
 findPosIdx :: Name -> [Type] -> Q (Maybe Int)
 findPosIdx con tys = case maybe
@@ -67,7 +75,7 @@ findPosIdx con tys = case maybe
      Ambiguous -> fail ("constructor " ++ pretty con ++ " has multiple occurrences of (Int, Int)")
      Absent -> return Nothing
      Idx idx -> return (Just idx)
-
+     
 splitFun :: Type -> Q (Q Type -> Q Type, [Type])
 splitFun (ForallT bndrs ctx ty) = do
   kindSigs <- isExtEnabled KindSignatures
@@ -77,6 +85,9 @@ splitFun ty                     = return (id, splitFun' ty)
 
 splitFun' :: Type -> [Type]
 splitFun' (FunTy a b) = a : splitFun' b
+#if __GLASGOW_HASKELL__ >= 900
+splitFun' (LinearFunTy a b) = a : splitFun' b
+#endif
 splitFun' ty          = [ty]
 
 buildType :: (Q Type -> Q Type) -> [Q Type] -> Q Type

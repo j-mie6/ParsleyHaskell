@@ -3,7 +3,7 @@
              ViewPatterns #-}
 module Parsley.Patterns (
     Pos,
-    deriveLiftedConstructors, deriveSingletonConstuctors,
+    deriveLiftedConstructors, deriveSingletonConstructors,
     deriveSubtype, deriveSubtypeUsing
   ) where
 
@@ -39,15 +39,9 @@ deriveLiftedConstructors prefix = fmap concat . traverse deriveCon
   where
     deriveCon :: Name -> Q [Dec]
     deriveCon con = do
-      DataConI _ ty _ <- reify con
-      (forall, tys) <- splitFun ty
-      posIdx <- findPosIdx con tys
-      let tys' = maybe id deleteAt posIdx tys
-      let nargs = length tys' - 1
+      (con', tys', func, posIdx, nargs, forall) <- buildMeta True prefix con
       args <- sequence (replicate nargs (newName "x"))
       let posAp = maybe [e|id|] (const [e|(pos <**>)|]) posIdx
-      let con' = mkName (prefix ++ pretty con)
-      let func = buildLiftedLambda con nargs posIdx
       sequence [ sigD con' (buildType forall (map return tys'))
                , funD con' [clause (map varP args) (normalB [e|$posAp $(applyArgs [|pure $func|] (map varE args)) |]) []]
                ]
@@ -56,11 +50,43 @@ deriveLiftedConstructors prefix = fmap concat . traverse deriveCon
     applyArgs rest [] = rest
     applyArgs rest (arg:args) = applyArgs [e|$rest <*> $arg|] args
 
-buildLiftedLambda :: Name -> Int -> Maybe Int -> Q Exp
-buildLiftedLambda con nargs posIdx = do
+    buildType :: (Q Type -> Q Type) -> [Q Type] -> Q Type
+    buildType forall tys = forall (foldr (\ty rest -> [t|Parser $ty -> $rest|]) [t|Parser $(last tys)|] (init tys))
+
+deriveSingletonConstructors :: String -> [Name] -> Q [Dec]
+deriveSingletonConstructors prefix = fmap concat . traverse deriveCon
+  where
+    deriveCon :: Name -> Q [Dec]
+    deriveCon con = do
+      (con', tys', func, posIdx, _, forall) <- buildMeta False prefix con
+      let posAp = maybe [e|id|] (const [e|(<*> pos)|]) posIdx
+      sequence [ sigD con' (buildType forall (map return tys'))
+               , funD con' [clause [] (normalB [e|$posAp (pure $func)|]) []]
+               ]
+
+    buildType :: (Q Type -> Q Type) -> [Q Type] -> Q Type
+    buildType forall tys = forall [t|Parser $(foldr1 (\ty rest -> [t| $ty -> $rest |]) tys)|]
+
+buildMeta :: Bool -> String -> Name -> Q (Name, [Type], Q Exp, Maybe Int, Int, Q Type -> Q Type)
+buildMeta posLast prefix con = do
+  DataConI _ ty _ <- reify con
+  (forall, tys) <- splitFun ty
+  posIdx <- findPosIdx con tys
+  let tys' = maybe id deleteAt posIdx tys
+  let nargs = length tys' - 1
+  let con' = mkName (prefix ++ pretty con)
+  let func = buildLiftedLambda posLast con nargs posIdx
+  return (con', tys', func, posIdx, nargs, forall)
+
+buildLiftedLambda :: Bool -> Name -> Int -> Maybe Int -> Q Exp
+buildLiftedLambda posLast con nargs posIdx = do
   args <- sequence (replicate nargs (newName "x"))
   posArg <- newName "pos"
-  let lam = lamE (map varP args ++ maybe [] (const [varP posArg]) posIdx) (applyArgs (conE con) (varE posArg) (map varE args) posIdx)
+  let args' = map varP args
+  let posArg' = maybe [] (const [varP posArg]) posIdx
+  let lam = lamE
+        (if posLast then args' ++ posArg' else posArg' ++ args')
+        (applyArgs (conE con) (varE posArg) (map varE args) posIdx)
 #if __GLASGOW_HASKELL__ >= 900
   [e|makeQ $lam (unsafeCodeCoerce $(liftQ lam))|]
 #else
@@ -76,9 +102,6 @@ deleteAt :: Int -> [a] -> [a]
 deleteAt 0 (_:xs) = xs
 deleteAt n (x:xs) = x : deleteAt (n-1) xs
 deleteAt _ []     = []
-
-deriveSingletonConstuctors :: String -> [Name] -> Q [Dec]
-deriveSingletonConstuctors prefix cons = undefined
 
 pattern PosTy :: Type
 pattern PosTy <- ConT ((== ''Pos) -> True)
@@ -116,9 +139,6 @@ splitFun' (FunTy a b) = a : splitFun' b
 splitFun' (LinearFunTy a b) = a : splitFun' b
 #endif
 splitFun' ty          = [ty]
-
-buildType :: (Q Type -> Q Type) -> [Q Type] -> Q Type
-buildType forall tys = forall (foldr (\ty rest -> [t|Parser $ty -> $rest|]) [t|Parser $(last tys)|] (init tys))
 
 -- When KindSignatures is off, the default (a :: *) that TH generates is broken!
 #if __GLASGOW_HASKELL__ < 900

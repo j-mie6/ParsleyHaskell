@@ -5,7 +5,7 @@ name:                parsley-core
 --                   | +------- breaking internal API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             1.0.0.0
+version:             1.0.1.0
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
 description:         This package contains the internals of the @parsley@ package.
                      .

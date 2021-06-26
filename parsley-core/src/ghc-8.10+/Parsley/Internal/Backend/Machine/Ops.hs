@@ -62,6 +62,7 @@ emitLengthCheck (I# n) good bad γ = [||
 
 {- General Operations -}
 dup :: Defunc x -> (Defunc x -> Code r) -> Code r
+dup (FREEVAR x) k = k (FREEVAR x)
 dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
 
 {-# INLINE returnST #-}
@@ -135,7 +136,7 @@ resume k γ = let Op x _ = operands γ in [|| $$k $$(genDefunc x) $$(input γ) |
 #define deriveContOps(_o)                                                              \
 instance ContOps _o where                                                              \
 {                                                                                      \
-  suspend m γ = [|| \x (!o#) -> $$(m (γ {operands = Op (FREEVAR [||x||]) (operands γ), \
+  suspend m γ = [|| \x !(o# :: Rep _o) -> $$(m (γ {operands = Op (FREEVAR [||x||]) (operands γ), \
                                          input = [||o#||]})) ||];                      \
 };
 inputInstances(deriveContOps)
@@ -177,15 +178,15 @@ inputInstances(deriveJoinBuilder)
 instance RecBuilder _o where                                                \
 {                                                                           \
   buildIter ctx μ l h o = [||                                               \
-      let handler !o# = $$(h [||o#||]);                                     \
-          loop !o# =                                                        \
+      let handler !(o# :: Rep _o) = $$(h [||o#||]);                                     \
+          loop !(o# :: Rep _o) =                                                        \
         $$(run l                                                            \
             (Γ Empty (noreturn @_o) [||o#||] (VCons [||handler o#||] VNil)) \
-            (voidCoins (insertSub μ [||\_ (!o#) _ -> loop o#||] ctx)))      \
+            (voidCoins (insertSub μ [||\_ !(o# :: Rep _o) _ -> loop o#||] ctx)))      \
       in loop $$o                                                           \
     ||];                                                                    \
   buildRec rs ctx k = takeFreeRegisters rs ctx (\ctx ->                     \
-    [|| \(!ret) (!o#) h ->                                                  \
+    [|| \(!ret) !(o# :: Rep _o) h ->                                                  \
       $$(run k (Γ Empty [||ret||] [||o#||] (VCons [||h||] VNil)) ctx) ||]); \
 };
 inputInstances(deriveRecBuilder)
@@ -220,7 +221,7 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
 #define deriveLogHandler(_o)                                                                   \
 instance LogHandler _o where                                                                   \
 {                                                                                              \
-  logHandler name ctx γ _ = let VCons h _ = handlers γ in [||\(!o#) ->                         \
+  logHandler name ctx γ _ = let VCons h _ = handlers γ in [||\ !(o# :: Rep _o) ->                         \
       trace $$(preludeString name '<' (γ {input = [||o#||]}) ctx (color Red " Fail")) ($$h o#) \
     ||];                                                                                       \
 };

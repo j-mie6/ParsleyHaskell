@@ -46,8 +46,8 @@ pattern (:$>:) :: Combinator (Cofree Combinator k) a -> Core.Defunc b -> Combina
 pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
 pattern LiftA2 :: Core.Defunc (a -> b -> c) -> k a -> k b -> Combinator (Cofree Combinator k) c
 pattern LiftA2 f p q <- (_ :< ((_ :< Pure f) :<*>: (p :< _))) :<*>: (q :< _)
-pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
-pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
+--pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
+--pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
 rollbackHandler :: Fix4 (Instr o) (o : xs) (Succ n) r a
 rollbackHandler = In4 (Seek (In4 Empt))
@@ -60,10 +60,10 @@ peephole (f :<$>: p) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (USER f) m
 peephole (LiftA2 f p q) = Just $ CodeGen $ \m ->
   do qc <- runCodeGen q (In4 (Lift2 (USER f) m))
      runCodeGen p qc
-peephole (TryOrElse p q) = Just $ CodeGen $ \m -> -- FIXME!
+{-peephole (TryOrElse p q) = Just $ CodeGen $ \m -> -- FIXME!
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     fmap (binder . In4 . Catch pc . In4 . Seek) (freshΦ (runCodeGen q φ))
+     fmap (binder . In4 . Catch pc . In4 . Seek) (freshΦ (runCodeGen q φ))-}
 peephole ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (In4 (Pop (In4 (Push (USER x) φ))))))

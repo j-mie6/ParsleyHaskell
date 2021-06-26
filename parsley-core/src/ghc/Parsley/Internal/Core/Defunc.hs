@@ -3,7 +3,7 @@ module Parsley.Internal.Core.Defunc (module Parsley.Internal.Core.Defunc) where
 
 import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..))
-import Parsley.Internal.Core.Lam (reduceAndGen, Lam(..))
+import Parsley.Internal.Core.Lam (normaliseGen, Lam(..))
 
 {-|
 This datatype is useful for providing an /inspectable/ representation of common Haskell functions.
@@ -142,7 +142,7 @@ adaptLam f = lamTerm . f . defuncTerm
     defuncTerm F          = LIFTED False
 
 genDefunc :: Defunc a -> Code a
-genDefunc = reduceAndGen . lamTerm
+genDefunc = normaliseGen . lamTerm
 
 genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
 genDefunc1 f x = genDefunc (APP_H f (unsafeBLACK x))

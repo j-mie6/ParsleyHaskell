@@ -1,4 +1,4 @@
-module Parsley.Internal.Core.Lam (reduceAndGen, Lam(..)) where
+module Parsley.Internal.Core.Lam (normaliseGen, Lam(..)) where
 
 import Parsley.Internal.Common.Utils (Code)
 
@@ -35,18 +35,15 @@ normalise x = reduce x
     normal (If F _ _) = False
     normal _ = True
 
-reduce :: Lam a -> Lam a
-reduce = normalise
-
 generate :: Lam a -> Code a
-generate (Abs f)    = [||\x -> $$(reduceAndGen (f (Var True [||x||])))||]
--- These have already been reduced, since we only expose `reduceAndGen`
+generate (Abs f)    = [||\x -> $$(normaliseGen (f (Var True [||x||])))||]
+-- These have already been reduced, since we only expose `normaliseGen`
 generate (App f x)  = [||$$(generate f) $$(generate x)||]
 generate (Var _ x)  = x
-generate (If c t e) = [||if $$(reduceAndGen c) then $$(reduceAndGen t) else $$(reduceAndGen e)||]
-generate (Let b i)  = [||let x = $$(reduceAndGen b) in $$(reduceAndGen (i (Var True [||x||])))||]
+generate (If c t e) = [||if $$(normaliseGen c) then $$(normaliseGen t) else $$(normaliseGen e)||]
+generate (Let b i)  = [||let x = $$(normaliseGen b) in $$(normaliseGen (i (Var True [||x||])))||]
 generate T          = [||True||]
 generate F          = [||False||]
 
-reduceAndGen :: Lam a -> Code a
-reduceAndGen = generate . reduce
+normaliseGen :: Lam a -> Code a
+normaliseGen = generate . normalise

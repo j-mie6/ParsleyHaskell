@@ -79,7 +79,7 @@ instance Quapplicative Defunc where
   _val (IF_S c t e) = if _val c then _val t else _val e
   _val (LAM_S f)    = \x -> _val (f (makeQ x undefined))
   _val (LET_S x f)  = let y = _val x in _val (f (makeQ y undefined))
-  _code = genDefunc
+  _code = normaliseGen . lamTerm
   (>*<) = APP_H
 
 {-|

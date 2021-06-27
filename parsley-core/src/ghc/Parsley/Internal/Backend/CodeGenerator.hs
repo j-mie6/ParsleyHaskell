@@ -53,12 +53,16 @@ rollbackHandler = In4 (Seek (In4 Empt))
 parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
 parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (If k (In4 Empt))))))
 
--- This needs to generate the correct coins!
 tryOrElseCompile :: CodeGen o a y -> CodeGen o a x -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a) -> CodeGen o a x
 tryOrElseCompile p q post = CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (post φ)))
-     fmap (binder . In4 . Catch pc . In4 . Seek) (freshΦ (runCodeGen q φ))
+     qc <- freshΦ (runCodeGen q φ)
+     let np = coinsNeeded pc
+     let nq = coinsNeeded qc
+     let dp = np - min np nq
+     let dq = nq - min np nq
+     return $! binder (In4 (Catch (addCoins dp pc) (In4 (Seek (addCoins dq qc)))))
 
 chainPreCompile :: PositionOps o => CodeGen o a (x -> x) -> CodeGen o a x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)

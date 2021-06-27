@@ -16,9 +16,12 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
     algCatch (_, True) k = k
     algCatch (k1, _) (k2, _) = (min k1 k2, False)
 
+    -- Bool represents if an empty is found in a branch (of a Catch)
+    -- This helps to get rid of `min` being used for `Try` where min is always 0
+    -- (The input is needed to _succeed_, so if one branch is doomed to fail it doesn't care about coins)
     alg :: Instr o (Const4 (Int, Bool)) xs n r a -> (Int, Bool)
     alg Ret                                    = (0, False)
-    alg (Push _ (Const4 k))                    = (fst k, False)
+    alg (Push _ k)                             = getConst4 k -- was const False on the second parameter, I think that's probably right but a bit presumptive
     alg (Pop k)                                = getConst4 k
     alg (Lift2 _ k)                            = getConst4 k
     alg (Sat _ (Const4 k))                     = (fst k + 1, snd k)

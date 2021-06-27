@@ -53,8 +53,11 @@ rollbackHandler = In4 (Seek (In4 Empt))
 parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
 parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (If k (In4 Empt))))))
 
-tryOrElseCompile :: CodeGen o a y -> CodeGen o a x -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a) -> CodeGen o a x
-tryOrElseCompile p q post = CodeGen $ \m ->
+altNoCutCompile :: CodeGen o a y -> CodeGen o a x
+                -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a)
+                -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a)
+                -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
+altNoCutCompile p q handler post m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (post φ)))
      qc <- freshΦ (runCodeGen q φ)
@@ -62,7 +65,7 @@ tryOrElseCompile p q post = CodeGen $ \m ->
      let nq = coinsNeeded qc
      let dp = np - min np nq
      let dq = nq - min np nq
-     return $! binder (In4 (Catch (addCoins dp pc) (In4 (Seek (addCoins dq qc)))))
+     return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
 
 chainPreCompile :: PositionOps o => CodeGen o a (x -> x) -> CodeGen o a x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
@@ -87,9 +90,9 @@ chainPostCompile p op preOp preM m =
 
 deep :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (USER f) m))
-deep (TryOrElse p q) = Just $ tryOrElseCompile p q id
-deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ tryOrElseCompile p q (In4 . Pop . In4 . Push (USER x))
-deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ tryOrElseCompile p q (In4 . Fmap (USER f))
+deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) id
+deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Pop . In4 . Push (USER x))
+deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Fmap (USER f))
 deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
@@ -110,15 +113,7 @@ shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (App m)); runCodeGen pf p
 shallow (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 shallow (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
 shallow Empty         _ = do return $! In4 Empt
-shallow (p :<|>: q) m =
-  do (binder, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     qc <- freshΦ (runCodeGen q φ)
-     let np = coinsNeeded pc
-     let nq = coinsNeeded qc
-     let dp = np - min np nq
-     let dq = nq - min np nq
-     return $! binder (In4 (Catch (addCoins dp pc) (parsecHandler (addCoins dq qc))))
+shallow (p :<|>: q)   m = do altNoCutCompile p q parsecHandler id m
 shallow (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 shallow (LookAhead p) m =
   do n <- fmap coinsNeeded (runCodeGen p (In4 Empt)) -- Dodgy hack, but oh well

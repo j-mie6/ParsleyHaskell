@@ -19,3 +19,7 @@
 ## 1.0.0.0 -- 2021-06-12
 
 * Factored all of the `Parsley.Internal` modules out into `parsley-core` package
+
+## 1.0.0.1 -- 2021-06-29
+
+* Improved implementation of `oneOf` and `noneOf` to use ranges and not exhaustive character search

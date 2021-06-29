@@ -1,4 +1,5 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# LANGUAGE PatternSynonyms, ViewPatterns #-}
 {-|
 Module      : Parsley.Combinator
 Description : The parsing combinators
@@ -22,9 +23,10 @@ module Parsley.Combinator (
   ) where
 
 import Prelude hiding      (traverse, (*>))
+import Data.List           (sort)
 import Parsley.Alternative (manyTill)
 import Parsley.Applicative (($>), void, traverse, (<:>), (*>))
-import Parsley.Internal    (Code, makeQ, Parser, Defunc(LIFTED, EQ_H, CONST), pattern APP_H, satisfy, lookAhead, try, notFollowedBy)
+import Parsley.Internal    (Code, Quapplicative(..), Parser, Defunc(LIFTED, EQ_H, CONST, LAM_S), pattern APP_H, pattern COMPOSE_H, satisfy, lookAhead, try, notFollowedBy)
 
 {-|
 This combinator will attempt match a given string. If the parser fails midway through, this
@@ -44,7 +46,7 @@ having consumed no input.
 @since 0.1.0.0
 -}
 oneOf :: [Char] -> Parser Char
-oneOf cs = satisfy (makeQ (flip elem cs) [||\c -> $$(ofChars cs [||c||])||])
+oneOf = satisfy . elem'
 
 {-|
 This combinator will attempt to not match any one of the provided list of characters. If one of those
@@ -54,10 +56,28 @@ the character that was not an element of the provided list.
 @since 0.1.0.0
 -}
 noneOf :: [Char] -> Parser Char
-noneOf cs = satisfy (makeQ (not . flip elem cs) [||\c -> not $$(ofChars cs [||c||])||])
+noneOf = satisfy . COMPOSE_H (makeQ not [||not||]) . elem'
+
+elem' :: [Char] -> Defunc (Char -> Bool)
+elem' cs = LAM_S (\c -> makeQ (elem (_val c) cs) (ofChars cs (_code c)))
 
 ofChars :: [Char] -> Code Char -> Code Bool
-ofChars = foldr (\c rest qc -> [|| c == $$qc || $$(rest qc) ||]) (const [||False||])
+ofChars [] _ = [||False||]
+ofChars cs qc = foldr1 (\p q -> [|| $$p || $$q ||]) (map (makePred qc) (ranges cs))
+
+makePred :: Code Char -> (Char, Char) -> Code Bool
+makePred qc (c, c')
+  | c == c' = [|| c == $$qc ||]
+  | otherwise = [|| c <= $$qc && $$qc <= c' ||]
+
+ranges :: [Char] -> [(Char, Char)]
+ranges (sort -> c:cs) = go c (fromEnum c) cs
+  where
+    go :: Char -> Int -> [Char] -> [(Char, Char)]
+    go lower prev [] = [(lower, toEnum prev)]
+    go lower prev (c:cs)
+      | i <- fromEnum c, i == prev + 1 = go lower i cs
+      | otherwise = (lower, toEnum prev) : go c (fromEnum c) cs
 
 {-|
 Like `string`, excepts parses the given string atomically using `try`. Never consumes input on

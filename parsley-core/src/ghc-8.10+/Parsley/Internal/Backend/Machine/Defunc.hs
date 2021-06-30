@@ -5,7 +5,7 @@ import Data.Proxy                                (Proxy(Proxy))
 import Parsley.Internal.Backend.Machine.InputOps (PositionOps(same))
 import Parsley.Internal.Backend.Machine.InputRep (Rep)
 import Parsley.Internal.Common.Utils             (Code)
-import Parsley.Internal.Core.Lam                 (Lam, normaliseGen, normalise)          
+import Parsley.Internal.Core.Lam                 (Lam, normaliseGen, normalise)
 
 import qualified Parsley.Internal.Core.Defunc as Core (Defunc, lamTerm)
 import qualified Parsley.Internal.Core.Lam    as Lam  (Lam(..))
@@ -39,7 +39,7 @@ genDefunc (OFFSET _)  = error "Cannot materialise an unboxed offset in the regul
 
 genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
 genDefunc1 (LAM f) qx = normaliseGen (Lam.App f (Lam.Var True qx))
-genDefunc1 f qx        = [|| $$(genDefunc f) $$qx ||]
+genDefunc1 f qx       = [|| $$(genDefunc f) $$qx ||]
 
 pattern NormLam :: Lam a -> Defunc a
 pattern NormLam t <- LAM (normalise -> t)

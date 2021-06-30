@@ -5,6 +5,7 @@
              CPP,
              ImplicitParams,
              MagicHash,
+             PatternSynonyms,
              RecordWildCards,
              TypeApplications #-}
 module Parsley.Internal.Backend.Machine.Ops (module Parsley.Internal.Backend.Machine.Ops) where
@@ -16,7 +17,7 @@ import Data.STRef                                    (writeSTRef, readSTRef, new
 import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
-import Parsley.Internal.Backend.Machine.Defunc       (Defunc(FREEVAR), genDefunc)
+import Parsley.Internal.Backend.Machine.Defunc       (Defunc, pattern FREEVAR, genDefunc)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
@@ -52,6 +53,7 @@ emitLengthCheck n good bad γ = [||
 
 {- General Operations -}
 dup :: Defunc x -> (Defunc x -> Code r) -> Code r
+dup (FREEVAR x) k = k (FREEVAR x)
 dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
 
 {-# INLINE returnST #-}

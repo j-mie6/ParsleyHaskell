@@ -11,6 +11,9 @@ data Defunc a where
   SAME    :: PositionOps o => Defunc (o -> o -> Bool)
   FREEVAR :: Code a -> Defunc a
 
+user :: Core.Defunc a -> Defunc a
+user = USER
+
 ap2 :: Defunc (a -> b -> c) -> Defunc a -> Defunc b -> Defunc c
 ap2 f x y = USER (Core.ap (Core.ap (seal f) (seal x)) (seal y))
   where

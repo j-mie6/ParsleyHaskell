@@ -5,7 +5,7 @@ module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 import Data.Maybe                                    (isJust)
 import Data.Set                                      (Set, elems)
 import Control.Monad.Trans                           (lift)
-import Parsley.Internal.Backend.Machine              (Defunc(USER, SAME), LetBinding, makeLetBinding, Instr(..),
+import Parsley.Internal.Backend.Machine              (Defunc(SAME), user, LetBinding, makeLetBinding, Instr(..),
                                                       pattern Fmap, pattern App, _Modify, _Get, _Put, _Make, pattern If,
                                                       addCoins, refundCoins, drainCoins, PositionOps,
                                                       IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
@@ -74,9 +74,9 @@ chainPreCompile :: PositionOps o => CodeGen o a (x -> x) -> CodeGen o a x
 chainPreCompile op p preOp preP m =
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (In4 (Fmap (USER (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
+     opc <- freshM (runCodeGen op (In4 (Fmap (user (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
      pc <- freshM (runCodeGen p (In4 (App m)))
-     return $! In4 (Push (USER ID) (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preP pc)))))))))
+     return $! In4 (Push (user ID) (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preP pc)))))))))
 
 chainPostCompile :: PositionOps o => CodeGen o a x -> CodeGen o a (x -> x)
                  -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
@@ -89,10 +89,10 @@ chainPostCompile p op preOp preM m =
      freshM (runCodeGen p (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preM m)))))))))
 
 deep :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
-deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (USER f) m))
+deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (user f) m))
 deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) id
-deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Pop . In4 . Push (USER x))
-deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Fmap (USER f))
+deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Pop . In4 . Push (user x))
+deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Fmap (user f))
 deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
@@ -107,8 +107,8 @@ addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r
 addCoinsNeeded = coinsNeeded >>= addCoins
 
 shallow :: PositionOps o => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
-shallow (Pure x)      m = do return $! In4 (Push (USER x) m)
-shallow (Satisfy p)   m = do return $! In4 (Sat (USER p) m)
+shallow (Pure x)      m = do return $! In4 (Push (user x) m)
+shallow (Satisfy p)   m = do return $! In4 (Sat (user p) m)
 shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (App m)); runCodeGen pf pxc
 shallow (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 shallow (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
@@ -122,7 +122,7 @@ shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
-     return $! In4 (Catch (addCoins (max (np - nm) 0) (In4 (Tell pc))) (In4 (Seek (In4 (Push (USER UNIT) m)))))
+     return $! In4 (Catch (addCoins (max (np - nm) 0) (In4 (Tell pc))) (In4 (Seek (In4 (Push (user UNIT) m)))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (App φ)))))
@@ -135,15 +135,15 @@ shallow (Match p fs qs def) m =
   do (binder, φ) <- makeΦ m
      qcs <- traverse (\q -> freshΦ (runCodeGen q φ)) qs
      defc <- freshΦ (runCodeGen def φ)
-     let minc = coinsNeeded (In4 (Choices (map USER fs) qcs defc))
+     let minc = coinsNeeded (In4 (Choices (map user fs) qcs defc))
      let defc':qcs' = map (max 0 . subtract minc . coinsNeeded >>= addCoins) (defc:qcs)
-     fmap binder (runCodeGen p (In4 (Choices (map USER fs) qcs' defc')))
+     fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ _)            m = do return $! tailCallOptimise μ m
 shallow (ChainPre op p)        m = do chainPreCompile op p addCoinsNeeded id m
 shallow (ChainPost p op)       m = do chainPostCompile p op addCoinsNeeded id m
 shallow (MakeRegister σ p q)   m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)        m = do return $! In4 (_Get σ m)
-shallow (PutRegister σ p)      m = do runCodeGen p (In4 (_Put σ (In4 (Push (USER UNIT) m))))
+shallow (PutRegister σ p)      m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) m))))
 shallow (Debug name p)         m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 shallow (MetaCombinator Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
 

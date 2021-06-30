@@ -15,6 +15,9 @@ data Defunc a where
   FREEVAR :: Code a -> Defunc a
   OFFSET  :: Code (Rep o) -> Defunc o
 
+user :: Core.Defunc a -> Defunc a
+user = USER
+
 ap2 :: Defunc (a -> b -> c) -> Defunc a -> Defunc b -> Defunc c
 ap2 f@SAME (OFFSET o1) (OFFSET o2) = USER (Core.unsafeBLACK (apSame f o1 o2))
   where

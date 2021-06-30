@@ -1,4 +1,4 @@
-module Parsley.Internal.Core.Lam (normaliseGen, Lam(..)) where
+module Parsley.Internal.Core.Lam (normaliseGen, normalise, Lam(..)) where
 
 import Parsley.Internal.Common.Utils (Code)
 
@@ -47,3 +47,16 @@ generate F          = [||False||]
 
 normaliseGen :: Lam a -> Code a
 normaliseGen = generate . normalise
+
+instance Show (Lam a) where
+  show = show' . normalise
+
+show' :: Lam a -> String
+show' (Abs f) = concat ["(\\x -> ", show (f (Var True undefined)), ")"]
+show' (App f x) = concat ["(", show' f, " ", show' x, ")"]
+show' (Var True _) = "x"
+show' (Var False _) = "complex"
+show' (If c t e) = concat ["if ", show' c, " then ", show t, " else ", show e]
+show' (Let x f) = concat ["let x = ", show x, " in ", show' (f (Var True undefined))]
+show' T = "True"
+show' F = "False"

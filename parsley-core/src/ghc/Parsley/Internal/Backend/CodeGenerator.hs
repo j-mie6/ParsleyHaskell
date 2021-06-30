@@ -6,7 +6,7 @@ import Data.Maybe                                    (isJust)
 import Data.Set                                      (Set, elems)
 import Control.Monad.Trans                           (lift)
 import Parsley.Internal.Backend.Machine              (Defunc(SAME), user, LetBinding, makeLetBinding, Instr(..),
-                                                      pattern Fmap, pattern App, _Modify, _Get, _Put, _Make, pattern If,
+                                                      _Fmap, _App, _Modify, _Get, _Put, _Make, _If,
                                                       addCoins, refundCoins, drainCoins, PositionOps,
                                                       IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
 import Parsley.Internal.Backend.InstructionAnalyser  (coinsNeeded)
@@ -51,7 +51,7 @@ rollbackHandler :: Fix4 (Instr o) (o : xs) (Succ n) r a
 rollbackHandler = In4 (Seek (In4 Empt))
 
 parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
-parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (If k (In4 Empt))))))
+parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (_If k (In4 Empt))))))
 
 altNoCutCompile :: CodeGen o a y -> CodeGen o a x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a)
@@ -74,8 +74,8 @@ chainPreCompile :: PositionOps o => CodeGen o a (x -> x) -> CodeGen o a x
 chainPreCompile op p preOp preP m =
   do μ <- askM
      σ <- freshΣ
-     opc <- freshM (runCodeGen op (In4 (Fmap (user (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
-     pc <- freshM (runCodeGen p (In4 (App m)))
+     opc <- freshM (runCodeGen op (In4 (_Fmap (user (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
+     pc <- freshM (runCodeGen p (In4 (_App m)))
      return $! In4 (Push (user ID) (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preP pc)))))))))
 
 chainPostCompile :: PositionOps o => CodeGen o a x -> CodeGen o a (x -> x)
@@ -89,10 +89,10 @@ chainPostCompile p op preOp preM m =
      freshM (runCodeGen p (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preM m)))))))))
 
 deep :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
-deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (Fmap (user f) m))
+deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
 deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) id
 deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Pop . In4 . Push (user x))
-deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Fmap (user f))
+deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . _Fmap (user f))
 deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
@@ -109,7 +109,7 @@ addCoinsNeeded = coinsNeeded >>= addCoins
 shallow :: PositionOps o => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 shallow (Pure x)      m = do return $! In4 (Push (user x) m)
 shallow (Satisfy p)   m = do return $! In4 (Sat (user p) m)
-shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (App m)); runCodeGen pf pxc
+shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf pxc
 shallow (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 shallow (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
 shallow Empty         _ = do return $! In4 Empt
@@ -125,8 +125,8 @@ shallow (NotFollowedBy p) m =
      return $! In4 (Catch (addCoins (max (np - nm) 0) (In4 (Tell pc))) (In4 (Seek (In4 (Push (user UNIT) m)))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (App φ)))))
-     qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (App φ)))))
+     pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
+     qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (_App φ)))))
      let minc = coinsNeeded (In4 (Case pc qc))
      let dp = max 0 (coinsNeeded pc - minc)
      let dq = max 0 (coinsNeeded qc - minc)

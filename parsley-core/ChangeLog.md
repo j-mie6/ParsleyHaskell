@@ -9,3 +9,7 @@
 
 * Introduced `Lam` to the API and conversion functions for `Core.Defunc`
 * Extra type ascriptions added to generated code
+
+## 1.0.1.1 -- 2021-06-27
+
+* Added input factoring to `try p <|> q` and also forms with `f <$> try p <|> q` and `try p $> x <|> q`

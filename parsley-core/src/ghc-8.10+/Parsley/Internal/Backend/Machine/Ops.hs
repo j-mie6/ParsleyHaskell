@@ -183,13 +183,13 @@ takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters
 
 {- Marshalling Operations -}
 class MarshalOps o where
-  dynHandler :: StaHandler s o a -> Code (DynHandler s o a)
-  dynCont :: StaCont s o a x -> Code (DynCont s o a x)
+  dynHandler :: StaHandler s o a -> DynHandler s o a
+  dynCont :: StaCont s o a x -> DynCont s o a x
 
-staHandler :: forall o s a. Code (DynHandler s o a) -> StaHandler s o a
+staHandler :: forall o s a. DynHandler s o a -> StaHandler s o a
 staHandler dh o# = [|| $$dh $$(o#) ||]
 
-staCont :: forall o s a x. Code (DynCont s o a x) -> StaCont s o a x
+staCont :: forall o s a x. DynCont s o a x -> StaCont s o a x
 staCont dk x o# = [|| $$dk $$x $$(o#) ||]
 
 #define deriveMarshalOps(_o)                                          \

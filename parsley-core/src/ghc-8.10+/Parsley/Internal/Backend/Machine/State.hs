@@ -5,7 +5,7 @@
 module Parsley.Internal.Backend.Machine.State (
     StaHandler, StaCont,
     DynHandler, DynCont,
-    HandlerStack, SubRoutine, MachineMonad, Func,
+    SubRoutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
     QSubRoutine(..), QJoin(..), Machine(..),
     run,
@@ -39,12 +39,15 @@ type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST
 -- Statics
 type StaHandler s o a = Code (Rep o) -> Code (ST s (Maybe a))
 type StaCont s o a x = Code x -> Code (Rep o) -> Code (ST s (Maybe a))
-type HandlerStack n s o a = Vec n (StaHandler s o a)
 
 -- Dynamics
-type DynHandler s o a = Rep o -> ST s (Maybe a)
-type DynCont s o a x = x -> Rep o -> ST s (Maybe a)
-type SubRoutine s o a x = DynCont s o a x -> Rep o -> DynHandler s o a -> ST s (Maybe a)
+type DynHandler s o a = Code (Handler s o a)
+type DynCont s o a x = Code (Cont s o a x)
+
+-- Base
+type Handler s o a = Rep o -> ST s (Maybe a)
+type Cont s o a x = x -> Rep o -> ST s (Maybe a)
+type SubRoutine s o a x = Cont s o a x -> Rep o -> Handler s o a -> ST s (Maybe a)
 
 type family Func (rs :: [Type]) s o a x where
   Func '[] s o a x      = SubRoutine s o a x
@@ -67,7 +70,7 @@ data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
 data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , retCont  :: StaCont s o a r
                         , input    :: Code (Rep o)
-                        , handlers :: HandlerStack n s o a }
+                        , handlers :: Vec n (StaHandler s o a) }
 
 data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)

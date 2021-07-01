@@ -4,14 +4,15 @@
              TypeFamilies,
              DerivingStrategies #-}
 module Parsley.Internal.Backend.Machine.State (
-    StaHandler(..), StaCont(..), staHandler#, mkStaHandler, staCont#, mkStaCont,
-    DynHandler, DynCont,
-    SubRoutine, MachineMonad, Func,
+    StaHandler(..), StaCont(..), StaSubRoutine, staHandler#, mkStaHandler, staCont#, mkStaCont,
+    DynHandler, DynCont, DynSubRoutine, DynFunc,
+    MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
-    QSubRoutine(..), QJoin(..), Machine(..),
+    QSubRoutine, QJoin(..), Machine(..),
     run,
     emptyCtx,
-    insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, concreteΣ, cachedΣ,
+    insertSub, insertΦ, insertNewΣ, cacheΣ, concreteΣ, cachedΣ, qSubRoutine,
+    takeFreeRegisters,
     askSub, askΦ,
     debugUp, debugDown, debugLevel,
     storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
@@ -56,20 +57,36 @@ staCont# (StaCont sk _) = sk
 mkStaCont :: StaCont# s o a x -> StaCont s o a x
 mkStaCont sk = StaCont sk Nothing
 
+type StaSubRoutine s o a x = DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a))
+type family StaFunc (rs :: [Type]) s o a x where
+  StaFunc '[] s o a x      = StaSubRoutine s o a x
+  StaFunc (r : rs) s o a x = Code (STRef s r) -> StaFunc rs s o a x
+
+data QSubRoutine s o a x = forall rs. QSubRoutine (StaFunc rs s o a x) (Regs rs)
+
 -- Dynamics
 type DynHandler s o a = Code (Handler# s o a)
 type DynCont s o a x = Code (Cont# s o a x)
+type DynSubRoutine s o a x = Code (SubRoutine# s o a x)
+
+type DynFunc (rs :: [Type]) s o a x = Code (Func rs s o a x)
+
+qSubRoutine :: forall s o a x rs. DynFunc rs s o a x -> Regs rs -> QSubRoutine s o a x
+qSubRoutine func frees = QSubRoutine (staFunc frees func) frees
+  where
+    staFunc :: forall rs. Regs rs -> DynFunc rs s o a x -> StaFunc rs s o a x
+    staFunc NoRegs func = \dk o# dh -> [|| $$func $$dk $$(o#) $$dh ||]
+    staFunc (FreeReg _ witness) func = \r -> staFunc witness [|| $$func $$r ||]
 
 -- Base
 type Handler# s o a = Rep o -> ST s (Maybe a)
 type Cont# s o a x = x -> Rep o -> ST s (Maybe a)
-type SubRoutine s o a x = Cont# s o a x -> Rep o -> Handler# s o a -> ST s (Maybe a)
+type SubRoutine# s o a x = Cont# s o a x -> Rep o -> Handler# s o a -> ST s (Maybe a)
 
 type family Func (rs :: [Type]) s o a x where
-  Func '[] s o a x      = SubRoutine s o a x
+  Func '[] s o a x      = SubRoutine# s o a x
   Func (r : rs) s o a x = STRef s r -> Func rs s o a x
 
-data QSubRoutine s o a x = forall rs. QSubRoutine  (Code (Func rs s o a x)) (Regs rs)
 newtype QJoin s o a x = QJoin { unwrapJoin :: StaCont s o a x }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
 
@@ -98,7 +115,7 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
 emptyCtx :: DMap MVar (QSubRoutine s o a) -> Ctx s o a
 emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 Queue.empty
 
-insertSub :: MVar x -> Code (SubRoutine s o a x) -> Ctx s o a -> Ctx s o a
+insertSub :: MVar x -> StaSubRoutine s o a x -> Ctx s o a -> Ctx s o a
 insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q NoRegs) (μs ctx)}
 
 insertΦ :: ΦVar x -> StaCont s o a x -> Ctx s o a -> Ctx s o a
@@ -121,7 +138,7 @@ concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (>>= getReg) . DMap.
 cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (>>= getCached) . DMap.lookup σ . σs
 
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubRoutine s o a x)
 askSub μ =
   do QSubRoutine sub rs <- askSubUnbound μ
      asks (provideFreeRegisters sub rs)
@@ -129,9 +146,15 @@ askSub μ =
 askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
 
-provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (SubRoutine s o a x)
+-- This needs to return a DynFunc: it is fed back to shared territory
+takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> DynSubRoutine s o a x) -> DynFunc rs s o a x
+takeFreeRegisters NoRegs ctx body = body ctx
+takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
+
+-- This needs to take a StaFunc
+provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubRoutine s o a x
 provideFreeRegisters sub NoRegs _ = sub
-provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters [||$$f $$(concreteΣ σ ctx)||] σs ctx
+provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
 
 askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (StaCont s o a x)
 askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)

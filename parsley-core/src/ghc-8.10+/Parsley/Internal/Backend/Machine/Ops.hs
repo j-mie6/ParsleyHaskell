@@ -27,9 +27,10 @@ import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..
 import Parsley.Internal.Backend.Machine.InputRep     (Rep{-, representationTypes-})
 import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
-import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Machine(..), MachineMonad, SubRoutine, OpStack(..), Func,
+import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Machine(..), MachineMonad, StaSubRoutine, OpStack(..), DynFunc,
                                                       StaHandler(..), StaCont(..), DynHandler, DynCont, staHandler#, mkStaHandler, staCont#, mkStaCont,
-                                                      run, voidCoins, insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
+                                                      run, voidCoins, insertSub, insertΦ, insertNewΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel,
+                                                      takeFreeRegisters)
 import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Core.InputTypes              (Text16, CharList, Stream)
 import System.Console.Pretty                         (color, Color(Green, White, Red, Blue))
@@ -130,8 +131,8 @@ halt = mkStaCont $ \x _ -> [||returnST $! Just $$x||]
 noreturn :: forall o s a. StaCont s o a Void
 noreturn = mkStaCont $ \_ _ -> [||error "Return is not permitted here"||]
 
-callWithContinuation :: forall o s a x n. MarshalOps o => Code (SubRoutine s o a x) -> StaCont s o a x -> Code (Rep o) -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
-callWithContinuation sub ret input (VCons h _) = [||$$sub $$(dynCont @o ret) $$input $! $$(dynHandler @o h)||]
+callWithContinuation :: forall o s a x n. MarshalOps o => StaSubRoutine s o a x -> StaCont s o a x -> Code (Rep o) -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
+callWithContinuation sub ret input (VCons h _) = sub (dynCont @o ret) input (dynHandler @o h)
 
 resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
 resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (input γ)
@@ -146,7 +147,7 @@ class RecBuilder o where
   buildRec  :: Regs rs
             -> Ctx s o a
             -> Machine s o '[] One r a
-            -> Code (Func rs s o a r)
+            -> DynFunc rs s o a r
 
 #define deriveJoinBuilder(_o)                                                       \
 instance JoinBuilder _o where                                                       \
@@ -168,7 +169,7 @@ instance RecBuilder _o where                                                    
           loop !(o# :: Rep _o) =                                                                           \
         $$(run l                                                                                           \
             (Γ Empty (noreturn @_o) [||o#||] (VCons (staHandler @_o [||handler o#||]) VNil))               \
-            (voidCoins (insertSub μ [||\_ !(o# :: Rep _o) _ -> loop o#||] ctx)))                           \
+            (voidCoins (insertSub μ (\_ o# _ -> [|| loop $$(o#) ||]) ctx)))                                \
       in loop $$o                                                                                          \
     ||];                                                                                                   \
   buildRec rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                    \
@@ -176,10 +177,6 @@ instance RecBuilder _o where                                                    
       $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]); \
 };
 inputInstances(deriveRecBuilder)
-
-takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> Code (SubRoutine s o a x)) -> Code (Func rs s o a x)
-takeFreeRegisters NoRegs ctx body = body ctx
-takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
 {- Marshalling Operations -}
 class MarshalOps o where

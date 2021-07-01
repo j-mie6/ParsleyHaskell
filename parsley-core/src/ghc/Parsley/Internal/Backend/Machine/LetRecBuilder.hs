@@ -13,7 +13,7 @@ import Language.Haskell.TH.Syntax                   (Q, unTypeQ, unsafeTExpCoerc
 import Language.Haskell.TH.Syntax                   (unTypeCode, unsafeCodeCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 #endif
 import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Binding, Regs)
-import Parsley.Internal.Backend.Machine.State       (QSubRoutine(..), Func)
+import Parsley.Internal.Backend.Machine.State       (QSubRoutine, qSubRoutine, Func)
 import Parsley.Internal.Common.Utils                (Code)
 
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
@@ -47,4 +47,4 @@ letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
      return (LetE decls exp)
   where
      makeTypedName :: Const (Name, Some Regs) x -> QSubRoutine s o a x
-     makeTypedName (Const (name, Some frees)) = QSubRoutine (unsafeCodeCoerce (return (VarE name))) frees
+     makeTypedName (Const (name, Some frees)) = qSubRoutine (unsafeCodeCoerce (return (VarE name))) frees

@@ -5,10 +5,10 @@
 module Parsley.Internal.Backend.Machine.State (
     HandlerStack, Handler, Cont, SubRoutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
-    QSubRoutine(..), QJoin(..), Machine(..),
+    QSubRoutine, QJoin(..), Machine(..),
     run,
     emptyCtx,
-    insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, concreteΣ, cachedΣ,
+    insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, concreteΣ, cachedΣ, qSubRoutine,
     askSub, askΦ,
     debugUp, debugDown, debugLevel,
     storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
@@ -43,6 +43,10 @@ type family Func (rs :: [Type]) s o a x where
   Func (r : rs) s o a x = STRef s r -> Func rs s o a x
 
 data QSubRoutine s o a x = forall rs. QSubRoutine  (Code (Func rs s o a x)) (Regs rs)
+
+qSubRoutine :: Code (Func rs s o a x) -> Regs rs -> QSubRoutine s o a x
+qSubRoutine func frees = QSubRoutine func frees
+
 newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
 

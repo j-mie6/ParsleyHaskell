@@ -138,8 +138,8 @@ evalIter :: (RecBuilder o, ReturnOps o)
          -> MachineMonad s o xs n r a
 evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ)) h ask
 
-evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
-evalJoin φ = askΦ φ <&> resume
+evalJoin :: forall s o xs n r a x. ΦVar x -> MachineMonad s o (x : xs) n r a
+evalJoin φ = askΦ φ <&> resume . staCont @o
 
 evalMkJoin :: JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMkJoin = setupJoinPoint

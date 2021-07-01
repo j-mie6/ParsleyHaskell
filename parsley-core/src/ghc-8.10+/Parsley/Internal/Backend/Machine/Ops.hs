@@ -27,7 +27,7 @@ import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..
 import Parsley.Internal.Backend.Machine.InputRep     (Rep{-, representationTypes-})
 import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
-import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Machine(..), MachineMonad, Cont, SubRoutine, OpStack(..), Func,
+import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Machine(..), MachineMonad, SubRoutine, OpStack(..), Func,
                                                       StaHandler, StaCont, DynHandler, DynCont,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
 import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..))
@@ -115,31 +115,30 @@ raise γ = let VCons h _ = handlers γ in h (input γ)
 
 {- Control Flow Operations -}
 class ContOps o where
-  suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
+  suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> StaCont s o a x
 
 class ReturnOps o where
-  halt :: Code (Cont s o a a)
-  noreturn :: Code (Cont s o a Void)
+  halt :: StaCont s o a a
+  noreturn :: StaCont s o a Void
 
-callWithContinuation :: forall o s a x n. MarshalOps o => Code (SubRoutine s o a x) -> Code (Cont s o a x) -> Code (Rep o) -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
-callWithContinuation sub ret input (VCons h _) = [||$$sub $$ret $$input $! $$(dynHandler @o h)||]
+callWithContinuation :: forall o s a x n. MarshalOps o => Code (SubRoutine s o a x) -> StaCont s o a x -> Code (Rep o) -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
+callWithContinuation sub ret input (VCons h _) = [||$$sub $$(dynCont @o ret) $$input $! $$(dynHandler @o h)||]
 
-resume :: Code (Cont s o a x) -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
-resume k γ = let Op x _ = operands γ in [|| $$k $$(genDefunc x) $$(input γ) ||]
+resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
+resume k γ = let Op x _ = operands γ in k (genDefunc x) (input γ)
 
-#define deriveContOps(_o)                                                              \
-instance ContOps _o where                                                              \
-{                                                                                      \
-  suspend m γ = [|| \x !(o# :: Rep _o) -> $$(m (γ {operands = Op (FREEVAR [||x||]) (operands γ), \
-                                         input = [||o#||]})) ||];                      \
+#define deriveContOps(_o)                                                        \
+instance ContOps _o where                                                        \
+{                                                                                \
+  suspend m γ x o# = m (γ {operands = Op (FREEVAR x) (operands γ), input = o#}); \
 };
 inputInstances(deriveContOps)
 
-#define deriveReturnOps(_o)                                      \
-instance ReturnOps _o where                                      \
-{                                                                \
-  halt = [||\x _ -> returnST $! Just x||];                       \
-  noreturn = [||\_ _ -> error "Return is not permitted here"||]; \
+#define deriveReturnOps(_o)                                  \
+instance ReturnOps _o where                                  \
+{                                                            \
+  halt x _ = [||returnST $! Just $$x||];                       \
+  noreturn _ _ = [||error "Return is not permitted here"||]; \
 };
 inputInstances(deriveReturnOps)
 
@@ -181,7 +180,7 @@ instance RecBuilder _o where                                                \
     ||];                                                                    \
   buildRec rs ctx k = takeFreeRegisters rs ctx (\ctx ->                     \
     [|| \ !ret !(o# :: Rep _o) h ->                                                  \
-      $$(run k (Γ Empty [||ret||] [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]); \
+      $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]); \
 };
 inputInstances(deriveRecBuilder)
 

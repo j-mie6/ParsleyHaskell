@@ -5,7 +5,7 @@
 module Parsley.Internal.Backend.Machine.State (
     StaHandler, StaCont,
     DynHandler, DynCont,
-    HandlerStack, Cont, SubRoutine, MachineMonad, Func,
+    HandlerStack, SubRoutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
     QSubRoutine(..), QJoin(..), Machine(..),
     run,
@@ -36,8 +36,6 @@ import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
 
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
-type Cont s o a x = DynCont s o a x
-
 -- Statics
 type StaHandler s o a = Code (Rep o) -> Code (ST s (Maybe a))
 type StaCont s o a x = Code x -> Code (Rep o) -> Code (ST s (Maybe a))
@@ -53,7 +51,7 @@ type family Func (rs :: [Type]) s o a x where
   Func (r : rs) s o a x = STRef s r -> Func rs s o a x
 
 data QSubRoutine s o a x = forall rs. QSubRoutine  (Code (Func rs s o a x)) (Regs rs)
-newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
+newtype QJoin s o a x = QJoin { unwrapJoin :: Code (DynCont s o a x) }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
 
 run :: Machine s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
@@ -67,7 +65,7 @@ data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
                    , getCached :: Maybe (Defunc x) }
 
 data Γ s o xs n r a = Γ { operands :: OpStack xs
-                        , retCont  :: Code (Cont s o a r)
+                        , retCont  :: StaCont s o a r
                         , input    :: Code (Rep o)
                         , handlers :: HandlerStack n s o a }
 
@@ -84,7 +82,7 @@ emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 Queue.empty
 insertSub :: MVar x -> Code (SubRoutine s o a x) -> Ctx s o a -> Ctx s o a
 insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q NoRegs) (μs ctx)}
 
-insertΦ :: ΦVar x -> Code (Cont s o a x) -> Ctx s o a -> Ctx s o a
+insertΦ :: ΦVar x -> Code (DynCont s o a x) -> Ctx s o a -> Ctx s o a
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 
 insertNewΣ :: ΣVar x -> Maybe (Code (STRef s x)) -> Defunc x -> Ctx s o a -> Ctx s o a
@@ -116,7 +114,7 @@ provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (
 provideFreeRegisters sub NoRegs _ = sub
 provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters [||$$f $$(concreteΣ σ ctx)||] σs ctx
 
-askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (Cont s o a x))
+askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (DynCont s o a x))
 askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
 
 debugUp :: Ctx s o a -> Ctx s o a

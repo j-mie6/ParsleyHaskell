@@ -73,7 +73,7 @@ readyMachine = cata4 (Machine . alg)
 evalRet :: MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
-evalCall :: forall s o a x xs n r. (MarshalOps o, ContOps o) => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalCall :: forall s o a x xs n r. MarshalOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation @o sub (suspend mk γ) input handlers) k (askSub μ)
 
 evalJump :: forall s o a x n. MarshalOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
@@ -106,8 +106,8 @@ evalEmpt = return $! raise
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
-evalCatch :: Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
-evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandler γ (buildHandler γ mh) mk) k h
+evalCatch :: HandlerOps o => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
+evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> bindHandler γ (buildHandler γ mh) mk) k h
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (OFFSET (input γ)) (operands γ)})
@@ -133,13 +133,13 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
       ||]
     go _ _ _ def γ = def γ
 
-evalIter :: (RecBuilder o, ReturnOps o)
+evalIter :: RecBuilder o
          => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
          -> MachineMonad s o xs n r a
 evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ)) h ask
 
-evalJoin :: forall s o xs n r a x. ΦVar x -> MachineMonad s o (x : xs) n r a
-evalJoin φ = askΦ φ <&> resume . staCont @o
+evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
+evalJoin φ = askΦ φ <&> resume
 
 evalMkJoin :: JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMkJoin = setupJoinPoint
@@ -165,9 +165,10 @@ evalPut σ a k = asks $! \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
+evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
+             => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) =
-  liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(setupHandler γ (logHandler name ctx γ) k)||])
+  liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindHandler γ (logHandler name ctx γ) k)||])
     (local debugUp mk)
     ask
 

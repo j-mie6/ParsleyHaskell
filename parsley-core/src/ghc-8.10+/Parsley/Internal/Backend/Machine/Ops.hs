@@ -46,7 +46,7 @@ derivation(Stream)                 \
 derivation(Lazy.ByteString)        \
 derivation(Text)
 
-type Ops o = (LogHandler o, ContOps o, JoinBuilder o, RecBuilder o, ReturnOps o, PositionOps o, MarshalOps o, LogOps (Rep o))
+type Ops o = (HandlerOps o, JoinBuilder o, RecBuilder o, PositionOps o, MarshalOps o, LogOps (Rep o))
 
 {- Input Operations -}
 sat :: (?ops :: InputOps (Rep o)) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
@@ -102,24 +102,33 @@ buildHandler γ h c o# = h (γ {operands = Op (OFFSET c) (operands γ), input = 
 fatal :: forall o s a. StaHandler s o a
 fatal = const [|| returnST Nothing ||]
 
-setupHandler :: forall s o xs n r a. Γ s o xs n r a
-             -> (Code (Rep o) -> StaHandler s o a)
-             -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
-setupHandler γ h k = [||
-    let handler o# = $$(h (input γ) [||o#||])
-    in $$(k (γ {handlers = VCons (staHandler @o [||handler||]) (handlers γ)}))
-  ||]
+class HandlerOps o where
+  bindHandler :: Γ s o xs n r a
+              -> (Code (Rep o) -> StaHandler s o a)
+              -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+
+#define deriveHandlerOps(_o)                                                    \
+instance HandlerOps _o where                                                    \
+{                                                                               \
+  bindHandler γ h k = [||                                                       \
+    let handler (o# :: Rep _o) = $$(h (input γ) [||o#||])                       \
+    in $$(k (γ {handlers = VCons (staHandler @_o [||handler||]) (handlers γ)})) \
+  ||]                                                                           \
+};
+inputInstances(deriveHandlerOps)
 
 raise :: Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
 raise γ = let VCons h _ = handlers γ in h (input γ)
 
 {- Control Flow Operations -}
-class ContOps o where
-  suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> StaCont s o a x
+suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> StaCont s o a x
+suspend m γ x o# = m (γ {operands = Op (FREEVAR x) (operands γ), input = o#})
 
-class ReturnOps o where
-  halt :: StaCont s o a a
-  noreturn :: StaCont s o a Void
+halt :: forall o s a. StaCont s o a a
+halt x _ = [||returnST $! Just $$x||]
+
+noreturn :: forall o s a. StaCont s o a Void
+noreturn _ _ = [||error "Return is not permitted here"||]
 
 callWithContinuation :: forall o s a x n. MarshalOps o => Code (SubRoutine s o a x) -> StaCont s o a x -> Code (Rep o) -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
 callWithContinuation sub ret input (VCons h _) = [||$$sub $$(dynCont @o ret) $$input $! $$(dynHandler @o h)||]
@@ -127,28 +136,12 @@ callWithContinuation sub ret input (VCons h _) = [||$$sub $$(dynCont @o ret) $$i
 resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
 resume k γ = let Op x _ = operands γ in k (genDefunc x) (input γ)
 
-#define deriveContOps(_o)                                                        \
-instance ContOps _o where                                                        \
-{                                                                                \
-  suspend m γ x o# = m (γ {operands = Op (FREEVAR x) (operands γ), input = o#}); \
-};
-inputInstances(deriveContOps)
-
-#define deriveReturnOps(_o)                                  \
-instance ReturnOps _o where                                  \
-{                                                            \
-  halt x _ = [||returnST $! Just $$x||];                       \
-  noreturn _ _ = [||error "Return is not permitted here"||]; \
-};
-inputInstances(deriveReturnOps)
-
 {- Builder Operations -}
 class JoinBuilder o where
   setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 
 class RecBuilder o where
-  buildIter :: ReturnOps o
-            => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
+  buildIter :: Ctx s o a -> MVar Void -> Machine s o '[] One Void a
             -> (Code (Rep o) -> StaHandler s o a) -> Code (Rep o) -> Code (ST s (Maybe a))
   buildRec  :: Regs rs
             -> Ctx s o a
@@ -162,7 +155,7 @@ instance JoinBuilder _o where                                                   
     liftM2 (\mk ctx γ -> [||                                                        \
       let join x !(o# :: Rep _o) =                                                  \
         $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = [||o#||]})) \
-      in $$(run mx γ (insertΦ φ [||join||] ctx))                                    \
+      in $$(run mx γ (insertΦ φ (staCont @_o [||join||]) ctx))                      \
     ||]) (local voidCoins k) ask;                                                   \
 };
 inputInstances(deriveJoinBuilder)
@@ -208,10 +201,14 @@ instance MarshalOps _o where                                          \
 inputInstances(deriveMarshalOps)
 
 {- Debugger Operations -}
-class (PositionOps o, LogOps (Rep o)) => LogHandler o where
-  logHandler :: (?ops :: InputOps (Rep o)) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code (Rep o) -> StaHandler s o a
+type LogHandler o = (PositionOps o, LogOps (Rep o))
 
-preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps o, LogOps (Rep o)) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
+logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code (Rep o) -> StaHandler s o a
+logHandler name ctx γ _ o# = let VCons h _ = handlers γ in [||
+    trace $$(preludeString name '<' (γ {input = o#}) ctx (color Red " Fail")) $$(h o#)
+  ||]
+
+preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset     = input γ
@@ -229,15 +226,6 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     eof        = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]
     prelude    = [|| concat [indent, dir : name, dir : " (", show ($$(offToInt offset)), "): "] ||]
     caretSpace = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
-
-#define deriveLogHandler(_o)                                                             \
-instance LogHandler _o where                                                             \
-{                                                                                        \
-  logHandler name ctx γ _ o# = let VCons h _ = handlers γ in [||                         \
-      trace $$(preludeString name '<' (γ {input = o#}) ctx (color Red " Fail")) $$(h o#) \
-    ||];                                                                                 \
-};
-inputInstances(deriveLogHandler)
 
 -- RIP Dream :(
 {-$(let derive _o = [d|

@@ -3,7 +3,9 @@
              TypeFamilies,
              DerivingStrategies #-}
 module Parsley.Internal.Backend.Machine.State (
-    HandlerStack, Handler, Cont, SubRoutine, MachineMonad, Func,
+    StaHandler, StaCont,
+    DynHandler, DynCont,
+    HandlerStack, Cont, SubRoutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
     QSubRoutine(..), QJoin(..), Machine(..),
     run,
@@ -32,11 +34,19 @@ import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Co
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
 
-type HandlerStack n s o a = Vec n (Code (Handler s o a))
-type Handler s o a = Rep o -> ST s (Maybe a)
-type Cont s o a x = x -> Rep o -> ST s (Maybe a)
-type SubRoutine s o a x = Cont s o a x -> Rep o -> Handler s o a -> ST s (Maybe a)
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
+
+type Cont s o a x = DynCont s o a x
+
+-- Statics
+type StaHandler s o a = Code (Rep o) -> Code (ST s (Maybe a))
+type StaCont s o a x = Code x -> Code (Rep o) -> Code (ST s (Maybe a))
+type HandlerStack n s o a = Vec n (StaHandler s o a)
+
+-- Dynamics
+type DynHandler s o a = Rep o -> ST s (Maybe a)
+type DynCont s o a x = x -> Rep o -> ST s (Maybe a)
+type SubRoutine s o a x = DynCont s o a x -> Rep o -> DynHandler s o a -> ST s (Maybe a)
 
 type family Func (rs :: [Type]) s o a x where
   Func '[] s o a x      = SubRoutine s o a x

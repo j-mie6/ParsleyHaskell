@@ -73,10 +73,10 @@ readyMachine = cata4 (Machine . alg)
 evalRet :: MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
-evalCall :: forall s o a x xs n r. ContOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalCall :: forall s o a x xs n r. (MarshalOps o, ContOps o) => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation @o sub (suspend mk γ) input handlers) k (askSub μ)
 
-evalJump :: forall s o a x n. MVar x -> MachineMonad s o '[] (Succ n) x a
+evalJump :: forall s o a x n. MarshalOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
 evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
@@ -106,7 +106,7 @@ evalEmpt = return $! raise
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
-evalCatch :: HandlerOps o => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
+evalCatch :: Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandler γ (buildHandler γ mh) mk) k h
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
@@ -133,7 +133,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
       ||]
     go _ _ _ def γ = def γ
 
-evalIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
+evalIter :: (RecBuilder o, ReturnOps o)
          => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
          -> MachineMonad s o xs n r a
 evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ)) h ask

@@ -13,7 +13,7 @@ import Language.Haskell.TH.Syntax                   (Q, unTypeQ, unsafeTExpCoerc
 import Language.Haskell.TH.Syntax                   (unTypeCode, unsafeCodeCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 #endif
 import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Binding, Regs)
-import Parsley.Internal.Backend.Machine.State       (QSubRoutine(..), Func)
+import Parsley.Internal.Backend.Machine.State       (QSubRoutine, qSubRoutine, Func)
 import Parsley.Internal.Common.Utils                (Code)
 
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
@@ -27,7 +27,7 @@ unTypeCode = unTypeQ
 
 letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o a)
                        -> {-nameof-}     (forall x. key x -> String)
-                       -> {-genBinding-} (forall x rs. Binding o a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
+                       -> {-genBinding-} (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
                        -> {-expr-}       (DMap key (QSubRoutine s o a) -> Code b)
                        -> Code b
 letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
@@ -38,7 +38,7 @@ letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
      -- Generate each binding providing them with the names
      let makeDecl (k :=> LetBinding body frees) =
           do let Const (name, _) = names ! k
-             func <- unTypeCode (genBinding body frees typedNames)
+             func <- unTypeCode (genBinding k body frees typedNames)
              return (FunD name [Clause [] (NormalB func) []])
      decls <- traverse makeDecl (toList bindings)
      -- Generate the main expression using the same names
@@ -47,4 +47,4 @@ letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
      return (LetE decls exp)
   where
      makeTypedName :: Const (Name, Some Regs) x -> QSubRoutine s o a x
-     makeTypedName (Const (name, Some frees)) = QSubRoutine (unsafeCodeCoerce (return (VarE name))) frees
+     makeTypedName (Const (name, Some frees)) = qSubRoutine (unsafeCodeCoerce (return (VarE name))) frees

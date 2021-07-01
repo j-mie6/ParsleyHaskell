@@ -147,7 +147,8 @@ class BoxOps o => RecBuilder o where
   buildIter :: ReturnOps o
             => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
             -> (Code o -> Code (Handler s o a)) -> Code o -> Code (ST s (Maybe a))
-  buildRec  :: Regs rs
+  buildRec  :: MVar r
+            -> Regs rs
             -> Ctx s o a
             -> Machine s o '[] One r a
             -> Code (Func rs s o a r)
@@ -175,7 +176,7 @@ instance RecBuilder _o where                                                    
             (voidCoins (insertSub μ [||\_ (!o#) _ -> loop o#||] ctx)))           \
       in loop ($$unbox $$o)                                                      \
     ||];                                                                         \
-  buildRec rs ctx k = let bx = box in takeFreeRegisters rs ctx (\ctx ->          \
+  buildRec _ rs ctx k = let bx = box in takeFreeRegisters rs ctx (\ctx ->        \
     [|| \(!ret) (!o#) h ->                                                       \
       $$(run k (Γ Empty [||ret||] [||$$bx o#||] (VCons [||h||] VNil)) ctx) ||]); \
 };

@@ -5,6 +5,7 @@
              CPP,
              ImplicitParams,
              MagicHash,
+             PatternSynonyms,
              RecordWildCards,
              TypeApplications #-}
 module Parsley.Internal.Backend.Machine.Ops (module Parsley.Internal.Backend.Machine.Ops) where
@@ -20,7 +21,7 @@ import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
 import GHC.Exts                                      (Int(..), (-#))
-import Parsley.Internal.Backend.Machine.Defunc       (Defunc(FREEVAR, OFFSET), genDefunc)
+import Parsley.Internal.Backend.Machine.Defunc       (Defunc(OFFSET), genDefunc, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep     (Rep{-, representationTypes-})

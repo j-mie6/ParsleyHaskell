@@ -1,5 +1,6 @@
 {-# LANGUAGE ImplicitParams,
              MultiWayIf,
+             PatternSynonyms,
              RecordWildCards,
              TypeApplications #-}
 module Parsley.Internal.Backend.Machine.Eval (eval) where
@@ -10,7 +11,7 @@ import Data.Void                                      (Void)
 import Control.Monad                                  (forM, liftM2)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc(FREEVAR), genDefunc, genDefunc1, ap2)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc, pattern FREEVAR, genDefunc, genDefunc1, ap2)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))

@@ -8,7 +8,7 @@ import Data.Void                                    (Void)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 
-import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc(USER))
+import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
 import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
 
 data Instr (o :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
@@ -56,14 +56,14 @@ refundCoins = mkCoin RefundCoins
 drainCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 drainCoins = mkCoin DrainCoins
 
-pattern App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
-pattern App k = Lift2 (USER ID) k
+_App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
+_App k = Lift2 (user ID) k
 
-pattern Fmap :: Machine.Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
-pattern Fmap f k = Push f (In4 (Lift2 (USER (FLIP_H ID)) k))
+_Fmap :: Machine.Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
+_Fmap f k = Push f (In4 (Lift2 (user (FLIP_H ID)) k))
 
 _Modify :: ΣVar x -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) ((x -> x) : xs) n r a
-_Modify σ  = _Get σ . In4 . App . In4 . _Put σ
+_Modify σ  = _Get σ . In4 . _App . In4 . _Put σ
 
 _Make :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
 _Make σ = Make σ Hard
@@ -75,8 +75,8 @@ _Get :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
 _Get σ = Get σ Hard
 
 -- This this is a nice little trick to get this instruction to generate optimised code
-pattern If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) (Bool : xs) n r a
-pattern If t e = Choices [USER ID] [t] e
+_If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) (Bool : xs) n r a
+_If t e = Choices [user ID] [t] e
 
 instance IFunctor4 (Instr o) where
   imap4 _ Ret                 = Ret

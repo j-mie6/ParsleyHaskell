@@ -174,14 +174,14 @@ instance RecBuilder _o where                                                    
             (voidCoins (insertSub μ (\_ o# _ -> [|| loop $$(o#) ||]) ctx)))                                \
       in loop $$o                                                                                          \
     ||];                                                                                                   \
-  buildRec μ rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                    \
-    {- The idea here is to try and reduce the number of times registers have to be passed around -}          \
-    {-[|| \ !ret !(o# :: Rep _o) h ->                                                                        \
-      $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]-}\
-    [|| let self !ret !(o# :: Rep _o) h =                                                                 \
-          $$(run k                                                                                        \
-              (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) \
-              (insertSub μ (\k o# h -> [|| self $$k $$(o#) $$h ||]) ctx)) in self ||]  ); \
+  buildRec μ rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                  \
+    {- The idea here is to try and reduce the number of times registers have to be passed around -}        \
+    {-[|| \ ret !(o# :: Rep _o) h ->                                                                       \
+      $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]-} \
+    [|| let self ret !(o# :: Rep _o) h =                                                                   \
+          $$(run k                                                                                         \
+              (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil))             \
+              (insertSub μ (\k o# h -> [|| self $$k $$(o#) $$h ||]) ctx)) in self ||]  );                  \
 };
 inputInstances(deriveRecBuilder)
 
@@ -201,7 +201,7 @@ instance MarshalOps _o where                                                    
 {                                                                                       \
   dynHandler (StaHandler sh Nothing) = [||\ !(o# :: Rep _o) -> $$(sh [||o#||]) ||];     \
   dynHandler (StaHandler _ (Just dh)) = dh;                                             \
-  dynCont (StaCont sk Nothing) = [||\ x !(o# :: Rep _o) -> $$(sk [||x||] [||o#||]) ||]; \
+  dynCont (StaCont sk Nothing) = [||\ x (o# :: Rep _o) -> $$(sk [||x||] [||o#||]) ||]; \
   dynCont (StaCont _ (Just dk)) = dk;                                                   \
 };
 inputInstances(deriveMarshalOps)

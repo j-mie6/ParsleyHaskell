@@ -160,19 +160,19 @@ instance JoinBuilder _o where                                                   
 };
 inputInstances(deriveJoinBuilder)
 
-#define deriveRecBuilder(_o)                                                \
-instance RecBuilder _o where                                                \
-{                                                                           \
-  buildIter ctx μ l h o = [||                                               \
-      let {-handler !(c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]);-}                                     \
-          loop !(o# :: Rep _o) =                                                        \
-        $$(run l                                                            \
-            (Γ Empty (noreturn @_o) [||o#||] (VCons ({-staHandler @_o [||handler o#||]-}h [||o#||]) VNil)) \
-            (voidCoins (insertSub μ [||\_ !(o# :: Rep _o) _ -> loop o#||] ctx)))      \
-      in loop $$o                                                           \
-    ||];                                                                    \
-  buildRec rs ctx k = takeFreeRegisters rs ctx (\ctx ->                     \
-    [|| \ !ret !(o# :: Rep _o) h ->                                                  \
+#define deriveRecBuilder(_o)                                                                               \
+instance RecBuilder _o where                                                                               \
+{                                                                                                          \
+  buildIter ctx μ l h o = [||                                                                              \
+      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(staHandler# (h [||c#||]) [||o#||]);                  \
+          loop !(o# :: Rep _o) =                                                                           \
+        $$(run l                                                                                           \
+            (Γ Empty (noreturn @_o) [||o#||] (VCons (staHandler @_o [||handler o#||]) VNil))               \
+            (voidCoins (insertSub μ [||\_ !(o# :: Rep _o) _ -> loop o#||] ctx)))                           \
+      in loop $$o                                                                                          \
+    ||];                                                                                                   \
+  buildRec rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                    \
+    [|| \ !ret !(o# :: Rep _o) h ->                                                                        \
       $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]); \
 };
 inputInstances(deriveRecBuilder)

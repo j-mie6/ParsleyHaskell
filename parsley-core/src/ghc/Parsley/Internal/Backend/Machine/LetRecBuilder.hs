@@ -27,7 +27,7 @@ unTypeCode = unTypeQ
 
 letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o a)
                        -> {-nameof-}     (forall x. key x -> String)
-                       -> {-genBinding-} (forall x rs. Binding o a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
+                       -> {-genBinding-} (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
                        -> {-expr-}       (DMap key (QSubRoutine s o a) -> Code b)
                        -> Code b
 letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
@@ -38,7 +38,7 @@ letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
      -- Generate each binding providing them with the names
      let makeDecl (k :=> LetBinding body frees) =
           do let Const (name, _) = names ! k
-             func <- unTypeCode (genBinding body frees typedNames)
+             func <- unTypeCode (genBinding k body frees typedNames)
              return (FunD name [Clause [] (NormalB func) []])
      decls <- traverse makeDecl (toList bindings)
      -- Generate the main expression using the same names

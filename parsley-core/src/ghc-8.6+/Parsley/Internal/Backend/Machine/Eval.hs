@@ -31,7 +31,7 @@ eval input (LetBinding !p _) fs = trace ("EVALUATING TOP LEVEL") [|| runST $
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
-             (\exp rs names -> buildRec rs (emptyCtx names) (readyMachine exp))
+             (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
              (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx names)))
   ||]
   where

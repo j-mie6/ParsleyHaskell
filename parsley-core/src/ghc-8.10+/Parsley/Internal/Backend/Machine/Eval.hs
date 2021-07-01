@@ -33,7 +33,7 @@ eval input (LetBinding !p _) fs = trace ("EVALUATING TOP LEVEL") [|| runST $
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
-             (\exp rs names -> buildRec rs (emptyCtx names) (readyMachine exp))
+             (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
              (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx names)))
   ||]
   where
@@ -98,7 +98,8 @@ evalSat p (Machine k) = do
   where
     maybeEmitCheck Nothing mk γ = sat (genDefunc1 p) mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc1 p) mk [||bad||]) [||bad||] γ)||]
+      --[|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc1 p) mk [||bad||]) [||bad||] γ)||]
+      emitLengthCheck n (sat (genDefunc1 p) mk (raise γ)) (raise γ) γ
 
 evalEmpt :: MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise

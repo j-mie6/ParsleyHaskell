@@ -21,6 +21,7 @@ import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
 import GHC.Exts                                      (Int(..), (-#))
+import Language.Haskell.TH.Syntax                    (liftTyped)
 import Parsley.Internal.Backend.Machine.Defunc       (Defunc(OFFSET), genDefunc, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..), InputOps, next, more)
@@ -60,7 +61,7 @@ emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps o
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
 emitLengthCheck (I# n) good bad γ = [||
-  if $$more $$(shiftRight (Proxy @o) (input γ) [||n -# 1#||]) then $$(good γ)
+  if $$more $$(shiftRight (Proxy @o) (input γ) (liftTyped (n -# 1#))) then $$(good γ)
   else $$bad ||]
 
 {- General Operations -}
@@ -144,7 +145,8 @@ class JoinBuilder o where
 class RecBuilder o where
   buildIter :: Ctx s o a -> MVar Void -> Machine s o '[] One Void a
             -> (Code (Rep o) -> StaHandler s o a) -> Code (Rep o) -> Code (ST s (Maybe a))
-  buildRec  :: Regs rs
+  buildRec  :: MVar r
+            -> Regs rs
             -> Ctx s o a
             -> Machine s o '[] One r a
             -> DynFunc rs s o a r
@@ -172,9 +174,14 @@ instance RecBuilder _o where                                                    
             (voidCoins (insertSub μ (\_ o# _ -> [|| loop $$(o#) ||]) ctx)))                                \
       in loop $$o                                                                                          \
     ||];                                                                                                   \
-  buildRec rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                    \
-    [|| \ !ret !(o# :: Rep _o) h ->                                                                        \
-      $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]); \
+  buildRec μ rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                    \
+    {- The idea here is to try and reduce the number of times registers have to be passed around -}          \
+    {-[|| \ !ret !(o# :: Rep _o) h ->                                                                        \
+      $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]-}\
+    [|| let self !ret !(o# :: Rep _o) h =                                                                 \
+          $$(run k                                                                                        \
+              (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) \
+              (insertSub μ (\k o# h -> [|| self $$k $$(o#) $$h ||]) ctx)) in self ||]  ); \
 };
 inputInstances(deriveRecBuilder)
 

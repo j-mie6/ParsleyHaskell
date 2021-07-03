@@ -16,6 +16,9 @@ data Defunc a where
 user :: Core.Defunc a -> Defunc a
 user = LAM . Core.lamTerm
 
+userBool :: Core.Defunc (a -> Bool) -> Defunc (a -> Bool)
+userBool = LAM . Core.lamTermBool
+
 ap2 :: Defunc (a -> b -> c) -> Defunc a -> Defunc b -> Defunc c
 ap2 f x y = LAM (Lam.App (Lam.App (seal f) (seal x)) (seal y))
   where

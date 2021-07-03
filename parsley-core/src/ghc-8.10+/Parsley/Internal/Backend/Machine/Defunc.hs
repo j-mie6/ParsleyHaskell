@@ -31,7 +31,7 @@ ap2 f@SAME (OFFSET o1) (OFFSET o2) = LAM (Lam.Var False (apSame f o1 o2))
     apSame :: forall o. Defunc (o -> o -> Bool) -> Code (Rep o) -> Code (Rep o) -> Code Bool
     apSame SAME = same (Proxy @o)
     apSame _    = undefined
-ap2 f x y = LAM (Lam.App (Lam.App (unliftDefunc f) (unliftDefunc x)) (unliftDefunc y))
+ap2 f x y = ap (ap f x) y
 
 _if :: Defunc Bool -> Code a -> Code a -> Code a
 _if c t e = normaliseGen (Lam.If (unliftDefunc c) (Lam.Var False t) (Lam.Var False e))

@@ -11,7 +11,7 @@ import Data.Void                                      (Void)
 import Control.Monad                                  (forM, liftM2)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc, pattern FREEVAR, genDefunc, genDefunc1, ap2)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc, pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
@@ -94,9 +94,9 @@ evalSat p (Machine k) = do
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
   where
-    maybeEmitCheck Nothing mk γ = sat (genDefunc1 p) mk (raise γ) γ
+    maybeEmitCheck Nothing mk γ = sat (ap p) mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (genDefunc1 p) mk [||bad||]) [||bad||] γ)||]
+      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (ap p) mk [||bad||]) [||bad||] γ)||]
 
 evalEmpt :: (BoxOps o, HandlerOps o) => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -125,10 +125,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
   def
   (forM ks getMachine)
   where
-    go x (f:fs) (mk:mks) def γ = [||
-        if $$(genDefunc1 f (genDefunc x)) then $$(mk γ)
-        else $$(go x fs mks def γ)
-      ||]
+    go x (f:fs) (mk:mks) def γ = _if (ap f x) (mk γ) (go x fs mks def γ)
     go _ _ _ def γ = def γ
 
 evalIter :: (RecBuilder o, ReturnOps o, HandlerOps o)

@@ -1,9 +1,18 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, TypeApplications #-}
 module Parsley.Internal.Core.Defunc (module Parsley.Internal.Core.Defunc) where
 
-import Language.Haskell.TH.Syntax (Lift(..))
+--import Data.Typeable                 (Typeable, (:~:)(Refl), eqT)
+import Language.Haskell.TH.Syntax    (Lift(..))
 import Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..))
-import Parsley.Internal.Core.Lam (normaliseGen, Lam(..))
+import Parsley.Internal.Core.Lam     (normaliseGen, Lam(..))
+
+{-
+  TODO: We should support Typeable in LIFTED to be more general, but I don't want changes to
+  Defunc to impact back-compat in parsley itself. We should consider not exposing the datatype
+  anymore, but exposing smart-constructors in Parsley.Defunctionalized.
+  This will come in parsley-2.0.0.0.
+-}
+
 
 {-|
 This datatype is useful for providing an /inspectable/ representation of common Haskell functions.
@@ -28,7 +37,7 @@ data Defunc a where
   -- | Corresponds to the partially applied @(== x)@ for some `Defunc` value @x@
   EQ_H    :: Eq a => Defunc a -> Defunc (a -> Bool)
   -- | Represents a liftable, showable value
-  LIFTED  :: (Show a, Lift a) => a -> Defunc a
+  LIFTED  :: (Show a, Lift a{-, Typeable a-}) => a -> Defunc a
   -- | Represents the standard @(:)@ function applied to no arguments
   CONS    :: Defunc (a -> [a] -> [a])
   -- | Represents the standard @const@ function applied to no arguments
@@ -114,11 +123,20 @@ pattern UNIT          = LIFTED ()
 ap :: Defunc (a -> b) -> Defunc a -> Defunc b
 ap f x = APP_H f x
 
-lamTerm :: Defunc a -> Lam a
+-- TODO: This is deprecated in favour of Typeable as of parsley 2.0.0.0
+lamTermBool :: Defunc (a -> Bool) -> Lam (a -> Bool)
+lamTermBool (APP_H CONST (LIFTED True)) = Abs (const T)
+lamTermBool (APP_H CONST (LIFTED False)) = Abs (const F)
+lamTermBool f = lamTerm f
+
+lamTerm :: forall a. Defunc a -> Lam a
 lamTerm ID = Abs id
 lamTerm COMPOSE = Abs (\f -> Abs (\g -> Abs (\x -> App f (App g x))))
 lamTerm FLIP = Abs (\f -> Abs (\x -> Abs (\y -> App (App f y) x)))
 lamTerm (APP_H f x) = App (lamTerm f) (lamTerm x)
+{-lamTerm (LIFTED b) | Just Refl <- eqT @a @Bool = case b of
+  False -> F
+  True -> T-}
 lamTerm (LIFTED x) = Var True [||x||]
 lamTerm (EQ_H x) = Abs (\y -> App (App (Var True [||(==)||]) (lamTerm x)) y)
 lamTerm CONS = Var True [||(:)||]

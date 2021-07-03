@@ -34,3 +34,9 @@
 ## 1.2.0.1 -- 2021-07-03
 
 * Added Jump-Elision optimisation to the code generator.
+
+## 1.3.0.0 -- 2021-07-03
+
+* Improved the `Lam` reduction algorithm
+* Preliminary support for `if true` reduction from `item` and `const True`
+* Introduced `_if` and `ap` in `Machine.Defunc`, removed `genDefunc1`

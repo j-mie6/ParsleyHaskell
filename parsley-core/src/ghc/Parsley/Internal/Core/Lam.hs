@@ -12,35 +12,36 @@ data Lam a where
     F   :: Lam Bool
 
 normalise :: Lam a -> Lam a
-normalise x = reduce x
+normalise x = if normal x then x else reduce x
   where
     reduce :: Lam a -> Lam a
-    reduce x
-      | normal x = x
-      | otherwise = reduce (reduceStep x)
-
-    reduceStep :: Lam a -> Lam a
-    reduceStep (App (Abs f) x) = f x
-    reduceStep (App f x)
-      | normal f = App f (reduceStep x)
-      | otherwise = App (reduceStep f) x
-    reduceStep (If T x _) = x
-    reduceStep (If F _ y) = y
-    reduceStep x = x
+    reduce (App (Abs f) x) = case f x of
+      x | normal x -> x
+      x            -> reduce x
+    reduce (App f x) = case reduce f of
+      f@(Abs _) -> reduce (App f x)
+      f         -> App f x
+    reduce (If c x y) = case reduce c of
+      T -> x
+      F -> y
+      c -> If c x y
+    reduce x = x
 
     normal :: Lam a -> Bool
     normal (App (Abs _) _) = False
-    normal (App f x) = normal f && normal x
+    normal (App f _) = normal f
     normal (If T _ _) = False
     normal (If F _ _) = False
+    normal (If x _ _) = normal x
     normal _ = True
 
 generate :: Lam a -> Code a
 generate (Abs f)    = [||\x -> $$(normaliseGen (f (Var True [||x||])))||]
--- These have already been reduced, since we only expose `normaliseGen`
-generate (App f x)  = [||$$(generate f) $$(generate x)||]
+-- f has already been reduced, since we only expose `normaliseGen`
+generate (App f x)  = [||$$(generate f) $$(normaliseGen x)||]
 generate (Var _ x)  = x
-generate (If c t e) = [||if $$(normaliseGen c) then $$(normaliseGen t) else $$(normaliseGen e)||]
+-- c has already been reduced, since we only expose `normaliseGen`
+generate (If c t e) = [||if $$(generate c) then $$(normaliseGen t) else $$(normaliseGen e)||]
 generate (Let b i)  = [||let x = $$(normaliseGen b) in $$(normaliseGen (i (Var True [||x||])))||]
 generate T          = [||True||]
 generate F          = [||False||]

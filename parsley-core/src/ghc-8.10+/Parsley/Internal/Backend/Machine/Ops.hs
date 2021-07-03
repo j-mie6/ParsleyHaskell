@@ -22,7 +22,7 @@ import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
 import GHC.Exts                                      (Int(..), (-#))
 import Language.Haskell.TH.Syntax                    (liftTyped)
-import Parsley.Internal.Backend.Machine.Defunc       (Defunc(OFFSET), genDefunc, pattern FREEVAR)
+import Parsley.Internal.Backend.Machine.Defunc       (Defunc(OFFSET), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep     (Rep{-, representationTypes-})
@@ -51,11 +51,8 @@ derivation(Text)
 type Ops o = (HandlerOps o, JoinBuilder o, RecBuilder o, PositionOps o, MarshalOps o, LogOps (Rep o))
 
 {- Input Operations -}
-sat :: (?ops :: InputOps (Rep o)) => (Code Char -> Code Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
-sat p k bad γ@Γ{..} = next input $ \c input' -> [||
-    if $$(p c) then $$(k (γ {operands = Op (FREEVAR c) operands, input = input'}))
-    else $$bad
-  ||]
+sat :: (?ops :: InputOps (Rep o)) => (Defunc Char -> Defunc Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat p k bad γ@Γ{..} = next input $ \c input' -> let v = FREEVAR c in _if (p v) (k (γ {operands = Op v operands, input = input'})) bad
 
 emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ

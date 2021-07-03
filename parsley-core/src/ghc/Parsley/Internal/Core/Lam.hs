@@ -26,7 +26,7 @@ normalise x = reduce x
       | otherwise = App (reduceStep f) x
     reduceStep (If T x _) = x
     reduceStep (If F _ y) = y
-    reduceStep (If c x y) | normal c = If (reduceStep c) x y
+    reduceStep (If c x y) | not (normal c) = If (reduceStep c) x y
     reduceStep x = x
 
     normal :: Lam a -> Bool

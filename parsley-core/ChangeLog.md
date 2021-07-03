@@ -26,7 +26,11 @@
   * Return continuations are also static functions, reducing beta-reduction required by GHC, `halt` generates better code
   * Recursive calls are also static functions, removing a lot of junk with the conversion from iterators to recursion
 * Registers are now bound once for recursive parsers, which close over their free-registers
-* Strictness has been updated to reflect the reduced burden on GHC to optimise: now strictness is for performance, and 
+* Strictness has been updated to reflect the reduced burden on GHC to optimise: now strictness is for performance, and
   not to coax GHC to optimise at the cost of performance
 * Removed the "bad" binding for `Sat`, handlers are always bound on creation, so the binding is basically meaningless
 * Performance on 8.10+ is anywhere from 10-20% faster than 1.1.0.0
+
+## 1.2.0.1 -- 2021-07-03
+
+* Added Jump-Elision optimisation to the code generator.

@@ -32,11 +32,11 @@ letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o a)
                        -> Code b
 letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
   do -- Make a bunch of names
-     names <- traverseWithKey (\k (LetBinding _ rs) -> Const . (, Some rs) <$> newName (nameOf k)) bindings
+     names <- traverseWithKey (\k (LetBinding _ rs) -> Const . (, rs) <$> newName (nameOf k)) bindings
      -- Wrap them up so that they are valid typed template haskell names
      let typedNames = DMap.map makeTypedName names
      -- Generate each binding providing them with the names
-     let makeDecl (k :=> LetBinding body frees) =
+     let makeDecl (k :=> LetBinding body (Some frees)) =
           do let Const (name, _) = names ! k
              func <- unTypeCode (genBinding k body frees typedNames)
              return (FunD name [Clause [] (NormalB func) []])

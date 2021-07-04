@@ -16,7 +16,7 @@ import Data.STRef                           (newSTRef, readSTRef, writeSTRef)
 import Parsley.Internal.Common.Indexed      (Fix, cata, Const1(..), (:*:)(..), zipper)
 import Parsley.Internal.Common.State        (State, MonadState, execState, modify')
 import Parsley.Internal.Core.CombinatorAST  (Combinator(..), traverseCombinator)
-import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), IΣVar, ΣVar(..))
+import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), IΣVar, ΣVar, SomeΣVar(..), getIΣVar)
 
 import qualified Data.Dependent.Map as DMap (foldrWithKey, filterWithKey)
 import qualified Data.Map.Strict    as Map  ((!), empty, insert, mapMaybeWithKey, findMax, elems, lookup, foldMapWithKey)
@@ -27,7 +27,7 @@ type Graph = Array IMVar [IMVar]
 -- TODO This actually should be in the backend... dead bindings and the topological ordering can be computed here
 --      but the register stuff should come after register optimisation and instruction peephole
 
-dependencyAnalysis :: Fix Combinator a -> DMap MVar (Fix Combinator) -> (DMap MVar (Fix Combinator), Map IMVar (Set IΣVar), IΣVar)
+dependencyAnalysis :: Fix Combinator a -> DMap MVar (Fix Combinator) -> (DMap MVar (Fix Combinator), Map IMVar (Set SomeΣVar), IΣVar)
 dependencyAnalysis toplevel μs =
   let -- Step 1: find roots of the toplevel
       roots = directDependencies toplevel
@@ -55,7 +55,7 @@ dependencyAnalysis toplevel μs =
                              in Just $ (uses \\ defs) `union` (subUses \\ subDefs)
         | otherwise        = Nothing
       trueRegs = Map.mapMaybeWithKey addNewRegs usedRegisters
-      largestRegister = fromMaybe (-1) (Set.lookupMax (Map.foldMapWithKey (const id) definedRegisters))
+      largestRegister = fromMaybe (-1) (fmap getIΣVar (Set.lookupMax (Map.foldMapWithKey (const id) definedRegisters)))
   in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, trueRegs, largestRegister)
 
 minMax :: Ord a => [a] -> (a, a)
@@ -108,9 +108,9 @@ dfs hasSeen setSeen graph = go
 
 -- IMMEDIATE DEPENDENCY MAPS
 data DependencyMaps = DependencyMaps {
-  usedRegisters         :: Map IMVar (Set IΣVar), -- Leave Lazy
+  usedRegisters         :: Map IMVar (Set SomeΣVar), -- Leave Lazy
   immediateDependencies :: Map IMVar (Set IMVar), -- Could be Strict
-  definedRegisters      :: Map IMVar (Set IΣVar)
+  definedRegisters      :: Map IMVar (Set SomeΣVar)
 }
 
 buildDependencyMaps :: DMap MVar (Fix Combinator) -> DependencyMaps
@@ -120,7 +120,7 @@ buildDependencyMaps = DMap.foldrWithKey (\(MVar v) p deps@DependencyMaps{..} ->
           , immediateDependencies = Map.insert v ds immediateDependencies
           , definedRegisters = Map.insert v defs definedRegisters}) (DependencyMaps Map.empty Map.empty Map.empty)
 
-freeRegistersAndDependencies :: IMVar -> Fix Combinator a -> (Set IΣVar,  Set IΣVar, Set IMVar)
+freeRegistersAndDependencies :: IMVar -> Fix Combinator a -> (Set SomeΣVar,  Set SomeΣVar, Set IMVar)
 freeRegistersAndDependencies v p =
   let frsm :*: depsm = zipper freeRegistersAlg (dependenciesAlg (Just v)) p
       (frs, defs) = runFreeRegisters frsm
@@ -145,8 +145,8 @@ dependsOn :: MonadState (Set IMVar) m => MVar a -> m ()
 dependsOn (MVar v) = modify' (insert v)
 
 -- FREE REGISTER ANALYSIS
-newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: State (Set IΣVar, Set IΣVar) () }
-runFreeRegisters :: FreeRegisters a -> (Set IΣVar, Set IΣVar)
+newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: State (Set SomeΣVar, Set SomeΣVar) () }
+runFreeRegisters :: FreeRegisters a -> (Set SomeΣVar, Set SomeΣVar)
 runFreeRegisters = flip execState (empty, empty) . doFreeRegisters
 
 {-# INLINE freeRegistersAlg #-}
@@ -157,8 +157,8 @@ freeRegistersAlg (MakeRegister σ p q) = FreeRegisters $ do defs σ; doFreeRegis
 freeRegistersAlg Let{}                = FreeRegisters $ do return () -- TODO This can be removed when Let doesn't have the body in it...
 freeRegistersAlg p                    = FreeRegisters $ do traverseCombinator (fmap Const1 . doFreeRegisters) p; return ()
 
-uses :: MonadState (Set IΣVar, vs) m => ΣVar a -> m ()
-uses (ΣVar σ) = modify' (first (insert σ)) --tell (singleton σ, mempty)
+uses :: MonadState (Set SomeΣVar, vs) m => ΣVar a -> m ()
+uses σ = modify' (first (insert (SomeΣVar σ)))
 
-defs :: MonadState (vs, Set IΣVar) m => ΣVar a -> m ()
-defs (ΣVar σ) = modify' (second (insert σ)) --tell (mempty, singleton σ)
+defs :: MonadState (vs, Set SomeΣVar) m => ΣVar a -> m ()
+defs σ = modify' (second (insert (SomeΣVar σ)))

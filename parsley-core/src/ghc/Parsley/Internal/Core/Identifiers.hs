@@ -3,10 +3,11 @@
              GeneralizedNewtypeDeriving #-}
 module Parsley.Internal.Core.Identifiers (
     MVar(..), IMVar,
-    ΣVar(..), IΣVar,
+    ΣVar(..), IΣVar, SomeΣVar(..), getIΣVar
   ) where
 
 import Data.Array        (Ix)
+import Data.Function     (on)
 import Data.GADT.Compare (GEq, GCompare, gcompare, geq, GOrdering(..))
 import Data.Kind         (Type)
 import Data.Typeable     ((:~:)(Refl))
@@ -31,6 +32,14 @@ instance GCompare ΣVar where
     LT -> GLT
     EQ -> case geq σ1 σ2 of Just Refl -> GEQ
     GT -> GGT
+
+data SomeΣVar = forall r. SomeΣVar (ΣVar r)
+instance Eq SomeΣVar where (==) = (==) `on` getIΣVar
+instance Ord SomeΣVar where compare = compare `on` getIΣVar
+instance Show SomeΣVar where show (SomeΣVar σ) = show σ
+
+getIΣVar :: SomeΣVar -> IΣVar
+getIΣVar (SomeΣVar (ΣVar σ)) = σ
 
 instance GEq MVar where
   geq (MVar u) (MVar v)

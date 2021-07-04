@@ -1,6 +1,4 @@
-{-# LANGUAGE ExistentialQuantification,
-             StandaloneDeriving,
-             DerivingStrategies #-}
+{-# LANGUAGE PatternSynonyms #-}
 module Parsley.Internal.Backend.Machine.LetBindings (
     LetBinding(..),
     Regs(..),
@@ -11,22 +9,20 @@ module Parsley.Internal.Backend.Machine.LetBindings (
 import Prelude hiding                                (foldr)
 import Data.Kind                                     (Type)
 import Data.Set                                      (Set, foldr)
-import Parsley.Internal.Backend.Machine.Identifiers  (IΣVar, ΣVar(..))
+import Data.Some                                     (Some, pattern Some)
+import Parsley.Internal.Backend.Machine.Identifiers  (ΣVar, SomeΣVar(..))
 import Parsley.Internal.Backend.Machine.Instructions (Instr)
 import Parsley.Internal.Common                       (Fix4, One)
-import Unsafe.Coerce                                 (unsafeCoerce)
 
 type Binding o a x = Fix4 (Instr o) '[] One x a
-data LetBinding o a x = forall rs. LetBinding (Binding o a x) (Regs rs)
-deriving stock instance Show (LetBinding o a x)
+data LetBinding o a x = LetBinding (Binding o a x) (Some Regs)
 
-makeLetBinding :: Binding o a x -> Set IΣVar -> LetBinding o a x
-makeLetBinding m rs = LetBinding m (unsafeMakeRegs rs)
+makeLetBinding :: Binding o a x -> Set SomeΣVar -> LetBinding o a x
+makeLetBinding m rs = LetBinding m (makeRegs rs)
 
 data Regs (rs :: [Type]) where
   NoRegs :: Regs '[]
   FreeReg :: ΣVar r -> Regs rs -> Regs (r : rs)
-deriving stock instance Show (Regs rs)
 
-unsafeMakeRegs :: Set IΣVar -> Regs rs
-unsafeMakeRegs =  foldr (\σ rs -> unsafeCoerce (FreeReg (ΣVar σ) rs)) (unsafeCoerce NoRegs)
+makeRegs :: Set SomeΣVar -> Some Regs
+makeRegs = foldr (\(SomeΣVar σ) (Some rs) -> Some (FreeReg σ rs)) (Some NoRegs)

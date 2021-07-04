@@ -26,6 +26,8 @@ jobs:
         run: |
           cabal update
           cabal freeze $CONFIG
+
+      - name: Check Cache
         uses: actions/cache@v2
         with:
           path: |

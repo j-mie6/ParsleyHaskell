@@ -8,7 +8,7 @@ import Control.Monad.Trans                           (lift)
 import Parsley.Internal.Backend.Machine              (Defunc(SAME), user, userBool, LetBinding, makeLetBinding, Instr(..),
                                                       _Fmap, _App, _Modify, _Get, _Put, _Make, _If,
                                                       addCoins, refundCoins, drainCoins, PositionOps,
-                                                      IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..))
+                                                      IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
 import Parsley.Internal.Backend.InstructionAnalyser  (coinsNeeded)
 import Parsley.Internal.Common.Fresh                 (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
 import Parsley.Internal.Common.Indexed               (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
@@ -29,8 +29,8 @@ newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
 {-# INLINEABLE codeGen #-}
-codeGen :: (Trace, PositionOps o) => Maybe (MVar x) -> Fix Combinator x -> Set IΣVar -> IMVar -> IΣVar -> LetBinding o a x
-codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (map ΣVar (elems rs)) ++ " => " ++ show m) $ makeLetBinding m rs
+codeGen :: (Trace, PositionOps o) => Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> IΣVar -> LetBinding o a x
+codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs
   where
     name = maybe "TOP LEVEL" show letBound
     m = finalise (histo alg p)

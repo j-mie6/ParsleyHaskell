@@ -19,7 +19,7 @@ import Parsley.Internal.Backend.Machine.InputRep      (Rep)
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
-import Parsley.Internal.Backend.Machine.Offset        (mkOffset)
+import Parsley.Internal.Backend.Machine.Offset        (mkOffset, offset)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.State
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -75,10 +75,10 @@ evalRet :: MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
 evalCall :: forall s o a x xs n r. MarshalOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation @o sub (suspend mk γ) input handlers) k (askSub μ)
+evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation @o sub (suspend mk γ) (offset input) handlers) k (askSub μ)
 
 evalJump :: forall s o a x n. MarshalOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
-evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input handlers
+evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont (offset input) handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
@@ -135,7 +135,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
 evalIter :: RecBuilder o
          => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
          -> MachineMonad s o xs n r a
-evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ)) h ask
+evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (offset (input γ))) h ask
 
 evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume

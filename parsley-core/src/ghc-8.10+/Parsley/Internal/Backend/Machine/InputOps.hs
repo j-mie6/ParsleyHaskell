@@ -86,8 +86,8 @@ instance InputPrep CharList where
           next (# i#, c:cs #) = (# c, (# i# +# 1#, cs #) #)
           I# size# = length input
           more (# i#, _ #) = $$(intLess [||i#||] [||size#||])
-          --more (OffWith _ []) = False
-          --more _              = True
+          --more (# _, [] #) = False
+          --more _            = True
       in (# next, more, $$(offWith [||input||]) #)
     ||]
 

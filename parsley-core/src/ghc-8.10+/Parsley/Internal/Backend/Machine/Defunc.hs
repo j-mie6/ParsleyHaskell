@@ -4,6 +4,7 @@ module Parsley.Internal.Backend.Machine.Defunc (module Parsley.Internal.Backend.
 import Data.Proxy                                (Proxy(Proxy))
 import Parsley.Internal.Backend.Machine.InputOps (PositionOps(same))
 import Parsley.Internal.Backend.Machine.InputRep (Rep)
+import Parsley.Internal.Backend.Machine.Offset   (Offset, offset)
 import Parsley.Internal.Common.Utils             (Code)
 import Parsley.Internal.Core.Lam                 (Lam, normaliseGen, normalise)
 
@@ -14,7 +15,7 @@ data Defunc a where
   LAM     :: Lam a -> Defunc a
   BOTTOM  :: Defunc a
   SAME    :: PositionOps o => Defunc (o -> o -> Bool)
-  OFFSET  :: Code (Rep o) -> Defunc o
+  OFFSET  :: Offset o -> Defunc o
 
 user :: Core.Defunc a -> Defunc a
 user = LAM . Core.lamTerm
@@ -26,7 +27,7 @@ ap :: Defunc (a -> b) -> Defunc a -> Defunc b
 ap f x = LAM (Lam.App (unliftDefunc f) (unliftDefunc x))
 
 ap2 :: Defunc (a -> b -> c) -> Defunc a -> Defunc b -> Defunc c
-ap2 f@SAME (OFFSET o1) (OFFSET o2) = LAM (Lam.Var False (apSame f o1 o2))
+ap2 f@SAME (OFFSET o1) (OFFSET o2) = LAM (Lam.Var False (apSame f (offset o1) (offset o2)))
   where
     apSame :: forall o. Defunc (o -> o -> Bool) -> Code (Rep o) -> Code (Rep o) -> Code Bool
     apSame SAME = same (Proxy @o)

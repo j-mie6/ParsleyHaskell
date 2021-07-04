@@ -75,6 +75,9 @@ library
                        Parsley.Internal.Backend.Machine.Ops,
                        Parsley.Internal.Backend.Machine.State
 
+  if impl(ghc >= 8.10)
+    exposed-modules:   Parsley.Internal.Backend.Machine.Offset
+
   default-extensions:  BangPatterns,
                        DataKinds,
                        GADTs,

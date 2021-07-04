@@ -31,6 +31,7 @@ import Parsley.Internal.Backend.Machine.Defunc      (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.InputRep    (Rep)
 import Parsley.Internal.Backend.Machine.LetBindings (Regs(..))
+import Parsley.Internal.Backend.Machine.Offset      (Offset)
 import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
@@ -102,7 +103,7 @@ data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
 
 data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , retCont  :: StaCont s o a r
-                        , input    :: Code (Rep o)
+                        , input    :: Offset o
                         , handlers :: Vec n (StaHandler s o a) }
 
 data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)

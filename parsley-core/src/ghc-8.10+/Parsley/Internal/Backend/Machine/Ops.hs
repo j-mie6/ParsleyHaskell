@@ -5,6 +5,7 @@
              CPP,
              ImplicitParams,
              MagicHash,
+             NamedFieldPuns,
              PatternSynonyms,
              RecordWildCards,
              TypeApplications #-}
@@ -28,6 +29,7 @@ import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..
 import Parsley.Internal.Backend.Machine.InputRep     (Rep{-, representationTypes-})
 import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
+import Parsley.Internal.Backend.Machine.Offset       (Offset(..), moveOne, mkOffset)
 import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Machine(..), MachineMonad, StaSubRoutine, OpStack(..), DynFunc,
                                                       StaHandler(..), StaCont(..), DynHandler, DynCont, staHandler#, mkStaHandler, staCont#, mkStaCont,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel,
@@ -52,13 +54,13 @@ type Ops o = (HandlerOps o, JoinBuilder o, RecBuilder o, PositionOps o, MarshalO
 
 {- Input Operations -}
 sat :: (?ops :: InputOps (Rep o)) => (Defunc Char -> Defunc Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
-sat p k bad γ@Γ{..} = next input $ \c input' -> let v = FREEVAR c in _if (p v) (k (γ {operands = Op v operands, input = input'})) bad
+sat p k bad γ@Γ{..} = next (offset input) $ \c offset' -> let v = FREEVAR c in _if (p v) (k (γ {operands = Op v operands, input = moveOne input offset'})) bad
 
 emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
-emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
+emitLengthCheck 1 good bad γ = [|| if $$more $$(offset (input γ)) then $$(good γ) else $$bad ||]
 emitLengthCheck (I# n) good bad γ = [||
-  if $$more $$(shiftRight (Proxy @o) (input γ) (liftTyped (n -# 1#))) then $$(good γ)
+  if $$more $$(shiftRight (Proxy @o) (offset (input γ)) (liftTyped (n -# 1#))) then $$(good γ)
   else $$bad ||]
 
 {- General Operations -}
@@ -95,15 +97,15 @@ readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
 {- Handler Operations -}
 buildHandler :: Γ s o xs n r a
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
-             -> Code (Rep o) -> StaHandler s o a
-buildHandler γ h c = mkStaHandler $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = o#})
+             -> Offset o -> StaHandler s o a
+buildHandler γ h c = mkStaHandler $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# 0})
 
 fatal :: forall o s a. StaHandler s o a
 fatal = mkStaHandler $ const [|| returnST Nothing ||]
 
 class HandlerOps o where
   bindHandler :: Γ s o xs n r a
-              -> (Code (Rep o) -> StaHandler s o a)
+              -> (Offset o -> StaHandler s o a)
               -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
 
 #define deriveHandlerOps(_o)                                                    \
@@ -117,11 +119,11 @@ instance HandlerOps _o where                                                    
 inputInstances(deriveHandlerOps)
 
 raise :: Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
-raise γ = let VCons h _ = handlers γ in staHandler# h (input γ)
+raise γ = let VCons h _ = handlers γ in staHandler# h (offset (input γ))
 
 {- Control Flow Operations -}
 suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> StaCont s o a x
-suspend m γ = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = o#})
+suspend m γ = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = mkOffset o# 0})
 
 halt :: forall o s a. StaCont s o a a
 halt = mkStaCont $ \x _ -> [||returnST $! Just $$x||]
@@ -129,11 +131,11 @@ halt = mkStaCont $ \x _ -> [||returnST $! Just $$x||]
 noreturn :: forall o s a. StaCont s o a Void
 noreturn = mkStaCont $ \_ _ -> [||error "Return is not permitted here"||]
 
-callWithContinuation :: forall o s a x n. MarshalOps o => StaSubRoutine s o a x -> StaCont s o a x -> Code (Rep o) -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
-callWithContinuation sub ret input (VCons h _) = sub (dynCont @o ret) input (dynHandler @o h)
+callWithContinuation :: forall o s a x n. MarshalOps o => StaSubRoutine s o a x -> StaCont s o a x -> Offset o -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
+callWithContinuation sub ret input (VCons h _) = sub (dynCont @o ret) (offset input) (dynHandler @o h)
 
 resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
-resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (input γ)
+resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (offset (input γ))
 
 {- Builder Operations -}
 class JoinBuilder o where
@@ -141,44 +143,44 @@ class JoinBuilder o where
 
 class RecBuilder o where
   buildIter :: Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-            -> (Code (Rep o) -> StaHandler s o a) -> Code (Rep o) -> Code (ST s (Maybe a))
+            -> (Offset o -> StaHandler s o a) -> Offset o -> Code (ST s (Maybe a))
   buildRec  :: MVar r
             -> Regs rs
             -> Ctx s o a
             -> Machine s o '[] One r a
             -> DynFunc rs s o a r
 
-#define deriveJoinBuilder(_o)                                                       \
-instance JoinBuilder _o where                                                       \
-{                                                                                   \
-  setupJoinPoint φ (Machine k) mx =                                                 \
-    liftM2 (\mk ctx γ -> [||                                                        \
-      let join x !(o# :: Rep _o) =                                                  \
-        $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = [||o#||]})) \
-      in $$(run mx γ (insertΦ φ (staCont @_o [||join||]) ctx))                      \
-    ||]) (local voidCoins k) ask;                                                   \
+#define deriveJoinBuilder(_o)                                                                  \
+instance JoinBuilder _o where                                                                  \
+{                                                                                              \
+  setupJoinPoint φ (Machine k) mx =                                                            \
+    liftM2 (\mk ctx γ -> [||                                                                   \
+      let join x !(o# :: Rep _o) =                                                             \
+        $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = mkOffset [||o#||] 0})) \
+      in $$(run mx γ (insertΦ φ (staCont @_o [||join||]) ctx))                                 \
+    ||]) (local voidCoins k) ask;                                                              \
 };
 inputInstances(deriveJoinBuilder)
 
-#define deriveRecBuilder(_o)                                                                               \
-instance RecBuilder _o where                                                                               \
-{                                                                                                          \
-  buildIter ctx μ l h o = [||                                                                              \
-      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(staHandler# (h [||c#||]) [||o#||]);                  \
-          loop !(o# :: Rep _o) =                                                                           \
-        $$(run l                                                                                           \
-            (Γ Empty (noreturn @_o) [||o#||] (VCons (staHandler @_o [||handler o#||]) VNil))               \
-            (voidCoins (insertSub μ (\_ o# _ -> [|| loop $$(o#) ||]) ctx)))                                \
-      in loop $$o                                                                                          \
-    ||];                                                                                                   \
-  buildRec μ rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                  \
-    {- The idea here is to try and reduce the number of times registers have to be passed around -}        \
-    {-[|| \ ret !(o# :: Rep _o) h ->                                                                       \
-      $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]-} \
-    [|| let self ret !(o# :: Rep _o) h =                                                                   \
-          $$(run k                                                                                         \
-              (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil))             \
-              (insertSub μ (\k o# h -> [|| self $$k $$(o#) $$h ||]) ctx)) in self ||]  );                  \
+#define deriveRecBuilder(_o)                                                                                \
+instance RecBuilder _o where                                                                                \
+{                                                                                                           \
+  buildIter ctx μ l h o = [||                                                                               \
+      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(staHandler# (h (mkOffset [||c#||] 0)) [||o#||]);      \
+          loop !(o# :: Rep _o) =                                                                            \
+        $$(run l                                                                                            \
+            (Γ Empty (noreturn @_o) (mkOffset [||o#||] 0) (VCons (staHandler @_o [||handler o#||]) VNil))   \
+            (voidCoins (insertSub μ (\_ o# _ -> [|| loop $$(o#) ||]) ctx)))                                 \
+      in loop $$(offset o)                                                                                  \
+    ||];                                                                                                    \
+  buildRec μ rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                   \
+    {- The idea here is to try and reduce the number of times registers have to be passed around -}         \
+    {-[|| \ ret !(o# :: Rep _o) h ->                                                                        \
+      $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]-}  \
+    [|| let self ret !(o# :: Rep _o) h =                                                                    \
+          $$(run k                                                                                          \
+              (Γ Empty (staCont @_o [||ret||]) (mkOffset [||o#||] 0) (VCons (staHandler @_o [||h||]) VNil)) \
+              (insertSub μ (\k o# h -> [|| self $$k $$(o#) $$h ||]) ctx)) in self ||]  );                   \
 };
 inputInstances(deriveRecBuilder)
 
@@ -206,29 +208,29 @@ inputInstances(deriveMarshalOps)
 {- Debugger Operations -}
 type LogHandler o = (PositionOps o, LogOps (Rep o))
 
-logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code (Rep o) -> StaHandler s o a
+logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Offset o -> StaHandler s o a
 logHandler name ctx γ _ = let VCons h _ = handlers γ in mkStaHandler $ \o# -> [||
-    trace $$(preludeString name '<' (γ {input = o#}) ctx (color Red " Fail")) $$(staHandler# h o#)
+    trace $$(preludeString name '<' (γ {input = mkOffset o# 0}) ctx (color Red " Fail")) $$(staHandler# h o#)
   ||]
 
 preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    offset     = input γ
-    proxy      = Proxy @o
-    indent     = replicate (debugLevel ctx * 2) ' '
-    start      = shiftLeft offset [||5#||]
-    end        = shiftRight proxy offset [||5#||]
-    inputTrace = [|| let replace '\n' = color Green "↙"
-                         replace ' '  = color White "·"
-                         replace c    = return c
-                         go i#
-                           | $$(same proxy [||i#||] end) || not ($$more i#) = []
-                           | otherwise = $$(next [||i#||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
-                     in go $$start ||]
-    eof        = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]
-    prelude    = [|| concat [indent, dir : name, dir : " (", show ($$(offToInt offset)), "): "] ||]
-    caretSpace = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
+    Offset {offset} = input γ
+    proxy           = Proxy @o
+    indent          = replicate (debugLevel ctx * 2) ' '
+    start           = shiftLeft offset [||5#||]
+    end             = shiftRight proxy offset [||5#||]
+    inputTrace      = [|| let replace '\n' = color Green "↙"
+                              replace ' '  = color White "·"
+                              replace c    = return c
+                              go i#
+                                | $$(same proxy [||i#||] end) || not ($$more i#) = []
+                                | otherwise = $$(next [||i#||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
+                          in go $$start ||]
+    eof             = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]
+    prelude         = [|| concat [indent, dir : name, dir : " (", show ($$(offToInt offset)), "): "] ||]
+    caretSpace      = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
 
 -- RIP Dream :(
 {-$(let derive _o = [d|

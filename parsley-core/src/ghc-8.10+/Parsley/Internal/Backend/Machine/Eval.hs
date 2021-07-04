@@ -19,6 +19,7 @@ import Parsley.Internal.Backend.Machine.InputRep      (Rep)
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
+import Parsley.Internal.Backend.Machine.Offset        (mkOffset)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.State
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -34,7 +35,7 @@ eval input (LetBinding !p _) fs = trace ("EVALUATING TOP LEVEL") [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (\names -> run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) (emptyCtx names)))
+             (\names -> run (readyMachine p) (Γ Empty (halt @o) (mkOffset [||offset||] 0) (VCons (fatal @o) VNil)) (emptyCtx names)))
   ||]
   where
     nameLet :: MVar x -> String

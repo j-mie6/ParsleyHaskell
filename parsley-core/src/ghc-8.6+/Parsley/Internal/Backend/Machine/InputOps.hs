@@ -85,10 +85,8 @@ instance InputPrep CharList where
   prepare qinput = [||
       let CharList input = $$qinput
           next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
-          size = length input
-          more (OffWith i _) = i < size
-          --more (OffWith _ []) = False
-          --more _              = True
+          more (OffWith _ []) = False
+          more _              = True
       in InputDependant next more ($$offWith input)
     ||]
 

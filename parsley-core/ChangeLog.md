@@ -49,3 +49,4 @@ backward incompatiblity _unless_ the `Parsley.Internal.*` modules are imported:
 this meets requirements for internal major change.
 
 * Removed an `unsafeCoerce` from register creation, using more existentials.
+* Changed `CharList`'s `more` check to test for `[]` and not length (faster!)

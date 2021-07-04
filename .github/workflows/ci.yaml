@@ -22,9 +22,12 @@ jobs:
           ghc-version: ${{ matrix.ghc }}
           cabal-version: '3.4.0.0'
 
-      - run: cabal update
-      - run: cabal freeze $CONFIG
+      - name: Determine Dependencies
+        run: |
+          cabal update
+          cabal freeze $CONFIG
       - uses: actions/cache@v2
+        id: Check Cache
         with:
           path: |
             ~/.cabal/store

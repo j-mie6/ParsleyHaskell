@@ -41,7 +41,7 @@
 * Preliminary support for `if true` reduction from `item` and `const True`
 * Introduced `_if` and `ap` in `Machine.Defunc`, removed `genDefunc1`
 
-## 1.4.0.0 -- 2021-07-04
+## 1.4.0.0 -- TBD (THIS IS NOT RELEASED YET)
 NOTE: The API exposed to `parsley` has changed, however, the changed types match up
 and the underlying types are not exposed. This means that `parsley` cannot write
 the type down to begin with, so the API change does not _actually_ result in any

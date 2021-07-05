@@ -8,7 +8,7 @@ import qualified Parsley.Precedence.Parsers as Parsers
 
 import Prelude hiding ()
 import Parsley (runParser, empty, Parser)
-import Parsley.Patterns (deriveSubtype, deriveLiftedConstructors, deriveSingletonConstructors, Pos)
+import Parsley.Patterns (deriveSubtype, deriveLiftedConstructors, deriveDeferredConstructors, Pos)
 import Parsley.Precedence (Subtype(..))
 
 data Foo where
@@ -22,7 +22,7 @@ data X a = X a a Pos
 deriveSubtype ''Bar ''Foo
 deriveLiftedConstructors "mk" ['X]
 deriveLiftedConstructors "mk" ['Bar, 'Goo]
-deriveSingletonConstructors "mkS" ['X]
+deriveDeferredConstructors "mkS" ['X]
 
 testParser :: Parser (X a)
 testParser = mkX empty empty

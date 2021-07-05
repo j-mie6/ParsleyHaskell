@@ -3,7 +3,7 @@
              ViewPatterns #-}
 module Parsley.Patterns (
     Pos,
-    deriveLiftedConstructors, deriveSingletonConstructors,
+    deriveLiftedConstructors, deriveDeferredConstructors,
     deriveSubtype, deriveSubtypeUsing
   ) where
 
@@ -53,8 +53,8 @@ deriveLiftedConstructors prefix = fmap concat . traverse deriveCon
     buildType :: (Q Type -> Q Type) -> [Q Type] -> Q Type
     buildType forall tys = forall (foldr (\ty rest -> [t|Parser $ty -> $rest|]) [t|Parser $(last tys)|] (init tys))
 
-deriveSingletonConstructors :: String -> [Name] -> Q [Dec]
-deriveSingletonConstructors prefix = fmap concat . traverse deriveCon
+deriveDeferredConstructors :: String -> [Name] -> Q [Dec]
+deriveDeferredConstructors prefix = fmap concat . traverse deriveCon
   where
     deriveCon :: Name -> Q [Dec]
     deriveCon con = do

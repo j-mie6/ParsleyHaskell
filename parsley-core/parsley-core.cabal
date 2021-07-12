@@ -132,4 +132,4 @@ library
 
 source-repository head
   type:                git
-  location:            https://github.com/j-mie6/HaskellParsley
+  location:            https://github.com/j-mie6/ParsleyHaskell

@@ -10,7 +10,7 @@ import Parsley
 import Parsley.Combinator (token, oneOf, noneOf, eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
 import Parsley.Precedence (precedence, monolith, prefix, postfix, infixR, infixL)
-import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED), pattern FLIP_H, pattern COMPOSE_H)
+import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED, LAM_S), pattern FLIP_H, pattern COMPOSE_H)
 import JavascriptBench.Shared
 import Data.Char (isSpace, isUpper, digitToInt, isDigit)
 import Data.Maybe (catMaybes)
@@ -93,7 +93,7 @@ javascript = whitespace *> many element <* eof
     conCall = identifier <**>
                 (dot *> (FLIP_H [|JSQual|] <$> conCall)
              <|> FLIP_H [|JSConCall|] <$> parens (commaSep asgn)
-             <|> pure (makeQ (\name -> JSConCall name []) [||\name -> JSConCall name []||]))
+             <|> pure (LAM_S $ \name -> [|JSConCall $name []|]))
     member :: Parser JSMember
     member = primaryExpr <**>
                 (FLIP_H [|JSCall|] <$> parens (commaSep asgn)
@@ -164,7 +164,7 @@ javascript = whitespace *> many element <* eof
     number :: Defunc Int -> Parser Char -> Parser Int
     number qbase digit = pfoldl1 addDigit (LIFTED 0) digit
       where
-        addDigit = [|\x d -> $(qbase) * x + (digitToInt d)|]
+        addDigit = [|\x d -> $qbase * x + digitToInt d|]
 
     stringLiteral :: Parser String
     stringLiteral = [|catMaybes|] <$> between (token "\"") (token "\"") (many stringChar) <* whitespace

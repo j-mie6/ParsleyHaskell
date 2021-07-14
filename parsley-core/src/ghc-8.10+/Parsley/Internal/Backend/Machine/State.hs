@@ -16,12 +16,13 @@ module Parsley.Internal.Backend.Machine.State (
     askSub, askΦ,
     debugUp, debugDown, debugLevel,
     storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
+    freshUnique, nextUnique,
     hasCoin, isBankrupt, liquidate
   ) where
 
 import Control.Exception                            (Exception, throw)
 import Control.Monad                                (liftM2)
-import Control.Monad.Reader                         (asks, MonadReader, Reader, runReader)
+import Control.Monad.Reader                         (asks, local, MonadReader, Reader, runReader)
 import Control.Monad.ST                             (ST)
 import Data.STRef                                   (STRef)
 import Data.Dependent.Map                           (DMap)
@@ -111,10 +112,11 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
                      , σs         :: DMap ΣVar (Reg s)
                      , debugLevel :: Int
                      , coins      :: Int
+                     , offsetUniq :: Word
                      , piggies    :: Queue Int }
 
 emptyCtx :: DMap MVar (QSubRoutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty
 
 insertSub :: MVar x -> StaSubRoutine s o a x -> Ctx s o a -> Ctx s o a
 insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q NoRegs) (μs ctx)}
@@ -181,6 +183,14 @@ isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
 
 spendCoin :: Ctx s o a -> Ctx s o a
 spendCoin ctx = ctx {coins = coins ctx - 1}
+
+nextUnique :: Ctx s o a -> Ctx s o a
+nextUnique ctx = ctx {offsetUniq = offsetUniq ctx + 1}
+
+freshUnique :: MonadReader (Ctx s o a) m => (Word -> m b) -> m b
+freshUnique f =
+  do unique <- asks offsetUniq
+     local nextUnique (f unique)
 
 giveCoins :: Int -> Ctx s o a -> Ctx s o a
 giveCoins c ctx = ctx {coins = coins ctx + c}

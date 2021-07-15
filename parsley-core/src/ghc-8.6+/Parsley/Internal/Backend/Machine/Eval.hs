@@ -11,7 +11,7 @@ import Data.Void                                      (Void)
 import Control.Monad                                  (forM, liftM2)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc, pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc(LAM, SAME), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
@@ -23,7 +23,10 @@ import Parsley.Internal.Common                        (Fix4, cata4, One, Code, V
 import Parsley.Internal.Trace                         (Trace(trace))
 import System.Console.Pretty                          (color, Color(Green))
 
+import Parsley.Internal.Core.Lam (Lam(Abs))
+
 import qualified Debug.Trace (trace)
+import qualified Parsley.Internal.Backend.Machine.Instructions as Instructions (Handler(..))
 
 eval :: forall o a. (Trace, Ops o) => Code (InputDependant o) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
 eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
@@ -51,12 +54,12 @@ readyMachine = cata4 (Machine . alg)
     alg (Sat p k)           = evalSat p k
     alg Empt                = evalEmpt
     alg (Commit k)          = evalCommit k
-    alg (Catch k h)         = evalCatch k h
+    alg (Catch k h)         = evalCatch k (evalHandler h)
     alg (Tell k)            = evalTell k
     alg (Seek k)            = evalSeek k
     alg (Case p q)          = evalCase p q
     alg (Choices fs ks def) = evalChoices fs ks def
-    alg (Iter μ l k)        = evalIter μ l k
+    alg (Iter μ l k)        = evalIter μ l (evalHandler k)
     alg (Join φ)            = evalJoin φ
     alg (MkJoin φ p k)      = evalMkJoin φ p k
     alg (Swap k)            = evalSwap k
@@ -106,6 +109,14 @@ evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ 
 
 evalCatch :: (BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandler γ (buildHandler γ mh) mk) k h
+
+evalHandler :: PositionOps o => Instructions.Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
+evalHandler (Instructions.Always k) = k
+evalHandler (Instructions.Same yes no) =
+  Machine (evalDup (
+    Machine (evalTell (
+      Machine (evalLift2 SAME (
+        Machine (evalChoices [LAM (Abs id)] [yes] no)))))))
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (FREEVAR (input γ)) (operands γ)})

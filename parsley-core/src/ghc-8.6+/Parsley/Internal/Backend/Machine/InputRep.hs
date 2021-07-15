@@ -1,5 +1,4 @@
 {-# LANGUAGE MagicHash,
-             TypeFamilies,
              TypeFamilyDependencies,
              UnboxedTuples #-}
 module Parsley.Internal.Backend.Machine.InputRep (
@@ -119,7 +118,7 @@ textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
       | otherwise = Text arr off' unconsumed'
 
 byteStringShiftRight :: UnpackedLazyByteString -> Int -> UnpackedLazyByteString
-byteStringShiftRight !(UnpackedLazyByteString i addr# final off size cs) j
+byteStringShiftRight (UnpackedLazyByteString i addr# final off size cs) j
   | j < size  = UnpackedLazyByteString (i + j) addr# final (off + j) (size - j) cs
   | otherwise = case cs of
     Lazy.Chunk (PS (ForeignPtr addr'# final') off' size') cs' -> byteStringShiftRight (UnpackedLazyByteString (i + size) addr'# final' off' size' cs') (j - size)

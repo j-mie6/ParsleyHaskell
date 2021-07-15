@@ -2,7 +2,6 @@
 {-# LANGUAGE AllowAmbiguousTypes,
              MagicHash,
              MultiParamTypeClasses,
-             MultiWayIf,
              RecursiveDo,
              UndecidableInstances #-}
 module Parsley.Internal.Frontend.Compiler (compile) where

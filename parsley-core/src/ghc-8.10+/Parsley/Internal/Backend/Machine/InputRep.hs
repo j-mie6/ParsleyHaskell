@@ -98,7 +98,7 @@ offWithSame qi# qj# = [||
 
 offWithShiftRight :: Code (Int -> ts -> ts) -> Code (# Int#, ts #) -> Code Int# -> Code (# Int#, ts #)
 offWithShiftRight drop qo# qi# = [||
-    case $$(qo#) of (# o#, ts #) -> (# (o# +# $$(qi#)), ($$drop (I# $$(qi#)) ts) #)
+    case $$(qo#) of (# o#, ts #) -> (# o# +# $$(qi#), $$drop (I# $$(qi#)) ts #)
   ||]
 
 {-offWithStreamAnd :: ts -> OffWithStreamAnd ts

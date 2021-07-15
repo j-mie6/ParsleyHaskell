@@ -49,7 +49,7 @@ newtype FreshT x m a = FreshT {unFreshT :: x -> x -> m (a, x, x)}
 instance Monad n => RunFreshT x n (FreshT x n) where
   runFreshT k init =
     do (x, _, max) <- unFreshT k init init
-       return $! (x, max)
+       return (x, max)
 
 runFresh :: RunFreshT x Identity m => m a -> x -> (a, x)
 runFresh mx = runIdentity . runFreshT mx
@@ -83,7 +83,7 @@ instance Monad m => Applicative (FreshT x m) where
   liftA2 f (FreshT mx) (FreshT my) = FreshT (\cur max ->
     do (x, cur', max') <- mx cur max
        (y, cur'', max'') <- my cur' max'
-       return $! (f x y, cur'', max''))
+       return (f x y, cur'', max''))
 
 instance Monad m => Monad (FreshT x m) where
   {-# INLINE return #-}
@@ -107,13 +107,13 @@ instance (Monad m, Ord x, Enum x) => MonadFresh x (VFreshT x m) where
   newVar = vFreshT (\cur m -> return (cur, cur, max m cur))
   newScope scoped = vFreshT (\cur max ->
     do (x, _, max') <- unVFreshT scoped (succ cur) max
-       return $! (x, cur, max'))
+       return (x, cur, max'))
 
 instance (Monad m, Ord x, Enum x) => MonadFresh x (HFreshT x m) where
   newVar = hFreshT (\cur m -> return (cur, succ cur, max m cur))
   newScope scoped = hFreshT (\cur max ->
     do (x, _, max') <- unHFreshT scoped cur max
-       return $! (x, cur, max'))
+       return (x, cur, max'))
 
 instance MonadIO m => MonadIO (FreshT x m) where liftIO = lift . liftIO
 instance MonadReader r m => MonadReader r (FreshT x m) where

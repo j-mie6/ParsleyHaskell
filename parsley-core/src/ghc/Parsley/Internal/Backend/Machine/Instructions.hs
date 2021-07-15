@@ -21,12 +21,12 @@ data Instr (o :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type
   Jump      :: MVar x -> Instr o k '[] (Succ n) x a
   Empt      :: Instr o k xs (Succ n) r a
   Commit    :: k xs n r a -> Instr o k xs (Succ n) r a
-  Catch     :: k xs (Succ n) r a -> k (o : xs) n r a -> Instr o k xs n r a
+  Catch     :: k xs (Succ n) r a -> Handler o k (o : xs) n r a -> Instr o k xs n r a
   Tell      :: k (o : xs) n r a -> Instr o k xs n r a
   Seek      :: k xs n r a -> Instr o k (o : xs) n r a
   Case      :: k (x : xs) n r a -> k (y : xs) n r a -> Instr o k (Either x y : xs) n r a
   Choices   :: [Machine.Defunc (x -> Bool)] -> [k xs n r a] -> k xs n r a -> Instr o k (x : xs) n r a
-  Iter      :: MVar Void -> k '[] One Void a -> k (o : xs) n r a -> Instr o k xs n r a
+  Iter      :: MVar Void -> k '[] One Void a -> Handler o k (o : xs) n r a -> Instr o k xs n r a
   Join      :: ΦVar x -> Instr o k (x : xs) n r a
   MkJoin    :: ΦVar x -> k (x : xs) n r a -> k xs n r a -> Instr o k xs n r a
   Swap      :: k (x : y : xs) n r a -> Instr o k (y : x : xs) n r a
@@ -45,6 +45,10 @@ data MetaInstr (n :: Nat) where
   RefundCoins :: Int -> MetaInstr n
   DrainCoins  :: Int -> MetaInstr (Succ n)
 
+data Handler (o :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
+  Same :: k (o : xs) n r a -> k (o : xs) n r a -> Handler o k (o : xs) n r a
+  Always :: k (o : xs) n r a -> Handler o k (o : xs) n r a
+
 mkCoin :: (Int -> MetaInstr n) -> Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 mkCoin _    0 = id
 mkCoin meta n = In4 . MetaInstr (meta n)
@@ -57,7 +61,7 @@ drainCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n
 drainCoins = mkCoin DrainCoins
 
 _App :: Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : (x -> y) : xs) n r a
-_App k = Lift2 (user ID) k
+_App = Lift2 (user ID)
 
 _Fmap :: Machine.Defunc (x -> y) -> Fix4 (Instr o) (y : xs) n r a -> Instr o (Fix4 (Instr o)) (x : xs) n r a
 _Fmap f k = Push f (In4 (Lift2 (user (FLIP_H ID)) k))
@@ -74,10 +78,6 @@ _Put σ = Put σ Hard
 _Get :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
 _Get σ = Get σ Hard
 
--- This this is a nice little trick to get this instruction to generate optimised code
-_If :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a -> Instr o (Fix4 (Instr o)) (Bool : xs) n r a
-_If t e = Choices [user ID] [t] e
-
 instance IFunctor4 (Instr o) where
   imap4 _ Ret                 = Ret
   imap4 f (Push x k)          = Push x (f k)
@@ -88,12 +88,12 @@ instance IFunctor4 (Instr o) where
   imap4 _ (Jump μ)            = Jump μ
   imap4 _ Empt                = Empt
   imap4 f (Commit k)          = Commit (f k)
-  imap4 f (Catch p h)         = Catch (f p) (f h)
+  imap4 f (Catch p h)         = Catch (f p) (imap4 f h)
   imap4 f (Tell k)            = Tell (f k)
   imap4 f (Seek k)            = Seek (f k)
   imap4 f (Case p q)          = Case (f p) (f q)
   imap4 f (Choices fs ks def) = Choices fs (map f ks) (f def)
-  imap4 f (Iter μ l h)        = Iter μ (f l) (f h)
+  imap4 f (Iter μ l h)        = Iter μ (f l) (imap4 f h)
   imap4 _ (Join φ)            = Join φ
   imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
@@ -104,6 +104,10 @@ instance IFunctor4 (Instr o) where
   imap4 f (LogEnter name k)   = LogEnter name (f k)
   imap4 f (LogExit name k)    = LogExit name (f k)
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
+
+instance IFunctor4 (Handler o) where
+  imap4 f (Same yes no) = Same (f yes) (f no)
+  imap4 f (Always k)    = Always (f k)
 
 instance Show (Fix4 (Instr o) xs n r a) where
   show = ($ "") . getConst4 . cata4 (Const4 . alg)
@@ -118,12 +122,12 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (Sat f k)           = "(Sat " . shows f . " " . getConst4 k . ")"
       alg Empt                = "Empt"
       alg (Commit k)          = "(Commit " . getConst4 k . ")"
-      alg (Catch p h)         = "(Catch " . getConst4 p . " " . getConst4 h . ")"
+      alg (Catch p h)         = "(Catch " . getConst4 p . " " . shows h . ")"
       alg (Tell k)            = "(Tell " . getConst4 k . ")"
       alg (Seek k)            = "(Seek " . getConst4 k . ")"
       alg (Case p q)          = "(Case " . getConst4 p . " " . getConst4 q . ")"
       alg (Choices fs ks def) = "(Choices " . shows fs . " [" . intercalateDiff ", " (map getConst4 ks) . "] " . getConst4 def . ")"
-      alg (Iter μ l h)        = "{Iter " . shows μ . " " . getConst4 l . " " . getConst4 h . "}"
+      alg (Iter μ l h)        = "{Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
       alg (Join φ)            = shows φ
       alg (MkJoin φ p k)      = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
       alg (Swap k)            = "(Swap " . getConst4 k . ")"
@@ -134,6 +138,10 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (LogEnter _ k)      = getConst4 k
       alg (LogExit _ k)       = getConst4 k
       alg (MetaInstr m k)     = "[" . shows m . "] " . getConst4 k
+
+instance Show (Handler o (Const4 (String -> String)) (o : xs) n r a) where
+  show (Same yes no) = "(Dup (Tell (Lift2 same (If " (getConst4 yes (" " (getConst4 no "))))")))
+  show (Always k)    = getConst4 k ""
 
 instance Show (MetaInstr n) where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"

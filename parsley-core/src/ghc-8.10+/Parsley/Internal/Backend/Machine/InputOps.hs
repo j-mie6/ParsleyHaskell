@@ -13,7 +13,6 @@ import Data.ByteString.Internal                  (ByteString(..))
 import Data.Text.Array                           (aBA{-, empty-})
 import Data.Text.Internal                        (Text(..))
 import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, reverseIter_-})
-import Data.Proxy                                (Proxy)
 import GHC.Exts                                  (Int(..), Char(..), TYPE, Int#)
 import GHC.ForeignPtr                            (ForeignPtr(..))
 import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
@@ -34,9 +33,9 @@ type InputDependant (rep :: TYPE r) = (# {-next-} rep -> (# Char, rep #)
 class InputPrep input where
   prepare :: rep ~ Rep input => Code input -> Code (InputDependant rep)
 
-class PositionOps input where
-  same :: rep ~ Rep input => Proxy input -> Code rep -> Code rep -> Code Bool
-  shiftRight :: rep ~ Rep input => Proxy input -> Code rep -> Code Int# -> Code rep
+class PositionOps (rep :: TYPE r) where
+  same :: Code rep -> Code rep -> Code Bool
+  shiftRight :: Code rep -> Code Int# -> Code rep
 
 class LogOps (rep :: TYPE r) where
   shiftLeft :: Code rep -> Code Int# -> Code rep
@@ -130,38 +129,29 @@ shiftRightInt :: Code Int# -> Code Int# -> Code Int#
 shiftRightInt qo# qi# = [||$$(qo#) +# $$(qi#)||]
 
 -- PositionOps Instances
-instance PositionOps [Char] where
-  same _ = intSame
-  shiftRight _ = shiftRightInt
-instance PositionOps (UArray Int Char) where
-  same _ = intSame
-  shiftRight _ = shiftRightInt
-instance PositionOps Text16 where
-  same _ = intSame
-  shiftRight _ = shiftRightInt
-instance PositionOps ByteString where
-  same _ = intSame
-  shiftRight _ = shiftRightInt
+instance PositionOps Int# where
+  same = intSame
+  shiftRight = shiftRightInt
 
-instance PositionOps CharList where
-  same _ = offWithSame
-  shiftRight _ qo# qi# = offWithShiftRight [||drop||] qo# qi#
+instance PositionOps (# Int#, [Char] #) where
+  same = offWithSame
+  shiftRight qo# qi# = offWithShiftRight [||drop||] qo# qi#
 
-instance PositionOps Stream where
-  same _ = offWithSame
-  shiftRight _ qo# qi# = offWithShiftRight [||dropStream||] qo# qi#
+instance PositionOps (# Int#, Stream #) where
+  same = offWithSame
+  shiftRight qo# qi# = offWithShiftRight [||dropStream||] qo# qi#
 
 instance PositionOps Text where
-  same _ qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
-  shiftRight _ qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
+  same qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
+  shiftRight qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
 
-instance PositionOps Lazy.ByteString where
-  same _ qx# qy# = [||
+instance PositionOps UnpackedLazyByteString where
+  same qx# qy# = [||
       case $$(qx#) of
         (# i#, _, _, _, _, _ #) -> case $$(qy#) of
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
-  shiftRight _ qo# qi# = [||byteStringShiftRight $$(qo#) $$(qi#)||]
+  shiftRight qo# qi# = [||byteStringShiftRight $$(qo#) $$(qi#)||]
 
 -- LogOps Instances
 instance LogOps Int# where

@@ -17,7 +17,6 @@ import Control.Monad.ST                              (ST)
 import Data.Array.Unboxed                            (UArray)
 import Data.ByteString.Internal                      (ByteString)
 import Data.STRef                                    (writeSTRef, readSTRef, newSTRef)
-import Data.Proxy                                    (Proxy(Proxy))
 import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
@@ -51,23 +50,24 @@ derivation(Stream)                 \
 derivation(Lazy.ByteString)        \
 derivation(Text)
 
-type Ops o = (HandlerOps o, JoinBuilder o, RecBuilder o, PositionOps o, MarshalOps o, LogOps (Rep o))
+type Ops o = (HandlerOps o, JoinBuilder o, RecBuilder o, PositionOps (Rep o), MarshalOps o, LogOps (Rep o))
 type StaHandlerBuilder s o a = Offset o -> StaHandler s o a
 
 {- Input Operations -}
 sat :: (?ops :: InputOps (Rep o)) => (Defunc Char -> Defunc Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 sat p k bad γ@Γ{..} = next (offset input) $ \c offset' -> let v = FREEVAR c in _if (p v) (k (γ {operands = Op v operands, input = moveOne input offset'})) bad
 
-emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps (Rep o)) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(offset (input γ)) then $$(good γ) else $$bad ||]
 emitLengthCheck (I# n) good bad γ = [||
-  if $$more $$(shiftRight (Proxy @o) (offset (input γ)) (liftTyped (n -# 1#))) then $$(good γ)
+  if $$more $$(shiftRight (offset (input γ)) (liftTyped (n -# 1#))) then $$(good γ)
   else $$bad ||]
 
 {- General Operations -}
 dup :: Defunc x -> (Defunc x -> Code r) -> Code r
 dup (FREEVAR x) k = k (FREEVAR x)
+dup (OFFSET o) k = k (OFFSET o)
 dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
 
 {-# INLINE returnST #-}
@@ -76,24 +76,24 @@ returnST = return @(ST s)
 
 {- Register Operations -}
 newΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
-newΣ σ Soft x k ctx = dup x $ \dupx -> k $! insertNewΣ σ Nothing dupx ctx
+newΣ σ Soft x k ctx = dup x $ \dupx -> k (insertNewΣ σ Nothing dupx ctx)
 newΣ σ Hard x k ctx = dup x $ \dupx -> [||
     do ref <- newSTRef $$(genDefunc dupx)
-       $$(k $! insertNewΣ σ (Just [||ref||]) dupx ctx)
+       $$(k (insertNewΣ σ (Just [||ref||]) dupx ctx))
   ||]
 
 writeΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
-writeΣ σ Soft x k ctx = dup x $ \dupx -> k $! cacheΣ σ dupx ctx
+writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$(genDefunc dupx)
-       $$(k $! cacheΣ σ dupx ctx)
+       $$(k (cacheΣ σ dupx ctx))
   ||]
 
 readΣ :: ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
-readΣ σ Soft k ctx = (k $! cachedΣ σ ctx) $! ctx
+readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
-       $$(let fv = FREEVAR [||x||] in k fv $! cacheΣ σ fv ctx)
+       $$(let fv = FREEVAR [||x||] in k fv (cacheΣ σ fv ctx))
   ||]
 
 {- Handler Operations -}
@@ -209,7 +209,7 @@ instance MarshalOps _o where                                                    
 inputInstances(deriveMarshalOps)
 
 {- Debugger Operations -}
-type LogHandler o = (PositionOps o, LogOps (Rep o))
+type LogHandler o = (PositionOps (Rep o), LogOps (Rep o))
 
 logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
 logHandler name ctx γ u _ = let VCons h _ = handlers γ in mkStaHandler $ \o# -> [||
@@ -220,15 +220,14 @@ preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o) =
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     Offset {offset} = input γ
-    proxy           = Proxy @o
     indent          = replicate (debugLevel ctx * 2) ' '
     start           = shiftLeft offset [||5#||]
-    end             = shiftRight proxy offset [||5#||]
+    end             = shiftRight offset [||5#||]
     inputTrace      = [|| let replace '\n' = color Green "↙"
                               replace ' '  = color White "·"
                               replace c    = return c
                               go i#
-                                | $$(same proxy [||i#||] end) || not ($$more i#) = []
+                                | $$(same [||i#||] end) || not ($$more i#) = []
                                 | otherwise = $$(next [||i#||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
                           in go $$start ||]
     eof             = [|| if $$more $$end then $$inputTrace else $$inputTrace ++ color Red "•" ||]

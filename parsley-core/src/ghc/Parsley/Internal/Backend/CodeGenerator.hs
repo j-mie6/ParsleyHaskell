@@ -5,9 +5,9 @@ module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 import Data.Maybe                                    (isJust)
 import Data.Set                                      (Set, elems)
 import Control.Monad.Trans                           (lift)
-import Parsley.Internal.Backend.Machine              (Defunc(SAME), user, userBool, LetBinding, makeLetBinding, Instr(..),
-                                                      _Fmap, _App, _Modify, _Get, _Put, _Make, _If,
-                                                      addCoins, refundCoins, drainCoins, PositionOps,
+import Parsley.Internal.Backend.Machine              (user, userBool, LetBinding, makeLetBinding, Instr(..), Handler(..),
+                                                      _Fmap, _App, _Modify, _Get, _Put, _Make,
+                                                      addCoins, refundCoins, drainCoins,
                                                       IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
 import Parsley.Internal.Backend.InstructionAnalyser  (coinsNeeded)
 import Parsley.Internal.Common.Fresh                 (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
@@ -26,12 +26,12 @@ newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
 {-# INLINEABLE codeGen #-}
-codeGen :: (Trace, PositionOps o) => Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> IΣVar -> LetBinding o a x
+codeGen :: Trace => Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> IΣVar -> LetBinding o a x
 codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs
   where
     name = maybe "TOP LEVEL" show letBound
     m = finalise (histo alg p)
-    alg :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
+    alg :: Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
     finalise cg =
       let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
@@ -44,14 +44,23 @@ pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
 pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
-rollbackHandler :: Fix4 (Instr o) (o : xs) (Succ n) r a
-rollbackHandler = In4 (Seek (In4 Empt))
+{-rollbackHandler :: Fix4 (Instr o) (o : xs) (Succ n) r a
+rollbackHandler = In4 (Seek (In4 Empt))-}
+rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
+rollbackHandler = Always (In4 (Seek (In4 Empt)))
 
-parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
-parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (_If k (In4 Empt))))))
+--parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
+parsecHandler :: Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
+--parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (_If k (In4 Empt))))))
+--parsecHandler k = Same (In4 (Pop k)) (In4 Empt)
+-- This version makes the _old_ offset the one that's used. Since this happens under the SAME, this
+-- makes superficial difference to the generated code, but it makes it more amenable to static
+-- position comparisons in the handlers
+--parsecHandler k = In4 (Dup (In4 (Tell (In4 (Lift2 SAME (In4 (_If (In4 (Seek k)) (In4 Empt))))))))
+parsecHandler k = Same (In4 (Seek k)) (In4 Empt)
 
 altNoCutCompile :: CodeGen o a y -> CodeGen o a x
-                -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a)
+                -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
                 -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a)
                 -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 altNoCutCompile p q handler post m =
@@ -64,7 +73,7 @@ altNoCutCompile p q handler post m =
      let dq = nq - min np nq
      return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
 
-chainPreCompile :: PositionOps o => CodeGen o a (x -> x) -> CodeGen o a x
+chainPreCompile :: CodeGen o a (x -> x) -> CodeGen o a x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
                 -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
@@ -75,7 +84,7 @@ chainPreCompile op p preOp preP m =
      pc <- freshM (runCodeGen p (In4 (_App m)))
      return $! In4 (Push (user ID) (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preP pc)))))))))
 
-chainPostCompile :: PositionOps o => CodeGen o a x -> CodeGen o a (x -> x)
+chainPostCompile :: CodeGen o a x -> CodeGen o a (x -> x)
                  -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
                  -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
                  -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
@@ -85,11 +94,11 @@ chainPostCompile p op preOp preM m =
      opc <- freshM (runCodeGen op (In4 (_Modify σ (In4 (Jump μ)))))
      freshM (runCodeGen p (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preM m)))))))))
 
-deep :: PositionOps o => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
+deep :: Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
-deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) id
-deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . Pop . In4 . Push (user x))
-deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (In4 . Seek) (In4 . _Fmap (user f))
+deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q (Always . In4 . Seek) id
+deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (Always . In4 . Seek) (In4 . Pop . In4 . Push (user x))
+deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (Always . In4 . Seek) (In4 . _Fmap (user f))
 deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
@@ -103,7 +112,7 @@ deep _ = Nothing
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 addCoinsNeeded = coinsNeeded >>= addCoins
 
-shallow :: PositionOps o => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
+shallow :: Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 shallow (Pure x)      m = do return $! In4 (Push (user x) m)
 shallow (Satisfy p)   m = do return $! In4 (Sat (userBool p) m)
 shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf pxc
@@ -119,7 +128,7 @@ shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
-     return $! In4 (Catch (addCoins (max (np - nm) 0) (In4 (Tell pc))) (In4 (Seek (In4 (Push (user UNIT) m)))))
+     return $! In4 (Catch (addCoins (max (np - nm) 0) (In4 (Tell pc))) (Always (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))

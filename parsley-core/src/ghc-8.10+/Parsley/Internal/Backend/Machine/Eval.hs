@@ -12,11 +12,11 @@ import Data.Void                                      (Void)
 import Control.Monad                                  (forM, liftM2)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET, SAME, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant, PositionOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.InputRep      (Rep)
-import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
+import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..), Handler(..))
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
 import Parsley.Internal.Backend.Machine.Offset        (mkOffset, offset)
@@ -27,6 +27,8 @@ import Parsley.Internal.Trace                         (Trace(trace))
 import System.Console.Pretty                          (color, Color(Green))
 
 import qualified Debug.Trace (trace)
+
+import Parsley.Internal.Core.Lam (Lam(Abs))
 
 eval :: forall o a. (Trace, Ops o) => Code (InputDependant (Rep o)) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
 eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
@@ -54,12 +56,12 @@ readyMachine = cata4 (Machine . alg)
     alg (Sat p k)           = evalSat p k
     alg Empt                = evalEmpt
     alg (Commit k)          = evalCommit k
-    alg (Catch k h)         = evalCatch k h
+    alg (Catch k h)         = evalCatch k (evalHandler h)
     alg (Tell k)            = evalTell k
     alg (Seek k)            = evalSeek k
     alg (Case p q)          = evalCase p q
     alg (Choices fs ks def) = evalChoices fs ks def
-    alg (Iter μ l k)        = evalIter μ l k
+    alg (Iter μ l k)        = evalIter μ l (evalHandler k)
     alg (Join φ)            = evalJoin φ
     alg (MkJoin φ p k)      = evalMkJoin φ p k
     alg (Swap k)            = evalSwap k
@@ -89,7 +91,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: (?ops :: InputOps (Rep o), PositionOps o, Trace) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p (Machine k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -110,6 +112,14 @@ evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ 
 
 evalCatch :: HandlerOps o => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) (Machine h) = freshUnique $ \u -> liftM2 (\mk mh γ -> bindHandler γ (buildHandler γ mh u) mk) k h
+
+evalHandler :: PositionOps (Rep o) => Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
+evalHandler (Always k) = k
+evalHandler (Same yes no) =
+  Machine (evalDup (
+    Machine (evalTell (
+      Machine (evalLift2 SAME (
+        Machine (evalChoices [LAM (Abs id)] [yes] no)))))))
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (OFFSET (input γ)) (operands γ)})
@@ -174,13 +184,13 @@ evalLogEnter name (Machine mk) = freshUnique $ \u ->
     (local debugUp mk)
     ask
 
-evalLogExit :: (?ops :: InputOps (Rep o), PositionOps o, LogOps (Rep o)) => String -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalLogExit :: (?ops :: InputOps (Rep o), PositionOps (Rep o), LogOps (Rep o)) => String -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalLogExit name (Machine mk) =
   liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||])
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps (Rep o), PositionOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k

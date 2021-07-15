@@ -1,7 +1,6 @@
 {-# LANGUAGE PatternSynonyms, StandaloneKindSignatures, TypeApplications, ViewPatterns #-}
 module Parsley.Internal.Backend.Machine.Defunc (module Parsley.Internal.Backend.Machine.Defunc) where
 
-import Data.Proxy                                (Proxy(Proxy))
 import Parsley.Internal.Backend.Machine.InputOps (PositionOps(same))
 import Parsley.Internal.Backend.Machine.InputRep (Rep)
 import Parsley.Internal.Backend.Machine.Offset   (Offset, offset)
@@ -14,7 +13,7 @@ import qualified Parsley.Internal.Core.Lam    as Lam  (Lam(..))
 data Defunc a where
   LAM     :: Lam a -> Defunc a
   BOTTOM  :: Defunc a
-  SAME    :: PositionOps o => Defunc (o -> o -> Bool)
+  SAME    :: PositionOps (Rep o) => Defunc (o -> o -> Bool)
   OFFSET  :: Offset o -> Defunc o
 
 user :: Core.Defunc a -> Defunc a
@@ -27,11 +26,7 @@ ap :: Defunc (a -> b) -> Defunc a -> Defunc b
 ap f x = LAM (Lam.App (unliftDefunc f) (unliftDefunc x))
 
 ap2 :: Defunc (a -> b -> c) -> Defunc a -> Defunc b -> Defunc c
-ap2 f@SAME (OFFSET o1) (OFFSET o2) = LAM (Lam.Var False (apSame f (offset o1) (offset o2)))
-  where
-    apSame :: forall o. Defunc (o -> o -> Bool) -> Code (Rep o) -> Code (Rep o) -> Code Bool
-    apSame SAME = same (Proxy @o)
-    apSame _    = undefined
+ap2 SAME (OFFSET o1) (OFFSET o2) = LAM (Lam.Var False (same (offset o1) (offset o2)))
 ap2 f x y = ap (ap f x) y
 
 _if :: Defunc Bool -> Code a -> Code a -> Code a

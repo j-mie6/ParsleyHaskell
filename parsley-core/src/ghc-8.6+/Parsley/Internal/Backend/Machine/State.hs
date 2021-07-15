@@ -16,7 +16,7 @@ module Parsley.Internal.Backend.Machine.State (
   ) where
 
 import Control.Exception                            (Exception, throw)
-import Control.Monad                                (liftM2)
+import Control.Monad                                (liftM2, (<=<))
 import Control.Monad.Reader                         (asks, MonadReader, Reader, runReader)
 import Control.Monad.ST                             (ST)
 import Data.STRef                                   (STRef)
@@ -45,7 +45,7 @@ type family Func (rs :: [Type]) s o a x where
 data QSubRoutine s o a x = forall rs. QSubRoutine  (Code (Func rs s o a x)) (Regs rs)
 
 qSubRoutine :: Code (Func rs s o a x) -> Regs rs -> QSubRoutine s o a x
-qSubRoutine func frees = QSubRoutine func frees
+qSubRoutine = QSubRoutine
 
 newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
@@ -93,10 +93,10 @@ cacheΣ σ x ctx = case DMap.lookup σ (σs ctx) of
   Nothing          -> throw (outOfScopeRegister σ)
 
 concreteΣ :: ΣVar x -> Ctx s o a -> Code (STRef s x)
-concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (>>= getReg) . DMap.lookup σ . σs
+concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (getReg <=< DMap.lookup σ . σs)
 
 cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
-cachedΣ σ = fromMaybe (throw (registerFault σ)) . (>>= getCached) . DMap.lookup σ . σs
+cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< DMap.lookup σ . σs)
 
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
 askSub μ =

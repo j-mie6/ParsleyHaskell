@@ -53,7 +53,7 @@ optimise (In (FLIP_CONST :<$>: p) :<*>: q)              = In (p :*>: q)
 -- Definition of <*
 optimise (In (CONST :<$>: p) :<*>: q)                   = In (p :<*: q)
 -- Reassociation Law 1: (u *> v) <*> w                  = u *> (v <*> w)
-optimise (In (u :*>: v) :<*>: w)                        = optimise (u :*>: (optimise (v :<*>: w)))
+optimise (In (u :*>: v) :<*>: w)                        = optimise (u :*>: optimise (v :<*>: w))
 -- Interchange Law: u <*> pure x                        = pure ($ x) <*> u
 optimise (u :<*>: In (Pure x))                          = optimise (APP_H (FLIP_H ID) x :<$>: u)
 -- Right Absorption Law: (f <$> p) *> q                 = p *> q
@@ -125,9 +125,9 @@ optimise (Try (In (p :$>: x)))                          = optimise (optimise (Tr
 -- Interchange law: try (f <$> p)                       = f <$> try p
 optimise (Try (In (f :<$>: p)))                         = optimise (f :<$>: optimise (Try p))
 -- pure Left law: branch (pure (Left x)) p q            = p <*> pure x
-optimise (Branch (In (Pure (l@(_val -> Left x)))) p _)  = optimise (p :<*>: In (Pure (makeQ x qx))) where qx = [||case $$(_code l) of Left x -> x||]
+optimise (Branch (In (Pure l@(_val -> Left x))) p _)    = optimise (p :<*>: In (Pure (makeQ x qx))) where qx = [||case $$(_code l) of Left x -> x||]
 -- pure Right law: branch (pure (Right x)) p q          = q <*> pure x
-optimise (Branch (In (Pure (r@(_val -> Right x)))) _ q) = optimise (q :<*>: In (Pure (makeQ x qx))) where qx = [||case $$(_code r) of Right x -> x||]
+optimise (Branch (In (Pure r@(_val -> Right x))) _ q)   = optimise (q :<*>: In (Pure (makeQ x qx))) where qx = [||case $$(_code r) of Right x -> x||]
 -- Generalised Identity law: branch b (pure f) (pure g) = either f g <$> b
 optimise (Branch b (In (Pure f)) (In (Pure g)))         = optimise (makeQ (either (_val f) (_val g)) [||either $$(_code f) $$(_code g)||] :<$>: b)
 -- Interchange law: branch (x *> y) p q                 = x *> branch y p q

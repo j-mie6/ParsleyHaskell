@@ -53,7 +53,7 @@ instance Applicative (StateT s m) where
   {-# INLINE pure #-}
   pure x = StateT (flip ($ x))
   {-# INLINE liftA2 #-}
-  liftA2 f (StateT mx) (StateT my) = StateT (\s k -> mx s (\x s' -> my s' (\y s'' -> k (f x y) s'')))
+  liftA2 f (StateT mx) (StateT my) = StateT (\s k -> mx s (\x s' -> my s' (k . f x)))
 
 instance Monad (StateT s m) where
   {-# INLINE return #-}

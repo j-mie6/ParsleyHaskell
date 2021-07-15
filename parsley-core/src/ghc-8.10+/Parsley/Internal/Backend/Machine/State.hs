@@ -21,7 +21,7 @@ module Parsley.Internal.Backend.Machine.State (
   ) where
 
 import Control.Exception                            (Exception, throw)
-import Control.Monad                                (liftM2)
+import Control.Monad                                (liftM2, (<=<))
 import Control.Monad.Reader                         (asks, local, MonadReader, Reader, runReader)
 import Control.Monad.ST                             (ST)
 import Data.STRef                                   (STRef)
@@ -136,10 +136,10 @@ cacheΣ σ x ctx = case DMap.lookup σ (σs ctx) of
   Nothing          -> throw (outOfScopeRegister σ)
 
 concreteΣ :: ΣVar x -> Ctx s o a -> Code (STRef s x)
-concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (>>= getReg) . DMap.lookup σ . σs
+concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (getReg <=< DMap.lookup σ . σs)
 
 cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
-cachedΣ σ = fromMaybe (throw (registerFault σ)) . (>>= getCached) . DMap.lookup σ . σs
+cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< (DMap.lookup σ . σs))
 
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubRoutine s o a x)
 askSub μ =

@@ -20,10 +20,7 @@ import Parsley.Internal.Core.Defunc as Core          (Defunc)
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a
 runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> a
-runCodeGenStack m μ0 φ0 σ0 =
-  (flip evalFresh σ0 .
-   flip evalFreshT μ0 .
-   flip evalFreshT φ0) m
+runCodeGenStack m μ0 φ0 = evalFresh (evalFreshT (evalFreshT m φ0) μ0)
 
 newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
@@ -171,7 +168,7 @@ freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
 makeΦ :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
-makeΦ m | elidable m = return $! (id, m)
+makeΦ m | elidable m = return (id, m)
   where
     elidable :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> Bool
     -- This is double-φ optimisation:   If a φ-node points shallowly to another φ-node, then it can be elided

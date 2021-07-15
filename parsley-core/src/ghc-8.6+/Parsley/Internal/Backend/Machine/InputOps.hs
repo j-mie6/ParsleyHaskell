@@ -18,7 +18,7 @@ import GHC.ForeignPtr                            (ForeignPtr(..))
 import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
 import Parsley.Internal.Backend.Machine.InputRep
 import Parsley.Internal.Common.Utils             (Code)
-import Parsley.Internal.Core.InputTypes
+import Parsley.Internal.Core.InputTypes          (Stream((:>)), CharList(..), Text16(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
@@ -145,7 +145,7 @@ instance PositionOps UnpackedLazyByteString where
 
 -- BoxOps Instances
 instance BoxOps Int where
-  box = [||\i# -> I# i#||]
+  box = [||I#||]
   unbox = [||\(I# i#) -> i#||]
 
 instance BoxOps (OffWith ts) where
@@ -157,7 +157,7 @@ instance BoxOps Text where
   unbox = [||id||]
 
 instance BoxOps UnpackedLazyByteString where
-  box = [||\(!(# i#, addr#, final, off#, size#, cs #)) -> UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs||]
+  box = [||\(# i#, addr#, final, off#, size#, cs #) -> UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs||]
   unbox = [||\(UnpackedLazyByteString (I# i#) addr# final (I# off#) (I# size#) cs) -> (# i#, addr#, final, off#, size#, cs #)||]
 
 -- LogOps Instances

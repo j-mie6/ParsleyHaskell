@@ -29,13 +29,13 @@ import System.Console.Pretty                          (color, Color(Green))
 import qualified Debug.Trace (trace)
 
 eval :: forall o a. (Trace, Ops o) => Code (InputDependant (Rep o)) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
-eval input (LetBinding !p _) fs = trace ("EVALUATING TOP LEVEL") [|| runST $
+eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(# next, more, offset #) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (\names -> run (readyMachine p) (Γ Empty (halt @o) (mkOffset [||offset||] 0) (VCons (fatal @o) VNil)) (nextUnique (emptyCtx names))))
+             (run (readyMachine p) (Γ Empty (halt @o) (mkOffset [||offset||] 0) (VCons (fatal @o) VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -95,7 +95,7 @@ evalSat p (Machine k) = do
   hasChange <- asks hasCoin
   if | bankrupt -> maybeEmitCheck (Just 1) <$> k
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
-     | otherwise -> trace "I have a piggy :)" $ local breakPiggy (maybeEmitCheck . Just <$> asks coins <*> local spendCoin k)
+     | otherwise -> trace "I have a piggy :)" $ local breakPiggy (asks ((maybeEmitCheck . Just) . coins) <*> local spendCoin k)
   where
     maybeEmitCheck Nothing mk γ = sat (ap p) mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
@@ -155,15 +155,15 @@ evalDup (Machine k) = k <&> \mk γ ->
   in dup x $ \dupx -> mk (γ {operands = Op dupx (Op dupx xs)})
 
 evalMake :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-evalMake σ a k = asks $! \ctx γ ->
+evalMake σ a k = asks $ \ctx γ ->
   let Op x xs = operands γ
   in newΣ σ a x (run k (γ {operands = xs})) ctx
 
 evalGet :: ΣVar x -> Access -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
-evalGet σ a k = asks $! \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
+evalGet σ a k = asks $ \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
 
 evalPut :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-evalPut σ a k = asks $! \ctx γ ->
+evalPut σ a k = asks $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 

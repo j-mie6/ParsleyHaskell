@@ -129,7 +129,7 @@ suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -
 suspend m γ u = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = mkOffset o# u})
 
 halt :: forall o s a. StaCont s o a a
-halt = mkStaCont $ \x _ -> [||returnST $! Just $$x||]
+halt = mkStaCont $ \x _ -> [||returnST (Just $$x)||]
 
 noreturn :: forall o s a. StaCont s o a Void
 noreturn = mkStaCont $ \_ _ -> [||error "Return is not permitted here"||]

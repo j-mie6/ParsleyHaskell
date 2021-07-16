@@ -56,7 +56,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Sat p k)           = evalSat p k
     alg Empt                = evalEmpt
     alg (Commit k)          = evalCommit k
-    alg (Catch k h)         = evalCatch k h--(evalHandler h)
+    alg (Catch k h)         = evalCatch k h
     alg (Tell k)            = evalTell k
     alg (Seek k)            = evalSeek k
     alg (Case p q)          = evalCase p q
@@ -111,9 +111,9 @@ evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
 evalCatch :: (PositionOps (Rep o), HandlerOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
---evalCatch (Machine k) (Machine h) = freshUnique $ \u -> liftM2 (\mk mh γ -> buildAndBindHandler γ mh u mk) k h
-evalCatch (Machine k) (Always (Machine h)) = freshUnique $ \u -> liftM2 (\mk mh γ -> buildAndBindAlwaysHandler γ mh u mk) k h
-evalCatch (Machine k) (Same (Machine yes) (Machine no)) = freshUnique $ \u -> liftM3 (\mk myes mno γ -> buildAndBindSameHandler γ myes mno u mk) k yes no
+evalCatch (Machine k) (Always (Machine h)) = freshUnique $ \u -> liftM2 (\mk mh γ -> bindAlwaysHandler γ (buildHandler γ mh u) mk) k h
+evalCatch (Machine k) (Same (Machine yes) (Machine no)) =
+  freshUnique $ \u -> liftM3 (\mk myes mno γ -> bindSameHandler γ (buildHandler γ myes u) (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (OFFSET (input γ)) (operands γ)})

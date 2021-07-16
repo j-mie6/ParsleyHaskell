@@ -97,24 +97,6 @@ readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
   ||]
 
 {- Handler Operations -}
-buildAndBindAlwaysHandler :: (HandlerOps o) => Γ s o xs n r a
-                          -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
-                          -> Word
-                          -> (Γ s o xs ('Succ n) r a -> Code b)
-                          -> Code b
-buildAndBindAlwaysHandler γ mh = bindAlwaysHandler γ . buildHandler γ mh
-
-buildAndBindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
-                        -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
-                        -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
-                        -> Word
-                        -> (Γ s o xs ('Succ n) r a -> Code b)
-                        -> Code b
-buildAndBindSameHandler γ myes mno u =
-  bindSameHandler γ
-    (buildHandler γ myes u)
-    (buildHandler γ mno u)
-
 buildHandler :: Γ s o xs n r a
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
              -> Word
@@ -135,20 +117,13 @@ bindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
                 -> StaHandlerBuilder s o a
                 -> (Γ s o xs (Succ n) r a -> Code b)
                 -> Code b
-bindSameHandler γ yes no k = bindSameHandler# (yes (input γ)) (no (input γ))
-  (\qyes qno -> mkStaHandler (input γ) $ \o ->
-    [||if $$(same (offset (input γ)) o) then $$qyes $$o else $$qno $$o||])
-  (\qyes qno full ->
-    k (γ {handlers = VCons (staHandlerFull (Just (input γ)) full qyes qno) (handlers γ)}))
-
-bindSameHandler# :: HandlerOps o => StaHandler s o a -> StaHandler s o a
-                 -> (DynHandler s o a -> DynHandler s o a -> StaHandler s o a)
-                 -> (DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> Code b)
-                 -> Code b
-bindSameHandler# yes no combine k =
-  bindHandler# yes $ \qyes ->
-    bindHandler# no $ \qno ->
-      bindHandler# (combine qyes qno) (k qyes qno)
+bindSameHandler γ yes no k =
+  bindHandler# (yes (input γ))$ \qyes ->
+    bindHandler# (no (input γ)) $ \qno ->
+      let handler = mkStaHandler (input γ) $ \o ->
+            [||if $$(same (offset (input γ)) o) then $$qyes $$o else $$qno $$o||]
+      in bindHandler# handler $ \qhandler ->
+           k (γ {handlers = VCons (staHandlerFull (Just (input γ)) qhandler qyes qno) (handlers γ)})
 
 class HandlerOps o where
   bindHandler# :: StaHandler s o a -> (DynHandler s o a -> Code b) -> Code b
@@ -160,12 +135,6 @@ instance HandlerOps _o where                                                    
     let handler (o# :: Rep _o) = $$(staHandler# h [||o#||])                                     \
     in $$(k [||handler||])                                                                      \
   ||];                                                                                          \
-  {-bindSameHandler# yes no combine k = [||                                                       \
-    let yesSame (o# :: Rep _o) = $$(staHandler# yes [||o#||]);                                  \
-        notSame (o# :: Rep _o) = $$(staHandler# no [||o#||]);                                   \
-        handler (o# :: Rep _o) = $$(staHandler# (combine [||yesSame||] [||notSame||]) [||o#||]) \
-    in $$(k [||yesSame||] [||notSame||] [||handler||])                                          \
-  ||]                                                                                           -}\
 };
 inputInstances(deriveHandlerOps)
 
@@ -217,11 +186,11 @@ buildIter ctx μ l h o u = buildIter# @o o
     in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
              (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx)))
 
-buildRec  :: forall rs s o a r. RecBuilder o => MVar r
-          -> Regs rs
-          -> Ctx s o a
-          -> Machine s o '[] One r a
-          -> DynFunc rs s o a r
+buildRec :: forall rs s o a r. RecBuilder o => MVar r
+         -> Regs rs
+         -> Ctx s o a
+         -> Machine s o '[] One r a
+         -> DynFunc rs s o a r
 buildRec μ rs ctx k =
   takeFreeRegisters rs ctx $ \ctx ->
     buildRec# @o $ \qself qret qo# qh ->
@@ -240,7 +209,7 @@ class RecBuilder o where
 instance RecBuilder _o where                                                                           \
 {                                                                                                      \
   buildIter# o h l = [||                                                                               \
-      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]) in let                            \
+      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]);                            \
           loop !(o# :: Rep _o) = $$(l [||loop||] [||handler||] [||o#||])                               \
       in loop $$o                                                                                      \
     ||];                                                                                               \

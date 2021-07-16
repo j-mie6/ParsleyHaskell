@@ -4,7 +4,7 @@
              TypeFamilies,
              DerivingStrategies #-}
 module Parsley.Internal.Backend.Machine.State (
-    StaHandler(..), StaCont(..), StaSubRoutine, staHandler#, mkStaHandler, staCont#, mkStaCont,
+    StaHandler(..), StaCont(..), StaSubRoutine, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown,
     DynHandler, DynCont, DynSubRoutine, DynFunc,
     MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
@@ -32,23 +32,47 @@ import Parsley.Internal.Backend.Machine.Defunc      (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.InputRep    (Rep)
 import Parsley.Internal.Backend.Machine.LetBindings (Regs(..))
-import Parsley.Internal.Backend.Machine.Offset      (Offset)
+import Parsley.Internal.Backend.Machine.Offset      (Offset(offset), same)
 import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
 
+import Debug.Trace (trace)
+
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
 -- Statics
 type StaHandler# s o a = Code (Rep o) -> Code (ST s (Maybe a))
-data StaHandler s o a = StaHandler (StaHandler# s o a) (Maybe (DynHandler s o a))
+data StaHandler s o a =
+  StaHandler
+    (Maybe (Offset o))                     -- ^ The statically bound offset for this handler, if available
+    {-# UNPACK #-} !(StaHandlerCase s o a) -- ^ The static function representing this handler when offsets are incomparable
+    (Maybe (DynHandler s o a))             -- ^ The dynamic handler that has been wrapped in this handler, if available
+
+data StaHandlerCase s o a = StaHandlerCase {
+  -- | The static function representing this handler when offsets are incomparable
+  unknown :: StaHandler# s o a,
+  -- | The static function representing this handler when offsets are known to match, if available
+  yesSame :: Maybe (StaHandler# s o a),
+  -- | The static function representing this handler when offsets are known not to match, if available
+  notSame :: Maybe (StaHandler# s o a)
+}
 
 staHandler# :: StaHandler s o a -> StaHandler# s o a
-staHandler# (StaHandler sh _) = sh
+staHandler# (StaHandler _ sh _) = unknown sh
 
-mkStaHandler :: StaHandler# s o a -> StaHandler s o a
-mkStaHandler sh = StaHandler sh Nothing
+staHandlerEval :: StaHandler s o a -> Offset o -> Code (ST s (Maybe a))
+staHandlerEval (StaHandler (Just c) sh _) o
+  | Just True <- same c o            = trace "offsets match" $ fromMaybe (unknown sh) (yesSame sh) (offset o)
+  | Just False <- same c o           = trace "offsets don't match" $ fromMaybe (unknown sh) (notSame sh) (offset o)
+staHandlerEval (StaHandler _ sh _) o = trace "offsets unknown or incomparable" $ unknown sh (offset o)
+
+mkStaHandler :: Offset o -> StaHandler# s o a -> StaHandler s o a
+mkStaHandler o sh = StaHandler (Just o) (mkUnknown sh) Nothing
+
+mkUnknown :: StaHandler# s o a -> StaHandlerCase s o a
+mkUnknown h = StaHandlerCase h Nothing Nothing
 
 type StaCont# s o a x = Code x -> Code (Rep o) -> Code (ST s (Maybe a))
 data StaCont s o a x = StaCont (StaCont# s o a x) (Maybe (DynCont s o a x))

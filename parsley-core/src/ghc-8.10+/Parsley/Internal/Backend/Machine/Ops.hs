@@ -29,11 +29,11 @@ import Parsley.Internal.Backend.Machine.InputRep     (Rep{-, representationTypes
 import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
 import Parsley.Internal.Backend.Machine.Offset       (Offset(..), moveOne, mkOffset)
-import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Machine(..), MachineMonad, StaSubRoutine, OpStack(..), DynFunc,
+import Parsley.Internal.Backend.Machine.State        {-(Γ(..), Ctx, Machine(..), MachineMonad, StaSubRoutine, OpStack(..), DynFunc, Cont#, Handler#,
                                                       StaHandler(..), StaCont(..), DynHandler, DynCont, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown, mkFull,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel,
                                                       takeFreeRegisters,
-                                                      freshUnique, nextUnique)
+                                                      freshUnique, nextUnique)-}
 import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Core.InputTypes              (Text16, CharList, Stream)
 import System.Console.Pretty                         (color, Color(Green, White, Red, Blue))
@@ -124,55 +124,48 @@ buildHandler γ h u c = trace ("handler with " ++ show c) $ mkStaHandler c $ \o#
 fatal :: forall o s a. StaHandler s o a
 fatal = StaHandler Nothing (mkUnknown (const [|| returnST Nothing ||])) Nothing
 
--- Should we elide StaHandlers derived from DynHandler?
 bindAlwaysHandler :: HandlerOps o => Γ s o xs n r a
                   -> StaHandlerBuilder s o a
                   -> (Γ s o xs (Succ n) r a -> Code b) -> Code b
-bindAlwaysHandler γ h k = bindAlwaysHandler# (h (input γ)) $ \qh ->
+bindAlwaysHandler γ h k = bindHandler# (h (input γ)) $ \qh ->
   k (γ {handlers = VCons (staHandler (Just (input γ)) qh) (handlers γ)})
 
--- Should we elide StaHandlers derived from DynHandler?
 bindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
                 -> StaHandlerBuilder s o a
                 -> StaHandlerBuilder s o a
                 -> (Γ s o xs (Succ n) r a -> Code b)
                 -> Code b
-bindSameHandler γ yes no k = bindSameHandler'# (yes (input γ)) (no (input γ))
+bindSameHandler γ yes no k = bindSameHandler# (yes (input γ)) (no (input γ))
   (\qyes qno -> mkStaHandler (input γ) $ \o ->
     [||if $$(same (offset (input γ)) o) then $$qyes $$o else $$qno $$o||])
   (\qyes qno full ->
     k (γ {handlers = VCons (staHandlerFull (Just (input γ)) full qyes qno) (handlers γ)}))
 
-class HandlerOps o where
-  bindAlwaysHandler# :: StaHandler s o a -> (DynHandler s o a -> Code b) -> Code b
-  bindSameHandler# :: StaHandler s o a -> StaHandler s o a
-                   -> (DynHandler s o a -> DynHandler s o a -> StaHandler s o a)
-                   -> (DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> Code b)
-                   -> Code b
+bindSameHandler# :: HandlerOps o => StaHandler s o a -> StaHandler s o a
+                 -> (DynHandler s o a -> DynHandler s o a -> StaHandler s o a)
+                 -> (DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> Code b)
+                 -> Code b
+bindSameHandler# yes no combine k =
+  bindHandler# yes $ \qyes ->
+    bindHandler# no $ \qno ->
+      bindHandler# (combine qyes qno) (k qyes qno)
 
-bindSameHandler'# :: (HandlerOps o) => StaHandler s o a -> StaHandler s o a
-                   -> (DynHandler s o a -> DynHandler s o a -> StaHandler s o a)
-                   -> (DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> Code b)
-                   -> Code b
-bindSameHandler'# yes no combine k =
-  bindAlwaysHandler# yes $ \qyes ->
-    bindAlwaysHandler# no $ \qno ->
-      bindAlwaysHandler# (combine qyes qno) $ \qhandler ->
-        k qyes qno qhandler
+class HandlerOps o where
+  bindHandler# :: StaHandler s o a -> (DynHandler s o a -> Code b) -> Code b
 
 #define deriveHandlerOps(_o)                                                                    \
 instance HandlerOps _o where                                                                    \
 {                                                                                               \
-  bindAlwaysHandler# h k = [||                                                                  \
+  bindHandler# h k = [||                                                                        \
     let handler (o# :: Rep _o) = $$(staHandler# h [||o#||])                                     \
     in $$(k [||handler||])                                                                      \
   ||];                                                                                          \
-  bindSameHandler# yes no combine k = [||                                                       \
+  {-bindSameHandler# yes no combine k = [||                                                       \
     let yesSame (o# :: Rep _o) = $$(staHandler# yes [||o#||]);                                  \
         notSame (o# :: Rep _o) = $$(staHandler# no [||o#||]);                                   \
         handler (o# :: Rep _o) = $$(staHandler# (combine [||yesSame||] [||notSame||]) [||o#||]) \
     in $$(k [||yesSame||] [||notSame||] [||handler||])                                          \
-  ||]                                                                                           \
+  ||]                                                                                           -}\
 };
 inputInstances(deriveHandlerOps)
 
@@ -196,49 +189,64 @@ resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
 resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (offset (input γ))
 
 {- Builder Operations -}
+setupJoinPoint :: forall s o xs n r a x. JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+setupJoinPoint φ (Machine k) mx = freshUnique $ \u ->
+    liftM2 (\mk ctx γ ->
+      setupJoinPoint# @o
+        (\qx qo# -> mk (γ {operands = Op (FREEVAR qx) (operands γ), input = mkOffset qo# u}))
+        (\qjoin -> run mx γ (insertΦ φ (staCont qjoin) ctx)))
+      (local voidCoins k) ask
+
 class JoinBuilder o where
-  setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+  setupJoinPoint# :: StaCont# s o a x -> (DynCont s o a x -> Code b) -> Code b
 
-class RecBuilder o where
-  buildIter :: Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-            -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
-  buildRec  :: MVar r
-            -> Regs rs
-            -> Ctx s o a
-            -> Machine s o '[] One r a
-            -> DynFunc rs s o a r
-
-#define deriveJoinBuilder(_o)                                                                  \
-instance JoinBuilder _o where                                                                  \
-{                                                                                              \
-  setupJoinPoint φ (Machine k) mx = freshUnique $ \u ->                                        \
-    liftM2 (\mk ctx γ -> [||                                                                   \
-      let join x !(o# :: Rep _o) =                                                             \
-        $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = mkOffset [||o#||] u})) \
-      in $$(run mx γ (insertΦ φ (staCont [||join||]) ctx))                                     \
-    ||]) (local voidCoins k) ask;                                                              \
+#define deriveJoinBuilder(_o)                                                             \
+instance JoinBuilder _o where                                                             \
+{                                                                                         \
+  setupJoinPoint# binding k =                                                             \
+    [|| let join x !(o# :: Rep _o) = $$(binding [||x||] [||o#||]) in $$(k [||join||]) ||] \
 };
 inputInstances(deriveJoinBuilder)
 
-#define deriveRecBuilder(_o)                                                                                \
-instance RecBuilder _o where                                                                                \
-{                                                                                                           \
-  buildIter ctx μ l h o u = [||                                                                             \
-      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(staHandler# (h (mkOffset [||c#||] u)) [||o#||]);      \
-          loop !(o# :: Rep _o) =                                                                            \
-        $$(let off = mkOffset [||o#||] u in run l                                                           \
-            (Γ Empty noreturn off (VCons (staHandler (Just off) [||handler o#||]) VNil))                    \
-            (voidCoins (insertSub μ (\_ o# _ -> [|| loop $$(o#) ||]) ctx)))                                 \
-      in loop $$o                                                                                           \
-    ||];                                                                                                    \
-  buildRec μ rs ctx k = takeFreeRegisters rs ctx (\ctx ->                                                   \
-    {- The idea here is to try and reduce the number of times registers have to be passed around -}         \
-    {-[|| \ ret !(o# :: Rep _o) h ->                                                                        \
-      $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]-}  \
-    [|| let self ret !(o# :: Rep _o) h =                                                                    \
-          $$(run k                                                                                          \
-              (Γ Empty (staCont [||ret||]) (mkOffset [||o#||] 0) (VCons (staHandler Nothing [||h||]) VNil)) \
-              (insertSub μ (\k o# h -> [|| self $$k $$(o#) $$h ||]) (nextUnique ctx))) in self ||]  );      \
+buildIter :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
+          -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
+buildIter ctx μ l h o u = buildIter# @o o
+  (\qc# -> staHandler# (h (mkOffset qc# u)))
+  (\qloop qhandler qo# ->
+    let off = mkOffset qo# u
+    in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
+             (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx)))
+
+buildRec  :: forall rs s o a r. RecBuilder o => MVar r
+          -> Regs rs
+          -> Ctx s o a
+          -> Machine s o '[] One r a
+          -> DynFunc rs s o a r
+buildRec μ rs ctx k =
+  takeFreeRegisters rs ctx $ \ctx ->
+    buildRec# @o $ \qself qret qo# qh ->
+      run k (Γ Empty (staCont qret) (mkOffset qo# 0) (VCons (staHandler Nothing qh) VNil))
+            (insertSub μ (\k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
+
+class RecBuilder o where
+  buildIter# :: Code (Rep o)
+             -> (Code (Rep o) -> StaHandler# s o a)
+             -> (Code (Rep o -> ST s (Maybe a)) -> Code (Rep o -> Handler# s o a) -> Code (Rep o) -> Code (ST s (Maybe a)))
+             -> Code (ST s (Maybe a))
+  buildRec#  :: (DynSubRoutine s o a x -> DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a)))
+             -> DynSubRoutine s o a x
+
+#define deriveRecBuilder(_o)                                                                           \
+instance RecBuilder _o where                                                                           \
+{                                                                                                      \
+  buildIter# o h l = [||                                                                               \
+      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]);                            \
+          loop !(o# :: Rep _o) = $$(l [||loop||] [||handler||] [||o#||])                               \
+      in loop $$o                                                                                      \
+    ||];                                                                                               \
+  buildRec# binding =                                                                                  \
+    {- The idea here is to try and reduce the number of times registers have to be passed around -}    \
+    [|| let self ret !(o# :: Rep _o) h = $$(binding [||self||] [||ret||] [||o#||] [||h||]) in self ||] \
 };
 inputInstances(deriveRecBuilder)
 

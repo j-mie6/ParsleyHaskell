@@ -6,6 +6,7 @@
 module Parsley.Internal.Backend.Machine.State (
     StaHandler(..), StaCont(..), StaSubRoutine, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown, mkFull,
     DynHandler, DynCont, DynSubRoutine, DynFunc,
+    Cont#, Handler#, StaCont#, StaHandler#,
     MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
     QSubRoutine, QJoin(..), Machine(..),

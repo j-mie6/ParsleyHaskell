@@ -137,11 +137,11 @@ bindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
                 -> StaHandlerBuilder s o a
                 -> (Γ s o xs (Succ n) r a -> Code b)
                 -> Code b
-bindSameHandler γ yes no k = bindSameHandler# (yes (input γ)) (no (input γ))
-  (\yes' no' -> mkStaHandler (input γ) $ \o ->
-    [||if $$(same (offset (input γ)) o) then $$yes' $$o else $$no' $$o||])
-  (\yes' no' full ->
-    k (γ {handlers = VCons (staHandlerFull (Just (input γ)) full yes' no') (handlers γ)}))
+bindSameHandler γ yes no k = bindSameHandler'# (yes (input γ)) (no (input γ))
+  (\qyes qno -> mkStaHandler (input γ) $ \o ->
+    [||if $$(same (offset (input γ)) o) then $$qyes $$o else $$qno $$o||])
+  (\qyes qno full ->
+    k (γ {handlers = VCons (staHandlerFull (Just (input γ)) full qyes qno) (handlers γ)}))
 
 class HandlerOps o where
   bindAlwaysHandler# :: StaHandler s o a -> (DynHandler s o a -> Code b) -> Code b
@@ -149,6 +149,16 @@ class HandlerOps o where
                    -> (DynHandler s o a -> DynHandler s o a -> StaHandler s o a)
                    -> (DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> Code b)
                    -> Code b
+
+bindSameHandler'# :: (HandlerOps o) => StaHandler s o a -> StaHandler s o a
+                   -> (DynHandler s o a -> DynHandler s o a -> StaHandler s o a)
+                   -> (DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> Code b)
+                   -> Code b
+bindSameHandler'# yes no combine k =
+  bindAlwaysHandler# yes $ \qyes ->
+    bindAlwaysHandler# no $ \qno ->
+      bindAlwaysHandler# (combine qyes qno) $ \qhandler ->
+        k qyes qno qhandler
 
 #define deriveHandlerOps(_o)                                                                    \
 instance HandlerOps _o where                                                                    \

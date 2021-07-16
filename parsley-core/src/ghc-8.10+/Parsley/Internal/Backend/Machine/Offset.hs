@@ -8,7 +8,14 @@ data Offset o = Offset {
     unique :: Word,
     moved  :: Word
   }
-instance Eq (Offset o) where o1 == o2 = unique o1 == unique o2 && moved o1 == moved o2
+--instance Eq (Offset o) where o1 == o2 = unique o1 == unique o2 && moved o1 == moved o2
+instance Show (Offset o) where
+  show o = show (unique o) ++ "+" ++ show (moved o)
+
+same :: Offset o -> Offset o -> Maybe Bool
+same o1 o2
+  | unique o1 == unique o2 = Just (moved o1 == moved o2)
+  | otherwise = Nothing
 
 moveOne :: Offset o -> Code (Rep o) -> Offset o
 moveOne off o = off { offset = o, moved = moved off + 1 }

@@ -30,7 +30,7 @@ import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
 import Parsley.Internal.Backend.Machine.Offset       (Offset(..), moveOne, mkOffset)
 import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Machine(..), MachineMonad, StaSubRoutine, OpStack(..), DynFunc,
-                                                      StaHandler(..), StaCont(..), DynHandler, DynCont, staHandler#, mkStaHandler, staCont#, mkStaCont,
+                                                      StaHandler(..), StaCont(..), DynHandler, DynCont, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel,
                                                       takeFreeRegisters,
                                                       freshUnique, nextUnique)
@@ -101,10 +101,10 @@ buildHandler :: Γ s o xs n r a
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
              -> Word
              -> StaHandlerBuilder s o a
-buildHandler γ h u c = mkStaHandler $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# u})
+buildHandler γ h u c = trace ("handler with " ++ show c) $ mkStaHandler c $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# u})
 
 fatal :: forall o s a. StaHandler s o a
-fatal = mkStaHandler $ const [|| returnST Nothing ||]
+fatal = StaHandler Nothing (mkUnknown (const [|| returnST Nothing ||])) Nothing
 
 class HandlerOps o where
   bindHandler :: Γ s o xs n r a
@@ -116,13 +116,13 @@ instance HandlerOps _o where                                                    
 {                                                                               \
   bindHandler γ h k = [||                                                       \
     let handler (o# :: Rep _o) = $$(staHandler# (h (input γ)) [||o#||])         \
-    in $$(k (γ {handlers = VCons (staHandler @_o [||handler||]) (handlers γ)})) \
+    in $$(k (γ {handlers = VCons (staHandler @_o (Just (input γ)) [||handler||]) (handlers γ)})) \
   ||]                                                                           \
 };
 inputInstances(deriveHandlerOps)
 
 raise :: Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
-raise γ = let VCons h _ = handlers γ in staHandler# h (offset (input γ))
+raise γ = let VCons h _ = handlers γ in staHandlerEval h (input γ)
 
 {- Control Flow Operations -}
 suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Word -> StaCont s o a x
@@ -160,7 +160,7 @@ instance JoinBuilder _o where                                                   
     liftM2 (\mk ctx γ -> [||                                                                   \
       let join x !(o# :: Rep _o) =                                                             \
         $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = mkOffset [||o#||] u})) \
-      in $$(run mx γ (insertΦ φ (staCont @_o [||join||]) ctx))                                 \
+      in $$(run mx γ (insertΦ φ (staCont [||join||]) ctx))                                 \
     ||]) (local voidCoins k) ask;                                                              \
 };
 inputInstances(deriveJoinBuilder)
@@ -171,8 +171,8 @@ instance RecBuilder _o where                                                    
   buildIter ctx μ l h o u = [||                                                                             \
       let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(staHandler# (h (mkOffset [||c#||] u)) [||o#||]);      \
           loop !(o# :: Rep _o) =                                                                            \
-        $$(run l                                                                                            \
-            (Γ Empty (noreturn @_o) (mkOffset [||o#||] u) (VCons (staHandler @_o [||handler o#||]) VNil))   \
+        $$(let off = mkOffset [||o#||] u in run l                                                           \
+            (Γ Empty noreturn off (VCons (staHandler (Just off) [||handler o#||]) VNil))          \
             (voidCoins (insertSub μ (\_ o# _ -> [|| loop $$(o#) ||]) ctx)))                                 \
       in loop $$o                                                                                           \
     ||];                                                                                                    \
@@ -182,7 +182,7 @@ instance RecBuilder _o where                                                    
       $$(run k (Γ Empty (staCont @_o [||ret||]) [||o#||] (VCons (staHandler @_o [||h||]) VNil)) ctx) ||]-}  \
     [|| let self ret !(o# :: Rep _o) h =                                                                    \
           $$(run k                                                                                          \
-              (Γ Empty (staCont @_o [||ret||]) (mkOffset [||o#||] 0) (VCons (staHandler @_o [||h||]) VNil)) \
+              (Γ Empty (staCont [||ret||]) (mkOffset [||o#||] 0) (VCons (staHandler Nothing [||h||]) VNil)) \
               (insertSub μ (\k o# h -> [|| self $$k $$(o#) $$h ||]) (nextUnique ctx))) in self ||]  );      \
 };
 inputInstances(deriveRecBuilder)
@@ -192,19 +192,19 @@ class MarshalOps o where
   dynHandler :: StaHandler s o a -> DynHandler s o a
   dynCont :: StaCont s o a x -> DynCont s o a x
 
-staHandler :: forall o s a. DynHandler s o a -> StaHandler s o a
-staHandler dh = StaHandler (\o# -> [|| $$dh $$(o#) ||]) (Just dh)
+staHandler :: Maybe (Offset o) -> DynHandler s o a -> StaHandler s o a
+staHandler c dh = StaHandler c (mkUnknown (\o# -> [|| $$dh $$(o#) ||])) (Just dh)
 
-staCont :: forall o s a x. DynCont s o a x -> StaCont s o a x
+staCont :: DynCont s o a x -> StaCont s o a x
 staCont dk = StaCont (\x o# -> [|| $$dk $$x $$(o#) ||]) (Just dk)
 
-#define deriveMarshalOps(_o)                                                           \
-instance MarshalOps _o where                                                           \
-{                                                                                      \
-  dynHandler (StaHandler sh Nothing) = [||\ !(o# :: Rep _o) -> $$(sh [||o#||]) ||];    \
-  dynHandler (StaHandler _ (Just dh)) = dh;                                            \
-  dynCont (StaCont sk Nothing) = [||\ x (o# :: Rep _o) -> $$(sk [||x||] [||o#||]) ||]; \
-  dynCont (StaCont _ (Just dk)) = dk;                                                  \
+#define deriveMarshalOps(_o)                                                                  \
+instance MarshalOps _o where                                                                  \
+{                                                                                             \
+  dynHandler (StaHandler _ sh Nothing) = [||\ !(o# :: Rep _o) -> $$(unknown sh [||o#||]) ||]; \
+  dynHandler (StaHandler _ _ (Just dh)) = dh;                                                 \
+  dynCont (StaCont sk Nothing) = [||\ x (o# :: Rep _o) -> $$(sk [||x||] [||o#||]) ||];        \
+  dynCont (StaCont _ (Just dk)) = dk;                                                         \
 };
 inputInstances(deriveMarshalOps)
 
@@ -212,7 +212,7 @@ inputInstances(deriveMarshalOps)
 type LogHandler o = (PositionOps (Rep o), LogOps (Rep o))
 
 logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
-logHandler name ctx γ u _ = let VCons h _ = handlers γ in mkStaHandler $ \o# -> [||
+logHandler name ctx γ u o = let VCons h _ = handlers γ in mkStaHandler o $ \o# -> [||
     trace $$(preludeString name '<' (γ {input = mkOffset o# u}) ctx (color Red " Fail")) $$(staHandler# h o#)
   ||]
 

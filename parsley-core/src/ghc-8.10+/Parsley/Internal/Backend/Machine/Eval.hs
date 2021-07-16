@@ -115,14 +115,6 @@ evalCatch :: (PositionOps (Rep o), HandlerOps o) => Machine s o xs (Succ n) r a 
 evalCatch (Machine k) (Always (Machine h)) = freshUnique $ \u -> liftM2 (\mk mh γ -> buildAndBindAlwaysHandler γ mh u mk) k h
 evalCatch (Machine k) (Same (Machine yes) (Machine no)) = freshUnique $ \u -> liftM3 (\mk myes mno γ -> buildAndBindSameHandler γ myes mno u mk) k yes no
 
-evalHandler :: PositionOps (Rep o) => Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
-evalHandler (Always k) = k
-evalHandler (Same yes no) =
-  Machine (evalDup (
-    Machine (evalTell (
-      Machine (evalLift2 SAME (
-        Machine (evalChoices [LAM (Abs id)] [yes] no)))))))
-
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (OFFSET (input γ)) (operands γ)})
 
@@ -151,6 +143,14 @@ evalIter μ l (Machine h) =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh u1) (offset (input γ)) u2) h ask
+
+evalHandler :: PositionOps (Rep o) => Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
+evalHandler (Always k) = k
+evalHandler (Same yes no) =
+  Machine (evalDup (
+    Machine (evalTell (
+      Machine (evalLift2 SAME (
+        Machine (evalChoices [LAM (Abs id)] [yes] no)))))))
 
 evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume

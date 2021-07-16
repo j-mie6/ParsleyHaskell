@@ -161,7 +161,7 @@ instance HandlerOps _o where                                                    
     let yesSame (o# :: Rep _o) = $$(staHandler# yes [||o#||]);                                  \
         notSame (o# :: Rep _o) = $$(staHandler# no [||o#||]);                                   \
         handler (o# :: Rep _o) = $$(staHandler# (combine [||yesSame||] [||notSame||]) [||o#||]) \
-    in $$(k [||handler||] [||handler||] [||handler||])                                          \
+    in $$(k [||yesSame||] [||notSame||] [||handler||])                                          \
   ||]                                                                                           \
 };
 inputInstances(deriveHandlerOps)

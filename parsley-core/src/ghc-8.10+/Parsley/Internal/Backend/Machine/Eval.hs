@@ -9,7 +9,7 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 import Data.Dependent.Map                             (DMap)
 import Data.Functor                                   ((<&>))
 import Data.Void                                      (Void)
-import Control.Monad                                  (forM, liftM2)
+import Control.Monad                                  (forM, liftM2, liftM3)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET, SAME, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
@@ -56,7 +56,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Sat p k)           = evalSat p k
     alg Empt                = evalEmpt
     alg (Commit k)          = evalCommit k
-    alg (Catch k h)         = evalCatch k (evalHandler h)
+    alg (Catch k h)         = evalCatch k h--(evalHandler h)
     alg (Tell k)            = evalTell k
     alg (Seek k)            = evalSeek k
     alg (Case p q)          = evalCase p q
@@ -110,8 +110,10 @@ evalEmpt = return $! raise
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
-evalCatch :: HandlerOps o => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
-evalCatch (Machine k) (Machine h) = freshUnique $ \u -> liftM2 (\mk mh γ -> bindHandler γ (buildHandler γ mh u) mk) k h
+evalCatch :: (PositionOps (Rep o), HandlerOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
+--evalCatch (Machine k) (Machine h) = freshUnique $ \u -> liftM2 (\mk mh γ -> buildAndBindHandler γ mh u mk) k h
+evalCatch (Machine k) (Always (Machine h)) = freshUnique $ \u -> liftM2 (\mk mh γ -> buildAndBindAlwaysHandler γ mh u mk) k h
+evalCatch (Machine k) (Same (Machine yes) (Machine no)) = freshUnique $ \u -> liftM3 (\mk myes mno γ -> buildAndBindSameHandler γ myes mno u mk) k yes no
 
 evalHandler :: PositionOps (Rep o) => Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
 evalHandler (Always k) = k
@@ -180,7 +182,7 @@ evalPut σ a k = asks $ \ctx γ ->
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) = freshUnique $ \u ->
-  liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindHandler γ (logHandler name ctx γ u) k)||])
+  liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindAlwaysHandler γ (logHandler name ctx γ u) k)||])
     (local debugUp mk)
     ask
 

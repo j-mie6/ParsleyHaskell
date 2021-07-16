@@ -30,7 +30,7 @@ import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
 import Parsley.Internal.Backend.Machine.Offset       (Offset(..), moveOne, mkOffset)
 import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Machine(..), MachineMonad, StaSubRoutine, OpStack(..), DynFunc,
-                                                      StaHandler(..), StaCont(..), DynHandler, DynCont, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown,
+                                                      StaHandler(..), StaCont(..), DynHandler, DynCont, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown, mkFull,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel,
                                                       takeFreeRegisters,
                                                       freshUnique, nextUnique)
@@ -54,10 +54,10 @@ type Ops o = (HandlerOps o, JoinBuilder o, RecBuilder o, PositionOps (Rep o), Ma
 type StaHandlerBuilder s o a = Offset o -> StaHandler s o a
 
 {- Input Operations -}
-sat :: (?ops :: InputOps (Rep o)) => (Defunc Char -> Defunc Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps (Rep o)) => (Defunc Char -> Defunc Bool) -> (Γ s o (Char : xs) n r a -> Code b) -> Code b -> Γ s o xs n r a -> Code b
 sat p k bad γ@Γ{..} = next (offset input) $ \c offset' -> let v = FREEVAR c in _if (p v) (k (γ {operands = Op v operands, input = moveOne input offset'})) bad
 
-emitLengthCheck :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps (Rep o)) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+emitLengthCheck :: forall s o xs n r a b. (?ops :: InputOps (Rep o), PositionOps (Rep o)) => Int -> (Γ s o xs n r a -> Code b) -> Code b -> Γ s o xs n r a -> Code b
 emitLengthCheck 0 good _ γ   = good γ
 emitLengthCheck 1 good bad γ = [|| if $$more $$(offset (input γ)) then $$(good γ) else $$bad ||]
 emitLengthCheck (I# n) good bad γ = [||
@@ -75,21 +75,21 @@ returnST :: forall s a. a -> ST s a
 returnST = return @(ST s)
 
 {- Register Operations -}
-newΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+newΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 newΣ σ Soft x k ctx = dup x $ \dupx -> k (insertNewΣ σ Nothing dupx ctx)
 newΣ σ Hard x k ctx = dup x $ \dupx -> [||
     do ref <- newSTRef $$(genDefunc dupx)
        $$(k (insertNewΣ σ (Just [||ref||]) dupx ctx))
   ||]
 
-writeΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+writeΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$(genDefunc dupx)
        $$(k (cacheΣ σ dupx ctx))
   ||]
 
-readΣ :: ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+readΣ :: ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
@@ -97,6 +97,24 @@ readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
   ||]
 
 {- Handler Operations -}
+buildAndBindAlwaysHandler :: (HandlerOps o) => Γ s o xs n r a
+                          -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
+                          -> Word
+                          -> (Γ s o xs ('Succ n) r a -> Code b)
+                          -> Code b
+buildAndBindAlwaysHandler γ mh = bindAlwaysHandler γ . buildHandler γ mh
+
+buildAndBindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
+                        -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
+                        -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
+                        -> Word
+                        -> (Γ s o xs ('Succ n) r a -> Code b)
+                        -> Code b
+buildAndBindSameHandler γ myes mno u =
+  bindSameHandler γ
+    (buildHandler γ myes u)
+    (buildHandler γ mno u)
+
 buildHandler :: Γ s o xs n r a
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
              -> Word
@@ -106,18 +124,45 @@ buildHandler γ h u c = trace ("handler with " ++ show c) $ mkStaHandler c $ \o#
 fatal :: forall o s a. StaHandler s o a
 fatal = StaHandler Nothing (mkUnknown (const [|| returnST Nothing ||])) Nothing
 
-class HandlerOps o where
-  bindHandler :: Γ s o xs n r a
-              -> StaHandlerBuilder s o a
-              -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
+-- Should we elide StaHandlers derived from DynHandler?
+bindAlwaysHandler :: HandlerOps o => Γ s o xs n r a
+                  -> StaHandlerBuilder s o a
+                  -> (Γ s o xs (Succ n) r a -> Code b) -> Code b
+bindAlwaysHandler γ h k = bindAlwaysHandler# (h (input γ)) $ \qh ->
+  k (γ {handlers = VCons (staHandler (Just (input γ)) qh) (handlers γ)})
 
-#define deriveHandlerOps(_o)                                                    \
-instance HandlerOps _o where                                                    \
-{                                                                               \
-  bindHandler γ h k = [||                                                       \
-    let handler (o# :: Rep _o) = $$(staHandler# (h (input γ)) [||o#||])         \
-    in $$(k (γ {handlers = VCons (staHandler @_o (Just (input γ)) [||handler||]) (handlers γ)})) \
-  ||]                                                                           \
+-- Should we elide StaHandlers derived from DynHandler?
+bindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
+                -> StaHandlerBuilder s o a
+                -> StaHandlerBuilder s o a
+                -> (Γ s o xs (Succ n) r a -> Code b)
+                -> Code b
+bindSameHandler γ yes no k = bindSameHandler# (yes (input γ)) (no (input γ))
+  (\yes' no' -> mkStaHandler (input γ) $ \o ->
+    [||if $$(same (offset (input γ)) o) then $$yes' $$o else $$no' $$o||])
+  (\yes' no' full ->
+    k (γ {handlers = VCons (staHandlerFull (Just (input γ)) full yes' no') (handlers γ)}))
+
+class HandlerOps o where
+  bindAlwaysHandler# :: StaHandler s o a -> (DynHandler s o a -> Code b) -> Code b
+  bindSameHandler# :: StaHandler s o a -> StaHandler s o a
+                   -> (DynHandler s o a -> DynHandler s o a -> StaHandler s o a)
+                   -> (DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> Code b)
+                   -> Code b
+
+#define deriveHandlerOps(_o)                                                                    \
+instance HandlerOps _o where                                                                    \
+{                                                                                               \
+  bindAlwaysHandler# h k = [||                                                                  \
+    let handler (o# :: Rep _o) = $$(staHandler# h [||o#||])                                     \
+    in $$(k [||handler||])                                                                      \
+  ||];                                                                                          \
+  bindSameHandler# yes no combine k = [||                                                       \
+    let yesSame (o# :: Rep _o) = $$(staHandler# yes [||o#||]);                                  \
+        notSame (o# :: Rep _o) = $$(staHandler# no [||o#||]);                                   \
+        handler (o# :: Rep _o) = $$(staHandler# (combine [||yesSame||] [||notSame||]) [||o#||]) \
+    in $$(k [||handler||] [||handler||] [||handler||])                                          \
+  ||]                                                                                           \
 };
 inputInstances(deriveHandlerOps)
 
@@ -160,7 +205,7 @@ instance JoinBuilder _o where                                                   
     liftM2 (\mk ctx γ -> [||                                                                   \
       let join x !(o# :: Rep _o) =                                                             \
         $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = mkOffset [||o#||] u})) \
-      in $$(run mx γ (insertΦ φ (staCont [||join||]) ctx))                                 \
+      in $$(run mx γ (insertΦ φ (staCont [||join||]) ctx))                                     \
     ||]) (local voidCoins k) ask;                                                              \
 };
 inputInstances(deriveJoinBuilder)
@@ -172,7 +217,7 @@ instance RecBuilder _o where                                                    
       let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(staHandler# (h (mkOffset [||c#||] u)) [||o#||]);      \
           loop !(o# :: Rep _o) =                                                                            \
         $$(let off = mkOffset [||o#||] u in run l                                                           \
-            (Γ Empty noreturn off (VCons (staHandler (Just off) [||handler o#||]) VNil))          \
+            (Γ Empty noreturn off (VCons (staHandler (Just off) [||handler o#||]) VNil))                    \
             (voidCoins (insertSub μ (\_ o# _ -> [|| loop $$(o#) ||]) ctx)))                                 \
       in loop $$o                                                                                           \
     ||];                                                                                                    \
@@ -194,6 +239,13 @@ class MarshalOps o where
 
 staHandler :: Maybe (Offset o) -> DynHandler s o a -> StaHandler s o a
 staHandler c dh = StaHandler c (mkUnknown (\o# -> [|| $$dh $$(o#) ||])) (Just dh)
+
+staHandlerFull :: Maybe (Offset o) -> DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> StaHandler s o a
+staHandlerFull c handler yes no = StaHandler c
+  (mkFull (\o# -> [|| $$handler $$(o#) ||])
+          (\o# -> [|| $$yes $$(o#) ||])
+          (\o# -> [|| $$no $$(o#) ||]))
+  (Just handler)
 
 staCont :: DynCont s o a x -> StaCont s o a x
 staCont dk = StaCont (\x o# -> [|| $$dk $$x $$(o#) ||]) (Just dk)

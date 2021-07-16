@@ -4,7 +4,7 @@
              TypeFamilies,
              DerivingStrategies #-}
 module Parsley.Internal.Backend.Machine.State (
-    StaHandler(..), StaCont(..), StaSubRoutine, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown,
+    StaHandler(..), StaCont(..), StaSubRoutine, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown, mkFull,
     DynHandler, DynCont, DynSubRoutine, DynFunc,
     MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
@@ -73,6 +73,9 @@ mkStaHandler o sh = StaHandler (Just o) (mkUnknown sh) Nothing
 
 mkUnknown :: StaHandler# s o a -> StaHandlerCase s o a
 mkUnknown h = StaHandlerCase h Nothing Nothing
+
+mkFull :: StaHandler# s o a -> StaHandler# s o a -> StaHandler# s o a -> StaHandlerCase s o a
+mkFull h yes no = StaHandlerCase h (Just yes) (Just no)
 
 type StaCont# s o a x = Code x -> Code (Rep o) -> Code (ST s (Maybe a))
 data StaCont s o a x = StaCont (StaCont# s o a x) (Maybe (DynCont s o a x))

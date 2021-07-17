@@ -184,7 +184,7 @@ buildIter = buildIterAlways
 buildIterAlways :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
                 -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
 buildIterAlways ctx μ l h o u =
-  buildIterHandler# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
+  buildIterHandlerBang# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
     buildIter# @o o $ \qloop qo# ->
       let off = mkOffset qo# u
       in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
@@ -197,7 +197,7 @@ buildIterSame ctx μ l yes no o u =
     buildIterHandler# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
       let handler qc# = mkStaHandler (mkOffset @o qc# u) $ \o ->
             [||if $$(same qc# o) then $$qyes $$(qc#) $$o else $$qno $$(qc#) $$o||]
-      in buildIterHandler# @o (staHandler# . handler) $ \qhandler ->
+      in buildIterHandlerBang# @o (staHandler# . handler) $ \qhandler ->
         buildIter# @o o $ \qloop qo# ->
           let off = mkOffset qo# u
           in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
@@ -218,6 +218,9 @@ class RecBuilder o where
   buildIterHandler# :: (Code (Rep o) -> StaHandler# s o a)
                     -> (Code (Rep o -> Handler# s o a) -> Code b)
                     -> Code b
+  buildIterHandlerBang# :: (Code (Rep o) -> StaHandler# s o a)
+                        -> (Code (Rep o -> Handler# s o a) -> Code b)
+                        -> Code b
   buildIter# :: Code (Rep o)
              -> (Code (Rep o -> ST s (Maybe a)) -> Code (Rep o) -> Code (ST s (Maybe a)))
              -> Code (ST s (Maybe a))
@@ -228,7 +231,10 @@ class RecBuilder o where
 instance RecBuilder _o where                                                                           \
 {                                                                                                      \
   buildIterHandler# h k = [||                                                                          \
-      let handler (c# :: Rep _o) (o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])      \
+      let handler (c# :: Rep _o) (o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])       \
+    ||];                                                                                               \
+  buildIterHandlerBang# h k = [||                                                                      \
+      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])      \
     ||];                                                                                               \
   buildIter# o l = [||                                                                                 \
       let loop !(o# :: Rep _o) = $$(l [||loop||] [||o#||])                                             \

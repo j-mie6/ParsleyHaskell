@@ -44,20 +44,11 @@ pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
 pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
-{-rollbackHandler :: Fix4 (Instr o) (o : xs) (Succ n) r a
-rollbackHandler = In4 (Seek (In4 Empt))-}
 rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
 rollbackHandler = Always (In4 (Seek (In4 Empt)))
 
---parsecHandler :: PositionOps o => Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) (o : xs) (Succ n) r a
 parsecHandler :: Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
---parsecHandler k = In4 (Tell (In4 (Lift2 SAME (In4 (_If k (In4 Empt))))))
---parsecHandler k = Same (In4 (Pop k)) (In4 Empt)
--- This version makes the _old_ offset the one that's used. Since this happens under the SAME, this
--- makes superficial difference to the generated code, but it makes it more amenable to static
--- position comparisons in the handlers
---parsecHandler k = In4 (Dup (In4 (Tell (In4 (Lift2 SAME (In4 (_If (In4 (Seek k)) (In4 Empt))))))))
-parsecHandler k = Same (In4 (Seek k)) (In4 Empt)
+parsecHandler k = Same k (In4 Empt)
 
 altNoCutCompile :: CodeGen o a y -> CodeGen o a x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)

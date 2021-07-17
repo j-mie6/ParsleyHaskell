@@ -46,7 +46,7 @@ data MetaInstr (n :: Nat) where
   DrainCoins  :: Int -> MetaInstr (Succ n)
 
 data Handler (o :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Type]) (n :: Nat) (r :: Type) (a :: Type) where
-  Same :: k (o : xs) n r a -> k (o : xs) n r a -> Handler o k (o : xs) n r a
+  Same :: k xs n r a -> k (o : xs) n r a -> Handler o k (o : xs) n r a
   Always :: k (o : xs) n r a -> Handler o k (o : xs) n r a
 
 mkCoin :: (Int -> MetaInstr n) -> Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a

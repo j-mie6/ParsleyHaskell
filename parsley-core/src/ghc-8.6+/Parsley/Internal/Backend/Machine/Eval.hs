@@ -116,7 +116,7 @@ evalHandler (Instructions.Same yes no) =
   Machine (evalDup (
     Machine (evalTell (
       Machine (evalLift2 SAME (
-        Machine (evalChoices [LAM (Abs id)] [yes] no)))))))
+        Machine (evalChoices [LAM (Abs id)] [Machine (evalPop yes)] no)))))))
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (FREEVAR (input γ)) (operands γ)})

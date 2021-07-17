@@ -130,5 +130,5 @@ relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
     alg (MetaInstr _ k)    n         = getStack k n
 
     algHandler :: Handler o RelevancyStack xs n r a -> SNat (Length xs) -> Vec (Length xs) Bool
-    algHandler (Same yes no) n = VCons True (let VCons _ xs = zipRelevancy (getStack yes n) (getStack no n) in xs)
+    algHandler (Same yes no) (SSucc n) = VCons True (let VCons _ xs = zipRelevancy (VCons False (getStack yes n)) (getStack no (SSucc n)) in xs)
     algHandler (Always k) n = getStack k n

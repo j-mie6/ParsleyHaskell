@@ -104,10 +104,10 @@ buildHandler :: Γ s o xs n r a
 buildHandler γ h u c = mkStaHandler c $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# u})
 
 buildYesHandler :: Γ s o xs n r a
-                -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
+                -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
                 -> Word
                 -> StaHandler s o a
-buildYesHandler γ h u = StaHandler Nothing (mkUnknown $ \o# -> h (γ {operands = Op (OFFSET (mkOffset o# u)) (operands γ), input = mkOffset o# u})) Nothing
+buildYesHandler γ h u = StaHandler Nothing (mkUnknown $ \o# -> h (γ {input = mkOffset o# u})) Nothing
 
 fatal :: forall o s a. StaHandler s o a
 fatal = StaHandler Nothing (mkUnknown (const [|| returnST Nothing ||])) Nothing

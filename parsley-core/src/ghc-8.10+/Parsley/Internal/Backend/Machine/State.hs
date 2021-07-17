@@ -39,8 +39,6 @@ import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Co
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
 
-import Debug.Trace (trace)
-
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
 -- Statics
@@ -65,9 +63,9 @@ staHandler# (StaHandler _ sh _) = unknown sh
 
 staHandlerEval :: StaHandler s o a -> Offset o -> Code (ST s (Maybe a))
 staHandlerEval (StaHandler (Just c) sh _) o
-  | Just True <- same c o            = trace "offsets match" $ maybe (unknown sh) const (yesSame sh) (offset o)
-  | Just False <- same c o           = trace "offsets don't match" $ fromMaybe (unknown sh) (notSame sh) (offset o)
-staHandlerEval (StaHandler _ sh _) o = trace "offsets unknown or incomparable" $ unknown sh (offset o)
+  | Just True <- same c o            = maybe (unknown sh) const (yesSame sh) (offset o)
+  | Just False <- same c o           = fromMaybe (unknown sh) (notSame sh) (offset o)
+staHandlerEval (StaHandler _ sh _) o = unknown sh (offset o)
 
 mkStaHandler :: Offset o -> StaHandler# s o a -> StaHandler s o a
 mkStaHandler o sh = StaHandler (Just o) (mkUnknown sh) Nothing

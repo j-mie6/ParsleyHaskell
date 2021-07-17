@@ -200,7 +200,7 @@ buildIterSame ctx μ l yes no o u =
       in buildIterHandler# @o (staHandler# . handler) $ \qhandler ->
         buildIter# @o o $ \qloop qo# ->
           let off = mkOffset qo# u
-          in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
+          in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
                    (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 buildRec :: forall rs s o a r. RecBuilder o => MVar r

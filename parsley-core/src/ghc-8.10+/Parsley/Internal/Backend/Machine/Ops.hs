@@ -187,7 +187,7 @@ inputInstances(deriveJoinBuilder)
 buildIterAlways :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
                 -> StaHandlerBuilder s o a -> Offset o -> Word -> Code (ST s (Maybe a))
 buildIterAlways ctx μ l h o u =
-  bindIterHandlerBang# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
+  bindIterHandler# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
     buildIter# @o (offset o) $ \qloop qo# ->
       let off = mkOffset qo# u
       in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
@@ -197,10 +197,10 @@ buildIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
                 -> StaHandler s o a -> StaHandlerBuilder s o a -> Offset o -> Word -> Code (ST s (Maybe a))
 buildIterSame ctx μ l yes no o u =
   bindHandler# @o yes $ \qyes ->
-    bindIterHandlerBang# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
+    bindIterHandler# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
       let handler qc# = mkStaHandler (mkOffset @o qc# u) $ \o ->
             [||if $$(same qc# o) then $$qyes $$(qc#) else $$qno $$(qc#) $$o||]
-      in bindIterHandlerBang# @o (staHandler# . handler) $ \qhandler ->
+      in bindIterHandler# @o (staHandler# . handler) $ \qhandler ->
         buildIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
           in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
@@ -221,9 +221,6 @@ class RecBuilder o where
   bindIterHandler# :: (Code (Rep o) -> StaHandler# s o a)
                    -> (Code (Rep o -> Handler# s o a) -> Code b)
                    -> Code b
-  bindIterHandlerBang# :: (Code (Rep o) -> StaHandler# s o a)
-                       -> (Code (Rep o -> Handler# s o a) -> Code b)
-                       -> Code b
   buildIter# :: Code (Rep o)
              -> (Code (Rep o -> ST s (Maybe a)) -> Code (Rep o) -> Code (ST s (Maybe a)))
              -> Code (ST s (Maybe a))
@@ -233,11 +230,8 @@ class RecBuilder o where
 #define deriveRecBuilder(_o)                                                                           \
 instance RecBuilder _o where                                                                           \
 {                                                                                                      \
-  bindIterHandler# h k = [||                                                                          \
+  bindIterHandler# h k = [||                                                                           \
       let handler (c# :: Rep _o) (o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])       \
-    ||];                                                                                               \
-  bindIterHandlerBang# h k = [||                                                                      \
-      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])      \
     ||];                                                                                               \
   buildIter# o l = [||                                                                                 \
       let loop !(o# :: Rep _o) = $$(l [||loop||] [||o#||])                                             \

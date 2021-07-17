@@ -179,12 +179,12 @@ inputInstances(deriveJoinBuilder)
 
 buildIter :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
           -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
-buildIter ctx μ l h o u = buildIter# @o o
-  (\qc# -> staHandler# (h (mkOffset qc# u)))
-  (\qloop qhandler qo# ->
-    let off = mkOffset qo# u
-    in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
-             (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx)))
+buildIter ctx μ l h o u =
+  buildIterHandler# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
+    buildIter# @o o $ \qloop qo# ->
+      let off = mkOffset qo# u
+      in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
+                (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 buildRec :: forall rs s o a r. RecBuilder o => MVar r
          -> Regs rs
@@ -198,9 +198,11 @@ buildRec μ rs ctx k =
             (insertSub μ (\k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
 
 class RecBuilder o where
+  buildIterHandler# :: (Code (Rep o) -> StaHandler# s o a)
+                    -> (Code (Rep o -> Handler# s o a) -> Code b)
+                    -> Code b
   buildIter# :: Code (Rep o)
-             -> (Code (Rep o) -> StaHandler# s o a)
-             -> (Code (Rep o -> ST s (Maybe a)) -> Code (Rep o -> Handler# s o a) -> Code (Rep o) -> Code (ST s (Maybe a)))
+             -> (Code (Rep o -> ST s (Maybe a)) -> Code (Rep o) -> Code (ST s (Maybe a)))
              -> Code (ST s (Maybe a))
   buildRec#  :: (DynSubRoutine s o a x -> DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a)))
              -> DynSubRoutine s o a x
@@ -208,9 +210,11 @@ class RecBuilder o where
 #define deriveRecBuilder(_o)                                                                           \
 instance RecBuilder _o where                                                                           \
 {                                                                                                      \
-  buildIter# o h l = [||                                                                               \
-      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]);                            \
-          loop !(o# :: Rep _o) = $$(l [||loop||] [||handler||] [||o#||])                               \
+  buildIterHandler# h k = [||                                                                          \
+      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])      \
+    ||];                                                                                               \
+  buildIter# o l = [||                                                                                 \
+      let loop !(o# :: Rep _o) = $$(l [||loop||] [||o#||])                                             \
       in loop $$o                                                                                      \
     ||];                                                                                               \
   buildRec# binding =                                                                                  \

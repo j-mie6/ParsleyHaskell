@@ -12,7 +12,7 @@ import Data.Void                                      (Void)
 import Control.Monad                                  (forM, liftM2, liftM3)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET, SAME, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET{-, SAME, LAM-}), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant, PositionOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.InputRep      (Rep)
@@ -28,7 +28,7 @@ import System.Console.Pretty                          (color, Color(Green))
 
 import qualified Debug.Trace (trace)
 
-import Parsley.Internal.Core.Lam (Lam(Abs))
+--import Parsley.Internal.Core.Lam (Lam(Abs))
 
 eval :: forall o a. (Trace, Ops o) => Code (InputDependant (Rep o)) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
 eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
@@ -61,7 +61,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Seek k)            = evalSeek k
     alg (Case p q)          = evalCase p q
     alg (Choices fs ks def) = evalChoices fs ks def
-    alg (Iter μ l k)        = evalIter μ l (evalHandler k)
+    alg (Iter μ l k)        = evalIter μ l k --(evalHandler k)
     alg (Join φ)            = evalJoin φ
     alg (MkJoin φ p k)      = evalMkJoin φ p k
     alg (Swap k)            = evalSwap k
@@ -111,9 +111,11 @@ evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
 evalCatch :: (PositionOps (Rep o), HandlerOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
-evalCatch (Machine k) (Always (Machine h)) = freshUnique $ \u -> liftM2 (\mk mh γ -> bindAlwaysHandler γ (buildHandler γ mh u) mk) k h
-evalCatch (Machine k) (Same (Machine yes) (Machine no)) =
-  freshUnique $ \u -> liftM3 (\mk myes mno γ -> bindSameHandler γ (buildHandler γ myes u) (buildHandler γ mno u) mk) k yes no
+evalCatch (Machine k) h = freshUnique $ \u -> case h of
+  Always (Machine h) ->
+    liftM2 (\mk mh γ -> bindAlwaysHandler γ (buildHandler γ mh u) mk) k h
+  Same (Machine yes) (Machine no) ->
+    liftM3 (\mk myes mno γ -> bindSameHandler γ (buildHandler γ myes u) (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (OFFSET (input γ)) (operands γ)})
@@ -136,21 +138,25 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go x (f:fs) (mk:mks) def γ = _if (ap f x) (mk γ) (go x fs mks def γ)
     go _ _      _        def γ = def γ
 
-evalIter :: RecBuilder o
-         => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
+evalIter :: (RecBuilder o, PositionOps (Rep o))
+         => MVar Void -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
          -> MachineMonad s o xs n r a
-evalIter μ l (Machine h) =
+evalIter μ l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
-      liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh u1) (offset (input γ)) u2) h ask
+      case h of
+        Always (Machine h) ->
+          liftM2 (\mh ctx γ -> buildIterAlways ctx μ l (buildHandler γ mh u1) (offset (input γ)) u2) h ask
+        Same (Machine yes) (Machine no) ->
+          liftM3 (\myes mno ctx γ ->  buildIterSame ctx μ l (buildHandler γ myes u1) (buildHandler γ mno u1) (offset (input γ)) u2) yes no ask
 
-evalHandler :: PositionOps (Rep o) => Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
+{-evalHandler :: PositionOps (Rep o) => Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
 evalHandler (Always k) = k
 evalHandler (Same yes no) =
   Machine (evalDup (
     Machine (evalTell (
       Machine (evalLift2 SAME (
-        Machine (evalChoices [LAM (Abs id)] [yes] no)))))))
+        Machine (evalChoices [LAM (Abs id)] [yes] no)))))))-}
 
 evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume

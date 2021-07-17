@@ -179,12 +179,29 @@ inputInstances(deriveJoinBuilder)
 
 buildIter :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
           -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
-buildIter ctx μ l h o u =
+buildIter = buildIterAlways
+
+buildIterAlways :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
+                -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
+buildIterAlways ctx μ l h o u =
   buildIterHandler# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
     buildIter# @o o $ \qloop qo# ->
       let off = mkOffset qo# u
       in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
                 (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
+
+buildIterSame :: forall s o a. (RecBuilder o, PositionOps (Rep o)) => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
+                -> StaHandlerBuilder s o a -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
+buildIterSame ctx μ l yes no o u =
+  buildIterHandler# @o (\qc# -> staHandler# (yes (mkOffset qc# u))) $ \qyes ->
+    buildIterHandler# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
+      let handler qc# = mkStaHandler (mkOffset @o qc# u) $ \o ->
+            [||if $$(same qc# o) then $$qyes $$(qc#) $$o else $$qno $$(qc#) $$o||]
+      in buildIterHandler# @o (staHandler# . handler) $ \qhandler ->
+        buildIter# @o o $ \qloop qo# ->
+          let off = mkOffset qo# u
+          in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
+                   (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 buildRec :: forall rs s o a r. RecBuilder o => MVar r
          -> Regs rs

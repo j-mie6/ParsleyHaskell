@@ -119,17 +119,18 @@ bindAlwaysHandler γ h k = bindHandler# (h (input γ)) $ \qh ->
   k (γ {handlers = VCons (staHandler (Just (input γ)) qh) (handlers γ)})
 
 bindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
-                -> StaHandlerBuilder s o a
+                -> StaHandler s o a
                 -> StaHandlerBuilder s o a
                 -> (Γ s o xs (Succ n) r a -> Code b)
                 -> Code b
 bindSameHandler γ yes no k =
-  bindHandler# (yes (input γ))$ \qyes ->
-    bindHandler# (no (input γ)) $ \qno ->
+  [|| let yesSame = $$(staHandler# yes (offset (input γ))) in
+    $$(bindHandler# (no (input γ)) $ \qno ->
       let handler = mkStaHandler (input γ) $ \o ->
-            [||if $$(same (offset (input γ)) o) then $$qyes $$o else $$qno $$o||]
+            [||if $$(same (offset (input γ)) o) then yesSame else $$qno $$o||]
       in bindHandler# handler $ \qhandler ->
-           k (γ {handlers = VCons (staHandlerFull (Just (input γ)) qhandler qyes qno) (handlers γ)})
+           k (γ {handlers = VCons (staHandlerFull (Just (input γ)) qhandler [||yesSame||] qno) (handlers γ)}))
+  ||]
 
 class HandlerOps o where
   bindHandler# :: StaHandler s o a -> (DynHandler s o a -> Code b) -> Code b
@@ -202,7 +203,7 @@ buildIterSame ctx μ l yes no o u =
       in bindIterHandlerBang# @o (staHandler# . handler) $ \qhandler ->
         buildIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
-          in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] qyes [||$$qno $$(qo#)||]) VNil))
+          in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
                    (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 buildRec :: forall rs s o a r. RecBuilder o => MVar r
@@ -256,10 +257,10 @@ class MarshalOps o where
 staHandler :: Maybe (Offset o) -> DynHandler s o a -> StaHandler s o a
 staHandler c dh = StaHandler c (mkUnknown (\o# -> [|| $$dh $$(o#) ||])) (Just dh)
 
-staHandlerFull :: Maybe (Offset o) -> DynHandler s o a -> DynHandler s o a -> DynHandler s o a -> StaHandler s o a
+staHandlerFull :: Maybe (Offset o) -> DynHandler s o a -> Code (ST s (Maybe a)) -> DynHandler s o a -> StaHandler s o a
 staHandlerFull c handler yes no = StaHandler c
   (mkFull (\o# -> [|| $$handler $$(o#) ||])
-          (\o# -> [|| $$yes $$(o#) ||])
+          yes
           (\o# -> [|| $$no $$(o#) ||]))
   (Just handler)
 

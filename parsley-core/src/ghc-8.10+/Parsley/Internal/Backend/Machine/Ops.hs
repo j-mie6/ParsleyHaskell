@@ -228,7 +228,7 @@ class RecBuilder o where
 instance RecBuilder _o where                                                                           \
 {                                                                                                      \
   buildIterHandler# h k = [||                                                                          \
-      let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])      \
+      let handler (c# :: Rep _o) (o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])      \
     ||];                                                                                               \
   buildIter# o l = [||                                                                                 \
       let loop !(o# :: Rep _o) = $$(l [||loop||] [||o#||])                                             \

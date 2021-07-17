@@ -138,7 +138,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go x (f:fs) (mk:mks) def γ = _if (ap f x) (mk γ) (go x fs mks def γ)
     go _ _      _        def γ = def γ
 
-evalIter :: (RecBuilder o, PositionOps (Rep o))
+evalIter :: (RecBuilder o, PositionOps (Rep o), HandlerOps o)
          => MVar Void -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
          -> MachineMonad s o xs n r a
 evalIter μ l h =
@@ -146,9 +146,9 @@ evalIter μ l h =
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       case h of
         Always (Machine h) ->
-          liftM2 (\mh ctx γ -> buildIterAlways ctx μ l (buildHandler γ mh u1) (offset (input γ)) u2) h ask
+          liftM2 (\mh ctx γ -> buildIterAlways ctx μ l (buildHandler γ mh u1) (input γ) u2) h ask
         Same (Machine yes) (Machine no) ->
-          liftM3 (\myes mno ctx γ ->  buildIterSame ctx μ l (buildHandler γ myes u1) (buildHandler γ mno u1) (offset (input γ)) u2) yes no ask
+          liftM3 (\myes mno ctx γ ->  buildIterSame ctx μ l (buildYesHandler γ myes u1) (buildHandler γ mno u1) (input γ) u2) yes no ask
 
 {-evalHandler :: PositionOps (Rep o) => Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
 evalHandler (Always k) = k

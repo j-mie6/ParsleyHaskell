@@ -200,7 +200,7 @@ buildIterSame ctx μ l yes no o u =
     bindIterHandler# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
       let handler qc# = mkStaHandler (mkOffset @o qc# u) $ \o ->
             [||if $$(same qc# o) then $$qyes $$(qc#) else $$qno $$(qc#) $$o||]
-      in bindIterHandlerBang# @o (staHandler# . handler) $ \qhandler ->
+      in bindIterHandler# @o (staHandler# . handler) $ \qhandler ->
         buildIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
           in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))

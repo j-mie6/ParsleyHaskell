@@ -103,6 +103,12 @@ buildHandler :: Γ s o xs n r a
              -> StaHandlerBuilder s o a
 buildHandler γ h u c = trace ("handler with " ++ show c) $ mkStaHandler c $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# u})
 
+buildYesHandler :: Γ s o xs n r a
+                -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
+                -> Word
+                -> StaHandler s o a
+buildYesHandler γ h u = StaHandler Nothing (mkUnknown $ \o# -> h (γ {operands = Op (OFFSET (mkOffset o# u)) (operands γ), input = mkOffset o# u})) Nothing
+
 fatal :: forall o s a. StaHandler s o a
 fatal = StaHandler Nothing (mkUnknown (const [|| returnST Nothing ||])) Nothing
 
@@ -177,30 +183,26 @@ instance JoinBuilder _o where                                                   
 };
 inputInstances(deriveJoinBuilder)
 
-buildIter :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-          -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
-buildIter = buildIterAlways
-
 buildIterAlways :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-                -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
+                -> StaHandlerBuilder s o a -> Offset o -> Word -> Code (ST s (Maybe a))
 buildIterAlways ctx μ l h o u =
-  buildIterHandlerBang# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
-    buildIter# @o o $ \qloop qo# ->
+  bindIterHandlerBang# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
+    buildIter# @o (offset o) $ \qloop qo# ->
       let off = mkOffset qo# u
       in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
                 (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
-buildIterSame :: forall s o a. (RecBuilder o, PositionOps (Rep o)) => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-                -> StaHandlerBuilder s o a -> StaHandlerBuilder s o a -> Code (Rep o) -> Word -> Code (ST s (Maybe a))
+buildIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o)) => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
+                -> StaHandler s o a -> StaHandlerBuilder s o a -> Offset o -> Word -> Code (ST s (Maybe a))
 buildIterSame ctx μ l yes no o u =
-  buildIterHandler# @o (\qc# -> staHandler# (yes (mkOffset qc# u))) $ \qyes ->
-    buildIterHandler# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
+  bindHandler# @o yes $ \qyes ->
+    bindIterHandler# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
       let handler qc# = mkStaHandler (mkOffset @o qc# u) $ \o ->
-            [||if $$(same qc# o) then $$qyes $$(qc#) $$o else $$qno $$(qc#) $$o||]
-      in buildIterHandlerBang# @o (staHandler# . handler) $ \qhandler ->
-        buildIter# @o o $ \qloop qo# ->
+            [||if $$(same qc# o) then $$qyes $$(qc#) else $$qno $$(qc#) $$o||]
+      in bindIterHandlerBang# @o (staHandler# . handler) $ \qhandler ->
+        buildIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
-          in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
+          in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] qyes [||$$qno $$(qo#)||]) VNil))
                    (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 buildRec :: forall rs s o a r. RecBuilder o => MVar r
@@ -215,12 +217,12 @@ buildRec μ rs ctx k =
             (insertSub μ (\k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
 
 class RecBuilder o where
-  buildIterHandler# :: (Code (Rep o) -> StaHandler# s o a)
-                    -> (Code (Rep o -> Handler# s o a) -> Code b)
-                    -> Code b
-  buildIterHandlerBang# :: (Code (Rep o) -> StaHandler# s o a)
-                        -> (Code (Rep o -> Handler# s o a) -> Code b)
-                        -> Code b
+  bindIterHandler# :: (Code (Rep o) -> StaHandler# s o a)
+                   -> (Code (Rep o -> Handler# s o a) -> Code b)
+                   -> Code b
+  bindIterHandlerBang# :: (Code (Rep o) -> StaHandler# s o a)
+                       -> (Code (Rep o -> Handler# s o a) -> Code b)
+                       -> Code b
   buildIter# :: Code (Rep o)
              -> (Code (Rep o -> ST s (Maybe a)) -> Code (Rep o) -> Code (ST s (Maybe a)))
              -> Code (ST s (Maybe a))
@@ -230,10 +232,10 @@ class RecBuilder o where
 #define deriveRecBuilder(_o)                                                                           \
 instance RecBuilder _o where                                                                           \
 {                                                                                                      \
-  buildIterHandler# h k = [||                                                                          \
+  bindIterHandler# h k = [||                                                                          \
       let handler (c# :: Rep _o) (o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])       \
     ||];                                                                                               \
-  buildIterHandlerBang# h k = [||                                                                      \
+  bindIterHandlerBang# h k = [||                                                                      \
       let handler (c# :: Rep _o) !(o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])      \
     ||];                                                                                               \
   buildIter# o l = [||                                                                                 \

@@ -101,7 +101,7 @@ buildHandler :: Γ s o xs n r a
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
              -> Word
              -> StaHandlerBuilder s o a
-buildHandler γ h u c = trace ("handler with " ++ show c) $ mkStaHandler c $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# u})
+buildHandler γ h u c = mkStaHandler c $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# u})
 
 buildYesHandler :: Γ s o xs n r a
                 -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
@@ -123,13 +123,13 @@ bindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
                 -> StaHandlerBuilder s o a
                 -> (Γ s o xs (Succ n) r a -> Code b)
                 -> Code b
-bindSameHandler γ yes no k =
-  [|| let yesSame = $$(staHandler# yes (offset (input γ))) in
-    $$(bindHandler# (no (input γ)) $ \qno ->
-      let handler = mkStaHandler (input γ) $ \o ->
-            [||if $$(same (offset (input γ)) o) then yesSame else $$qno $$o||]
-      in bindHandler# handler $ \qhandler ->
-           k (γ {handlers = VCons (staHandlerFull (Just (input γ)) qhandler [||yesSame||] qno) (handlers γ)}))
+bindSameHandler γ yes no k = [||
+    let yesSame = $$(staHandler# yes (offset (input γ)))
+    in $$(bindHandler# (no (input γ)) $ \qno ->
+            let handler = mkStaHandler (input γ) $ \o ->
+                  [||if $$(same (offset (input γ)) o) then yesSame else $$qno $$o||]
+            in bindHandler# handler $ \qhandler ->
+                k (γ {handlers = VCons (staHandlerFull (Just (input γ)) qhandler [||yesSame||] qno) (handlers γ)}))
   ||]
 
 class HandlerOps o where

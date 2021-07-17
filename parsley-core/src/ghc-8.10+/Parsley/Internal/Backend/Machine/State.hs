@@ -54,8 +54,8 @@ data StaHandler s o a =
 data StaHandlerCase s o a = StaHandlerCase {
   -- | The static function representing this handler when offsets are incomparable
   unknown :: StaHandler# s o a,
-  -- | The static function representing this handler when offsets are known to match, if available
-  yesSame :: Maybe (StaHandler# s o a),
+  -- | The static value representing this handler when offsets are known to match, if available
+  yesSame :: Maybe (Code (ST s (Maybe a))),
   -- | The static function representing this handler when offsets are known not to match, if available
   notSame :: Maybe (StaHandler# s o a)
 }
@@ -65,7 +65,7 @@ staHandler# (StaHandler _ sh _) = unknown sh
 
 staHandlerEval :: StaHandler s o a -> Offset o -> Code (ST s (Maybe a))
 staHandlerEval (StaHandler (Just c) sh _) o
-  | Just True <- same c o            = trace "offsets match" $ fromMaybe (unknown sh) (yesSame sh) (offset o)
+  | Just True <- same c o            = trace "offsets match" $ maybe (unknown sh) const (yesSame sh) (offset o)
   | Just False <- same c o           = trace "offsets don't match" $ fromMaybe (unknown sh) (notSame sh) (offset o)
 staHandlerEval (StaHandler _ sh _) o = trace "offsets unknown or incomparable" $ unknown sh (offset o)
 
@@ -75,7 +75,7 @@ mkStaHandler o sh = StaHandler (Just o) (mkUnknown sh) Nothing
 mkUnknown :: StaHandler# s o a -> StaHandlerCase s o a
 mkUnknown h = StaHandlerCase h Nothing Nothing
 
-mkFull :: StaHandler# s o a -> StaHandler# s o a -> StaHandler# s o a -> StaHandlerCase s o a
+mkFull :: StaHandler# s o a -> Code (ST s (Maybe a)) -> StaHandler# s o a -> StaHandlerCase s o a
 mkFull h yes no = StaHandlerCase h (Just yes) (Just no)
 
 type StaCont# s o a x = Code x -> Code (Rep o) -> Code (ST s (Maybe a))

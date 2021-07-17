@@ -115,7 +115,7 @@ evalCatch (Machine k) h = freshUnique $ \u -> case h of
   Always (Machine h) ->
     liftM2 (\mk mh γ -> bindAlwaysHandler γ (buildHandler γ mh u) mk) k h
   Same (Machine yes) (Machine no) ->
-    liftM3 (\mk myes mno γ -> bindSameHandler γ (buildHandler γ myes u) (buildHandler γ mno u) mk) k yes no
+    liftM3 (\mk myes mno γ -> bindSameHandler γ (buildYesHandler γ myes u) (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (OFFSET (input γ)) (operands γ)})

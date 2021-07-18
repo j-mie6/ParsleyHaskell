@@ -1,53 +1,45 @@
 {-# LANGUAGE DeriveAnyClass,
-             ExistentialQuantification,
-             TypeFamilies,
+             MagicHash,
              DerivingStrategies #-}
-module Parsley.Internal.Backend.Machine.State (
-    HandlerStack, Handler, Cont, SubRoutine, MachineMonad, Func,
+module Parsley.Internal.Backend.Machine.Types.State (
+    MachineMonad,
     Γ(..), Ctx, OpStack(..),
-    QSubRoutine, QJoin(..), Machine(..),
+    QJoin(..), Machine(..),
     run,
     emptyCtx,
-    insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, concreteΣ, cachedΣ, qSubRoutine,
+    insertSub, insertΦ, insertNewΣ, cacheΣ, concreteΣ, cachedΣ,
+    takeFreeRegisters,
     askSub, askΦ,
     debugUp, debugDown, debugLevel,
     storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
-    hasCoin, isBankrupt, liquidate
+    freshUnique, nextUnique,
+    hasCoin, isBankrupt, liquidate,
+    -- Rexport for ghc 8.6+ compat
+    QSubRoutine, qSubRoutine, Func
   ) where
 
-import Control.Exception                            (Exception, throw)
-import Control.Monad                                (liftM2, (<=<))
-import Control.Monad.Reader                         (asks, MonadReader, Reader, runReader)
-import Control.Monad.ST                             (ST)
-import Data.STRef                                   (STRef)
-import Data.Dependent.Map                           (DMap)
-import Data.Kind                                    (Type)
-import Data.Maybe                                   (fromMaybe)
-import Parsley.Internal.Backend.Machine.Defunc      (Defunc)
-import Parsley.Internal.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
-import Parsley.Internal.Backend.Machine.InputRep    (Unboxed)
-import Parsley.Internal.Backend.Machine.LetBindings (Regs(..))
-import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Code, Vec)
+import Control.Exception                               (Exception, throw)
+import Control.Monad                                   (liftM2, (<=<))
+import Control.Monad.Reader                            (asks, local, MonadReader, Reader, runReader)
+import Control.Monad.ST                                (ST)
+import Data.STRef                                      (STRef)
+import Data.Dependent.Map                              (DMap)
+import Data.Maybe                                      (fromMaybe)
+import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
+import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
+import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
+import Parsley.Internal.Backend.Machine.Types.Base     (Func)
+import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubRoutine)
+import Parsley.Internal.Backend.Machine.Types.Offset   (Offset)
+import Parsley.Internal.Backend.Machine.Types.Statics  (QSubRoutine(..), StaFunc, StaSubRoutine, StaCont, StaHandler, qSubRoutine)
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
 
-type HandlerStack n s o a = Vec n (Code (Handler s o a))
-type Handler s o a = Unboxed o -> ST s (Maybe a)
-type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
-type SubRoutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
-type family Func (rs :: [Type]) s o a x where
-  Func '[] s o a x      = SubRoutine s o a x
-  Func (r : rs) s o a x = STRef s r -> Func rs s o a x
-
-data QSubRoutine s o a x = forall rs. QSubRoutine  (Code (Func rs s o a x)) (Regs rs)
-
-qSubRoutine :: Code (Func rs s o a x) -> Regs rs -> QSubRoutine s o a x
-qSubRoutine = QSubRoutine
-
-newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
+newtype QJoin s o a x = QJoin { unwrapJoin :: StaCont s o a x }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
 
 run :: Machine s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
@@ -61,24 +53,25 @@ data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
                    , getCached :: Maybe (Defunc x) }
 
 data Γ s o xs n r a = Γ { operands :: OpStack xs
-                        , retCont  :: Code (Cont s o a r)
-                        , input    :: Code o
-                        , handlers :: HandlerStack n s o a }
+                        , retCont  :: StaCont s o a r
+                        , input    :: Offset o
+                        , handlers :: Vec n (StaHandler s o a) }
 
 data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (Reg s)
                      , debugLevel :: Int
                      , coins      :: Int
+                     , offsetUniq :: Word
                      , piggies    :: Queue Int }
 
 emptyCtx :: DMap MVar (QSubRoutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty
 
-insertSub :: MVar x -> Code (SubRoutine s o a x) -> Ctx s o a -> Ctx s o a
+insertSub :: MVar x -> StaSubRoutine s o a x -> Ctx s o a -> Ctx s o a
 insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q NoRegs) (μs ctx)}
 
-insertΦ :: ΦVar x -> Code (Cont s o a x) -> Ctx s o a -> Ctx s o a
+insertΦ :: ΦVar x -> StaCont s o a x -> Ctx s o a -> Ctx s o a
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 
 insertNewΣ :: ΣVar x -> Maybe (Code (STRef s x)) -> Defunc x -> Ctx s o a -> Ctx s o a
@@ -96,9 +89,9 @@ concreteΣ :: ΣVar x -> Ctx s o a -> Code (STRef s x)
 concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (getReg <=< DMap.lookup σ . σs)
 
 cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
-cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< DMap.lookup σ . σs)
+cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< (DMap.lookup σ . σs))
 
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubRoutine s o a x)
 askSub μ =
   do QSubRoutine sub rs <- askSubUnbound μ
      asks (provideFreeRegisters sub rs)
@@ -106,11 +99,17 @@ askSub μ =
 askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
 
-provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (SubRoutine s o a x)
-provideFreeRegisters sub NoRegs _ = sub
-provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters [||$$f $$(concreteΣ σ ctx)||] σs ctx
+-- This needs to return a DynFunc: it is fed back to shared territory
+takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> DynSubRoutine s o a x) -> DynFunc rs s o a x
+takeFreeRegisters NoRegs ctx body = body ctx
+takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
-askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (Code (Cont s o a x))
+-- This needs to take a StaFunc
+provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubRoutine s o a x
+provideFreeRegisters sub NoRegs _ = sub
+provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
+
+askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (StaCont s o a x)
 askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
 
 debugUp :: Ctx s o a -> Ctx s o a
@@ -134,6 +133,14 @@ isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
 
 spendCoin :: Ctx s o a -> Ctx s o a
 spendCoin ctx = ctx {coins = coins ctx - 1}
+
+nextUnique :: Ctx s o a -> Ctx s o a
+nextUnique ctx = ctx {offsetUniq = offsetUniq ctx + 1}
+
+freshUnique :: MonadReader (Ctx s o a) m => (Word -> m b) -> m b
+freshUnique f =
+  do unique <- asks offsetUniq
+     local nextUnique (f unique)
 
 giveCoins :: Int -> Ctx s o a -> Ctx s o a
 giveCoins c ctx = ctx {coins = coins ctx + c}

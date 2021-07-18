@@ -11,29 +11,32 @@
              TypeApplications #-}
 module Parsley.Internal.Backend.Machine.Ops (module Parsley.Internal.Backend.Machine.Ops) where
 
-import Control.Monad                                 (liftM2)
-import Control.Monad.Reader                          (ask, local)
-import Control.Monad.ST                              (ST)
-import Data.Array.Unboxed                            (UArray)
-import Data.ByteString.Internal                      (ByteString)
-import Data.STRef                                    (writeSTRef, readSTRef, newSTRef)
-import Data.Text                                     (Text)
-import Data.Void                                     (Void)
-import Debug.Trace                                   (trace)
-import GHC.Exts                                      (Int(..), (-#))
-import Language.Haskell.TH.Syntax                    (liftTyped)
-import Parsley.Internal.Backend.Machine.Defunc       (Defunc(OFFSET), genDefunc, _if, pattern FREEVAR)
-import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), LogOps(..), InputOps, next, more)
-import Parsley.Internal.Backend.Machine.InputRep     (Rep{-, representationTypes-})
-import Parsley.Internal.Backend.Machine.Instructions (Access(..))
-import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
-import Parsley.Internal.Backend.Machine.Offset       (Offset(..), moveOne, mkOffset)
-import Parsley.Internal.Backend.Machine.State        {-(Γ(..), Ctx, Machine(..), MachineMonad, StaSubRoutine, OpStack(..), DynFunc, Cont#, Handler#,
+import Control.Monad                                  (liftM2)
+import Control.Monad.Reader                           (ask, local)
+import Control.Monad.ST                               (ST)
+import Data.Array.Unboxed                             (UArray)
+import Data.ByteString.Internal                       (ByteString)
+import Data.STRef                                     (writeSTRef, readSTRef, newSTRef)
+import Data.Text                                      (Text)
+import Data.Void                                      (Void)
+import Debug.Trace                                    (trace)
+import GHC.Exts                                       (Int(..), (-#))
+import Language.Haskell.TH.Syntax                     (liftTyped)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET), genDefunc, _if, pattern FREEVAR)
+import Parsley.Internal.Backend.Machine.Identifiers   (MVar, ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.InputOps      (PositionOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Internal.Backend.Machine.InputRep      (Rep{-, representationTypes-})
+import Parsley.Internal.Backend.Machine.Instructions  (Access(..))
+import Parsley.Internal.Backend.Machine.LetBindings   (Regs(..))
+import Parsley.Internal.Backend.Machine.Types.Base
+import Parsley.Internal.Backend.Machine.Types.Dynamics
+import Parsley.Internal.Backend.Machine.Types.Offset  (Offset(..), moveOne, mkOffset)
+import Parsley.Internal.Backend.Machine.Types.State   {-(Γ(..), Ctx, Machine(..), MachineMonad, StaSubRoutine, OpStack(..), DynFunc, Cont#, Handler#,
                                                       StaHandler(..), StaCont(..), DynHandler, DynCont, staHandler#, mkStaHandler, staCont#, mkStaCont, mkUnknown, staHandlerEval, unknown, mkFull,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel,
                                                       takeFreeRegisters,
                                                       freshUnique, nextUnique)-}
+import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Core.InputTypes              (Text16, CharList, Stream)
 import System.Console.Pretty                         (color, Color(Green, White, Red, Blue))

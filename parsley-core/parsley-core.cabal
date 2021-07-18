@@ -73,10 +73,14 @@ library
                        Parsley.Internal.Backend.Machine.InputRep,
                        Parsley.Internal.Backend.Machine.Instructions,
                        Parsley.Internal.Backend.Machine.Ops,
-                       Parsley.Internal.Backend.Machine.State
+
+                       Parsley.Internal.Backend.Machine.Types.State
 
   if impl(ghc >= 8.10)
-    exposed-modules:   Parsley.Internal.Backend.Machine.Offset
+    exposed-modules:   Parsley.Internal.Backend.Machine.Types.Base,
+                       Parsley.Internal.Backend.Machine.Types.Dynamics,
+                       Parsley.Internal.Backend.Machine.Types.Offset,
+                       Parsley.Internal.Backend.Machine.Types.Statics
 
   default-extensions:  BangPatterns,
                        DataKinds,

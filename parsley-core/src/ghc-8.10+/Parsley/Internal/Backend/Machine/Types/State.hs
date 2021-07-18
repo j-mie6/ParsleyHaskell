@@ -13,9 +13,7 @@ module Parsley.Internal.Backend.Machine.Types.State (
     debugUp, debugDown, debugLevel,
     storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
     freshUnique, nextUnique,
-    hasCoin, isBankrupt, liquidate,
-    -- Rexport for ghc 8.6+ compat
-    QSubRoutine, qSubRoutine, Func
+    hasCoin, isBankrupt, liquidate
   ) where
 
 import Control.Exception                               (Exception, throw)
@@ -28,10 +26,9 @@ import Data.Maybe                                      (fromMaybe)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Base     (Func)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubRoutine)
 import Parsley.Internal.Backend.Machine.Types.Offset   (Offset)
-import Parsley.Internal.Backend.Machine.Types.Statics  (QSubRoutine(..), StaFunc, StaSubRoutine, StaCont, StaHandler, qSubRoutine)
+import Parsley.Internal.Backend.Machine.Types.Statics  (QSubRoutine(..), StaFunc, StaSubRoutine, StaCont, StaHandler)
 import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)

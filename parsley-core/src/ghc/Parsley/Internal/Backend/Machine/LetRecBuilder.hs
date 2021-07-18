@@ -13,7 +13,7 @@ import Language.Haskell.TH.Syntax                   (Q, unTypeQ, unsafeTExpCoerc
 import Language.Haskell.TH.Syntax                   (unTypeCode, unsafeCodeCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 #endif
 import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Binding, Regs)
-import Parsley.Internal.Backend.Machine.Types.State (QSubRoutine, qSubRoutine, Func)
+import Parsley.Internal.Backend.Machine.Types       (QSubRoutine, qSubRoutine, Func)
 
 import Parsley.Internal.Common.Utils                (Code)
 

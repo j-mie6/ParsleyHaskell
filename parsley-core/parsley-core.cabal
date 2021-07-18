@@ -74,6 +74,7 @@ library
                        Parsley.Internal.Backend.Machine.Instructions,
                        Parsley.Internal.Backend.Machine.Ops,
 
+                       Parsley.Internal.Backend.Machine.Types,
                        Parsley.Internal.Backend.Machine.Types.State
 
   if impl(ghc >= 8.10)

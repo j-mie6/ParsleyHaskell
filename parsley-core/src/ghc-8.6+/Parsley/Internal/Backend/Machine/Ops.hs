@@ -23,7 +23,7 @@ import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..
 import Parsley.Internal.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
-import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, SubRoutine, OpStack(..), Func,
+import Parsley.Internal.Backend.Machine.Types.State  (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, SubRoutine, OpStack(..), Func,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
 import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                         (color, Color(Green, White, Red, Blue))

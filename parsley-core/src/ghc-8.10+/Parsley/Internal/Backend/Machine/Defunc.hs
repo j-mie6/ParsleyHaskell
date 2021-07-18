@@ -1,9 +1,9 @@
 {-# LANGUAGE PatternSynonyms, StandaloneKindSignatures, TypeApplications, ViewPatterns #-}
 module Parsley.Internal.Backend.Machine.Defunc (module Parsley.Internal.Backend.Machine.Defunc) where
 
-import Parsley.Internal.Backend.Machine.Offset   (Offset)
-import Parsley.Internal.Common.Utils             (Code)
-import Parsley.Internal.Core.Lam                 (Lam, normaliseGen, normalise)
+import Parsley.Internal.Backend.Machine.Types.Offset (Offset)
+import Parsley.Internal.Common.Utils                 (Code)
+import Parsley.Internal.Core.Lam                     (Lam, normaliseGen, normalise)
 
 import qualified Parsley.Internal.Core.Defunc as Core (Defunc, lamTerm, lamTermBool)
 import qualified Parsley.Internal.Core.Lam    as Lam  (Lam(..))

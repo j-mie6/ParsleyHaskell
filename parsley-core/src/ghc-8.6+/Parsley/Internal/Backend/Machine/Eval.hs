@@ -18,7 +18,7 @@ import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..),
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
 import Parsley.Internal.Backend.Machine.Ops
-import Parsley.Internal.Backend.Machine.State
+import Parsley.Internal.Backend.Machine.Types.State
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Trace                         (Trace(trace))
 import System.Console.Pretty                          (color, Color(Green))

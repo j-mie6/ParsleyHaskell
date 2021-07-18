@@ -1,7 +1,7 @@
-module Parsley.Internal.Backend.Machine.Offset (module Parsley.Internal.Backend.Machine.Offset) where
+module Parsley.Internal.Backend.Machine.Types.Offset (module Parsley.Internal.Backend.Machine.Types.Offset) where
 
 import Parsley.Internal.Backend.Machine.InputRep    (Rep)
-import Parsley.Internal.Common                      (Code)
+import Parsley.Internal.Common.Utils                (Code)
 
 data Offset o = Offset {
     offset :: Code (Rep o),

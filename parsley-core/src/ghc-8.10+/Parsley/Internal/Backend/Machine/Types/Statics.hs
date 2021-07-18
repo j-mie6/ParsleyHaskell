@@ -48,6 +48,22 @@ mkUnknown h = StaHandlerCase h Nothing Nothing
 mkFull :: StaHandler# s o a -> Code (ST s (Maybe a)) -> StaHandler# s o a -> StaHandlerCase s o a
 mkFull h yes no = StaHandlerCase h (Just yes) (Just no)
 
+staHandler :: Maybe (Offset o) -> DynHandler s o a -> StaHandler s o a
+staHandler c dh = StaHandler c (mkUnknown (\o# -> [|| $$dh $$(o#) ||])) (Just dh)
+
+staHandlerFull :: Maybe (Offset o) -> DynHandler s o a -> Code (ST s (Maybe a)) -> DynHandler s o a -> StaHandler s o a
+staHandlerFull c handler yes no = StaHandler c
+  (mkFull (\o# -> [|| $$handler $$(o#) ||])
+          yes
+          (\o# -> [|| $$no $$(o#) ||]))
+  (Just handler)
+
+staHandlerUnknown :: StaHandler# s o a -> StaHandler s o a
+staHandlerUnknown h = StaHandler Nothing (mkUnknown h) Nothing
+
+staCont :: DynCont s o a x -> StaCont s o a x
+staCont dk = StaCont (\x o# -> [|| $$dk $$x $$(o#) ||]) (Just dk)
+
 type StaCont# s o a x = Code x -> Code (Rep o) -> Code (ST s (Maybe a))
 data StaCont s o a x = StaCont (StaCont# s o a x) (Maybe (DynCont s o a x))
 

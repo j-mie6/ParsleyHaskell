@@ -14,14 +14,16 @@ import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps      (InputDependant, PositionOps, LogOps, InputOps(InputOps))
+import Parsley.Internal.Backend.Machine.InputOps      (InputDependant, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.InputRep      (Rep)
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..), Handler(..))
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
-import Parsley.Internal.Backend.Machine.LetRecBuilder
+import Parsley.Internal.Backend.Machine.LetRecBuilder (letRec)
+import Parsley.Internal.Backend.Machine.Types         (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, offset)
 import Parsley.Internal.Backend.Machine.Ops
-import Parsley.Internal.Backend.Machine.Types.State
+import Parsley.Internal.Backend.Machine.Types.State   (Γ(..), OpStack(..))
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Trace                         (Trace(trace))
 import System.Console.Pretty                          (color, Color(Green))
@@ -35,7 +37,7 @@ eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine p) (Γ Empty (halt @o) (mkOffset [||offset||] 0) (VCons (fatal @o) VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine p) (Γ Empty halt (mkOffset [||offset||] 0) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String

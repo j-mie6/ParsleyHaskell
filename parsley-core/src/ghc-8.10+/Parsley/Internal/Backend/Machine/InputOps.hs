@@ -1,3 +1,4 @@
+{-# OPTIONS_HADDOCK show-extensions #-}
 {-# LANGUAGE ImplicitParams,
              MagicHash,
              TypeApplications,

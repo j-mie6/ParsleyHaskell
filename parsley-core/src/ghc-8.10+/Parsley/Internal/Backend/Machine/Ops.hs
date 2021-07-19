@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-monomorphism-restriction #-}
+{-# OPTIONS_HADDOCK show-extensions #-}
 {-# LANGUAGE AllowAmbiguousTypes,
              ConstrainedClassMethods,
              ConstraintKinds,
@@ -36,7 +37,6 @@ import Parsley.Internal.Backend.Machine.Types.State    (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                         (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                           (color, Color(Green, White, Red, Blue))
-
 
 type Ops o = (HandlerOps o, JoinBuilder o, RecBuilder o, PositionOps (Rep o), MarshalOps o, LogOps (Rep o))
 type StaHandlerBuilder s o a = Offset o -> StaHandler s o a
@@ -95,29 +95,29 @@ buildYesHandler :: Γ s o xs n r a
                 -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
                 -> Word
                 -> StaHandler s o a
-buildYesHandler γ h u = staHandlerUnknown $ \o# -> h (γ {input = mkOffset o# u})
+buildYesHandler γ h u = mkStaHandlerNoOffset $ \o# -> h (γ {input = mkOffset o# u})
 
 fatal :: StaHandler s o a
-fatal = staHandlerUnknown (const [|| returnST Nothing ||])
+fatal = mkStaHandlerNoOffset (const [|| returnST Nothing ||])
 
-bindAlwaysHandler :: HandlerOps o => Γ s o xs n r a
+bindAlwaysHandler :: forall s o xs n r a b. HandlerOps o => Γ s o xs n r a
                   -> StaHandlerBuilder s o a
                   -> (Γ s o xs (Succ n) r a -> Code b) -> Code b
-bindAlwaysHandler γ h k = bindHandler# (h (input γ)) $ \qh ->
-  k (γ {handlers = VCons (staHandler (Just (input γ)) qh) (handlers γ)})
+bindAlwaysHandler γ h k = bindHandler# @o (staHandler# (h (input γ))) $ \qh ->
+  k (γ {handlers = VCons (mkStaHandlerDyn (Just (input γ)) qh) (handlers γ)})
 
-bindSameHandler :: (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
+bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (Rep o)) => Γ s o xs n r a
                 -> StaHandler s o a
                 -> StaHandlerBuilder s o a
                 -> (Γ s o xs (Succ n) r a -> Code b)
                 -> Code b
 bindSameHandler γ yes no k = [||
     let yesSame = $$(staHandler# yes (offset (input γ)))
-    in $$(bindHandler# (no (input γ)) $ \qno ->
+    in $$(bindHandler# @o (staHandler# (no (input γ))) $ \qno ->
             let handler = mkStaHandler (input γ) $ \o ->
                   [||if $$(same (offset (input γ)) o) then yesSame else $$qno $$o||]
-            in bindHandler# handler $ \qhandler ->
-                k (γ {handlers = VCons (staHandlerFull (Just (input γ)) qhandler [||yesSame||] qno) (handlers γ)}))
+            in bindHandler# @o (staHandler# handler) $ \qhandler ->
+                k (γ {handlers = VCons (mkStaHandlerFull (input γ) qhandler [||yesSame||] qno) (handlers γ)}))
   ||]
 
 raise :: Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
@@ -133,7 +133,7 @@ halt = mkStaCont $ \x _ -> [||returnST (Just $$x)||]
 noreturn :: StaCont s o a Void
 noreturn = mkStaCont $ \_ _ -> [||error "Return is not permitted here"||]
 
-callWithContinuation :: MarshalOps o => StaSubRoutine s o a x -> StaCont s o a x -> Code (Rep o) -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
+callWithContinuation :: MarshalOps o => StaSubroutine s o a x -> StaCont s o a x -> Code (Rep o) -> Vec (Succ n) (StaHandler s o a) -> Code (ST s (Maybe a))
 callWithContinuation sub ret input (VCons h _) = sub (dynCont ret) input (dynHandler h)
 
 resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
@@ -145,7 +145,7 @@ setupJoinPoint φ (Machine k) mx = freshUnique $ \u ->
     liftM2 (\mk ctx γ ->
       setupJoinPoint# @o
         (\qx qo# -> mk (γ {operands = Op (FREEVAR qx) (operands γ), input = mkOffset qo# u}))
-        (\qjoin -> run mx γ (insertΦ φ (staCont qjoin) ctx)))
+        (\qjoin -> run mx γ (insertΦ φ (mkStaContDyn qjoin) ctx)))
       (local voidCoins k) ask
 
 buildIterAlways :: forall s o a. RecBuilder o => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
@@ -154,20 +154,20 @@ buildIterAlways ctx μ l h o u =
   bindIterHandler# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
     buildIter# @o (offset o) $ \qloop qo# ->
       let off = mkOffset qo# u
-      in run l (Γ Empty noreturn off (VCons (staHandler (Just off) [||$$qhandler $$(qo#)||]) VNil))
-                (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
+      in run l (Γ Empty noreturn off (VCons (mkStaHandlerDyn (Just off) [||$$qhandler $$(qo#)||]) VNil))
+               (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 buildIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o)) => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-                -> StaHandler s o a -> StaHandlerBuilder s o a -> Offset o -> Word -> Code (ST s (Maybe a))
+              -> StaHandler s o a -> StaHandlerBuilder s o a -> Offset o -> Word -> Code (ST s (Maybe a))
 buildIterSame ctx μ l yes no o u =
-  bindHandler# @o yes $ \qyes ->
+  bindHandler# @o (staHandler# yes) $ \qyes ->
     bindIterHandler# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
       let handler qc# = mkStaHandler (mkOffset @o qc# u) $ \o ->
             [||if $$(same qc# o) then $$qyes $$(qc#) else $$qno $$(qc#) $$o||]
       in bindIterHandler# @o (staHandler# . handler) $ \qhandler ->
         buildIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
-          in run l (Γ Empty noreturn off (VCons (staHandlerFull (Just off) [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
+          in run l (Γ Empty noreturn off (VCons (mkStaHandlerFull off [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
                    (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 buildRec :: forall rs s o a r. RecBuilder o => MVar r
@@ -178,13 +178,13 @@ buildRec :: forall rs s o a r. RecBuilder o => MVar r
 buildRec μ rs ctx k =
   takeFreeRegisters rs ctx $ \ctx ->
     buildRec# @o $ \qself qret qo# qh ->
-      run k (Γ Empty (staCont qret) (mkOffset qo# 0) (VCons (staHandler Nothing qh) VNil))
+      run k (Γ Empty (mkStaContDyn qret) (mkOffset qo# 0) (VCons (mkStaHandlerDyn Nothing qh) VNil))
             (insertSub μ (\k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
 
 {- Marshalling Operations -}
 dynHandler :: forall s o a. MarshalOps o => StaHandler s o a -> DynHandler s o a
-dynHandler (StaHandler _ sh Nothing) = dynHandler# @o (unknown sh)
-dynHandler (StaHandler _ _ (Just dh)) = dh
+dynHandler sh@(StaHandler _ _ Nothing) = dynHandler# @o (staHandler# sh)
+dynHandler (StaHandler _ _ (Just dh))  = dh
 
 dynCont :: forall s o a x. MarshalOps o => StaCont s o a x -> DynCont s o a x
 dynCont (StaCont sk Nothing) = dynCont# @o sk

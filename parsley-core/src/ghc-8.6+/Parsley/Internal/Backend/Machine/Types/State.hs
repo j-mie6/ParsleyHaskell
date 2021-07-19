@@ -3,12 +3,12 @@
              TypeFamilies,
              DerivingStrategies #-}
 module Parsley.Internal.Backend.Machine.Types.State (
-    HandlerStack, Handler, Cont, SubRoutine, MachineMonad, Func,
+    HandlerStack, Handler, Cont, Subroutine, MachineMonad, Func,
     Γ(..), Ctx, OpStack(..),
-    QSubRoutine, QJoin(..), Machine(..),
+    QSubroutine, QJoin(..), Machine(..),
     run,
     emptyCtx,
-    insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, concreteΣ, cachedΣ, qSubRoutine,
+    insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, concreteΣ, cachedΣ, qSubroutine,
     askSub, askΦ,
     debugUp, debugDown, debugLevel,
     storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
@@ -35,17 +35,17 @@ import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
 type HandlerStack n s o a = Vec n (Code (Handler s o a))
 type Handler s o a = Unboxed o -> ST s (Maybe a)
 type Cont s o a x = x -> Unboxed o -> ST s (Maybe a)
-type SubRoutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
+type Subroutine s o a x = Cont s o a x -> Unboxed o -> Handler s o a -> ST s (Maybe a)
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
 type family Func (rs :: [Type]) s o a x where
-  Func '[] s o a x      = SubRoutine s o a x
+  Func '[] s o a x      = Subroutine s o a x
   Func (r : rs) s o a x = STRef s r -> Func rs s o a x
 
-data QSubRoutine s o a x = forall rs. QSubRoutine  (Code (Func rs s o a x)) (Regs rs)
+data QSubroutine s o a x = forall rs. QSubroutine  (Code (Func rs s o a x)) (Regs rs)
 
-qSubRoutine :: Code (Func rs s o a x) -> Regs rs -> QSubRoutine s o a x
-qSubRoutine = QSubRoutine
+qSubroutine :: Code (Func rs s o a x) -> Regs rs -> QSubroutine s o a x
+qSubroutine = QSubroutine
 
 newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
@@ -65,18 +65,18 @@ data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , input    :: Code o
                         , handlers :: HandlerStack n s o a }
 
-data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
+data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a)
                      , φs         :: DMap ΦVar (QJoin s o a)
                      , σs         :: DMap ΣVar (Reg s)
                      , debugLevel :: Int
                      , coins      :: Int
                      , piggies    :: Queue Int }
 
-emptyCtx :: DMap MVar (QSubRoutine s o a) -> Ctx s o a
+emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
 emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 Queue.empty
 
-insertSub :: MVar x -> Code (SubRoutine s o a x) -> Ctx s o a -> Ctx s o a
-insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q NoRegs) (μs ctx)}
+insertSub :: MVar x -> Code (Subroutine s o a x) -> Ctx s o a -> Ctx s o a
+insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs) (μs ctx)}
 
 insertΦ :: ΦVar x -> Code (Cont s o a x) -> Ctx s o a -> Ctx s o a
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
@@ -98,15 +98,15 @@ concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (getReg <=< DMap.loo
 cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< DMap.lookup σ . σs)
 
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (SubRoutine s o a x))
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (Code (Subroutine s o a x))
 askSub μ =
-  do QSubRoutine sub rs <- askSubUnbound μ
+  do QSubroutine sub rs <- askSubUnbound μ
      asks (provideFreeRegisters sub rs)
 
-askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
+askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubroutine s o a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
 
-provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (SubRoutine s o a x)
+provideFreeRegisters :: Code (Func rs s o a x) -> Regs rs -> Ctx s o a -> Code (Subroutine s o a x)
 provideFreeRegisters sub NoRegs _ = sub
 provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters [||$$f $$(concreteΣ σ ctx)||] σs ctx
 

@@ -1,17 +1,56 @@
 {-# LANGUAGE DeriveAnyClass,
              MagicHash,
              DerivingStrategies #-}
+{-|
+Module      : Parsley.Internal.Backend.Machine.Types.Context
+Description : Fully static context required to generate a parser
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains the compile-time state of a parser, which is
+used to aid code generation.
+
+@since 1.4.0.0
+-}
 module Parsley.Internal.Backend.Machine.Types.Context (
+    -- * Core Data-types
     Ctx,
-    QJoin(..),
+    QJoin,
     emptyCtx,
-    insertSub, insertΦ, insertNewΣ, cacheΣ, concreteΣ, cachedΣ,
+
+    -- * Subroutines
+    -- $sub-doc
+    insertSub, askSub,
+
+    -- * Join Points
+    -- $join-doc
+    insertΦ, askΦ,
+
+    -- * Registers
+    -- $reg-doc
+
+    -- ** Putters
+    insertNewΣ, cacheΣ, 
+    -- ** Getters 
+    concreteΣ, cachedΣ,
     takeFreeRegisters,
-    askSub, askΦ,
+
+    -- * Debug Level Tracking
+    -- $debug-doc
     debugUp, debugDown, debugLevel,
-    storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
+
+    -- * Unique Offsets
+    -- $offset-doc
     freshUnique, nextUnique,
-    hasCoin, isBankrupt, liquidate
+
+    -- * Token Credit System (Piggy-banks)
+    -- $piggy-doc
+
+    -- ** Modifiers
+    storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, 
+    -- ** Getters
+    coins, hasCoin, isBankrupt, liquidate
   ) where
 
 import Control.Exception                               (Exception, throw)
@@ -23,112 +62,340 @@ import Data.Maybe                                      (fromMaybe)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubRoutine)
-import Parsley.Internal.Backend.Machine.Types.Statics  (QSubRoutine(..), StaFunc, StaSubRoutine, StaCont)
+import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
+import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
 import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
 
+-- Core Data-types
+{-|
+The `Ctx` stores information that aids or facilitates the generation of parser code,
+but its components are fully static and do not materialise as runtime values, but
+may form part of the generated code.
+
+@since 1.0.0.0
+-}
+data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a) -- ^ Map of subroutine bindings.
+                     , φs         :: DMap ΦVar (QJoin s o a)       -- ^ Map of join point bindings.
+                     , σs         :: DMap ΣVar (Reg s)             -- ^ Map of available registers.
+                     , debugLevel :: Int                           -- ^ Approximate depth of debug combinator.
+                     , coins      :: Int                           -- ^ Number of tokens free to consume without length check.
+                     , offsetUniq :: Word                          -- ^ Next unique offset identifier.
+                     , piggies    :: Queue Int                     -- ^ Queue of future length check credit.
+                     }
+
+{-|
+`QJoin` represents Φ-nodes in the generated parser, and is represented
+as a `Parsley.Internal.Backend.Machine.Types.Statics.StaCont`.
+
+@since 1.0.0.0
+-}
 newtype QJoin s o a x = QJoin { unwrapJoin :: StaCont s o a x }
 
-data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
-                   , getCached :: Maybe (Defunc x) }
+{-|
+Creates an empty `Ctx` populated with a map of the top-level (recursive)
+bindings: information about their required free-registers is included.
 
-data Ctx s o a = Ctx { μs         :: DMap MVar (QSubRoutine s o a)
-                     , φs         :: DMap ΦVar (QJoin s o a)
-                     , σs         :: DMap ΣVar (Reg s)
-                     , debugLevel :: Int
-                     , coins      :: Int
-                     , offsetUniq :: Word
-                     , piggies    :: Queue Int }
-
-emptyCtx :: DMap MVar (QSubRoutine s o a) -> Ctx s o a
+@since 1.0.0.0
+-}
+emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
 emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty
 
-insertSub :: MVar x -> StaSubRoutine s o a x -> Ctx s o a -> Ctx s o a
-insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubRoutine q NoRegs) (μs ctx)}
+-- Subroutines
+{- $sub-doc
+Subroutines are the representations of let-bindings or recursive parsers
+in the original user program. They are factored out to prevent code-explosion.
 
-insertΦ :: ΦVar x -> StaCont s o a x -> Ctx s o a -> Ctx s o a
+The names of these bindings are helpfully stored within the `Ctx` and can be
+accessed statically. While the initial context is always populated with the
+top-level recursive bindings, additional bindings can be added "dynamically"
+during evaluation, for instance iterative bindings and recursive bindings that
+capture their free-registers.
+-}
+{-|
+Registers a new subroutine into the context, which will be available
+according to "local" @Reader@ semantics.
+
+@since 1.2.0.0
+-}
+insertSub :: MVar x                -- ^ The name of the binding.
+          -> StaSubroutine s o a x -- ^ The binding to register.
+          -> Ctx s o a             -- ^ The current context.
+          -> Ctx s o a             -- ^ The new context.
+insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs) (μs ctx)}
+
+{-|
+Fetches a binding from the context according to its name (See `Parsley.Internal.Core.Identifiers.MVar`).
+In the (hopefully impossible!) event that it is not found in the map, will throw a @MissingDependency@
+exception. If this binding had free registers, these are generously provided by the `Ctx`.
+
+@since 1.2.0.0
+-}
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubroutine s o a x)
+askSub μ =
+  do QSubroutine sub rs <- askSubUnbound μ
+     asks (provideFreeRegisters sub rs)
+
+askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubroutine s o a x)
+askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
+
+-- Join Points
+{- $join-doc
+Similar to the subroutines, join points (or Φ-nodes) are used by the parsley engine
+to factor out common branches of code. When generated, access to these bindings is
+available via the `Ctx`.
+-}
+{-|
+Registers a new binding into the `Ctx` so that it can be retrieved later. Binding
+expires according to "local" @Reader@ semantics.
+
+@since 1.0.0.0
+-}
+insertΦ :: ΦVar x          -- ^ The name of the new binding.
+        -> StaCont s o a x -- ^ The binding to add.
+        -> Ctx s o a       -- ^ The old context.
+        -> Ctx s o a       -- ^ The new context.
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 
-insertNewΣ :: ΣVar x -> Maybe (Code (STRef s x)) -> Defunc x -> Ctx s o a -> Ctx s o a
+{-|
+Fetches a binding from the `Ctx`.
+
+@since 1.2.0.0
+-}
+askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (StaCont s o a x)
+askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
+
+-- Registers
+{- $reg-doc
+Registers are used within parsley to persist state across different parts of a parser.
+Across recursion and call-boundaries, these materialise as @STRef@s. These are stored
+in the `Ctx` and can be looked up when required.
+
+However, parsley does not mandate that registers /must/ exist in this form. Registers 
+can be subject to caching, where a register's static "most-recently known" may be 
+stored within the `Ctx` in addition to the "true" binding. This can, in effect, mean
+that registers do not exist at runtime. Both forms of register data can be extracted, 
+however exceptions will guard against mis-management.
+-}
+data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x)) -- ^ The "true" register
+                   , getCached :: Maybe (Defunc x) }       -- ^ The "most-recently known" value
+
+{-|
+Registers a recently created register into the `Ctx`. This must be provided with
+the original value in the register, which is injected into the cache.
+
+@since 1.0.0.0
+-}
+insertNewΣ :: ΣVar x                   -- ^ The name of the register.
+           -> Maybe (Code (STRef s x)) -- ^ The runtime representation, if available.
+           -> Defunc x                 -- ^ The initial value stored into the register.
+           -> Ctx s o a                -- ^ The old context.
+           -> Ctx s o a                -- ^ The new context.
 insertNewΣ σ qref x ctx = ctx {σs = DMap.insert σ (Reg qref (Just x)) (σs ctx)}
 
-insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
-insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing) (σs ctx)}
+{-|
+Updated the "last-known value" of a register in the cache.
 
+@since 1.0.0.0
+-}
 cacheΣ :: ΣVar x -> Defunc x -> Ctx s o a -> Ctx s o a
 cacheΣ σ x ctx = case DMap.lookup σ (σs ctx) of
   Just (Reg ref _) -> ctx {σs = DMap.insert σ (Reg ref (Just x)) (σs ctx)}
   Nothing          -> throw (outOfScopeRegister σ)
 
+{-|
+Fetches a known to be concrete register (i.e. one that must be materialised
+at runtime as an @STRef@). If this register does not exist, this throws an
+@IntangibleRegister@ exception.
+
+@since 1.0.0.0
+-}
 concreteΣ :: ΣVar x -> Ctx s o a -> Code (STRef s x)
 concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (getReg <=< DMap.lookup σ . σs)
 
+{-|
+Fetches the cached "last-known value" of a register. If the cache is unaware of
+this value, a @RegisterFault@ exception is thrown.
+
+@since 1.0.0.0
+-}
 cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< (DMap.lookup σ . σs))
 
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubRoutine s o a x)
-askSub μ =
-  do QSubRoutine sub rs <- askSubUnbound μ
-     asks (provideFreeRegisters sub rs)
+{-|
+When a binding is generated, it needs to generate function arguments for each of the
+free registers it requires. This is performed by this function, which also adds each
+of these freshly bound registers into the `Ctx`. Has the effect of converting a
+`Parsley.Internal.Backend.Machine.Types.Dynamics.DynSubroutine` into a
+`Parsley.Internal.Backend.Machine.Types.Dynamics.DynFunc`.
 
-askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubRoutine s o a x)
-askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
-
+@since 1.2.0.0
+-}
 -- This needs to return a DynFunc: it is fed back to shared territory
-takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> DynSubRoutine s o a x) -> DynFunc rs s o a x
+takeFreeRegisters :: Regs rs                              -- ^ The free registers demanded by the binding.
+                  -> Ctx s o a                            -- ^ The old context.
+                  -> (Ctx s o a -> DynSubroutine s o a x) -- ^ Given the new context, function that produces the subroutine.
+                  -> DynFunc rs s o a x                   -- ^ The newly produced dynamic function.
 takeFreeRegisters NoRegs ctx body = body ctx
 takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
--- This needs to take a StaFunc
-provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubRoutine s o a x
+insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
+insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing) (σs ctx)}
+
+-- This needs to take a StaFunc, it is fed back via `askSub`
+provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine s o a x
 provideFreeRegisters sub NoRegs _ = sub
 provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
 
-askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (StaCont s o a x)
-askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
+-- Debug Level Tracking
+{- $debug-doc
+The debug combinator generates runtime diagnostic information. To make this more ergonomic,
+it would be nice to indent nested debug info. To do this perfectly, a debug level that controls
+indentation would need to be added to `Parsley.Internal.Backend.Machine.Types.State.Γ`. This
+is problematic since, without a lot of work and complexity, it would introduce a runtime penalty
+for not just debug parsers, but all other parsers too. As a compromise, the debug level is stored
+purely statically in the `Ctx`: the consequence is that the indentation level resets across a
+call-boundary.
+-}
+{-|
+Increase the debug level for the forseeable static future.
 
+@since 1.0.0.0
+-}
 debugUp :: Ctx s o a -> Ctx s o a
 debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
 
+{-|
+Decrease the debug level for the forseeable static future.
+
+@since 1.0.0.0
+-}
 debugDown :: Ctx s o a -> Ctx s o a
 debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
--- Piggy bank functions
-storePiggy :: Int -> Ctx s o a -> Ctx s o a
-storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
+-- Unique Offsets
+{- $offset-doc
+The `Parsley.Internal.Backend.Machine.Types.Offset.Offset` type refines dynamic offsets
+with statically known properties such as input consumed and the source of the offset.
+These sources are unique and must be generated statically, with "local" @Reader@ semantics.
+This means that the `Ctx` lends itself nicely to managing the pool of fresh offset names.
+-}
+{-|
+Advances the unique identifier stored in the `Ctx`. This is used to /skip/ a given name.
 
-breakPiggy :: Ctx s o a -> Ctx s o a
-breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
-
-hasCoin :: Ctx s o a -> Bool
-hasCoin = (> 0) . coins
-
-isBankrupt :: Ctx s o a -> Bool
-isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
-
-spendCoin :: Ctx s o a -> Ctx s o a
-spendCoin ctx = ctx {coins = coins ctx - 1}
-
+@since 1.4.0.0
+-}
 nextUnique :: Ctx s o a -> Ctx s o a
 nextUnique ctx = ctx {offsetUniq = offsetUniq ctx + 1}
 
+{-|
+Generate a fresh name that is valid for the scope of the provided continuation.
+
+@since 1.4.0.0
+-}
 freshUnique :: MonadReader (Ctx s o a) m => (Word -> m b) -> m b
 freshUnique f =
   do unique <- asks offsetUniq
      local nextUnique (f unique)
 
+-- Token Credit System (Piggy-banks)
+{- $piggy-doc
+Parsley has analysis in place to factor out length checks when it is statically known that
+/n/ tokens must be consumed in order for a parser to succeed. Part of this analysis is the
+cut analysis performed in the frontend, and then the coins analysis in the backend during
+code generation. The meta instructions that reference "coins" interact with a system during
+interpretation called the "Piggy-bank" system: this is all stored and accessed via the `Ctx`.
+
+The system works like this:
+
+* The `Ctx` stores two components: some coins and some piggybanks.
+* When there are coins present in the `Ctx`, these can be "spent" to read a token without
+  emitting a length check for it (the guarantee is that a length check was generated to
+  get hold of those coins).
+* When the coins run out a piggy-bank can be broken to get more coins: this should generate
+  a length check for value of the coins in the bank
+* When all the piggy-banks are exhausted, a length check must be generated for each
+  token that is consumed.
+
+These are the basic principles behind this system, and it works effectively. There are some
+extra edge-case operations that are described in their corresponding documentation. The
+reason why piggy-banks are stored in the context and /not/ consumed immediately to add to
+the coin count is so that length checks are delayed to the last possible moment: you should
+have used all of your current allocation before asking for more!
+-}
+{-|
+Place a piggy-bank into the reserve, delaying the corresponding length check until it is
+broken.
+
+@since 1.0.0.0
+-}
+storePiggy :: Int -> Ctx s o a -> Ctx s o a
+storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
+
+{-|
+Break the next piggy-bank in the queue, and fill the coins in return.
+
+__Note__: This should generate a length check when used!
+
+@since 1.0.0.0
+-}
+breakPiggy :: Ctx s o a -> Ctx s o a
+breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
+
+{-|
+Does the context have coins available?
+
+@since 1.0.0.0
+-}
+hasCoin :: Ctx s o a -> Bool
+hasCoin = (> 0) . coins
+
+{-|
+Is it the case that there are no coins /and/ no piggy-banks remaining?
+
+@since 1.0.0.0
+-}
+isBankrupt :: Ctx s o a -> Bool
+isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
+
+{-|
+Spend a single coin, used when a token is consumed.
+
+@since 1.0.0.0
+-}
+spendCoin :: Ctx s o a -> Ctx s o a
+spendCoin ctx = ctx {coins = coins ctx - 1}
+
+{-|
+Adds coins into the current supply.
+
+@since 1.0.0.0
+-}
 giveCoins :: Int -> Ctx s o a -> Ctx s o a
 giveCoins c ctx = ctx {coins = coins ctx + c}
 
+{-|
+Removes all coins and piggy-banks, such that @isBankrupt == True@.
+
+@since 1.0.0.0
+-}
 voidCoins :: Ctx s o a -> Ctx s o a
 voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
 
+{-|
+Collect all coins and the value of every piggy bank.
+
+This is used when a join-point is called, so that a length check can be
+generated to cover the cost of the binding.
+
+@since 1.0.0.0
+-}
 liquidate :: Ctx s o a -> Int
 liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
 
+-- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar deriving anyclass Exception
 newtype IntangibleRegister = IntangibleRegister IΣVar deriving anyclass Exception

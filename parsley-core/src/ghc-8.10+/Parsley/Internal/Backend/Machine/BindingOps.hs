@@ -10,8 +10,8 @@ import Data.ByteString.Internal                        (ByteString)
 import Data.Text                                       (Text)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
 import Parsley.Internal.Backend.Machine.Types.Base     (Handler#)
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubRoutine, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler, StaHandler#, staHandler# )
+import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler)
+import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#)
 import Parsley.Internal.Common.Utils                   (Code)
 import Parsley.Internal.Core.InputTypes                (Text16, CharList, Stream)
 
@@ -28,15 +28,15 @@ derivation(Lazy.ByteString)        \
 derivation(Text)
 
 class HandlerOps o where
-  bindHandler# :: StaHandler s o a -> (DynHandler s o a -> Code b) -> Code b
+  bindHandler# :: StaHandler# s o a -> (DynHandler s o a -> Code b) -> Code b
 
-#define deriveHandlerOps(_o)                                \
-instance HandlerOps _o where                                \
-{                                                           \
-  bindHandler# h k = [||                                    \
-    let handler (o# :: Rep _o) = $$(staHandler# h [||o#||]) \
-    in $$(k [||handler||])                                  \
-  ||];                                                      \
+#define deriveHandlerOps(_o)                    \
+instance HandlerOps _o where                    \
+{                                               \
+  bindHandler# h k = [||                        \
+    let handler (o# :: Rep _o) = $$(h [||o#||]) \
+    in $$(k [||handler||])                      \
+  ||];                                          \
 };
 inputInstances(deriveHandlerOps)
 
@@ -56,10 +56,10 @@ class RecBuilder o where
                    -> (Code (Rep o -> Handler# s o a) -> Code b)
                    -> Code b
   buildIter# :: Code (Rep o)
-             -> (Code (Rep o -> ST s (Maybe a)) -> Code (Rep o) -> Code (ST s (Maybe a)))
+             -> (DynHandler s o a -> Code (Rep o) -> Code (ST s (Maybe a)))
              -> Code (ST s (Maybe a))
-  buildRec#  :: (DynSubRoutine s o a x -> DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a)))
-             -> DynSubRoutine s o a x
+  buildRec#  :: (DynSubroutine s o a x -> DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a)))
+             -> DynSubroutine s o a x
 
 #define deriveRecBuilder(_o)                                                                           \
 instance RecBuilder _o where                                                                           \

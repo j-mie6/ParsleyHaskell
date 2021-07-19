@@ -13,7 +13,7 @@ import Language.Haskell.TH.Syntax                   (Q, unTypeQ, unsafeTExpCoerc
 import Language.Haskell.TH.Syntax                   (unTypeCode, unsafeCodeCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 #endif
 import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Binding, Regs)
-import Parsley.Internal.Backend.Machine.Types       (QSubRoutine, qSubRoutine, Func)
+import Parsley.Internal.Backend.Machine.Types       (QSubroutine, qSubroutine, Func)
 
 import Parsley.Internal.Common.Utils                (Code)
 
@@ -28,8 +28,8 @@ unTypeCode = unTypeQ
 
 letRec :: GCompare key => {-bindings-}   DMap key (LetBinding o a)
                        -> {-nameof-}     (forall x. key x -> String)
-                       -> {-genBinding-} (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (QSubRoutine s o a) -> Code (Func rs s o a x))
-                       -> {-expr-}       (DMap key (QSubRoutine s o a) -> Code b)
+                       -> {-genBinding-} (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (QSubroutine s o a) -> Code (Func rs s o a x))
+                       -> {-expr-}       (DMap key (QSubroutine s o a) -> Code b)
                        -> Code b
 letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
   do -- Make a bunch of names
@@ -47,5 +47,5 @@ letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
      -- Construct the let expression
      return (LetE decls exp)
   where
-     makeTypedName :: Const (Name, Some Regs) x -> QSubRoutine s o a x
-     makeTypedName (Const (name, Some frees)) = qSubRoutine (unsafeCodeCoerce (return (VarE name))) frees
+     makeTypedName :: Const (Name, Some Regs) x -> QSubroutine s o a x
+     makeTypedName (Const (name, Some frees)) = qSubroutine (unsafeCodeCoerce (return (VarE name))) frees

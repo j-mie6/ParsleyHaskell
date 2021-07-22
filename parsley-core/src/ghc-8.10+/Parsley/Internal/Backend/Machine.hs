@@ -32,9 +32,21 @@ import Parsley.Internal.Trace                        (Trace)
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
 import qualified Parsley.Internal.Backend.Machine.Eval as Eval (eval)
 
+{-|
+This function is exposed to parsley itself and is used to generate the Haskell code
+for a parser.
+
+@since 0.1.0.0
+-}
 eval :: forall input a. (Input input, Trace) => Code input -> (LetBinding input a a, DMap MVar (LetBinding input a)) -> Code (Maybe a)
 eval input (toplevel, bindings) = Eval.eval (prepare input) toplevel bindings
 
+{-|
+This class is exposed to parsley itself and is used to denote which types may be
+used as input for a parser.
+
+@since 0.1.0.0
+-}
 class (InputPrep input, Ops input) => Input input
 instance Input [Char]
 instance Input (UArray Int Char)

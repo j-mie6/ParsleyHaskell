@@ -17,7 +17,7 @@ import Parsley.Internal.Backend.Machine.InputRep    (Rep)
 import Parsley.Internal.Common.Utils                (Code)
 
 {-|
-Augments a regular @Code (Rep o)@ with information about its origins and
+Augments a regular @'Code' ('Rep' o)@ with information about its origins and
 how much input is known to have been consumed since it came into existence.
 This can be used to statically evaluate handlers (see 
 `Parsley.Internal.Backend.Machine.Types.Statics.staHandlerEval`).

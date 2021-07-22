@@ -144,7 +144,7 @@ mkStaHandlerFull c handler yes no = StaHandler (Just c)
   (Just handler)
 
 {-|
-Unlike `staHandler#`, which returns a handler that accepts @Code (Rep o)@, this
+Unlike `staHandler#`, which returns a handler that accepts @'Code' ('Rep' o)@, this
 function accepts a full `Parsley.Internal.Backend.Machine.Types.Offset.Offset`,
 which can be used to refine the outcome of the execution of the handler as follows:
 

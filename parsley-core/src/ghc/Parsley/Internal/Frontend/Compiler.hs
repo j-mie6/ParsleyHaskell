@@ -4,6 +4,18 @@
              MultiParamTypeClasses,
              RecursiveDo,
              UndecidableInstances #-}
+{-|
+Module      : Parsley.Internal.Frontend.Compiler
+Description : Compile and analyse a parser
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+Exposes `compile` which is used to detect recursion, let-bindings and compile them
+into another representation with a code generation function.
+
+@since 1.0.0.0
+-}
 module Parsley.Internal.Frontend.Compiler (compile) where
 
 import Prelude hiding (pred)
@@ -39,8 +51,18 @@ import qualified Data.HashSet        as HashSet (member, insert, empty)
 import qualified Data.Map            as Map     ((!))
 import qualified Data.Set            as Set     (empty)
 
+{-|
+Given a user's parser, this will analyse it, extract bindings and then compile them with a given function
+provided with the information that has been distilled about each binding. Returns all the prepared bindings
+along with the top-level definition.
+
+@since 1.0.0.0
+-}
 {-# INLINEABLE compile #-}
-compile :: forall compiled a. Trace => Parser a -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> IΣVar -> compiled x) -> (compiled a, DMap MVar compiled)
+compile :: forall compiled a. Trace
+        => Parser a                                                                                       -- ^ The parser to compile.
+        -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> IΣVar -> compiled x) -- ^ How to generate a compiled value with the distilled information.
+        -> (compiled a, DMap MVar compiled)                                                               -- ^ The compiled top-level and all of the bindings.
 compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
   where
     (p', μs, maxV) = preprocess p

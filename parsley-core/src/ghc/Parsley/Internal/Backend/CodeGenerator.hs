@@ -1,5 +1,17 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-|
+Module      : Parsley.Internal.Backend.CodeGenerator
+Description : Translation of Combinator AST into Machine
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module exports `codeGen` used to translation from the high-level representation
+to the low-level representation.
+
+@since 1.0.0.0
+-}
 module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 
 import Data.Maybe                                    (isJust)
@@ -25,8 +37,19 @@ runCodeGenStack m μ0 φ0 = evalFresh (evalFreshT (evalFreshT m φ0) μ0)
 newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
 
+{-|
+Translates a parser represented with combinators into its machine representation.
+
+@since 1.0.0.0
+-}
 {-# INLINEABLE codeGen #-}
-codeGen :: Trace => Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> IΣVar -> LetBinding o a x
+codeGen :: Trace
+        => Maybe (MVar x)   -- ^ The name of the parser, if it exists.
+        -> Fix Combinator x -- ^ The definition of the parser.
+        -> Set SomeΣVar     -- ^ The free registers it requires to run.
+        -> IMVar            -- ^ The binding identifier to start name generation from.
+        -> IΣVar            -- ^ The register identifier to start name generation from.
+        -> LetBinding o a x
 codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs
   where
     name = maybe "TOP LEVEL" show letBound

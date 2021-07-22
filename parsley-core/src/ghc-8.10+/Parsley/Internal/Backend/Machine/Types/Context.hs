@@ -318,6 +318,8 @@ The system works like this:
   a length check for value of the coins in the bank
 * When all the piggy-banks are exhausted, a length check must be generated for each
   token that is consumed.
+* When adding coins into the system, if the `Ctx` is bankrupt, then the coins are added 
+  immediately along with a length check, otherwise a piggy-bank is added.
 
 These are the basic principles behind this system, and it works effectively. There are some
 extra edge-case operations that are described in their corresponding documentation. The

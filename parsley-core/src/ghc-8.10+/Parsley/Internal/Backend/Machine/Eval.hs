@@ -4,6 +4,17 @@
              RecordWildCards,
              TypeApplications,
              UnboxedTuples #-}
+{-|
+Module      : Parsley.Internal.Backend.Machine.Eval
+Description : Entry point for the evaluator
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module exports the `eval` functions used to convert a machine into code.
+
+@since 1.0.0.0
+-}
 module Parsley.Internal.Backend.Machine.Eval (eval) where
 
 import Data.Dependent.Map                             (DMap)
@@ -30,7 +41,16 @@ import System.Console.Pretty                          (color, Color(Green))
 
 import qualified Debug.Trace (trace)
 
-eval :: forall o a. (Trace, Ops o) => Code (InputDependant (Rep o)) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
+{-|
+This function performs the evaluation on the top-level let-bound parser to convert it into code.
+
+@since 1.0.0.0
+-}
+eval :: forall o a. (Trace, Ops o) 
+     => Code (InputDependant (Rep o)) -- ^ The input as provided by the user.
+     -> LetBinding o a a              -- ^ The binding to be generated.
+     -> DMap MVar (LetBinding o a)    -- ^ The map of all other required bindings.
+     -> Code (Maybe a)                -- ^ The code for this parser.
 eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(# next, more, offset #) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
@@ -102,7 +122,7 @@ evalSat p (Machine k) = do
     maybeEmitCheck Nothing mk γ = sat (ap p) mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
       --[|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (ap p) mk [||bad||]) [||bad||] γ)||]
-      emitLengthCheck n (sat (ap p) mk (raise γ)) (raise γ) γ
+      emitLengthCheck n (sat (ap p) mk (raise γ) γ) (raise γ) (input γ)
 
 evalEmpt :: MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -194,6 +214,6 @@ evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Ma
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins mk (raise γ) γ
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raise γ) (input γ)
 evalMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
-evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n mk (raise γ) γ) (asks ((coins -) . liquidate)) k
+evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raise γ) (input γ)) (asks ((coins -) . liquidate)) k

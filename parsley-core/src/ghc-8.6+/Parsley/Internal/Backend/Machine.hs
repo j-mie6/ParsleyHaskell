@@ -9,7 +9,6 @@ Stability   : unstable
 -}
 module Parsley.Internal.Backend.Machine (
     Input, eval,
-    PositionOps,
     module Parsley.Internal.Backend.Machine.Instructions,
     module Parsley.Internal.Backend.Machine.Defunc,
     module Parsley.Internal.Backend.Machine.Identifiers,
@@ -20,9 +19,9 @@ import Data.Array.Unboxed                            (UArray)
 import Data.ByteString                               (ByteString)
 import Data.Dependent.Map                            (DMap)
 import Data.Text                                     (Text)
-import Parsley.Internal.Backend.Machine.Defunc       (Defunc(SAME), user, userBool)
+import Parsley.Internal.Backend.Machine.Defunc       (user, userBool)
 import Parsley.Internal.Backend.Machine.Identifiers
-import Parsley.Internal.Backend.Machine.InputOps     (InputPrep(..), PositionOps)
+import Parsley.Internal.Backend.Machine.InputOps     (InputPrep(..))
 import Parsley.Internal.Backend.Machine.InputRep     (Rep)
 import Parsley.Internal.Backend.Machine.Instructions
 import Parsley.Internal.Backend.Machine.LetBindings  (LetBinding, makeLetBinding)

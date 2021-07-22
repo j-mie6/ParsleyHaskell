@@ -13,7 +13,7 @@ plusOne' :: Parser Int
 plusOne' = chainPre (try (string "++") $> [|succ|]) (char '1' $> [|1|])
 
 plusOnePure :: Parser Int
-plusOnePure = try (chainPre (string "++" $> [|succ|]) (pure ([|1|]))) <|> pure ([|0|])
+plusOnePure = try (chainPre (string "++" $> [|succ|]) (pure [|1|])) <|> pure [|0|]
 
 onePlus :: Parser Int
 onePlus = chainPost (char '1' $> [|1|]) (string "++" $> [|succ|])

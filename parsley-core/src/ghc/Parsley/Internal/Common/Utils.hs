@@ -89,7 +89,7 @@ class Quapplicative q where
   @since 0.1.0.0
   -}
   (>*<) :: q (a -> b) -> q a -> q b
-  f >*< x = makeQ ((_val f) (_val x)) [||$$(_code f) $$(_code x)||]
+  f >*< x = makeQ (_val f (_val x)) [||$$(_code f) $$(_code x)||]
 infixl 9 >*<
 
 {-|
@@ -112,5 +112,5 @@ newtype Id a = Id {unId :: a -> a}
 instance Semigroup (Id a) where f <> g = Id $ unId f . unId g
 instance Monoid (Id a) where mempty = Id $ id
 
-intercalateDiff :: (a -> a) -> [(a -> a)] -> a -> a
+intercalateDiff :: (a -> a) -> [a -> a] -> a -> a
 intercalateDiff sep xs = unId $ intercalate (Id sep) (map Id xs)

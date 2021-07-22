@@ -121,7 +121,7 @@ pattern UNIT          :: Defunc ()
 pattern UNIT          = LIFTED ()
 
 ap :: Defunc (a -> b) -> Defunc a -> Defunc b
-ap f x = APP_H f x
+ap = APP_H
 
 -- TODO: This is deprecated in favour of Typeable as of parsley 2.0.0.0
 lamTermBool :: Defunc (a -> Bool) -> Lam (a -> Bool)
@@ -131,17 +131,17 @@ lamTermBool f = lamTerm f
 
 lamTerm :: forall a. Defunc a -> Lam a
 lamTerm ID = Abs id
-lamTerm COMPOSE = Abs (\f -> Abs (\g -> Abs (\x -> App f (App g x))))
+lamTerm COMPOSE = Abs (\f -> Abs (\g -> Abs (App f . App g)))
 lamTerm FLIP = Abs (\f -> Abs (\x -> Abs (\y -> App (App f y) x)))
 lamTerm (APP_H f x) = App (lamTerm f) (lamTerm x)
 {-lamTerm (LIFTED b) | Just Refl <- eqT @a @Bool = case b of
   False -> F
   True -> T-}
 lamTerm (LIFTED x) = Var True [||x||]
-lamTerm (EQ_H x) = Abs (\y -> App (App (Var True [||(==)||]) (lamTerm x)) y)
+lamTerm (EQ_H x) = Abs (App (App (Var True [||(==)||]) (lamTerm x)))
 lamTerm CONS = Var True [||(:)||]
 lamTerm EMPTY = Var True [||[]||]
-lamTerm CONST = Abs (\x -> Abs (\_ -> x))
+lamTerm CONST = Abs (Abs . const)
 lamTerm (BLACK x) = Var False (_code x)
 lamTerm (LAM_S f) = Abs (adaptLam f)
 lamTerm (IF_S c t e) = If (lamTerm c) (lamTerm t) (lamTerm e)

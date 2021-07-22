@@ -4,7 +4,7 @@
 module Parsley.Internal.Backend.InstructionAnalyser (coinsNeeded, relevancy, Length) where
 
 import Data.Kind                        (Type)
-import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..))
+import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..))
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Const4(..))
 import Parsley.Internal.Common.Vec      (Vec(..), Nat(..), SNat(..), SingNat(..), zipWithVec, replicateVec)
 
@@ -29,12 +29,12 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
     alg (Jump _)                               = (0, False)
     alg Empt                                   = (0, True)
     alg (Commit k)                             = getConst4 k
-    alg (Catch k h)                            = algCatch (getConst4 k) (getConst4 h)
+    alg (Catch k h)                            = algCatch (getConst4 k) (algHandler h)
     alg (Tell k)                               = getConst4 k
     alg (Seek k)                               = getConst4 k
     alg (Case p q)                             = algCatch (getConst4 p) (getConst4 q)
     alg (Choices _ ks def)                     = foldr (algCatch . getConst4) (getConst4 def) ks
-    alg (Iter _ _ (Const4 k))                  = (0, snd k)
+    alg (Iter _ _ h)                           = (0, snd (algHandler h))
     alg (Join _)                               = (0, False)
     alg (MkJoin _ (Const4 b) (Const4 k))       = (fst k + fst b, snd k || snd b)
     alg (Swap k)                               = getConst4 k
@@ -47,6 +47,10 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
     alg (MetaInstr (AddCoins _) (Const4 k))    = k
     alg (MetaInstr (RefundCoins n) (Const4 k)) = (max (fst k - n) 0, snd k) -- These were refunded, so deduct
     alg (MetaInstr (DrainCoins _) (Const4 k))  = (fst k, False)
+
+    algHandler :: Handler o (Const4 (Int, Bool)) xs n r a -> (Int, Bool)
+    algHandler (Same yes no) = algCatch (getConst4 yes) (getConst4 no)
+    algHandler (Always k) = getConst4 k
 
 {- TODO
   Live Value Analysis
@@ -113,7 +117,7 @@ relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
     alg (Seek k)           (SSucc n) = VCons True (getStack k n)
     alg (Case p q)         n         = VCons True (let VCons _ xs = zipRelevancy (getStack p n) (getStack q n) in xs)
     alg (Choices _ ks def) (SSucc n) = VCons True (foldr (zipRelevancy . (`getStack` n)) (getStack def n) ks)
-    alg (Iter _ _ k)       n         = let VCons _ xs = getStack k (SSucc n) in xs
+    alg (Iter _ _ h)       n         = let VCons _ xs = algHandler h (SSucc n) in xs
     alg (Join _)           (SSucc n) = VCons True (replicateVec n False)
     alg (MkJoin _ b _)     n         = let VCons _ xs = getStack b (SSucc n) in xs
     alg (Swap k)           n         = let VCons rel1 (VCons rel2 xs) = getStack k n in VCons rel2 (VCons rel1 xs)
@@ -124,3 +128,7 @@ relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
     alg (LogEnter _ k)     n         = getStack k n
     alg (LogExit _ k)      n         = getStack k n
     alg (MetaInstr _ k)    n         = getStack k n
+
+    algHandler :: Handler o RelevancyStack xs n r a -> SNat (Length xs) -> Vec (Length xs) Bool
+    algHandler (Same yes no) (SSucc n) = VCons True (let VCons _ xs = zipRelevancy (VCons False (getStack yes n)) (getStack no (SSucc n)) in xs)
+    algHandler (Always k) n = getStack k n

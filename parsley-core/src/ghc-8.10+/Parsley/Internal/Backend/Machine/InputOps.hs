@@ -1,7 +1,20 @@
+{-# OPTIONS_HADDOCK show-extensions #-}
 {-# LANGUAGE ImplicitParams,
              MagicHash,
              TypeApplications,
              UnboxedTuples #-}
+{-|
+Module      : Parsley.Internal.Backend.Machine.InputOps
+Description : Primitive operations for working with input.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains the primitive operations required by the
+parsing machinery to work with input.
+
+@since 1.0.0.0
+-}
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), LogOps(..),
     InputOps(..), more, next,
@@ -13,7 +26,6 @@ import Data.ByteString.Internal                  (ByteString(..))
 import Data.Text.Array                           (aBA{-, empty-})
 import Data.Text.Internal                        (Text(..))
 import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, reverseIter_-})
-import Data.Proxy                                (Proxy)
 import GHC.Exts                                  (Int(..), Char(..), TYPE, Int#)
 import GHC.ForeignPtr                            (ForeignPtr(..))
 import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
@@ -25,28 +37,113 @@ import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
 
 {- Auxillary Representation -}
+{-|
+Given some associated representation type, defines the operations
+that work with a /closed over/ instance of that type. These are:
+
+* @next@: extract the next character from the input (existence not included)
+* @more@: query whether another character /can/ be read
+* @init@: the initial state of the input.
+
+@since 1.0.0.0
+-}
 type InputDependant (rep :: TYPE r) = (# {-next-} rep -> (# Char, rep #)
                                        , {-more-} rep -> Bool
                                        , {-init-} rep
                                        #)
 
 {- Typeclasses -}
+{-|
+This class is responsible for converting the user's input into a form that
+parsley can work with efficiently.
+
+@since 1.0.0.0
+-}
 class InputPrep input where
+  {-|
+  Given the user's input to the parser, in its original form, this function
+  distils it first into @`Rep` input@, which is parsley's internal representation,
+  and then produces an `InputDependant` containing the core operations.
+
+  @since 1.0.0.0
+  -}
   prepare :: rep ~ Rep input => Code input -> Code (InputDependant rep)
 
-class PositionOps input where
-  same :: rep ~ Rep input => Proxy input -> Code rep -> Code rep -> Code Bool
-  shiftRight :: rep ~ Rep input => Proxy input -> Code rep -> Code Int# -> Code rep
+{-|
+Defines operations for manipulating offsets for regular use. These are not
+tied to the original captured input but instead to the representation of its
+offset.
 
+@since 1.0.0.0
+-}
+class PositionOps (rep :: TYPE r) where
+  {-|
+  Compares two "input"s for equality. In reality this usually means an offset
+  present in the @rep@.
+
+  @since 1.0.0.0
+  -}
+  same :: Code rep -> Code rep -> Code Bool
+
+  {-|
+  Advances the input by several characters at a time (existence not included).
+  This can be used to check if characters exist at a future point in the input
+  in conjunction with `more`.
+
+  @since 1.0.0.0
+  -}
+  shiftRight :: Code rep -> Code Int# -> Code rep
+
+{-|
+Defines operation used for debugging operations.
+
+@since 1.0.0.0
+-}
 class LogOps (rep :: TYPE r) where
+  {-|
+  If possible, shifts the input back several characters.
+  This is used to provide the previous input characters for the debugging combinator.
+
+  @since 1.0.0.0
+  -}
   shiftLeft :: Code rep -> Code Int# -> Code rep
+
+  {-|
+  Converts the represention of the input into an @Int@.
+
+  @since 1.0.0.0
+  -}
   offToInt  :: Code rep -> Code Int
 
-data InputOps (rep :: TYPE r) = InputOps { _more       :: Code (rep -> Bool)
-                                         , _next       :: Code (rep -> (# Char, rep #))
+{-|
+This is a psuedo-typeclass, which depends directly on the values obtained from
+`InputDependant`. Because this instance must depend on local information, it is
+synthesised and passed around using @ImplicitParams@.
+
+@since 1.0.0.0
+-}
+data InputOps (rep :: TYPE r) = InputOps { _more       :: Code (rep -> Bool)            -- ^ Does the input have any more characters?
+                                         , _next       :: Code (rep -> (# Char, rep #)) -- ^ Read the next character (without checking existence)
                                          }
-more :: forall r (rep :: TYPE r). (?ops :: InputOps rep) => Code (rep -> Bool)
-more = _more ?ops
+{-|
+Wraps around `InputOps` and `_more`. 
+
+Queries the input to see if another character may be consumed.
+
+@since 1.4.0.0
+-}
+more :: forall r (rep :: TYPE r). (?ops :: InputOps rep) => Code rep -> Code Bool
+more qo# = [|| $$(_more ?ops) $$(qo#) ||]
+
+{-|
+Wraps around `InputOps` and `_next`.
+
+Given some input and a continuation that accepts new input and a character, it will read
+a character off (without checking that it exists!) and feeds it and the remaining input
+to the continuation.
+
+@since 1.0.0.0
+-}
 next :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a
 next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
 
@@ -130,38 +227,29 @@ shiftRightInt :: Code Int# -> Code Int# -> Code Int#
 shiftRightInt qo# qi# = [||$$(qo#) +# $$(qi#)||]
 
 -- PositionOps Instances
-instance PositionOps [Char] where
-  same _ = intSame
-  shiftRight _ = shiftRightInt
-instance PositionOps (UArray Int Char) where
-  same _ = intSame
-  shiftRight _ = shiftRightInt
-instance PositionOps Text16 where
-  same _ = intSame
-  shiftRight _ = shiftRightInt
-instance PositionOps ByteString where
-  same _ = intSame
-  shiftRight _ = shiftRightInt
+instance PositionOps Int# where
+  same = intSame
+  shiftRight = shiftRightInt
 
-instance PositionOps CharList where
-  same _ = offWithSame
-  shiftRight _ qo# qi# = offWithShiftRight [||drop||] qo# qi#
+instance PositionOps (# Int#, [Char] #) where
+  same = offWithSame
+  shiftRight qo# qi# = offWithShiftRight [||drop||] qo# qi#
 
-instance PositionOps Stream where
-  same _ = offWithSame
-  shiftRight _ qo# qi# = offWithShiftRight [||dropStream||] qo# qi#
+instance PositionOps (# Int#, Stream #) where
+  same = offWithSame
+  shiftRight qo# qi# = offWithShiftRight [||dropStream||] qo# qi#
 
 instance PositionOps Text where
-  same _ qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
-  shiftRight _ qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
+  same qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
+  shiftRight qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
 
-instance PositionOps Lazy.ByteString where
-  same _ qx# qy# = [||
+instance PositionOps UnpackedLazyByteString where
+  same qx# qy# = [||
       case $$(qx#) of
         (# i#, _, _, _, _, _ #) -> case $$(qy#) of
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
-  shiftRight _ qo# qi# = [||byteStringShiftRight $$(qo#) $$(qi#)||]
+  shiftRight qo# qi# = [||byteStringShiftRight $$(qo#) $$(qi#)||]
 
 -- LogOps Instances
 instance LogOps Int# where

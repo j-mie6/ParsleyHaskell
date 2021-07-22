@@ -23,7 +23,7 @@ ap :: Defunc (a -> b) -> Defunc a -> Defunc b
 ap f x = LAM (Lam.App (unliftDefunc f) (unliftDefunc x))
 
 ap2 :: Defunc (a -> b -> c) -> Defunc a -> Defunc b -> Defunc c
-ap2 f x y = ap (ap f x) y
+ap2 f x = ap (ap f x)
 
 _if :: Defunc Bool -> Code a -> Code a -> Code a
 _if c t e = normaliseGen (Lam.If (unliftDefunc c) (Lam.Var False t) (Lam.Var False e))

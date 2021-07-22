@@ -10,7 +10,6 @@ import Data.Array.Unboxed                   (assocs)
 import Data.Dependent.Map                   (DMap)
 import Data.List                            (foldl', partition, sortOn)
 import Data.Map.Strict                      (Map)
-import Data.Maybe                           (fromMaybe)
 import Data.Set                             (Set, insert, (\\), union, notMember, empty)
 import Data.STRef                           (newSTRef, readSTRef, writeSTRef)
 import Parsley.Internal.Common.Indexed      (Fix, cata, Const1(..), (:*:)(..), zipper)
@@ -55,7 +54,7 @@ dependencyAnalysis toplevel μs =
                              in Just $ (uses \\ defs) `union` (subUses \\ subDefs)
         | otherwise        = Nothing
       trueRegs = Map.mapMaybeWithKey addNewRegs usedRegisters
-      largestRegister = fromMaybe (-1) (fmap getIΣVar (Set.lookupMax (Map.foldMapWithKey (const id) definedRegisters)))
+      largestRegister = maybe (-1) getIΣVar (Set.lookupMax (Map.foldMapWithKey (const id) definedRegisters))
   in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, trueRegs, largestRegister)
 
 minMax :: Ord a => [a] -> (a, a)

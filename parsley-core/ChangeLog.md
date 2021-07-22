@@ -1,6 +1,6 @@
 # Revision history for `parsley-core`
 
-## 1.0.0.0  -- 2021-06-12
+## 1.0.0.0 -- 2021-06-12
 
 * First version. Released on an unsuspecting world.
 * Core factored out of the main `parsley` package
@@ -41,7 +41,7 @@
 * Preliminary support for `if true` reduction from `item` and `const True`
 * Introduced `_if` and `ap` in `Machine.Defunc`, removed `genDefunc1`
 
-## 1.4.0.0 -- TBD (THIS IS NOT RELEASED YET)
+## 1.4.0.0 -- 2021-07-22
 NOTE: The API exposed to `parsley` has changed, however, the changed types match up
 and the underlying types are not exposed. This means that `parsley` cannot write
 the type down to begin with, so the API change does not _actually_ result in any
@@ -50,3 +50,8 @@ this meets requirements for internal major change.
 
 * Removed an `unsafeCoerce` from register creation, using more existentials.
 * Changed `CharList`'s `more` check to test for `[]` and not length (faster!)
+* Added static information to offset in the machine
+* Leveraged static information to refine handlers at compile time, offering up
+  to 20% performance improvement
+* Code restructuring and refactoring
+* Added copious amounts of documentation

@@ -23,7 +23,7 @@ import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..
 import Parsley.Internal.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
 import Parsley.Internal.Backend.Machine.Instructions (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
-import Parsley.Internal.Backend.Machine.State        (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, SubRoutine, OpStack(..), Func,
+import Parsley.Internal.Backend.Machine.Types.State  (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, Subroutine, OpStack(..), Func,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
 import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                         (color, Color(Green, White, Red, Blue))
@@ -112,7 +112,7 @@ inputInstances(deriveHandlerOps)
 class BoxOps o => ContOps o where
   suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
   resume :: Code (Cont s o a x) -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
-  callWithContinuation :: Code (SubRoutine s o a x) -> Code (Cont s o a x) -> Code o -> Vec (Succ n) (Code (Handler s o a)) -> Code (ST s (Maybe a))
+  callWithContinuation :: Code (Subroutine s o a x) -> Code (Cont s o a x) -> Code o -> Vec (Succ n) (Code (Handler s o a)) -> Code (ST s (Maybe a))
 
 class ReturnOps o where
   halt :: Code (Cont s o a a)
@@ -179,7 +179,7 @@ instance RecBuilder _o where                                                    
 };
 inputInstances(deriveRecBuilder)
 
-takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> Code (SubRoutine s o a x)) -> Code (Func rs s o a x)
+takeFreeRegisters :: Regs rs -> Ctx s o a -> (Ctx s o a -> Code (Subroutine s o a x)) -> Code (Func rs s o a x)
 takeFreeRegisters NoRegs ctx body = body ctx
 takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 

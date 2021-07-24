@@ -24,7 +24,7 @@ import Language.Haskell.TH.Syntax                   (Q, unTypeQ, unsafeTExpCoerc
 #else
 import Language.Haskell.TH.Syntax                   (unTypeCode, unsafeCodeCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 #endif
-import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Binding, Regs)
+import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Metadata, Binding, Regs)
 import Parsley.Internal.Backend.Machine.Types       (QSubroutine, qSubroutine, Func)
 
 import Parsley.Internal.Common.Utils                (Code)
@@ -44,23 +44,24 @@ refer to every other. These are then in scope for the top-level parser.
 
 @since 1.0.0.0
 -}
-letRec :: GCompare key 
+-- TODO: new doc
+letRec :: GCompare key
        => {-bindings-}  DMap key (LetBinding o a)   -- ^ The bindings that should form part of the recursive group
       -> {-nameof-}     (forall x. key x -> String) -- ^ A function which can give a name to a key in the map
-      -> {-genBinding-} (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (QSubroutine s o a) -> Code (Func rs s o a x)) 
+      -> {-genBinding-} (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (QSubroutine s o a) -> Metadata -> Code (Func rs s o a x))
       -- ^ How a binding - and their free registers - should be converted into code
-      -> {-expr-}       (DMap key (QSubroutine s o a) -> Code b) 
+      -> {-expr-}       (DMap key (QSubroutine s o a) -> Code b)
       -- ^ How to produce the top-level binding given the compiled bindings, i.e. the @in@ for the @let@
       -> Code b
 letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
   do -- Make a bunch of names
-     names <- traverseWithKey (\k (LetBinding _ rs) -> Const . (, rs) <$> newName (nameOf k)) bindings
+     names <- traverseWithKey (\k (LetBinding _ rs meta) -> Const . (, rs, meta) <$> newName (nameOf k)) bindings
      -- Wrap them up so that they are valid typed template haskell names
      let typedNames = DMap.map makeTypedName names
      -- Generate each binding providing them with the names
-     let makeDecl (k :=> LetBinding body (Some frees)) =
-          do let Const (name, _) = names ! k
-             func <- unTypeCode (genBinding k body frees typedNames)
+     let makeDecl (k :=> LetBinding body (Some frees) _) =
+          do let Const (name, _, meta) = names ! k
+             func <- unTypeCode (genBinding k body frees typedNames meta)
              return (FunD name [Clause [] (NormalB func) []])
      decls <- traverse makeDecl (toList bindings)
      -- Generate the main expression using the same names
@@ -68,5 +69,5 @@ letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
      -- Construct the let expression
      return (LetE decls exp)
   where
-     makeTypedName :: Const (Name, Some Regs) x -> QSubroutine s o a x
-     makeTypedName (Const (name, Some frees)) = qSubroutine (unsafeCodeCoerce (return (VarE name))) frees
+     makeTypedName :: Const (Name, Some Regs, Metadata) x -> QSubroutine s o a x
+     makeTypedName (Const (name, Some frees, meta)) = qSubroutine (unsafeCodeCoerce (return (VarE name))) frees meta

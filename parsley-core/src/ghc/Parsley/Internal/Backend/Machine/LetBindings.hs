@@ -12,9 +12,10 @@ free registers.
 @since 1.0.0.0
 -}
 module Parsley.Internal.Backend.Machine.LetBindings (
-    LetBinding(..),
+    LetBinding(..), Metadata, InputCharacteristic(..),
     Regs(..),
-    makeLetBinding,
+    makeLetBinding, newMeta,
+    successInputCharacteristic, failureInputCharacteristic,
     Binding
   ) where
 
@@ -44,7 +45,21 @@ and their types.
 
 @since 1.4.0.0
 -}
-data LetBinding o a x = LetBinding (Binding o a x) (Some Regs)
+-- TODO: New doc
+data LetBinding o a x = LetBinding {
+    body :: Binding o a x,
+    freeRegs :: Some Regs,
+    meta :: Metadata
+  }
+
+-- TODO: New doc
+data Metadata = Metadata {
+    successInputCharacteristic :: InputCharacteristic,
+    failureInputCharacteristic :: InputCharacteristic
+  }
+
+-- TODO: New doc
+data InputCharacteristic = AlwaysConsumes | NeverConsumes | MayConsume
 
 {-|
 Given a `Binding` and a set of existential `ΣVar`s, produces a
@@ -52,8 +67,16 @@ Given a `Binding` and a set of existential `ΣVar`s, produces a
 
 @since 1.4.0.0
 -}
-makeLetBinding :: Binding o a x -> Set SomeΣVar -> LetBinding o a x
+-- TODO: New doc
+makeLetBinding :: Binding o a x -> Set SomeΣVar -> Metadata -> LetBinding o a x
 makeLetBinding m rs = LetBinding m (makeRegs rs)
+
+-- TODO: New doc
+newMeta :: Metadata
+newMeta = Metadata {
+    successInputCharacteristic = MayConsume,
+    failureInputCharacteristic = MayConsume
+  }
 
 {-|
 Represents a collection of free registers, preserving their type

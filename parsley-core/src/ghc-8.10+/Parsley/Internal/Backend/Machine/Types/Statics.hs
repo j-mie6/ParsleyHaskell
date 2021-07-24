@@ -21,11 +21,12 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
 
     -- ** @StaHandler@ Builders
     -- | The following functions are builders of `StaHandler`.
-    mkStaHandler, mkStaHandlerNoOffset, mkStaHandlerDyn, mkStaHandlerFull, 
-    
+    mkStaHandler, mkStaHandlerNoOffset, mkStaHandlerDyn, mkStaHandlerFull,
+
     -- ** @StaHandler@ Interpreters
     -- | The following functions interpret or extract information from `StaHandler`.
     staHandler#, staHandlerEval,
+    staHandlerCharacteristicSta, staHandlerCharacteristicDyn,
 
     -- * Return Continuations
     StaCont#, StaCont(..),
@@ -34,7 +35,11 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
 
     -- * Subroutines
     QSubroutine(..), StaSubroutine, StaFunc,
-    qSubroutine
+    -- ** Subroutine Builders
+    qSubroutine, mkStaSubroutine, mkStaSubroutineMeta,
+
+    -- ** Subroutine Extractors
+    staSubroutine#, meta,
   ) where
 
 import Control.Monad.ST                                (ST)
@@ -42,7 +47,7 @@ import Data.STRef                                      (STRef)
 import Data.Kind                                       (Type)
 import Data.Maybe                                      (fromMaybe)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
+import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata, newMeta, InputCharacteristic(..))
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynCont, DynHandler, DynFunc)
 import Parsley.Internal.Backend.Machine.Types.Offset   (Offset(offset), same)
 import Parsley.Internal.Common.Utils                   (Code)
@@ -61,9 +66,9 @@ mkStaHandler# :: forall o s a. DynHandler s o a -> StaHandler# s o a
 mkStaHandler# dh qo# = [||$$dh $$(qo#)||]
 
 {-|
-Compared with `StaHandler#`, this type allows for the encoding of various static 
+Compared with `StaHandler#`, this type allows for the encoding of various static
 properties of handlers which can be carried around during the lifetime of the handlers.
-This information allows the engine to optimise more aggressively, leveraging 
+This information allows the engine to optimise more aggressively, leveraging
 domain-specific optimisation data.
 
 Note that @StaHandlerCase@ is not exposed, but is potentially three handlers: one for
@@ -74,9 +79,9 @@ to be different (see `mkStaHandlerFull`).
 -}
 data StaHandler s o a =
   StaHandler
-    (Maybe (Offset o))                     -- ^ The statically bound offset for this handler, if available.
-    {-# UNPACK #-} !(StaHandlerCase s o a) -- ^ The static function representing this handler when offsets are incomparable.
-    (Maybe (DynHandler s o a))             -- ^ The dynamic handler that has been wrapped in this handler, if available.
+    (Maybe (Offset o))                         -- ^ The statically bound offset for this handler, if available.
+    (StaHandlerCase WStaHandler# s o a)        -- ^ The static function representing this handler when offsets are incomparable.
+    (Maybe (StaHandlerCase WDynHandler s o a)) -- ^ The dynamic handler that has been wrapped in this handler, if available.
 
 {-|
 Given a static handler, extracts the underlying handler which
@@ -86,10 +91,10 @@ attached to.
 @since 1.4.0.0
 -}
 staHandler# :: StaHandler s o a -> StaHandler# s o a
-staHandler# (StaHandler _ sh _) = unknown sh
+staHandler# (StaHandler _ sh _) = unWrapSta (unknown sh)
 
 _mkStaHandler :: Maybe (Offset o) -> StaHandler# s o a -> StaHandler s o a
-_mkStaHandler o sh = StaHandler o (mkUnknown sh) Nothing
+_mkStaHandler o sh = StaHandler o (mkUnknownSta sh) Nothing
 
 {-|
 Augments a `StaHandler#` with information about what the offset is that
@@ -112,7 +117,7 @@ mkStaHandlerNoOffset :: StaHandler# s o a -> StaHandler s o a
 mkStaHandlerNoOffset = _mkStaHandler Nothing
 
 {-|
-Converts a `Parsley.Internal.Machine.Types.Dynamics.DynHandler` into a 
+Converts a `Parsley.Internal.Machine.Types.Dynamics.DynHandler` into a
 `StaHandler` taking into account the possibility that captured offset
 information is available. The dynamic handler used to construct this
 static handler is maintained as the origin of the handler. This means
@@ -121,11 +126,11 @@ if it is converted back the conversion is free.
 @since 1.4.0.0
 -}
 mkStaHandlerDyn :: forall s o a. Maybe (Offset o) -> DynHandler s o a -> StaHandler s o a
-mkStaHandlerDyn c dh = StaHandler c (mkUnknown (mkStaHandler# @o dh)) (Just dh)
+mkStaHandlerDyn c dh = StaHandler c (mkUnknownSta (mkStaHandler# @o dh)) (Just (mkUnknownDyn dh))
 
 {-|
 When the behaviours of a handler given input that matches or does not match
-its captured offset are known, this function can be used to construct a 
+its captured offset are known, this function can be used to construct a
 `StaHandler` that stores this information. This can in turn be used in
 conjunction with `staHandlerEval` to statically refine the application of
 a handler to its argument.
@@ -138,10 +143,10 @@ mkStaHandlerFull :: forall s o a. Offset o -- ^ The offset captured by the creat
                  -> DynHandler s o a       -- ^ The handler to be executed when offsets are known not to match.
                  -> StaHandler s o a       -- ^ A handler that carries this information around for later refinement.
 mkStaHandlerFull c handler yes no = StaHandler (Just c)
-  (mkFull (mkStaHandler# @o handler)
-          yes
-          (mkStaHandler# @o no))
-  (Just handler)
+  (mkFullSta (mkStaHandler# @o handler)
+             yes
+             (mkStaHandler# @o no))
+  (Just (mkFullDyn handler yes no))
 
 {-|
 Unlike `staHandler#`, which returns a handler that accepts @'Code' ('Rep' o)@, this
@@ -160,24 +165,52 @@ which can be used to refine the outcome of the execution of the handler as follo
 -}
 staHandlerEval :: StaHandler s o a -> Offset o -> Code (ST s (Maybe a))
 staHandlerEval (StaHandler (Just c) sh _) o
-  | Just True <- same c o            = maybe (unknown sh) const (yesSame sh) (offset o)
-  | Just False <- same c o           = fromMaybe (unknown sh) (notSame sh) (offset o)
-staHandlerEval (StaHandler _ sh _) o = unknown sh (offset o)
+  | Just True <- same c o            = maybe (unWrapSta (unknown sh)) const (yesSame sh) (offset o)
+  | Just False <- same c o           = unWrapSta (fromMaybe (unknown sh) (notSame sh)) (offset o)
+staHandlerEval (StaHandler _ sh _) o = unWrapSta (unknown sh) (offset o)
 
-data StaHandlerCase s o a = StaHandlerCase {
+data StaHandlerCase h s (o :: Type) a = StaHandlerCase {
   -- | The static function representing this handler when offsets are incomparable.
-  unknown :: StaHandler# s o a,
+  unknown :: h s o a,
   -- | The static value representing this handler when offsets are known to match, if available.
   yesSame :: Maybe (Code (ST s (Maybe a))),
   -- | The static function representing this handler when offsets are known not to match, if available.
-  notSame :: Maybe (StaHandler# s o a)
+  notSame :: Maybe (h s o a)
 }
 
-mkUnknown :: StaHandler# s o a -> StaHandlerCase s o a
+newtype WStaHandler# s o a = WrapSta { unWrapSta :: StaHandler# s o a }
+newtype WDynHandler s o a = WrapDyn { unWrapDyn :: DynHandler s o a }
+
+staHandlerCharacteristic :: StaHandlerCase h s o a -> (Code (ST s (Maybe a)) -> h s o a) -> InputCharacteristic -> h s o a
+staHandlerCharacteristic sh conv NeverConsumes  = maybe (unknown sh) conv (yesSame sh)
+staHandlerCharacteristic sh _    AlwaysConsumes = fromMaybe (unknown sh) (notSame sh)
+staHandlerCharacteristic sh _    MayConsume     = unknown sh
+
+--TODO: new doc
+staHandlerCharacteristicSta :: StaHandlerCase WStaHandler# s o a -> InputCharacteristic -> StaHandler# s o a
+staHandlerCharacteristicSta h = unWrapSta . staHandlerCharacteristic h (WrapSta . const)
+
+--TODO: new doc
+staHandlerCharacteristicDyn :: StaHandlerCase WDynHandler s o a -> (Code (ST s (Maybe a)) -> DynHandler s o a) -> InputCharacteristic -> DynHandler s o a
+staHandlerCharacteristicDyn h conv = unWrapDyn . staHandlerCharacteristic h (WrapDyn . conv)
+
+mkUnknown :: h s o a -> StaHandlerCase h s o a
 mkUnknown h = StaHandlerCase h Nothing Nothing
 
-mkFull :: StaHandler# s o a -> Code (ST s (Maybe a)) -> StaHandler# s o a -> StaHandlerCase s o a
+mkUnknownSta :: StaHandler# s o a -> StaHandlerCase WStaHandler# s o a
+mkUnknownSta = mkUnknown . WrapSta
+
+mkUnknownDyn :: DynHandler s o a -> StaHandlerCase WDynHandler s o a
+mkUnknownDyn = mkUnknown . WrapDyn
+
+mkFull :: h s o a -> Code (ST s (Maybe a)) -> h s o a -> StaHandlerCase h s o a
 mkFull h yes no = StaHandlerCase h (Just yes) (Just no)
+
+mkFullSta :: StaHandler# s o a -> Code (ST s (Maybe a)) -> StaHandler# s o a -> StaHandlerCase WStaHandler# s o a
+mkFullSta h yes no = mkFull (WrapSta h) yes (WrapSta no)
+
+mkFullDyn :: DynHandler s o a -> Code (ST s (Maybe a)) -> DynHandler s o a -> StaHandlerCase WDynHandler s o a
+mkFullDyn h yes no = mkFull (WrapDyn h) yes (WrapDyn no)
 
 -- Continuations
 {-|
@@ -198,7 +231,7 @@ with its dynamic origin, if available.
 data StaCont s o a x = StaCont (StaCont# s o a x) (Maybe (DynCont s o a x))
 
 {-|
-Converts a `Parsley.Internal.Machine.Types.Dynamics.DynCont` into a 
+Converts a `Parsley.Internal.Machine.Types.Dynamics.DynCont` into a
 `StaCont`. The dynamic continuation used to construct this
 static continuation is maintained as the origin of the continuation. This means
 if it is converted back the conversion is free.
@@ -228,6 +261,9 @@ mkStaCont :: StaCont# s o a x -> StaCont s o a x
 mkStaCont sk = StaCont sk Nothing
 
 -- Subroutines
+-- TODO: New doc
+type StaSubroutine# s o a x = DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a))
+
 {-|
 This represents the translation of `Parsley.Internal.Backend.Machine.Types.Base.Subroutine#`
 but where the static function structure has been exposed. This allows for β-reduction
@@ -235,7 +271,17 @@ on subroutines, a simple form of inlining optimisation: useful for iteration.
 
 @since 1.4.0.0
 -}
-type StaSubroutine s o a x = DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a))
+-- TODO: New doc
+data StaSubroutine s o a x = StaSubroutine {
+    staSubroutine# :: StaSubroutine# s o a x,
+    meta :: Metadata
+  }
+
+mkStaSubroutine :: StaSubroutine# s o a x -> StaSubroutine s o a x
+mkStaSubroutine sub = StaSubroutine sub newMeta
+
+mkStaSubroutineMeta :: Metadata -> StaSubroutine# s o a x -> StaSubroutine s o a x
+mkStaSubroutineMeta = flip StaSubroutine
 
 {-|
 This represents the translation of `Parsley.Internal.Backend.Machine.Types.Base.Func`
@@ -262,9 +308,10 @@ existentially bounds to the function.
 
 @since 1.4.0.0
 -}
-qSubroutine :: forall s o a x rs. DynFunc rs s o a x -> Regs rs -> QSubroutine s o a x
-qSubroutine func frees = QSubroutine (staFunc frees func) frees
+-- TODO: New doc
+qSubroutine :: forall s o a x rs. DynFunc rs s o a x -> Regs rs -> Metadata -> QSubroutine s o a x
+qSubroutine func frees meta = QSubroutine (staFunc frees func) frees
   where
     staFunc :: forall rs. Regs rs -> DynFunc rs s o a x -> StaFunc rs s o a x
-    staFunc NoRegs func = \dk o# dh -> [|| $$func $$dk $$(o#) $$dh ||]
+    staFunc NoRegs func = StaSubroutine (\dk o# dh -> [|| $$func $$dk $$(o#) $$dh ||]) meta
     staFunc (FreeReg _ witness) func = \r -> staFunc witness [|| $$func $$r ||]

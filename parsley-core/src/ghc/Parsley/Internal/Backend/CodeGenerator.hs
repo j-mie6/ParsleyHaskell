@@ -17,7 +17,7 @@ module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 import Data.Maybe                                    (isJust)
 import Data.Set                                      (Set, elems)
 import Control.Monad.Trans                           (lift)
-import Parsley.Internal.Backend.Machine              (user, userBool, LetBinding, makeLetBinding, Instr(..), Handler(..),
+import Parsley.Internal.Backend.Machine              (user, userBool, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                                       _Fmap, _App, _Modify, _Get, _Put, _Make,
                                                       addCoins, refundCoins, drainCoins,
                                                       IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
@@ -50,7 +50,7 @@ codeGen :: Trace
         -> IMVar            -- ^ The binding identifier to start name generation from.
         -> IΣVar            -- ^ The register identifier to start name generation from.
         -> LetBinding o a x
-codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs
+codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs newMeta
   where
     name = maybe "TOP LEVEL" show letBound
     m = finalise (histo alg p)

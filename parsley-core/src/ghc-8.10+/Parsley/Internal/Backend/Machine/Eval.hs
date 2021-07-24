@@ -46,18 +46,18 @@ This function performs the evaluation on the top-level let-bound parser to conve
 
 @since 1.0.0.0
 -}
-eval :: forall o a. (Trace, Ops o) 
+eval :: forall o a. (Trace, Ops o)
      => Code (InputDependant (Rep o)) -- ^ The input as provided by the user.
      -> LetBinding o a a              -- ^ The binding to be generated.
      -> DMap MVar (LetBinding o a)    -- ^ The map of all other required bindings.
      -> Code (Maybe a)                -- ^ The code for this parser.
-eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
+eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(# next, more, offset #) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine p) (Γ Empty halt (mkOffset [||offset||] 0) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty halt (mkOffset [||offset||] 0) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String

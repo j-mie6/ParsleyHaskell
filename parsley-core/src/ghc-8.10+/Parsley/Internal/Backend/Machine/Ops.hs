@@ -73,7 +73,7 @@ import Parsley.Internal.Backend.Machine.Identifiers    (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps       (PositionOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
 import Parsley.Internal.Backend.Machine.Instructions   (Access(..))
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
+import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failureInputCharacteristic), InputCharacteristic)
 import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
@@ -315,7 +315,7 @@ callWithContinuation :: MarshalOps o
                      -> Code (Rep o)                    -- ^ The input to feed to @sub@.
                      -> Vec (Succ n) (StaHandler s o a) -- ^ The stack from which to obtain the handler to pass to @sub@.
                      -> Code (ST s (Maybe a))
-callWithContinuation sub ret input (VCons h _) = sub (dynCont ret) input (dynHandler h)
+callWithContinuation sub ret input (VCons h _) = staSubroutine# sub (dynCont ret) input (dynHandler h (failureInputCharacteristic (meta sub)))
 
 -- Continuation preparation
 {-|
@@ -371,7 +371,7 @@ buildIterAlways ctx μ l h o u =
     bindIter# @o (offset o) $ \qloop qo# ->
       let off = mkOffset qo# u
       in run l (Γ Empty noreturn off (VCons (mkStaHandlerDyn (Just off) [||$$qhandler $$(qo#)||]) VNil))
-               (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
+               (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {-|
 Similar to `buildIterAlways`, but builds a handler that performs in
@@ -397,7 +397,7 @@ buildIterSame ctx μ l yes no o u =
         bindIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
           in run l (Γ Empty noreturn off (VCons (mkStaHandlerFull off [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
-                   (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
+                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {- Recursion Operations -}
 {-|
@@ -408,17 +408,19 @@ each time round.
 
 @since 1.4.0.0
 -}
+-- TODO: new doc
 buildRec :: forall rs s o a r. RecBuilder o
          => MVar r                  -- ^ The name of the binding.
          -> Regs rs                 -- ^ The registered required by the binding.
          -> Ctx s o a               -- ^ The context to re-insert the register-less binding
          -> Machine s o '[] One r a -- ^ The body of the binding.
+         -> Metadata
          -> DynFunc rs s o a r
-buildRec μ rs ctx k =
+buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qo# qh ->
       run k (Γ Empty (mkStaContDyn qret) (mkOffset qo# 0) (VCons (mkStaHandlerDyn Nothing qh) VNil))
-            (insertSub μ (\k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
+            (insertSub μ (mkStaSubroutineMeta meta $ \k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
 
 {- Marshalling Operations -}
 {-|
@@ -427,9 +429,10 @@ originated from a `DynHandler` itself, that no work is performed.
 
 @since 1.4.0.0
 -}
-dynHandler :: forall s o a. MarshalOps o => StaHandler s o a -> DynHandler s o a
-dynHandler sh@(StaHandler _ _ Nothing) = dynHandler# @o (staHandler# sh)
-dynHandler (StaHandler _ _ (Just dh))  = dh
+-- TODO: new doc
+dynHandler :: forall s o a. MarshalOps o => StaHandler s o a -> InputCharacteristic -> DynHandler s o a
+dynHandler (StaHandler _ sh Nothing)  = dynHandler# @o . staHandlerCharacteristicSta sh
+dynHandler (StaHandler _ _ (Just dh)) = staHandlerCharacteristicDyn dh (dynHandler# @o . const)
 
 {-|
 Wraps around `dynCont#`, but ensures that if the `StaCont`

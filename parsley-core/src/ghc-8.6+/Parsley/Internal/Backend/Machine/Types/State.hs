@@ -26,7 +26,7 @@ import Data.Maybe                                   (fromMaybe)
 import Parsley.Internal.Backend.Machine.Defunc      (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.InputRep    (Unboxed)
-import Parsley.Internal.Backend.Machine.LetBindings (Regs(..))
+import Parsley.Internal.Backend.Machine.LetBindings (Regs(..), Metadata)
 import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
@@ -44,8 +44,8 @@ type family Func (rs :: [Type]) s o a x where
 
 data QSubroutine s o a x = forall rs. QSubroutine  (Code (Func rs s o a x)) (Regs rs)
 
-qSubroutine :: Code (Func rs s o a x) -> Regs rs -> QSubroutine s o a x
-qSubroutine = QSubroutine
+qSubroutine :: Code (Func rs s o a x) -> Regs rs -> Metadata -> QSubroutine s o a x
+qSubroutine body frees _ = QSubroutine body frees
 
 newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
 newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }

@@ -182,9 +182,9 @@ newtype WStaHandler# s o a = WrapSta { unWrapSta :: StaHandler# s o a }
 newtype WDynHandler s o a = WrapDyn { unWrapDyn :: DynHandler s o a }
 
 staHandlerCharacteristic :: StaHandlerCase h s o a -> (Code (ST s (Maybe a)) -> h s o a) -> InputCharacteristic -> h s o a
-staHandlerCharacteristic sh conv NeverConsumes  = maybe (unknown sh) conv (yesSame sh)
-staHandlerCharacteristic sh _    AlwaysConsumes = fromMaybe (unknown sh) (notSame sh)
-staHandlerCharacteristic sh _    MayConsume     = unknown sh
+staHandlerCharacteristic sh conv NeverConsumes      = maybe (unknown sh) conv (yesSame sh)
+staHandlerCharacteristic sh _    (AlwaysConsumes _) = fromMaybe (unknown sh) (notSame sh)
+staHandlerCharacteristic sh _    MayConsume         = unknown sh
 
 --TODO: new doc
 staHandlerCharacteristicSta :: StaHandlerCase WStaHandler# s o a -> InputCharacteristic -> StaHandler# s o a

@@ -59,7 +59,9 @@ data Metadata = Metadata {
   }
 
 -- TODO: New doc
-data InputCharacteristic = AlwaysConsumes | NeverConsumes | MayConsume
+data InputCharacteristic = AlwaysConsumes (Maybe Word)
+                         | NeverConsumes
+                         | MayConsume
 
 {-|
 Given a `Binding` and a set of existential `ΣVar`s, produces a

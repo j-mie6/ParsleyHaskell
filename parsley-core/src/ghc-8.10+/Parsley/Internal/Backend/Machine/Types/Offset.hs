@@ -11,7 +11,9 @@ a parser as it is evaluated.
 
 @since 1.4.0.0
 -}
-module Parsley.Internal.Backend.Machine.Types.Offset (module Parsley.Internal.Backend.Machine.Types.Offset) where
+module Parsley.Internal.Backend.Machine.Types.Offset (
+    Offset, mkOffset, offset, moveOne, moveN, same
+  ) where
 
 import Parsley.Internal.Backend.Machine.InputRep    (Rep)
 import Parsley.Internal.Common.Utils                (Code)
@@ -19,20 +21,22 @@ import Parsley.Internal.Common.Utils                (Code)
 {-|
 Augments a regular @'Code' ('Rep' o)@ with information about its origins and
 how much input is known to have been consumed since it came into existence.
-This can be used to statically evaluate handlers (see 
+This can be used to statically evaluate handlers (see
 `Parsley.Internal.Backend.Machine.Types.Statics.staHandlerEval`).
 
 @since 1.4.0.0
 -}
+-- TODO: new doc
 data Offset o = Offset {
     -- | The underlying code that represents the current offset into the input.
     offset :: Code (Rep o),
     -- | The unique identifier that determines where this offset originated from.
     unique :: Word,
     -- | The amount of input that has been consumed on this offset since it was born.
-    moved  :: Word
+    moved  :: Amount
   }
-instance Show (Offset o) where show o = show (unique o) ++ "+" ++ show (moved o)
+
+data Amount = Known Word | Unknown
 
 {-|
 Given two `Offset`s, this determines whether or not they represent the same
@@ -53,7 +57,15 @@ runtime offset and records that another character has been consumed.
 @since 1.4.0.0
 -}
 moveOne :: Offset o -> Code (Rep o) -> Offset o
-moveOne off o = off { offset = o, moved = moved off + 1 }
+moveOne = moveN (Just 1)
+
+--TODO: new doc
+moveN :: Maybe Word -> Offset o -> Code (Rep o) -> Offset o
+moveN n off o = off { offset = o, moved = moved off + toAmount n }
+  where
+    toAmount :: Maybe Word -> Amount
+    toAmount Nothing = Unknown
+    toAmount (Just n) = Known n
 
 {-|
 Makes a fresh `Offset` that has not had any input consumed off of it
@@ -63,3 +75,28 @@ yet.
 -}
 mkOffset :: Code (Rep o) -> Word -> Offset o
 mkOffset offset unique = Offset offset unique 0
+
+-- Instances
+instance Show (Offset o) where
+  show o = show (unique o) ++ "+" ++ show (moved o)
+
+instance Eq Amount where
+  Known n == Known m = n == m
+  _       == _       = False
+
+instance Show Amount where
+  show (Known n) = show n
+  show Unknown   = "n"
+
+instance Num Amount where
+  Known n + Known m = Known (m + n)
+  _       + _       = Unknown
+  Known n * Known m = Known (m * n)
+  _       * _       = Unknown
+  abs (Known n)     = Known (abs n)
+  abs _             = Unknown
+  signum (Known n)  = Known (signum n)
+  signum _          = Unknown
+  fromInteger       = Known . fromInteger
+  negate (Known n)  = Known (negate n)
+  negate _          = Unknown

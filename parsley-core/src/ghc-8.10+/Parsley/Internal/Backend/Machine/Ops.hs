@@ -77,11 +77,12 @@ import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failu
 import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Offset   (Offset(..), moveOne, mkOffset)
 import Parsley.Internal.Backend.Machine.Types.State    (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                         (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                           (color, Color(Green, White, Red, Blue))
+
+import Parsley.Internal.Backend.Machine.Types.Offset as Offset (Offset(..), moveOne, mkOffset)
 
 {- General Operations -}
 {-|
@@ -471,7 +472,7 @@ preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o)
               -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    Offset {offset} = input γ
+    offset          = Offset.offset (input γ)
     indent          = replicate (debugLevel ctx * 2) ' '
     start           = shiftLeft offset [||5#||]
     end             = shiftRight offset [||5#||]

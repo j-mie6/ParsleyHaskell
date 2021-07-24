@@ -60,3 +60,4 @@ this meets requirements for internal major change.
 * Refactored `LetBinding` to include more generic metadata.
 * Added metadata to `StaSubroutine` and introduced `StaSubroutine#` and associated functions.
 * Fed metadata through `letRec`'s `genBinding` and into `buildRec`.
+* Added `Known` and `Unknown` `Amount`s to `Offset` to account for the `o+n` case.

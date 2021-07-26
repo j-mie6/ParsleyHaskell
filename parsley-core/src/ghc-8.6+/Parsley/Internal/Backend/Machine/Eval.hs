@@ -29,13 +29,13 @@ import qualified Debug.Trace (trace)
 import qualified Parsley.Internal.Backend.Machine.Instructions as Instructions (Handler(..))
 
 eval :: forall o a. (Trace, Ops o) => Code (InputDependant o) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
-eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
+eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
-             (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine p) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) . emptyCtx))
+             (\μ exp rs names _meta -> buildRec μ rs (emptyCtx names) (readyMachine exp))
+             (run (readyMachine (body binding)) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String

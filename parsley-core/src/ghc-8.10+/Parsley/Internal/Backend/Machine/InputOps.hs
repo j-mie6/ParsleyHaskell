@@ -29,9 +29,12 @@ import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, rever
 import GHC.Exts                                  (Int(..), Char(..), TYPE, Int#)
 import GHC.ForeignPtr                            (ForeignPtr(..))
 import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
-import Parsley.Internal.Backend.Machine.InputRep
+import Parsley.Internal.Backend.Machine.InputRep (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
+                                                  offWith, emptyUnpackedLazyByteString, intSame, intLess,
+                                                  offsetText, offWithSame, offWithShiftRight, dropStream,
+                                                  textShiftRight, textShiftLeft, byteStringShiftRight,
+                                                  byteStringShiftLeft, max#)
 import Parsley.Internal.Common.Utils             (Code)
-import Parsley.Internal.Core.InputTypes
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
@@ -126,7 +129,7 @@ data InputOps (rep :: TYPE r) = InputOps { _more       :: Code (rep -> Bool)    
                                          , _next       :: Code (rep -> (# Char, rep #)) -- ^ Read the next character (without checking existence)
                                          }
 {-|
-Wraps around `InputOps` and `_more`. 
+Wraps around `InputOps` and `_more`.
 
 Queries the input to see if another character may be consumed.
 

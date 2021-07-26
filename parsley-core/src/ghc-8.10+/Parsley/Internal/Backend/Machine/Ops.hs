@@ -39,7 +39,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Continuation Operations
     -- *** Basic continuations and operations
     halt, noreturn,
-    resume, callWithContinuation,
+    resume, callWithContinuation, callCC,
     -- *** Continuation preparation
     suspend,
     -- ** Join Point Operations
@@ -73,15 +73,16 @@ import Parsley.Internal.Backend.Machine.Identifiers    (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps       (PositionOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
 import Parsley.Internal.Backend.Machine.Instructions   (Access(..))
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
+import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic), InputCharacteristic(..))
 import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Offset   (Offset(..), moveOne, mkOffset)
 import Parsley.Internal.Backend.Machine.Types.State    (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                         (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                           (color, Color(Green, White, Red, Blue))
+
+import Parsley.Internal.Backend.Machine.Types.Offset as Offset (Offset(..), moveOne, mkOffset, moveN)
 
 {- General Operations -}
 {-|
@@ -315,20 +316,42 @@ callWithContinuation :: MarshalOps o
                      -> Code (Rep o)                    -- ^ The input to feed to @sub@.
                      -> Vec (Succ n) (StaHandler s o a) -- ^ The stack from which to obtain the handler to pass to @sub@.
                      -> Code (ST s (Maybe a))
-callWithContinuation sub ret input (VCons h _) = sub (dynCont ret) input (dynHandler h)
+callWithContinuation sub ret input (VCons h _) = staSubroutine# sub (dynCont ret) input (dynHandler h (failureInputCharacteristic (meta sub)))
 
 -- Continuation preparation
 {-|
 Converts a partial parser into a return continuation in a manner similar
 to `buildHandler`.
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
 suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -- ^ The partial parser to turn into a return continuation.
         -> Γ s o xs n r a                                  -- ^ The state to execute the continuation with.
-        -> Word                                            -- ^ The unique identifier to assign to the continuation's input.
+        -> (Code (Rep o) -> Offset o)                      -- ^ Function used to generate the offset
         -> StaCont s o a x
-suspend m γ u = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = mkOffset o# u})
+suspend m γ off = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = off o#})
+
+{-|
+Combines `suspend` and `callWithContinuation`, simultaneously performing
+an optimisation on the offset if the subroutine has known input characteristics.
+
+@since 1.5.0.0
+-}
+callCC :: forall s o xs n r a x. MarshalOps o
+       => Word                                                   --
+       -> StaSubroutine s o a x                                  -- ^ The subroutine @sub@ that will be called.
+       -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
+       -> Γ s o xs (Succ n) r a                                  --
+       -> Code (ST s (Maybe a))
+callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseOffset (successInputCharacteristic (meta sub)) o)) (offset o) (handlers γ)
+  where
+    o :: Offset o
+    o = input γ
+
+    chooseOffset :: InputCharacteristic -> Offset o -> Code (Rep o) -> Offset o
+    chooseOffset (AlwaysConsumes n) o qo# = moveN n o qo#
+    chooseOffset NeverConsumes      o qo# = o {offset = qo#}
+    chooseOffset MayConsume         _ qo# = mkOffset qo# u
 
 {- Join Point Operations -}
 {-|
@@ -371,7 +394,7 @@ buildIterAlways ctx μ l h o u =
     bindIter# @o (offset o) $ \qloop qo# ->
       let off = mkOffset qo# u
       in run l (Γ Empty noreturn off (VCons (mkStaHandlerDyn (Just off) [||$$qhandler $$(qo#)||]) VNil))
-               (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
+               (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {-|
 Similar to `buildIterAlways`, but builds a handler that performs in
@@ -397,7 +420,7 @@ buildIterSame ctx μ l yes no o u =
         bindIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
           in run l (Γ Empty noreturn off (VCons (mkStaHandlerFull off [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
-                   (voidCoins (insertSub μ (\_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
+                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {- Recursion Operations -}
 {-|
@@ -406,30 +429,34 @@ also provides all the free-registers which are closed over by the binding.
 This eliminates recursive calls from having to pass all of the same registers
 each time round.
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
 buildRec :: forall rs s o a r. RecBuilder o
          => MVar r                  -- ^ The name of the binding.
          -> Regs rs                 -- ^ The registered required by the binding.
          -> Ctx s o a               -- ^ The context to re-insert the register-less binding
          -> Machine s o '[] One r a -- ^ The body of the binding.
+         -> Metadata                -- ^ The metadata associated with the binding
          -> DynFunc rs s o a r
-buildRec μ rs ctx k =
+buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qo# qh ->
       run k (Γ Empty (mkStaContDyn qret) (mkOffset qo# 0) (VCons (mkStaHandlerDyn Nothing qh) VNil))
-            (insertSub μ (\k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
+            (insertSub μ (mkStaSubroutineMeta meta $ \k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
 
 {- Marshalling Operations -}
 {-|
 Wraps around `dynHandler#`, but ensures that if the `StaHandler`
 originated from a `DynHandler` itself, that no work is performed.
 
-@since 1.4.0.0
+Takes in an `InputCharacteristic`, which is used to refine the
+handler given knowledge about how it might be used.
+
+@since 1.5.0.0
 -}
-dynHandler :: forall s o a. MarshalOps o => StaHandler s o a -> DynHandler s o a
-dynHandler sh@(StaHandler _ _ Nothing) = dynHandler# @o (staHandler# sh)
-dynHandler (StaHandler _ _ (Just dh))  = dh
+dynHandler :: forall s o a. MarshalOps o => StaHandler s o a -> InputCharacteristic -> DynHandler s o a
+dynHandler (StaHandler _ sh Nothing)  = dynHandler# @o . staHandlerCharacteristicSta sh
+dynHandler (StaHandler _ _ (Just dh)) = staHandlerCharacteristicDyn dh (dynHandler# @o . const)
 
 {-|
 Wraps around `dynCont#`, but ensures that if the `StaCont`
@@ -468,7 +495,7 @@ preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o)
               -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    Offset {offset} = input γ
+    offset          = Offset.offset (input γ)
     indent          = replicate (debugLevel ctx * 2) ' '
     start           = shiftLeft offset [||5#||]
     end             = shiftRight offset [||5#||]

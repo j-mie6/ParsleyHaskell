@@ -14,21 +14,21 @@ to the low-level representation.
 -}
 module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 
-import Data.Maybe                                    (isJust)
-import Data.Set                                      (Set, elems)
-import Control.Monad.Trans                           (lift)
-import Parsley.Internal.Backend.Machine              (user, userBool, LetBinding, makeLetBinding, Instr(..), Handler(..),
-                                                      _Fmap, _App, _Modify, _Get, _Put, _Make,
-                                                      addCoins, refundCoins, drainCoins,
-                                                      IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
-import Parsley.Internal.Backend.InstructionAnalyser  (coinsNeeded)
-import Parsley.Internal.Common.Fresh                 (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
-import Parsley.Internal.Common.Indexed               (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
-import Parsley.Internal.Core.CombinatorAST           (Combinator(..), MetaCombinator(..))
-import Parsley.Internal.Core.Defunc                  (Defunc(COMPOSE, ID), pattern FLIP_H, pattern UNIT)
-import Parsley.Internal.Trace                        (Trace(trace))
+import Data.Maybe                          (isJust)
+import Data.Set                            (Set, elems)
+import Control.Monad.Trans                 (lift)
+import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
+                                            _Fmap, _App, _Modify, _Get, _Put, _Make,
+                                            addCoins, refundCoins, drainCoins,
+                                            IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
+import Parsley.Internal.Backend.Analysis   (coinsNeeded)
+import Parsley.Internal.Common.Fresh       (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
+import Parsley.Internal.Common.Indexed     (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
+import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
+import Parsley.Internal.Core.Defunc        (Defunc(COMPOSE, ID), pattern FLIP_H, pattern UNIT)
+import Parsley.Internal.Trace              (Trace(trace))
 
-import Parsley.Internal.Core.Defunc as Core          (Defunc)
+import Parsley.Internal.Core.Defunc as Core (Defunc)
 
 type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a
 runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> a
@@ -50,7 +50,7 @@ codeGen :: Trace
         -> IMVar            -- ^ The binding identifier to start name generation from.
         -> IΣVar            -- ^ The register identifier to start name generation from.
         -> LetBinding o a x
-codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs
+codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs newMeta
   where
     name = maybe "TOP LEVEL" show letBound
     m = finalise (histo alg p)

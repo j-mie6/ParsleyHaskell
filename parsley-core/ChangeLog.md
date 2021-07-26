@@ -55,3 +55,16 @@ this meets requirements for internal major change.
   to 20% performance improvement
 * Code restructuring and refactoring
 * Added copious amounts of documentation
+
+## 1.5.0.0 -- TBD
+* Refactored `LetBinding` to include more generic metadata.
+* Added metadata to `StaSubroutine` and introduced `StaSubroutine#` and associated functions.
+* Fed metadata through `letRec`'s `genBinding` and into `buildRec`.
+* Added an `Amount` to `Offset`, which also takes into account a multiplicity, used to track unknown
+  but non-zero quantities.
+* Added `callCC` and modified the API for `suspend` to allow for abstracted `Offset` creation. The
+  `callCC` operation promises to utilise static input consumption from the subroutine to refine the
+  input to the return continuation (making use of the multiplicity above).
+* Refactored the `CombinatorAnalyser` into an `Analysis.Cut` module (and moved `Dependencies` there too)
+* Refactored the `InstructionAnalyser` into an `Analysis.Coins` and `Analysis.Relevancy` modules
+* More documentation

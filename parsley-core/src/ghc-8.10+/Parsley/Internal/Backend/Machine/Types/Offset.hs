@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingStrategies, MagicHash #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Offset
 Description : Statically refined offsets.
@@ -11,7 +12,9 @@ a parser as it is evaluated.
 
 @since 1.4.0.0
 -}
-module Parsley.Internal.Backend.Machine.Types.Offset (module Parsley.Internal.Backend.Machine.Types.Offset) where
+module Parsley.Internal.Backend.Machine.Types.Offset (
+    Offset, mkOffset, offset, moveOne, moveN, same
+  ) where
 
 import Parsley.Internal.Backend.Machine.InputRep    (Rep)
 import Parsley.Internal.Common.Utils                (Code)
@@ -19,10 +22,10 @@ import Parsley.Internal.Common.Utils                (Code)
 {-|
 Augments a regular @'Code' ('Rep' o)@ with information about its origins and
 how much input is known to have been consumed since it came into existence.
-This can be used to statically evaluate handlers (see 
+This can be used to statically evaluate handlers (see
 `Parsley.Internal.Backend.Machine.Types.Statics.staHandlerEval`).
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
 data Offset o = Offset {
     -- | The underlying code that represents the current offset into the input.
@@ -30,9 +33,11 @@ data Offset o = Offset {
     -- | The unique identifier that determines where this offset originated from.
     unique :: Word,
     -- | The amount of input that has been consumed on this offset since it was born.
-    moved  :: Word
+    moved  :: Amount
   }
-instance Show (Offset o) where show o = show (unique o) ++ "+" ++ show (moved o)
+
+data Amount = Amount Word {- ^ The multiplicity. -} Word {- ^ The additive offset. -}
+  deriving stock Eq
 
 {-|
 Given two `Offset`s, this determines whether or not they represent the same
@@ -53,7 +58,21 @@ runtime offset and records that another character has been consumed.
 @since 1.4.0.0
 -}
 moveOne :: Offset o -> Code (Rep o) -> Offset o
-moveOne off o = off { offset = o, moved = moved off + 1 }
+moveOne = moveN (Just 1)
+
+{-|
+Updates an `Offset` with its new underlying representation of a real
+runtime offset and records that several more characters have been consumed.
+Here, `Nothing` represents an unknown but non-zero amount of characters.
+
+@since 1.5.0.0
+-}
+moveN :: Maybe Word -> Offset o -> Code (Rep o) -> Offset o
+moveN n off o = off { offset = o, moved = moved off `add` toAmount n }
+  where
+    toAmount :: Maybe Word -> Amount
+    toAmount Nothing = Amount 1 0
+    toAmount (Just n) = Amount 0 n
 
 {-|
 Makes a fresh `Offset` that has not had any input consumed off of it
@@ -62,4 +81,20 @@ yet.
 @since 1.4.0.0
 -}
 mkOffset :: Code (Rep o) -> Word -> Offset o
-mkOffset offset unique = Offset offset unique 0
+mkOffset offset unique = Offset offset unique (Amount 0 0)
+
+add :: Amount -> Amount -> Amount
+add a1@(Amount n i) a2@(Amount m j)
+  -- If the multiplicites don't match then this is _even_ more unknowable
+  | n /= m, n /= 0, m /= 0 = Amount (n + m) 0
+  -- This is a funny case, it shouldn't happen and it's not really clear what happens if it does
+  | n /= 0, m /= 0         = error ("adding " ++ show a1 ++ " and " ++ show a2 ++ " makes no sense?")
+  -- If one of the multiplicites is 0 then the offset can be added
+  | otherwise              = Amount (max n m) (i + j)
+
+-- Instances
+instance Show (Offset o) where
+  show o = show (unique o) ++ "+" ++ show (moved o)
+
+instance Show Amount where
+  show (Amount n m) = show n ++ "*n+" ++ show m

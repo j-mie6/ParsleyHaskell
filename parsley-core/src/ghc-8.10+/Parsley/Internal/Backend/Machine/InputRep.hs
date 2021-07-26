@@ -29,16 +29,18 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * @LazyByteString@ Operations
     UnpackedLazyByteString, emptyUnpackedLazyByteString,
     -- * @Stream@ Operations
-    Stream, dropStream,
+    dropStream,
     -- * @Text@ Operations
     offsetText,
     -- * Crucial Exposed Functions
-    {- | 
+    {- |
     These functions must be exposed, since they can appear
     in the generated code.
     -}
     textShiftRight, textShiftLeft,
-    byteStringShiftRight, byteStringShiftLeft
+    byteStringShiftRight, byteStringShiftLeft,
+    -- * Re-exports
+    module Parsley.Internal.Core.InputTypes
   ) where
 
 import Data.Array.Unboxed                (UArray)
@@ -50,7 +52,7 @@ import GHC.Exts                          (Int(..), TYPE, RuntimeRep(..), (==#), 
 import GHC.ForeignPtr                    (ForeignPtr(..), ForeignPtrContents)
 import GHC.Prim                          (Int#, Addr#, nullAddr#)
 import Parsley.Internal.Common.Utils     (Code)
-import Parsley.Internal.Core.InputTypes  (Text16, CharList, Stream(..))
+import Parsley.Internal.Core.InputTypes  (Text16(..), CharList(..), Stream(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 
@@ -107,7 +109,7 @@ representation of an input with the correct kind, this type family must be used.
 -}
 type RepKind :: Type -> RuntimeRep
 type family RepKind input where
-  RepKind [Char] = IntRep 
+  RepKind [Char] = IntRep
   RepKind (UArray Int Char) = IntRep
   RepKind Text16 = IntRep
   RepKind ByteString = IntRep

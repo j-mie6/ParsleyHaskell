@@ -31,8 +31,8 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- $reg-doc
 
     -- ** Putters
-    insertNewΣ, cacheΣ, 
-    -- ** Getters 
+    insertNewΣ, cacheΣ,
+    -- ** Getters
     concreteΣ, cachedΣ,
     takeFreeRegisters,
 
@@ -48,7 +48,7 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- $piggy-doc
 
     -- ** Modifiers
-    storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, 
+    storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins,
     -- ** Getters
     coins, hasCoin, isBankrupt, liquidate
   ) where
@@ -173,10 +173,10 @@ Registers are used within parsley to persist state across different parts of a p
 Across recursion and call-boundaries, these materialise as @STRef@s. These are stored
 in the `Ctx` and can be looked up when required.
 
-However, parsley does not mandate that registers /must/ exist in this form. Registers 
-can be subject to caching, where a register's static "most-recently known" may be 
+However, parsley does not mandate that registers /must/ exist in this form. Registers
+can be subject to caching, where a register's static "most-recently known" may be
 stored within the `Ctx` in addition to the "true" binding. This can, in effect, mean
-that registers do not exist at runtime. Both forms of register data can be extracted, 
+that registers do not exist at runtime. Both forms of register data can be extracted,
 however exceptions will guard against mis-management.
 -}
 data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x)) -- ^ The "true" register
@@ -318,7 +318,7 @@ The system works like this:
   a length check for value of the coins in the bank
 * When all the piggy-banks are exhausted, a length check must be generated for each
   token that is consumed.
-* When adding coins into the system, if the `Ctx` is bankrupt, then the coins are added 
+* When adding coins into the system, if the `Ctx` is bankrupt, then the coins are added
   immediately along with a length check, otherwise a piggy-bank is added.
 
 These are the basic principles behind this system, and it works effectively. There are some

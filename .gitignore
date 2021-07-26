@@ -4,6 +4,7 @@
 /dist-newstyle/
 *.dump*
 /dump-core/
+.vscode/
 *.hp
 *.prof
 *.verbose-core2core

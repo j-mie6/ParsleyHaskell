@@ -28,12 +28,12 @@ import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.InputRep      (Rep)
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..), Handler(..))
-import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
+import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(body))
 import Parsley.Internal.Backend.Machine.LetRecBuilder (letRec)
+import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types         (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, offset)
-import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types.State   (Γ(..), OpStack(..))
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Trace                         (Trace(trace))
@@ -46,18 +46,18 @@ This function performs the evaluation on the top-level let-bound parser to conve
 
 @since 1.0.0.0
 -}
-eval :: forall o a. (Trace, Ops o) 
+eval :: forall o a. (Trace, Ops o)
      => Code (InputDependant (Rep o)) -- ^ The input as provided by the user.
      -> LetBinding o a a              -- ^ The binding to be generated.
      -> DMap MVar (LetBinding o a)    -- ^ The map of all other required bindings.
      -> Code (Maybe a)                -- ^ The code for this parser.
-eval input (LetBinding !p _) fs = trace "EVALUATING TOP LEVEL" [|| runST $
+eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(# next, more, offset #) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine p) (Γ Empty halt (mkOffset [||offset||] 0) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty halt (mkOffset [||offset||] 0) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -97,7 +97,7 @@ evalRet :: MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
 evalCall :: forall s o a x xs n r. MarshalOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (\mk sub γ@Γ{..} -> callWithContinuation @o sub (suspend mk γ u) (offset input) handlers) k (askSub μ)
+evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
 
 evalJump :: forall s o a x n. MarshalOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
 evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont (offset input) handlers

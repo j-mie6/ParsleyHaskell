@@ -23,7 +23,7 @@ import Parsley.Internal.Backend.Machine.Defunc       (user, userBool)
 import Parsley.Internal.Backend.Machine.Identifiers
 import Parsley.Internal.Backend.Machine.InputOps     (InputPrep(..))
 import Parsley.Internal.Backend.Machine.Instructions
-import Parsley.Internal.Backend.Machine.LetBindings  (LetBinding, makeLetBinding)
+import Parsley.Internal.Backend.Machine.LetBindings  (LetBinding, makeLetBinding, newMeta)
 import Parsley.Internal.Backend.Machine.Ops          (Ops)
 import Parsley.Internal.Common.Utils                 (Code)
 import Parsley.Internal.Core.InputTypes

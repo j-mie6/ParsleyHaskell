@@ -1,5 +1,18 @@
 {-# LANGUAGE RecordWildCards #-}
-module Parsley.Internal.Frontend.Dependencies (dependencyAnalysis) where
+{-|
+Module      : Parsley.Internal.Frontend.Analysis.Dependencies
+Description : Calculate dependencies of a collection of bindings.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+Exposes `dependencyAnalysis`, which is used to calculate information
+regarding the dependencies of each let-bound parser, as well as their
+free-registers.
+
+@since 1.5.0.0
+-}
+module Parsley.Internal.Frontend.Analysis.Dependencies (dependencyAnalysis) where
 
 import Control.Arrow                        (first, second)
 import Control.Monad                        (unless, forM_)
@@ -23,9 +36,21 @@ import qualified Data.Set           as Set  (elems, empty, insert, lookupMax)
 
 type Graph = Array IMVar [IMVar]
 
+{-|
+Given a top-level parser and a collection of its let-bound subjects performs the following tasks:
+
+* Determines which parser depend on which others.
+* Use the previous information to remove any dead bindings.
+* Calculate the direct free registers for each binding.
+* Propogate the free registers according to transitive need via the dependency graph.
+
+Returns the non-dead bindings, the information about each bindings free registers, and the next
+free index for any registers created in code generation.
+
+@since 1.5.0.0
+-}
 -- TODO This actually should be in the backend... dead bindings and the topological ordering can be computed here
 --      but the register stuff should come after register optimisation and instruction peephole
-
 dependencyAnalysis :: Fix Combinator a -> DMap MVar (Fix Combinator) -> (DMap MVar (Fix Combinator), Map IMVar (Set SomeΣVar), IΣVar)
 dependencyAnalysis toplevel μs =
   let -- Step 1: find roots of the toplevel

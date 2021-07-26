@@ -1,5 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
-module Parsley.Internal.Frontend.Dependencies (dependencyAnalysis) where
+module Parsley.Internal.Frontend.Analysis.Dependencies (dependencyAnalysis) where
 
 import Control.Arrow                        (first, second)
 import Control.Monad                        (unless, forM_)

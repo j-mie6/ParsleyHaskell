@@ -65,3 +65,6 @@ this meets requirements for internal major change.
 * Added `callCC` and modified the API for `suspend` to allow for abstracted `Offset` creation. The
   `callCC` operation promises to utilise static input consumption from the subroutine to refine the
   input to the return continuation (making use of the multiplicity above).
+* Refactored the `CombinatorAnalyser` into an `Analysis.Cut` module (and moved `Dependencies` there too)
+* Refactored the `InstructionAnalyser` into an `Analysis.Coins` and `Analysis.Relevancy` modules
+* More documentation

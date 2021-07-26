@@ -53,15 +53,21 @@ library
                        Parsley.Internal.Core.Primitives,
 
                        Parsley.Internal.Frontend,
-                       Parsley.Internal.Frontend.CombinatorAnalyser,
                        Parsley.Internal.Frontend.Compiler,
-                       Parsley.Internal.Frontend.Dependencies,
                        Parsley.Internal.Frontend.Optimiser,
+
+                       Parsley.Internal.Frontend.Analysis,
+                       Parsley.Internal.Frontend.Analysis.Cut,
+                       Parsley.Internal.Frontend.Analysis.Dependencies,
+                       Parsley.Internal.Frontend.Analysis.Flags,
 
                        Parsley.Internal.Backend,
                        Parsley.Internal.Backend.CodeGenerator,
-                       Parsley.Internal.Backend.InstructionAnalyser,
                        Parsley.Internal.Backend.Optimiser,
+
+                       Parsley.Internal.Backend.Analysis,
+                       Parsley.Internal.Backend.Analysis.Coins,
+                       Parsley.Internal.Backend.Analysis.Relevancy,
 
                        Parsley.Internal.Backend.Machine,
                        Parsley.Internal.Backend.Machine.Defunc,

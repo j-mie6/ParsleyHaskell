@@ -1,8 +1,27 @@
+{-|
+Module      : Parsley.Internal.Backend.Analysis.Coins
+Description : Coins analysis.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+Implements the analysis path required to determine how many tokens of input a given parser
+is known to consume at /least/ in order to successfully execute. This provides the needed
+metadata to perform the piggybank algorithm in the machine (see
+"Parsley.Internal.Backend.Machine.Types.Context" for more information.)
+
+@since 1.5.0.0
+-}
 module Parsley.Internal.Backend.Analysis.Coins (coinsNeeded) where
 
 import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..))
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Const4(..))
 
+{-|
+Calculate the number of tokens that will be consumed by a given machine.
+
+@since 1.5.0.0
+-}
 coinsNeeded :: Fix4 (Instr o) xs n r a -> Int
 coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
 
@@ -15,7 +34,6 @@ bimap = curry (bilift2 ($) ($))
 bilift2 :: (a -> b -> c) -> (x -> y -> z) -> (a, x) -> (b, y) -> (c, z)
 bilift2 f g (x1, y1) (x2, y2) = (f x1 x2, g y1 y2)
 
-
 algCatch :: (Int, Bool) -> (Int, Bool) -> (Int, Bool)
 algCatch k (_, True) = k
 algCatch (_, True) k = k
@@ -23,7 +41,7 @@ algCatch (k1, _) (k2, _) = (min k1 k2, False)
 
 -- Bool represents if an empty is found in a branch (of a Catch)
 -- This helps to get rid of `min` being used for `Try` where min is always 0
--- (The input is needed to _succeed_, so if one branch is doomed to fail it doesn't care about coins)
+-- (The input is needed to /succeed/, so if one branch is doomed to fail it doesn't care about coins)
 alg :: Instr o (Const4 (Int, Bool)) xs n r a -> (Int, Bool)
 alg Ret                                    = (0, False)
 alg (Push _ k)                             = getConst4 k -- was const False on the second parameter, I think that's probably right but a bit presumptive

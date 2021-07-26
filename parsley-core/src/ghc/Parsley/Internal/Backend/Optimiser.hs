@@ -1,3 +1,4 @@
+-- This module doesn't exist yet (technically)
 module Parsley.Internal.Backend.Optimiser (optimise) where
 
 import Data.GADT.Compare                (geq)

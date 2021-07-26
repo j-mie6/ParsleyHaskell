@@ -25,9 +25,8 @@ how much input is known to have been consumed since it came into existence.
 This can be used to statically evaluate handlers (see
 `Parsley.Internal.Backend.Machine.Types.Statics.staHandlerEval`).
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
--- TODO: new doc
 data Offset o = Offset {
     -- | The underlying code that represents the current offset into the input.
     offset :: Code (Rep o),
@@ -61,7 +60,13 @@ runtime offset and records that another character has been consumed.
 moveOne :: Offset o -> Code (Rep o) -> Offset o
 moveOne = moveN (Just 1)
 
---TODO: new doc
+{-|
+Updates an `Offset` with its new underlying representation of a real
+runtime offset and records that several more characters have been consumed.
+Here, `Nothing` represents an unknown but non-zero amount of characters.
+
+@since 1.5.0.0
+-}
 moveN :: Maybe Word -> Offset o -> Code (Rep o) -> Offset o
 moveN n off o = off { offset = o, moved = moved off `add` toAmount n }
   where

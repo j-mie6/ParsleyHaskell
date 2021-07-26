@@ -1,16 +1,36 @@
 {-# LANGUAGE DerivingStrategies #-}
-module Parsley.Internal.Frontend.Analysis.Cut (cutAnalysis, Compliance(..)) where
+{-|
+Module      : Parsley.Internal.Frontend.Analysis.Cut
+Description : Marks cut points in the parser.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+Exposes a transformation that annotates the parts of the grammar where cuts occur: these are places
+where backtracking is not allowed to occur. This information is used to help with correct allocation
+of coins used for "Parsley.Internal.Backend.Analysis.Coins": the combinator tree has access to scoping
+information lost in the machine.
+
+@since 1.5.0.0
+-}
+module Parsley.Internal.Frontend.Analysis.Cut (cutAnalysis) where
 
 import Data.Coerce                         (coerce)
 import Data.Kind                           (Type)
 import Parsley.Internal.Common.Indexed     (Fix(..), zygo, (:*:)(..), ifst)
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 
-cutAnalysis :: Bool -> Fix Combinator a -> Fix Combinator a
+{-|
+Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
+
+@since 1.5.0.0
+-}
+cutAnalysis :: Bool -- ^ Whether or not the parser in question is a let-bound parser.
+            -> Fix Combinator a -> Fix Combinator a
 cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . cutAlg) compliance
 
 data Compliance (k :: Type) = DomComp | NonComp | Comp | FullPure deriving stock (Show, Eq)
-newtype CutAnalysis a = CutAnalysis {doCut :: Bool -> (Fix Combinator a, Bool)}
+newtype CutAnalysis a = CutAnalysis { doCut :: Bool -> (Fix Combinator a, Bool) }
 
 seqCompliance :: Compliance a -> Compliance b -> Compliance c
 seqCompliance c FullPure = coerce c

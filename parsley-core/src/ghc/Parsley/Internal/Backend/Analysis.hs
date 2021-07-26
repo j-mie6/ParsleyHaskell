@@ -1,3 +1,15 @@
+{-|
+Module      : Parsley.Internal.Backend.Analysis
+Description : Exposes various analysis passes.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+Exposes the analysis passes defined within the analysis submodules. See
+the extended documentation in the submodules.
+
+@since 1.5.0.0
+-}
 module Parsley.Internal.Backend.Analysis (
     coinsNeeded,
     relevancy

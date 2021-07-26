@@ -1,6 +1,19 @@
 {-# LANGUAGE MultiParamTypeClasses,
              TypeFamilies,
              UndecidableInstances #-}
+{-|
+Module      : Parsley.Internal.Backend.Analysis.Relevancy
+Description : Value relevancy analysis.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+Exposes an analysis that can determine whether each of the values present on the stack for a
+given machine are actually used or not. This information may be useful in the future to calculate
+whether a register is "dead" or not.
+
+@since 1.5.0.0
+-}
 module Parsley.Internal.Backend.Analysis.Relevancy (relevancy, Length) where
 
 import Data.Kind                        (Type)
@@ -8,9 +21,20 @@ import Parsley.Internal.Backend.Machine (Instr(..), Handler(..))
 import Parsley.Internal.Common.Indexed  (cata4, Fix4)
 import Parsley.Internal.Common.Vec      (Vec(..), Nat(..), SNat(..), SingNat(..), zipWithVec, replicateVec)
 
+{-|
+Provides a conservative estimate on whether or not each of the elements of the stack on
+entry to a machine are actually used in the computation.
+
+@since 1.5.0.0
+-}
 relevancy :: SingNat (Length xs) => Fix4 (Instr o) xs n r a -> Vec (Length xs) Bool
 relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
 
+{-|
+Computes the length of a type-level list. Used to index a `Vec`.
+
+@since 1.5.0.0
+-}
 type family Length (xs :: [Type]) :: Nat where
   Length '[] = Zero
   Length (_ : xs) = Succ (Length xs)

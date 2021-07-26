@@ -41,39 +41,73 @@ type Binding o a x = Fix4 (Instr o) '[] One x a
 Packages a binding along with its free registers that are required
 for it, which are left existential. This is possible since the `Regs`
 datatype serves as a singleton-style witness of the original registers
-and their types.
+and their types. It also requires `Metadata` to be provided, sourced
+from analysis.
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
--- TODO: New doc
 data LetBinding o a x = LetBinding {
     body :: Binding o a x,
     freeRegs :: Some Regs,
     meta :: Metadata
   }
 
--- TODO: New doc
+{- |
+This is used to store useful static information that can be
+used to guide code generation.
+
+See `successInputCharacteristic`, and `failureInputCharacteristic`.
+
+@since 1.5.0.0
+-}
 data Metadata = Metadata {
+    {- |
+    Characterises the way that a binding consumes input on success.
+
+    @since 1.5.0.0
+    -}
     successInputCharacteristic :: InputCharacteristic,
+    {- |
+    Characterises the way that a binding consumes input on failure.
+
+    @since 1.5.0.0
+    -}
     failureInputCharacteristic :: InputCharacteristic
   }
 
--- TODO: New doc
+{-|
+Provides a way to describe how input is consumed in certain circumstances:
+
+* The input may be always the same on all paths
+* The input may always be consumed, but not the same on all paths
+* The input may never be consumed in any path
+* It may be inconsistent
+
+@since 1.5.0.0
+-}
 data InputCharacteristic = AlwaysConsumes (Maybe Word)
+                         -- ^ On all paths, input must be consumed: `Nothing` when the extact
+                         --   amount is inconsistent across paths.
                          | NeverConsumes
+                         -- ^ On all paths, no input is consumed.
                          | MayConsume
+                         -- ^ The input characteristic is unknown or inconsistent.
 
 {-|
-Given a `Binding` and a set of existential `ΣVar`s, produces a
+Given a `Binding` , a set of existential `ΣVar`s, and some `Metadata`, produces a
 `LetBinding` instance.
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
--- TODO: New doc
 makeLetBinding :: Binding o a x -> Set SomeΣVar -> Metadata -> LetBinding o a x
 makeLetBinding m rs = LetBinding m (makeRegs rs)
 
--- TODO: New doc
+{-|
+Produces a new `Metadata` object, with fields initialised to sensible conservative
+defaults.
+
+@since 1.5.0.0
+-}
 newMeta :: Metadata
 newMeta = Metadata {
     successInputCharacteristic = MayConsume,

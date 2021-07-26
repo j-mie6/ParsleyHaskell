@@ -323,16 +323,20 @@ callWithContinuation sub ret input (VCons h _) = staSubroutine# sub (dynCont ret
 Converts a partial parser into a return continuation in a manner similar
 to `buildHandler`.
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
---TODO: new doc
 suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -- ^ The partial parser to turn into a return continuation.
         -> Γ s o xs n r a                                  -- ^ The state to execute the continuation with.
-        -> (Code (Rep o) -> Offset o)                      --
+        -> (Code (Rep o) -> Offset o)                      -- ^ Function used to generate the offset
         -> StaCont s o a x
 suspend m γ off = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = off o#})
 
---TODO: new doc
+{-|
+Combines `suspend` and `callWithContinuation`, simultaneously performing
+an optimisation on the offset if the subroutine has known input characteristics.
+
+@since 1.5.0.0
+-}
 callCC :: forall s o xs n r a x. MarshalOps o
        => Word                                                   --
        -> StaSubroutine s o a x                                  -- ^ The subroutine @sub@ that will be called.
@@ -425,15 +429,14 @@ also provides all the free-registers which are closed over by the binding.
 This eliminates recursive calls from having to pass all of the same registers
 each time round.
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
--- TODO: new doc
 buildRec :: forall rs s o a r. RecBuilder o
          => MVar r                  -- ^ The name of the binding.
          -> Regs rs                 -- ^ The registered required by the binding.
          -> Ctx s o a               -- ^ The context to re-insert the register-less binding
          -> Machine s o '[] One r a -- ^ The body of the binding.
-         -> Metadata
+         -> Metadata                -- ^ The metadata associated with the binding
          -> DynFunc rs s o a r
 buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
@@ -446,9 +449,11 @@ buildRec μ rs ctx k meta =
 Wraps around `dynHandler#`, but ensures that if the `StaHandler`
 originated from a `DynHandler` itself, that no work is performed.
 
-@since 1.4.0.0
+Takes in an `InputCharacteristic`, which is used to refine the
+handler given knowledge about how it might be used.
+
+@since 1.5.0.0
 -}
--- TODO: new doc
 dynHandler :: forall s o a. MarshalOps o => StaHandler s o a -> InputCharacteristic -> DynHandler s o a
 dynHandler (StaHandler _ sh Nothing)  = dynHandler# @o . staHandlerCharacteristicSta sh
 dynHandler (StaHandler _ _ (Just dh)) = staHandlerCharacteristicDyn dh (dynHandler# @o . const)

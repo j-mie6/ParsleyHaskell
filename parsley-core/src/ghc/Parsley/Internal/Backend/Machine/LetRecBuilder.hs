@@ -42,9 +42,8 @@ unTypeCode = unTypeQ
 Given a collection of bindings, generates a recursive binding group where each is allowed to
 refer to every other. These are then in scope for the top-level parser.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
--- TODO: new doc
 letRec :: GCompare key
        => {-bindings-}  DMap key (LetBinding o a)   -- ^ The bindings that should form part of the recursive group
       -> {-nameof-}     (forall x. key x -> String) -- ^ A function which can give a name to a key in the map

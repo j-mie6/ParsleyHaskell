@@ -56,7 +56,7 @@ this meets requirements for internal major change.
 * Code restructuring and refactoring
 * Added copious amounts of documentation
 
-## 1.x.0.0 -- TBD
+## 1.5.0.0 -- TBD
 * Refactored `LetBinding` to include more generic metadata.
 * Added metadata to `StaSubroutine` and introduced `StaSubroutine#` and associated functions.
 * Fed metadata through `letRec`'s `genBinding` and into `buildRec`.

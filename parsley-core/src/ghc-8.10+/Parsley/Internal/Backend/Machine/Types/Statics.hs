@@ -17,7 +17,7 @@ call boundaries.
 -}
 module Parsley.Internal.Backend.Machine.Types.Statics (
     -- * Handlers
-    StaHandler#, StaHandler(..),
+    StaHandler#, StaHandler(..), StaHandlerCase, WStaHandler#, WDynHandler,
 
     -- ** @StaHandler@ Builders
     -- | The following functions are builders of `StaHandler`.
@@ -34,7 +34,7 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
     staCont#,
 
     -- * Subroutines
-    QSubroutine(..), StaSubroutine, StaFunc,
+    QSubroutine(..), StaSubroutine, StaSubroutine#, StaFunc,
     -- ** Subroutine Builders
     qSubroutine, mkStaSubroutine, mkStaSubroutineMeta,
 
@@ -71,11 +71,7 @@ properties of handlers which can be carried around during the lifetime of the ha
 This information allows the engine to optimise more aggressively, leveraging
 domain-specific optimisation data.
 
-Note that @StaHandlerCase@ is not exposed, but is potentially three handlers: one for
-unknown offset cases, one for offset known to be the same, and another for offset known
-to be different (see `mkStaHandlerFull`).
-
-@since 1.4.0.0
+@since 1.5.0.0
 -}
 data StaHandler s o a =
   StaHandler
@@ -169,6 +165,39 @@ staHandlerEval (StaHandler (Just c) sh _) o
   | Just False <- same c o           = unWrapSta (fromMaybe (unknown sh) (notSame sh)) (offset o)
 staHandlerEval (StaHandler _ sh _) o = unWrapSta (unknown sh) (offset o)
 
+staHandlerCharacteristic :: StaHandlerCase h s o a -> (Code (ST s (Maybe a)) -> h s o a) -> InputCharacteristic -> h s o a
+staHandlerCharacteristic sh conv NeverConsumes      = maybe (unknown sh) conv (yesSame sh)
+staHandlerCharacteristic sh _    (AlwaysConsumes _) = fromMaybe (unknown sh) (notSame sh)
+staHandlerCharacteristic sh _    MayConsume         = unknown sh
+
+{-|
+Selects the correct case out of a `StaHandlerCase` depending on what the `InputCharacteristic` that
+governs the use of the handler is. This means that it can select any of the three cases.
+
+@since 1.5.0.0
+-}
+staHandlerCharacteristicSta :: StaHandlerCase WStaHandler# s o a -> InputCharacteristic -> StaHandler# s o a
+staHandlerCharacteristicSta h = unWrapSta . staHandlerCharacteristic h (WrapSta . const)
+
+{-|
+Selects the correct case out of a `StaHandlerCase` depending on what the `InputCharacteristic` that
+governs the use of the handler is. This means that it can select any of the three cases.
+
+@since 1.5.0.0
+-}
+staHandlerCharacteristicDyn :: StaHandlerCase WDynHandler s o a
+                            -> (Code (ST s (Maybe a)) -> DynHandler s o a) -- ^ How to convert the input-same case to a `DynHandler`.
+                            -> InputCharacteristic
+                            -> DynHandler s o a
+staHandlerCharacteristicDyn h conv = unWrapDyn . staHandlerCharacteristic h (WrapDyn . conv)
+
+{-|
+Represents potentially three handlers: one for unknown offset cases, one for offset known to be
+the same, and another for offset known to be different (see `mkStaHandlerFull`). Parameterised by
+a generic handler type, which is instantiated to one of `WStaHandler#` or `WDynHandler`.
+
+@since 1.5.0.0
+-}
 data StaHandlerCase h s (o :: Type) a = StaHandlerCase {
   -- | The static function representing this handler when offsets are incomparable.
   unknown :: h s o a,
@@ -178,21 +207,19 @@ data StaHandlerCase h s (o :: Type) a = StaHandlerCase {
   notSame :: Maybe (h s o a)
 }
 
+{-|
+Wraps a `StaHandler#`.
+
+@since 1.5.0.0
+-}
 newtype WStaHandler# s o a = WrapSta { unWrapSta :: StaHandler# s o a }
+
+{-|
+Wraps a `DynHandler`.
+
+@since 1.5.0.0
+-}
 newtype WDynHandler s o a = WrapDyn { unWrapDyn :: DynHandler s o a }
-
-staHandlerCharacteristic :: StaHandlerCase h s o a -> (Code (ST s (Maybe a)) -> h s o a) -> InputCharacteristic -> h s o a
-staHandlerCharacteristic sh conv NeverConsumes      = maybe (unknown sh) conv (yesSame sh)
-staHandlerCharacteristic sh _    (AlwaysConsumes _) = fromMaybe (unknown sh) (notSame sh)
-staHandlerCharacteristic sh _    MayConsume         = unknown sh
-
---TODO: new doc
-staHandlerCharacteristicSta :: StaHandlerCase WStaHandler# s o a -> InputCharacteristic -> StaHandler# s o a
-staHandlerCharacteristicSta h = unWrapSta . staHandlerCharacteristic h (WrapSta . const)
-
---TODO: new doc
-staHandlerCharacteristicDyn :: StaHandlerCase WDynHandler s o a -> (Code (ST s (Maybe a)) -> DynHandler s o a) -> InputCharacteristic -> DynHandler s o a
-staHandlerCharacteristicDyn h conv = unWrapDyn . staHandlerCharacteristic h (WrapDyn . conv)
 
 mkUnknown :: h s o a -> StaHandlerCase h s o a
 mkUnknown h = StaHandlerCase h Nothing Nothing
@@ -261,25 +288,41 @@ mkStaCont :: StaCont# s o a x -> StaCont s o a x
 mkStaCont sk = StaCont sk Nothing
 
 -- Subroutines
--- TODO: New doc
-type StaSubroutine# s o a x = DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a))
-
 {-|
 This represents the translation of `Parsley.Internal.Backend.Machine.Types.Base.Subroutine#`
 but where the static function structure has been exposed. This allows for β-reduction
 on subroutines, a simple form of inlining optimisation: useful for iteration.
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
--- TODO: New doc
+type StaSubroutine# s o a x = DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a))
+
+{-|
+Packages a `StaSubroutine#` along with statically determined metadata that describes it derived from
+static analysis.
+
+@since 1.5.0.0
+-}
 data StaSubroutine s o a x = StaSubroutine {
+    -- | Extracts the underlying subroutine.
     staSubroutine# :: StaSubroutine# s o a x,
+    -- | Extracts the metadata from a subroutine.
     meta :: Metadata
   }
 
-mkStaSubroutine :: StaSubroutine# s o a x -> StaSubroutine s o a x
-mkStaSubroutine sub = StaSubroutine sub newMeta
+{-|
+Converts a `StaSubroutine#` into a `StaSubroutine` by providing the empty meta.
 
+@since 1.5.0.0
+-}
+mkStaSubroutine :: StaSubroutine# s o a x -> StaSubroutine s o a x
+mkStaSubroutine = mkStaSubroutineMeta newMeta
+
+{-|
+Converts a `StaSubroutine#` into a `StaSubroutine` by providing its metadata.
+
+@since 1.5.0.0
+-}
 mkStaSubroutineMeta :: Metadata -> StaSubroutine# s o a x -> StaSubroutine s o a x
 mkStaSubroutineMeta = flip StaSubroutine
 
@@ -306,9 +349,8 @@ Converts a `Parsley.Internal.Backend.Machine.Types.Dynamics.DynFunc` that relies
 on zero or more free registers into a `QSubroutine`, where the registers are
 existentially bounds to the function.
 
-@since 1.4.0.0
+@since 1.5.0.0
 -}
--- TODO: New doc
 qSubroutine :: forall s o a x rs. DynFunc rs s o a x -> Regs rs -> Metadata -> QSubroutine s o a x
 qSubroutine func frees meta = QSubroutine (staFunc frees func) frees
   where

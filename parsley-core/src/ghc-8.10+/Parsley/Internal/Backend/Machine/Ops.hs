@@ -39,7 +39,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Continuation Operations
     -- *** Basic continuations and operations
     halt, noreturn,
-    resume, callWithContinuation,
+    resume, callWithContinuation, callCC,
     -- *** Continuation preparation
     suspend,
     -- ** Join Point Operations
@@ -73,7 +73,7 @@ import Parsley.Internal.Backend.Machine.Identifiers    (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps       (PositionOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
 import Parsley.Internal.Backend.Machine.Instructions   (Access(..))
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failureInputCharacteristic), InputCharacteristic)
+import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic), InputCharacteristic(..))
 import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
@@ -82,7 +82,7 @@ import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                         (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                           (color, Color(Green, White, Red, Blue))
 
-import Parsley.Internal.Backend.Machine.Types.Offset as Offset (Offset(..), moveOne, mkOffset)
+import Parsley.Internal.Backend.Machine.Types.Offset as Offset (Offset(..), moveOne, mkOffset, moveN)
 
 {- General Operations -}
 {-|
@@ -325,11 +325,29 @@ to `buildHandler`.
 
 @since 1.4.0.0
 -}
+--TODO: new doc
 suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -- ^ The partial parser to turn into a return continuation.
         -> Γ s o xs n r a                                  -- ^ The state to execute the continuation with.
-        -> Word                                            -- ^ The unique identifier to assign to the continuation's input.
+        -> (Code (Rep o) -> Offset o)                      --
         -> StaCont s o a x
-suspend m γ u = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = mkOffset o# u})
+suspend m γ off = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = off o#})
+
+--TODO: new doc
+callCC :: forall s o xs n r a x. MarshalOps o
+       => Word                                                   --
+       -> StaSubroutine s o a x                                  -- ^ The subroutine @sub@ that will be called.
+       -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
+       -> Γ s o xs (Succ n) r a                                  --
+       -> Code (ST s (Maybe a))
+callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseOffset (successInputCharacteristic (meta sub)) o)) (offset o) (handlers γ)
+  where
+    o :: Offset o
+    o = input γ
+
+    chooseOffset :: InputCharacteristic -> Offset o -> Code (Rep o) -> Offset o
+    chooseOffset (AlwaysConsumes n) o qo# = moveN n o qo#
+    chooseOffset NeverConsumes      o qo# = o {offset = qo#}
+    chooseOffset MayConsume         _ qo# = mkOffset qo# u
 
 {- Join Point Operations -}
 {-|

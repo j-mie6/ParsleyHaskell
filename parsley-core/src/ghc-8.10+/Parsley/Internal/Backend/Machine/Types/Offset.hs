@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingStrategies, MagicHash #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Offset
 Description : Statically refined offsets.
@@ -36,7 +37,8 @@ data Offset o = Offset {
     moved  :: Amount
   }
 
-data Amount = Known Word | Unknown
+data Amount = Amount Word {- ^ The multiplicity. -} Word {- ^ The additive offset. -}
+  deriving stock Eq
 
 {-|
 Given two `Offset`s, this determines whether or not they represent the same
@@ -61,11 +63,11 @@ moveOne = moveN (Just 1)
 
 --TODO: new doc
 moveN :: Maybe Word -> Offset o -> Code (Rep o) -> Offset o
-moveN n off o = off { offset = o, moved = moved off + toAmount n }
+moveN n off o = off { offset = o, moved = moved off `add` toAmount n }
   where
     toAmount :: Maybe Word -> Amount
-    toAmount Nothing = Unknown
-    toAmount (Just n) = Known n
+    toAmount Nothing = Amount 1 0
+    toAmount (Just n) = Amount 0 n
 
 {-|
 Makes a fresh `Offset` that has not had any input consumed off of it
@@ -74,29 +76,20 @@ yet.
 @since 1.4.0.0
 -}
 mkOffset :: Code (Rep o) -> Word -> Offset o
-mkOffset offset unique = Offset offset unique 0
+mkOffset offset unique = Offset offset unique (Amount 0 0)
+
+add :: Amount -> Amount -> Amount
+add a1@(Amount n i) a2@(Amount m j)
+  -- If the multiplicites don't match then this is _even_ more unknowable
+  | n /= m, n /= 0, m /= 0 = Amount (n + m) 0
+  -- This is a funny case, it shouldn't happen and it's not really clear what happens if it does
+  | n /= 0, m /= 0         = error ("adding " ++ show a1 ++ " and " ++ show a2 ++ " makes no sense?")
+  -- If one of the multiplicites is 0 then the offset can be added
+  | otherwise              = Amount (max n m) (i + j)
 
 -- Instances
 instance Show (Offset o) where
   show o = show (unique o) ++ "+" ++ show (moved o)
 
-instance Eq Amount where
-  Known n == Known m = n == m
-  _       == _       = False
-
 instance Show Amount where
-  show (Known n) = show n
-  show Unknown   = "n"
-
-instance Num Amount where
-  Known n + Known m = Known (m + n)
-  _       + _       = Unknown
-  Known n * Known m = Known (m * n)
-  _       * _       = Unknown
-  abs (Known n)     = Known (abs n)
-  abs _             = Unknown
-  signum (Known n)  = Known (signum n)
-  signum _          = Unknown
-  fromInteger       = Known . fromInteger
-  negate (Known n)  = Known (negate n)
-  negate _          = Unknown
+  show (Amount n m) = show n ++ "*n+" ++ show m

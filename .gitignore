@@ -13,3 +13,4 @@ log
 hie.*
 *.c
 *.h
+cabal.project.local

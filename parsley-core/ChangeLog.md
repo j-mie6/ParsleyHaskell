@@ -57,6 +57,8 @@ this meets requirements for internal major change.
 * Added copious amounts of documentation
 
 ## 1.5.0.0 -- TBD
+Infrastructure for improved handler analysis:
+
 * Refactored `LetBinding` to include more generic metadata.
 * Added metadata to `StaSubroutine` and introduced `StaSubroutine#` and associated functions.
 * Fed metadata through `letRec`'s `genBinding` and into `buildRec`.
@@ -68,3 +70,8 @@ this meets requirements for internal major change.
 * Refactored the `CombinatorAnalyser` into an `Analysis.Cut` module (and moved `Dependencies` there too)
 * Refactored the `InstructionAnalyser` into an `Analysis.Coins` and `Analysis.Relevancy` modules
 * More documentation
+
+Input Reclamation:
+
+* Added `Machine.Types.Coins`, which separates coins for length checks from input reclamation.
+* `Analysis.Coins` now deals wiith the `Coins` type, as do the instructions.

@@ -9,6 +9,7 @@ Stability   : unstable
 -}
 module Parsley.Internal.Backend.Machine (
     Input, eval,
+    module Parsley.Internal.Backend.Machine.Types.Coins,
     module Parsley.Internal.Backend.Machine.Instructions,
     module Parsley.Internal.Backend.Machine.Defunc,
     module Parsley.Internal.Backend.Machine.Identifiers,
@@ -26,6 +27,7 @@ import Parsley.Internal.Backend.Machine.InputRep     (Rep)
 import Parsley.Internal.Backend.Machine.Instructions
 import Parsley.Internal.Backend.Machine.LetBindings  (LetBinding, makeLetBinding, newMeta)
 import Parsley.Internal.Backend.Machine.Ops          (Ops)
+import Parsley.Internal.Backend.Machine.Types.Coins  (Coins(..), zero, minCoins, plus, plus1)
 import Parsley.Internal.Common.Utils                 (Code)
 import Parsley.Internal.Core.InputTypes
 import Parsley.Internal.Trace                        (Trace)

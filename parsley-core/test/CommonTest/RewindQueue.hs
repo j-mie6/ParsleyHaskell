@@ -13,9 +13,12 @@ import Test.Tasty.QuickCheck
     resize,
     Arbitrary(arbitrary),
     Property )
-import CommonTest.Queue as QueueTest (genTests, QueueLike(..))
+import CommonTest.Queue as QueueTest (genTests, QueueLikeImpl(..))
 
 import Prelude hiding (null)
+
+import Parsley.Internal.Common.QueueLike  (QueueLike(empty, null, size, enqueue, dequeue, enqueueAll))
+import Parsley.Internal.Common.RewindQueue ()
 import Parsley.Internal.Common.RewindQueue.Impl (RewindQueue(..))
 import qualified Parsley.Internal.Common.RewindQueue.Impl as Rewind
 
@@ -36,11 +39,5 @@ instance Arbitrary a => Arbitrary (RewindQueue a) where
                  queue <- arbitrary
                  return $ RewindQueue queue undo (length undo)
 
-instance QueueTest.QueueLike RewindQueue where
-  empty = Rewind.empty
-  null = Rewind.null
-  size = Rewind.size
-  enqueue = Rewind.enqueue
-  dequeue = Rewind.dequeue
-  enqueueAll = Rewind.enqueueAll
+instance QueueTest.QueueLikeImpl RewindQueue where
   toList = Rewind.toList

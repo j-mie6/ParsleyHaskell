@@ -39,6 +39,7 @@ library
                        Parsley.Internal.Common,
                        Parsley.Internal.Common.Fresh,
                        Parsley.Internal.Common.Indexed,
+                       Parsley.Internal.Common.QueueLike,
                        Parsley.Internal.Common.State,
                        Parsley.Internal.Common.Utils,
                        Parsley.Internal.Common.Vec,

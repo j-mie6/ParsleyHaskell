@@ -11,6 +11,8 @@ import Test.Tasty.QuickCheck
     Property )
 
 import Prelude hiding (null)
+import Parsley.Internal.Common.QueueLike  (QueueLike(empty, null, size, enqueue, dequeue, enqueueAll))
+import Parsley.Internal.Common.Queue ()
 import Parsley.Internal.Common.Queue.Impl (Queue(..))
 import qualified Parsley.Internal.Common.Queue.Impl as Queue
 
@@ -21,25 +23,13 @@ instance Arbitrary a => Arbitrary (Queue a) where
                                 , outs = outs, outsz = length outs
                                 }
 
-class QueueLike q where
-  empty :: q a
-  null :: q a -> Bool
-  size :: q a -> Int
-  enqueue :: a -> q a -> q a
-  dequeue :: q a -> (a, q a)
-  enqueueAll :: [a] -> q a -> q a
+class QueueLike q => QueueLikeImpl q where
   toList :: q a -> [a]
 
-instance QueueLike Queue where
-  empty = Queue.empty
-  null = Queue.null
-  size = Queue.size
-  enqueue = Queue.enqueue
-  dequeue = Queue.dequeue
-  enqueueAll = Queue.enqueueAll
+instance QueueLikeImpl Queue where
   toList = Queue.toList
 
-type TestContext q = (Arbitrary (q Integer), QueueLike q, Show (q Integer))
+type TestContext q = (Arbitrary (q Integer), QueueLikeImpl q, Show (q Integer))
 
 tests :: TestTree
 tests = testGroup "Queue" (genTests @Queue)

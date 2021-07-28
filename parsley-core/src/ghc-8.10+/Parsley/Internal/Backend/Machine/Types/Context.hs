@@ -63,11 +63,14 @@ import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
+import Parsley.Internal.Backend.Machine.Types.Offset   (Offset)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code)
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
-import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
+import qualified Parsley.Internal.Common.QueueLike as Queue (empty, null)
+import qualified Parsley.Internal.Common.Queue as Queue (foldr)
+--import qualified Parsley.Internal.Common.RewindQueue as Queue (rewind)
 
 -- Core Data-types
 {-|
@@ -84,6 +87,7 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a) -- ^ Map of 
                      , coins      :: Int                           -- ^ Number of tokens free to consume without length check.
                      , offsetUniq :: Word                          -- ^ Next unique offset identifier.
                      , piggies    :: Queue Int                     -- ^ Queue of future length check credit.
+                     , _knownChars :: RewindQueue (Char, Offset o)  -- ^ Characters that can be reclaimed on backtrack
                      }
 
 {-|
@@ -101,7 +105,7 @@ bindings: information about their required free-registers is included.
 @since 1.0.0.0
 -}
 emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty Queue.empty
 
 -- Subroutines
 {- $sub-doc

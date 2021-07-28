@@ -76,4 +76,5 @@ Input Reclamation:
 * Added `Machine.Types.Coins`, which separates coins for length checks from input reclamation.
 * `Analysis.Coins` now deals wiith the `Coins` type, as do the instructions.
 * Added `Common.RewindQueue` to handle rewindable input caching.
+* Added `Common.QueueLike` to abstract both queue's common operations.
 * Moved the implementation of `Queue` into a `Queue.Impl` submodule, for `RewindQueue` and testing.

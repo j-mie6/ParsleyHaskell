@@ -22,8 +22,8 @@ Calculate the number of tokens that will be consumed by a given machine.
 
 @since 1.5.0.0
 -}
-coinsNeeded :: Fix4 (Instr o) xs n r a -> Int
-coinsNeeded = willConsume . fst . getConst4 . cata4 (Const4 . alg)
+coinsNeeded :: Fix4 (Instr o) xs n r a -> Coins
+coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
 
 first :: (a -> b) -> (a, x) -> (b, x)
 first = flip bimap id

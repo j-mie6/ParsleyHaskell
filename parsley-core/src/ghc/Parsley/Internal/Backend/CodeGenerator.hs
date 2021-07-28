@@ -20,6 +20,7 @@ import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                             _Fmap, _App, _Modify, _Get, _Put, _Make,
                                             addCoins, refundCoins, drainCoins,
+                                            minus, minCoins, maxCoins, zero,
                                             IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded)
 import Parsley.Internal.Common.Fresh       (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
@@ -83,8 +84,8 @@ altNoCutCompile p q handler post m =
      qc <- freshΦ (runCodeGen q φ)
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
-     let dp = np - min np nq
-     let dq = nq - min np nq
+     let dp = np `minus` minCoins np nq
+     let dq = nq `minus` minCoins np nq
      return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
 
 chainPreCompile :: CodeGen o a (x -> x) -> CodeGen o a x
@@ -142,21 +143,21 @@ shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
-     return $! In4 (Catch (addCoins (max (np - nm) 0) (In4 (Tell pc))) (Always (In4 (Seek (In4 (Push (user UNIT) m))))))
+     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc))) (Always (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
      qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (_App φ)))))
      let minc = coinsNeeded (In4 (Case pc qc))
-     let dp = max 0 (coinsNeeded pc - minc)
-     let dq = max 0 (coinsNeeded qc - minc)
+     let dp = maxCoins zero (coinsNeeded pc `minus` minc)
+     let dq = maxCoins zero (coinsNeeded qc `minus` minc)
      fmap binder (runCodeGen b (In4 (Case (addCoins dp pc) (addCoins dq qc))))
 shallow (Match p fs qs def) m =
   do (binder, φ) <- makeΦ m
      qcs <- traverse (\q -> freshΦ (runCodeGen q φ)) qs
      defc <- freshΦ (runCodeGen def φ)
      let minc = coinsNeeded (In4 (Choices (map userBool fs) qcs defc))
-     let defc':qcs' = map (max 0 . subtract minc . coinsNeeded >>= addCoins) (defc:qcs)
+     let defc':qcs' = map (maxCoins zero . (`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ _)            m = do return $! tailCallOptimise μ m
 shallow (ChainPre op p)        m = do chainPreCompile op p addCoinsNeeded id m

@@ -41,8 +41,9 @@ jobs:
         run: cabal build parsley $CONFIG
 
       - name: Test
-        run: cabal test parsley-core $CONFIG
-        run: cabal test parsley $CONFIG
+        run: |
+          cabal test parsley-core $CONFIG
+          cabal test parsley $CONFIG
 
       - name: Doc
         run: cabal haddock parsley $CONFIG

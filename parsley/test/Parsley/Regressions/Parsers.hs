@@ -9,3 +9,6 @@ import Parsley.Combinator (token)
 
 issue26_ex1 :: Parser ()
 issue26_ex1 = (token "123" <|> token "") *> void (token "abc")
+
+issue26_ex2 :: Parser ()
+issue26_ex2 = (token "123" <|> token "45") *> void (token "abc")

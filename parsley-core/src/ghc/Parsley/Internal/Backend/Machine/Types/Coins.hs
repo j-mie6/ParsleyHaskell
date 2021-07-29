@@ -32,3 +32,6 @@ plus = zipCoins (+)
 
 minus :: Coins -> Coins -> Coins
 minus = zipCoins (-)
+
+plusNotReclaim :: Coins -> Int -> Coins
+plusNotReclaim (Coins k r) n = Coins (k + n) r

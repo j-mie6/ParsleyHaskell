@@ -14,7 +14,7 @@ metadata to perform the piggybank algorithm in the machine (see
 -}
 module Parsley.Internal.Backend.Analysis.Coins (coinsNeeded) where
 
-import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, plus, minCoins, zero, minus)
+import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, minCoins, zero, minus, plusNotReclaim, willConsume)
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Const4(..))
 
 {-|
@@ -62,7 +62,7 @@ alg (Case p q)                             = algCatch (getConst4 p) (getConst4 q
 alg (Choices _ ks def)                     = foldr (algCatch . getConst4) (getConst4 def) ks
 alg (Iter _ _ h)                           = first (const zero) (algHandler h)
 alg (Join _)                               = (zero, False)
-alg (MkJoin _ (Const4 b) (Const4 k))       = bilift2 plus (||) k b
+alg (MkJoin _ (Const4 b) (Const4 k))       = bilift2 (flip plusNotReclaim . willConsume) (||) b k
 alg (Swap k)                               = getConst4 k
 alg (Dup k)                                = getConst4 k
 alg (Make _ _ k)                           = getConst4 k

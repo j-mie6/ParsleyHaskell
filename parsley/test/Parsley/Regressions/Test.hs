@@ -5,15 +5,16 @@ import Test.Tasty.HUnit
 import TestUtils
 import qualified Parsley.Regressions.Parsers as Parsers
 
-import Parsley (runParser, empty)
+import Parsley (runParser)
+import Parsley.InputExtras (CharList(..))
 
 tests :: TestTree
 tests = testGroup "Regressions" [ issue26 ]
 
 issue26 :: TestTree
 issue26 = testGroup "#26 Coin draining on bindings is wrong"
-  [ testCase "" $ issue26_ex1 "123ab" @?= Nothing
+  [ testCase "" $ issue26_ex1 (CharList "123ab") @?= Nothing
   ]
 
-issue26_ex1 :: String -> Maybe ()
+issue26_ex1 :: CharList -> Maybe ()
 issue26_ex1 = $$(Parsley.runParser Parsers.issue26_ex1)

@@ -78,3 +78,4 @@ Input Reclamation:
 * Added `Common.RewindQueue` to handle rewindable input caching.
 * Added `Common.QueueLike` to abstract both queue's common operations.
 * Moved the implementation of `Queue` into a `Queue.Impl` submodule, for `RewindQueue` and testing.
+* Added `GiveBursary` instruction to implement a variant of `RefundCoins`.

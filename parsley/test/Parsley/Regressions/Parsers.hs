@@ -8,4 +8,4 @@ import Parsley.Combinator (token)
 --import Parsley.Garnish
 
 issue26_ex1 :: Parser ()
-issue26_ex1 = (token "123" <|> token "45") *> token "abc" *> unit
+issue26_ex1 = (token "123" <|> token "") *> void (token "abc")

@@ -14,7 +14,7 @@ metadata to perform the piggybank algorithm in the machine (see
 -}
 module Parsley.Internal.Backend.Analysis.Coins (coinsNeeded) where
 
-import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins(..), plus1, plus, minCoins, zero)
+import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins(..), plus1, plus, minCoins, zero, minus)
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Const4(..))
 
 {-|
@@ -71,10 +71,7 @@ alg (Put _ _ k)                            = getConst4 k
 alg (LogEnter _ k)                         = getConst4 k
 alg (LogExit _ k)                          = getConst4 k
 alg (MetaInstr (AddCoins _) (Const4 k))    = k
-alg (MetaInstr (RefundCoins n) (Const4 k)) = first adjust k -- These were refunded, so deduct
-  where
-    adjust :: Coins -> Coins
-    adjust (Coins k r) = Coins (min 0 (k - n)) r
+alg (MetaInstr (RefundCoins n) (Const4 k)) = first (minCoins zero . (`minus` n)) k -- These were refunded, so deduct
 alg (MetaInstr (DrainCoins _) (Const4 k))  = second (const False) k
 
 algHandler :: Handler o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)

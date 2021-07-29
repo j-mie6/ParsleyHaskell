@@ -18,6 +18,7 @@ import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..),
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
 import Parsley.Internal.Backend.Machine.Ops
+import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume)
 import Parsley.Internal.Backend.Machine.Types.State
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Trace                         (Trace(trace))
@@ -184,9 +185,10 @@ evalLogExit name (Machine mk) =
     ask
 
 evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
-evalMeta (AddCoins coins) (Machine k) =
+evalMeta (AddCoins coins') (Machine k) =
   do requiresPiggy <- asks hasCoin
+     let coins = willConsume coins'
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins mk (raise γ) γ
-evalMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
-evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n mk (raise γ) γ) (asks ((coins -) . liquidate)) k
+evalMeta (RefundCoins coins) (Machine k) = local (giveCoins (willConsume coins)) k
+evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n mk (raise γ) γ) (asks ((willConsume coins -) . liquidate)) k

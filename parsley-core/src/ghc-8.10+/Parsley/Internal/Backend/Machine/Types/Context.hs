@@ -48,7 +48,7 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- $piggy-doc
 
     -- ** Modifiers
-    storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins,
+    storePiggy, breakPiggy, spendCoin, giveCoins, refundCoins, voidCoins,
     -- ** Getters
     coins, hasCoin, isBankrupt, liquidate
   ) where
@@ -62,6 +62,7 @@ import Data.Maybe                                      (fromMaybe)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
+import Parsley.Internal.Backend.Machine.Types.Coins    (Coins, willConsume, canReclaim)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Offset   (Offset)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
@@ -70,7 +71,7 @@ import Parsley.Internal.Common                         (Queue, enqueue, dequeue,
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.QueueLike as Queue (empty, null)
 import qualified Parsley.Internal.Common.Queue as Queue (foldr)
---import qualified Parsley.Internal.Common.RewindQueue as Queue (rewind)
+import qualified Parsley.Internal.Common.RewindQueue as Queue (rewind)
 
 -- Core Data-types
 {-|
@@ -86,8 +87,8 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a) -- ^ Map of 
                      , debugLevel :: Int                           -- ^ Approximate depth of debug combinator.
                      , coins      :: Int                           -- ^ Number of tokens free to consume without length check.
                      , offsetUniq :: Word                          -- ^ Next unique offset identifier.
-                     , piggies    :: Queue Int                     -- ^ Queue of future length check credit.
-                     , _knownChars :: RewindQueue (Char, Offset o)  -- ^ Characters that can be reclaimed on backtrack
+                     , piggies    :: Queue Coins                   -- ^ Queue of future length check credit.
+                     , knownChars :: RewindQueue (Char, Offset o)  -- ^ Characters that can be reclaimed on backtrack.
                      }
 
 {-|
@@ -304,6 +305,7 @@ freshUnique f =
   do unique <- asks offsetUniq
      local nextUnique (f unique)
 
+--TODO: new doc for input reclamation
 -- Token Credit System (Piggy-banks)
 {- $piggy-doc
 Parsley has analysis in place to factor out length checks when it is statically known that
@@ -335,9 +337,9 @@ have used all of your current allocation before asking for more!
 Place a piggy-bank into the reserve, delaying the corresponding length check until it is
 broken.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-storePiggy :: Int -> Ctx s o a -> Ctx s o a
+storePiggy :: Coins -> Ctx s o a -> Ctx s o a
 storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
 
 {-|
@@ -348,7 +350,7 @@ __Note__: This should generate a length check when used!
 @since 1.0.0.0
 -}
 breakPiggy :: Ctx s o a -> Ctx s o a
-breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
+breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = willConsume coins, piggies = piggies'}
 
 {-|
 Does the context have coins available?
@@ -377,10 +379,20 @@ spendCoin ctx = ctx {coins = coins ctx - 1}
 {-|
 Adds coins into the current supply.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-giveCoins :: Int -> Ctx s o a -> Ctx s o a
-giveCoins c ctx = ctx {coins = coins ctx + c}
+giveCoins :: Coins -> Ctx s o a -> Ctx s o a
+giveCoins c ctx = ctx {coins = coins ctx + willConsume c}
+
+{-|
+Adds coins into the current supply.
+
+@since 1.5.0.0
+-}
+refundCoins :: Coins -> Ctx s o a -> Ctx s o a
+refundCoins c ctx = ctx { coins = coins ctx + willConsume c
+                        , knownChars = Queue.rewind (canReclaim c) (knownChars ctx)
+                        }
 
 {-|
 Removes all coins and piggy-banks, such that @isBankrupt == True@.
@@ -388,7 +400,7 @@ Removes all coins and piggy-banks, such that @isBankrupt == True@.
 @since 1.0.0.0
 -}
 voidCoins :: Ctx s o a -> Ctx s o a
-voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
+voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty}
 
 {-|
 Collect all coins and the value of every piggy bank.
@@ -399,7 +411,7 @@ generated to cover the cost of the binding.
 @since 1.0.0.0
 -}
 liquidate :: Ctx s o a -> Int
-liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
+liquidate ctx = Queue.foldr ((+) . willConsume) (coins ctx) (piggies ctx)
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

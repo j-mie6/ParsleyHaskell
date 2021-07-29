@@ -33,6 +33,7 @@ import Parsley.Internal.Backend.Machine.LetRecBuilder (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types         (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
+import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume)
 import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, offset)
 import Parsley.Internal.Backend.Machine.Types.State   (Γ(..), OpStack(..))
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -214,6 +215,7 @@ evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Ma
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raise γ) (input γ)
-evalMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
-evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raise γ) (input γ)) (asks ((coins -) . liquidate)) k
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ)
+evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
+-- No interaction with input reclamation here!
+evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raise γ) (input γ)) (asks ((willConsume coins -) . liquidate)) k

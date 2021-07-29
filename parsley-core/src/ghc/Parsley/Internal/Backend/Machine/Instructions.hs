@@ -30,7 +30,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
 import Data.Kind                                    (Type)
 import Data.Void                                    (Void)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.Types.Coins (Coins(Coins), willConsume)
+import Parsley.Internal.Backend.Machine.Types.Coins (Coins(Coins))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 
 import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
@@ -235,24 +235,24 @@ data MetaInstr (n :: Nat) where
       A handler is required, in case the length check fails.
 
   @since 1.5.0.0 -}
-  AddCoins    :: Int -> MetaInstr (Succ n)
+  AddCoins    :: Coins -> MetaInstr (Succ n)
   {-| Refunds to the piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information).
       This always happens for free, and is added straight to the coins.
 
   @since 1.5.0.0 -}
-  RefundCoins :: Int -> MetaInstr n
+  RefundCoins :: Coins -> MetaInstr n
   {-| Remove coins from piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information)
       This is used to pay for more expensive calls to bindings with known required input.
 
       A handler is required, as there may not be enough coins to pay the cost and a length check causes a failure.
 
   @since 1.5.0.0 -}
-  DrainCoins  :: Int -> MetaInstr (Succ n)
+  DrainCoins  :: Coins -> MetaInstr (Succ n)
 
 
-mkCoin :: (Int -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
+mkCoin :: (Coins -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 mkCoin _    (Coins 0 0) = id
-mkCoin meta n           = In4 . MetaInstr (meta (willConsume n))
+mkCoin meta n           = In4 . MetaInstr (meta n)
 
 {-|
 Smart-constuctor around `AddCoins`.

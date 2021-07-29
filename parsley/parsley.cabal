@@ -89,6 +89,7 @@ source-repository head
 common test-common
   build-depends:       base >=4.10 && <5,
                        parsley,
+                       parsley-core,
                        parsley-garnish,
                        tasty,
                        template-haskell

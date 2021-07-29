@@ -59,6 +59,7 @@ codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p +
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
     finalise cg =
       let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
+      -- Why do we skip coins for let-bound things? Seems like a wasted opportunity?
       in if isJust letBound then m else addCoins (coinsNeeded m) m
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
@@ -143,6 +144,7 @@ shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
+     -- The minus here is used because the shared coins are propagated out front, neat.
      return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc))) (Always (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
@@ -202,7 +204,7 @@ makeΦ m | elidable m = return (id, m)
     -- This is a form of double-φ optimisation: If a φ-node points shallowly to a jump, then it can be elided and the jump used instead
     -- Note that this should NOT be done for non-tail calls, as they may generate a large continuation
     elidable (In4 (Pop (In4 (Jump _)))) = True
-    elidable _                          = False
+    elidable _                          = False                -- v addCoins is wrong, this should be refundCoins no? change to giveBursary now input-reclamation is a thing
 makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In4 . MkJoin φ (addCoins n m), drainCoins n (In4 (Join φ)))) askΦ
 
 freshΣ :: CodeGenStack (ΣVar a)

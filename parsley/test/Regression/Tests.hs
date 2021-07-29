@@ -1,15 +1,18 @@
 {-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, TypeApplications #-}
-module Parsley.Regressions.Test where
+module Main where
 import Test.Tasty
 import Test.Tasty.HUnit
 import TestUtils
-import qualified Parsley.Regressions.Parsers as Parsers
+import qualified Regression.Parsers as Parsers
 
 import Parsley (runParser)
 import Parsley.InputExtras (CharList(..))
 
+main :: IO ()
+main = defaultMain tests
+
 tests :: TestTree
-tests = testGroup "Regressions" [ issue26 ]
+tests = testGroup "Regression Tests" [ issue26 ]
 
 issue26 :: TestTree
 issue26 = testGroup "#26 Coin draining on bindings is wrong"

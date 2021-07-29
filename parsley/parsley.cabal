@@ -97,19 +97,24 @@ common test-common
   hs-source-dirs:      test
   default-language:    Haskell2010
   ghc-options:         -fplugin=Parsley.OverloadedQuotesPlugin
+  other-modules:       TestUtils
 
 test-suite parsley-test
   import:              test-common
   type:                exitcode-stdio-1.0
   build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq
-  main-is:             ParsleyTest.hs
+  main-is:             Parsley/Tests.hs
   other-modules:       Parsley.Alternative.Test, Parsley.Applicative.Test, Parsley.Combinator.Test, Parsley.Fold.Test,
                        Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test, Parsley.Primitive.Test,
-                       Parsley.Regressions.Test,
                        Parsley.Alternative.Parsers, Parsley.Applicative.Parsers, Parsley.Combinator.Parsers, Parsley.Fold.Parsers,
-                       Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers, Parsley.Primitive.Parsers,
-                       Parsley.Regressions.Parsers,
-                       TestUtils
+                       Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers, Parsley.Primitive.Parsers
+
+test-suite regression-test
+  import:              test-common
+  type:                exitcode-stdio-1.0
+  build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq
+  main-is:             Regression/Tests.hs
+  other-modules:       Regression.Parsers
 
 common benchmark-common
   build-tool-depends:  happy:happy

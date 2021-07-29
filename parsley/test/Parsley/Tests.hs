@@ -8,7 +8,6 @@ import qualified Parsley.Precedence.Test as Precedence
 import qualified Parsley.Primitive.Test as Primitive
 import qualified Parsley.Register.Test as Register
 import qualified Parsley.Selective.Test as Selective
-import qualified Parsley.Regressions.Test as Regressions
 
 main :: IO ()
 main = defaultMain tests
@@ -22,5 +21,4 @@ tests = testGroup "Parsley Tests" [ Primitive.tests
                                   , Precedence.tests
                                   , Register.tests
                                   , Selective.tests
-                                  , Regressions.tests
                                   ]

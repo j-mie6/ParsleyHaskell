@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
-module Parsley.Regressions.Parsers where
+module Regression.Parsers where
 
 import Prelude hiding (pure, (<*>), (*>), (<*))
 import Data.Char (isDigit)

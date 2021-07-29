@@ -50,7 +50,7 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- ** Modifiers
     storePiggy, breakPiggy, spendCoin, giveCoins, refundCoins, voidCoins,
     -- ** Getters
-    coins, hasCoin, isBankrupt, liquidate
+    coins, hasCoin, isBankrupt, canAfford
   ) where
 
 import Control.Exception                               (Exception, throw)
@@ -70,7 +70,6 @@ import Parsley.Internal.Common                         (Queue, enqueue, dequeue,
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.QueueLike as Queue (empty, null)
-import qualified Parsley.Internal.Common.Queue as Queue (foldr)
 import qualified Parsley.Internal.Common.RewindQueue as Queue (rewind)
 
 -- Core Data-types
@@ -358,7 +357,7 @@ Does the context have coins available?
 @since 1.0.0.0
 -}
 hasCoin :: Ctx s o a -> Bool
-hasCoin = (> 0) . coins
+hasCoin = canAfford 1
 
 {-|
 Is it the case that there are no coins /and/ no piggy-banks remaining?
@@ -403,15 +402,15 @@ voidCoins :: Ctx s o a -> Ctx s o a
 voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty}
 
 {-|
-Collect all coins and the value of every piggy bank.
+Asks if the current coin total can afford a charge of \(n\) characters.
 
-This is used when a join-point is called, so that a length check can be
-generated to cover the cost of the binding.
+This is used by `DrainCoins`, which will have to emit a full length check
+of size \(n\) if this quota cannot be reached.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-liquidate :: Ctx s o a -> Int
-liquidate ctx = {-Queue.foldr ((+) . willConsume) (-}coins ctx--) (piggies ctx)
+canAfford :: Int -> Ctx s o a -> Bool
+canAfford n = (>= n) . coins
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

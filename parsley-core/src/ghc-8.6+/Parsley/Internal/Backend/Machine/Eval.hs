@@ -191,5 +191,10 @@ evalMeta (AddCoins coins') (Machine k) =
      if requiresPiggy then local (storePiggy coins) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins mk (raise γ) γ
 evalMeta (RefundCoins coins) (Machine k) = local (giveCoins (willConsume coins)) k
-evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n mk (raise γ) γ) (asks ((willConsume coins -) . liquidate)) k
+evalMeta (DrainCoins coins) (Machine k) =
+  -- If there are enough coins left to cover the cost, no length check is required
+  -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
+  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) mk (raise γ) γ)
+         (asks (canAfford (willConsume coins)))
+         k
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins (willConsume coins)) k

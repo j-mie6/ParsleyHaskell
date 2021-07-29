@@ -12,7 +12,7 @@ module Parsley.Internal.Backend.Machine.Types.State (
     askSub, askΦ,
     debugUp, debugDown, debugLevel,
     storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
-    hasCoin, isBankrupt, liquidate
+    hasCoin, isBankrupt, canAfford
   ) where
 
 import Control.Exception                            (Exception, throw)
@@ -30,7 +30,7 @@ import Parsley.Internal.Backend.Machine.LetBindings (Regs(..), Metadata)
 import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
-import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
+import qualified Parsley.Internal.Common.Queue as Queue (empty, null)
 
 type HandlerStack n s o a = Vec n (Code (Handler s o a))
 type Handler s o a = Unboxed o -> ST s (Maybe a)
@@ -127,7 +127,7 @@ breakPiggy :: Ctx s o a -> Ctx s o a
 breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
 
 hasCoin :: Ctx s o a -> Bool
-hasCoin = (> 0) . coins
+hasCoin = canAfford 1
 
 isBankrupt :: Ctx s o a -> Bool
 isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
@@ -141,8 +141,8 @@ giveCoins c ctx = ctx {coins = coins ctx + c}
 voidCoins :: Ctx s o a -> Ctx s o a
 voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
 
-liquidate :: Ctx s o a -> Int
-liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
+canAfford :: Int -> Ctx s o a -> Bool
+canAfford n = (>= n) . coins
 
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar deriving anyclass Exception

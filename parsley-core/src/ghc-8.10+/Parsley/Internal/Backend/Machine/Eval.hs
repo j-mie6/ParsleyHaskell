@@ -218,9 +218,11 @@ evalMeta (AddCoins coins) (Machine k) =
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ)
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
--- FIXME: This is wrong (and the reason why bindings use add and not refund...)
---        The coins we /have/ are already paid for, but the piggies aren't.
---        So liquidate is just plain not right.
-evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raise γ) (input γ)) (asks ((willConsume coins -) . liquidate)) k
+evalMeta (DrainCoins coins) (Machine k) =
+  -- If there are enough coins left to cover the cost, no length check is required
+  -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
+  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ))
+         (asks (canAfford (willConsume coins)))
+         k
 --TODO: This needs to actually collect the advertised characters into the rewind queue
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k

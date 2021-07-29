@@ -105,8 +105,10 @@ test-suite parsley-test
   main-is:             ParsleyTest.hs
   other-modules:       Parsley.Alternative.Test, Parsley.Applicative.Test, Parsley.Combinator.Test, Parsley.Fold.Test,
                        Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test, Parsley.Primitive.Test,
+                       Parsley.Regressions.Test,
                        Parsley.Alternative.Parsers, Parsley.Applicative.Parsers, Parsley.Combinator.Parsers, Parsley.Fold.Parsers,
                        Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers, Parsley.Primitive.Parsers,
+                       Parsley.Regressions.Parsers,
                        TestUtils
 
 common benchmark-common

@@ -24,7 +24,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
     -- * Smart Instructions
     _App, _Fmap, _Modify, _Make, _Put, _Get,
     -- * Smart Meta-Instructions
-    addCoins, refundCoins, drainCoins
+    addCoins, refundCoins, drainCoins, giveBursary
   ) where
 
 import Data.Kind                                    (Type)
@@ -248,6 +248,12 @@ data MetaInstr (n :: Nat) where
 
   @since 1.5.0.0 -}
   DrainCoins  :: Coins -> MetaInstr (Succ n)
+  {-| Refunds to the piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information).
+      This always happens for free, and is added straight to the coins. Unlike `RefundCoins` this cannot reclaim
+      input, nor is is subtractive in the analysis.
+
+  @since 1.5.0.0 -}
+  GiveBursary :: Coins -> MetaInstr n
 
 
 mkCoin :: (Coins -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
@@ -277,6 +283,14 @@ Smart-constuctor around `DrainCoins`.
 -}
 drainCoins :: Coins -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 drainCoins = mkCoin DrainCoins
+
+{-|
+Smart-constuctor around `RefundCoins`.
+
+@since 1.5.0.0
+-}
+giveBursary :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
+giveBursary = mkCoin GiveBursary
 
 {-|
 Applies a value on the top of the stack to a function on the second-most top of the stack.
@@ -396,3 +410,4 @@ instance Show (MetaInstr n) where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"
   show (RefundCoins n) = "Refund " ++ show n ++ " coins"
   show (DrainCoins n)  = "Using " ++ show n ++ " coins"
+  show (GiveBursary n) = "Bursary of " ++ show n ++ " coins"

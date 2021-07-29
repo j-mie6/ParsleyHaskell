@@ -192,3 +192,4 @@ evalMeta (AddCoins coins') (Machine k) =
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins mk (raise γ) γ
 evalMeta (RefundCoins coins) (Machine k) = local (giveCoins (willConsume coins)) k
 evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n mk (raise γ) γ) (asks ((willConsume coins -) . liquidate)) k
+evalMeta (GiveBursary coins) (Machine k) = local (giveCoins (willConsume coins)) k

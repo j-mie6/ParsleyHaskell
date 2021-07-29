@@ -19,7 +19,7 @@ import Data.Set                            (Set, elems)
 import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                             _Fmap, _App, _Modify, _Get, _Put, _Make,
-                                            addCoins, refundCoins, drainCoins,
+                                            addCoins, refundCoins, drainCoins, giveBursary,
                                             minus, minCoins, maxCoins, zero,
                                             IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded)
@@ -138,7 +138,7 @@ shallow Empty         _ = do return $! In4 Empt
 shallow (p :<|>: q)   m = do altNoCutCompile p q parsecHandler id m
 shallow (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 shallow (LookAhead p) m =
-  do n <- fmap coinsNeeded (runCodeGen p (In4 Empt)) -- Dodgy hack, but oh well
+  do n <- fmap coinsNeeded (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
@@ -205,7 +205,7 @@ makeΦ m | elidable m = return (id, m)
     -- Note that this should NOT be done for non-tail calls, as they may generate a large continuation
     elidable (In4 (Pop (In4 (Jump _)))) = True
     elidable _                          = False                -- v addCoins is wrong, this should be refundCoins no? change to giveBursary now input-reclamation is a thing
-makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In4 . MkJoin φ (addCoins n m), drainCoins n (In4 (Join φ)))) askΦ
+makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In4 . MkJoin φ (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
 
 freshΣ :: CodeGenStack (ΣVar a)
 freshΣ = lift (lift (construct ΣVar))

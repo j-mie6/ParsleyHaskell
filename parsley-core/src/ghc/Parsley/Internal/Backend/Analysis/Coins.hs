@@ -73,6 +73,7 @@ alg (LogExit _ k)                          = getConst4 k
 alg (MetaInstr (AddCoins _) (Const4 k))    = k
 alg (MetaInstr (RefundCoins n) (Const4 k)) = first (minCoins zero . (`minus` n)) k -- These were refunded, so deduct
 alg (MetaInstr (DrainCoins _) (Const4 k))  = second (const False) k
+alg (MetaInstr (GiveBursary n) (Const4 _)) = (n, False)                            -- We know that `n` is the required for `k`
 
 algHandler :: Handler o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)
 algHandler (Same yes no) = algCatch (getConst4 yes) (getConst4 no)

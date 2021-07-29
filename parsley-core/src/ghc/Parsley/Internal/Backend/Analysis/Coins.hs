@@ -14,7 +14,7 @@ metadata to perform the piggybank algorithm in the machine (see
 -}
 module Parsley.Internal.Backend.Analysis.Coins (coinsNeeded) where
 
-import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins(..), plus1, plus, minCoins, zero, minus)
+import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, plus, minCoins, zero, minus)
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Const4(..))
 
 {-|

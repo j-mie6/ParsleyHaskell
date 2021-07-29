@@ -204,7 +204,7 @@ makeΦ m | elidable m = return (id, m)
     -- This is a form of double-φ optimisation: If a φ-node points shallowly to a jump, then it can be elided and the jump used instead
     -- Note that this should NOT be done for non-tail calls, as they may generate a large continuation
     elidable (In4 (Pop (In4 (Jump _)))) = True
-    elidable _                          = False                -- v addCoins is wrong, this should be refundCoins no? change to giveBursary now input-reclamation is a thing
+    elidable _                          = False
 makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In4 . MkJoin φ (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
 
 freshΣ :: CodeGenStack (ΣVar a)

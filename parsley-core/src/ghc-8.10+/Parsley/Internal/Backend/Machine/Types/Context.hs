@@ -411,7 +411,7 @@ generated to cover the cost of the binding.
 @since 1.0.0.0
 -}
 liquidate :: Ctx s o a -> Int
-liquidate ctx = Queue.foldr ((+) . willConsume) (coins ctx) (piggies ctx)
+liquidate ctx = {-Queue.foldr ((+) . willConsume) (-}coins ctx--) (piggies ctx)
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

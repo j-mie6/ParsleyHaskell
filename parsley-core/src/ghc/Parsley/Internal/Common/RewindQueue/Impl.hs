@@ -6,7 +6,7 @@ import Data.List (foldl')
 import Parsley.Internal.Common.Queue.Impl as Queue (Queue(..), toList)
 
 import qualified Parsley.Internal.Common.Queue.Impl as Queue (
-    empty, enqueue, enqueueAll, dequeue, null, size, foldr
+    empty, enqueue, enqueueAll, dequeue, null, size, foldr, peek, modifyHead
   )
 
 data RewindQueue a = RewindQueue {
@@ -37,6 +37,14 @@ rewind n RewindQueue{..}
                                    undo = undo',
                                    undosz = undosz - n }
   | otherwise   = error $ "Cannot rewind more than " ++ show undosz ++ " elements, but tried " ++ show n
+
+peek :: RewindQueue a -> (a, RewindQueue a)
+peek rw@RewindQueue{..} =
+  let (x, queue') = Queue.peek queue
+  in (x, rw { queue = queue' })
+
+modifyHead :: (a -> a) -> RewindQueue a -> RewindQueue a
+modifyHead f rw@RewindQueue{..} = rw { queue = Queue.modifyHead f queue }
 
 null :: RewindQueue a -> Bool
 null = Queue.null . queue

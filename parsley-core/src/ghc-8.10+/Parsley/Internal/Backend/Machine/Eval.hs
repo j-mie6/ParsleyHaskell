@@ -212,6 +212,18 @@ evalLogExit name (Machine mk) =
     ask
 
 evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+-- As it happens, it is possible to have coins but not loaded characters: it's important to check
+-- whether the character queue needs to be topped up too, even if we can afford to collect them without
+-- a check!
+-- Here's the crux:
+--   We have x coins and 0 characters: normally, in this situation we break a piggy bank for size y.
+--   That would generate a length check, which we don't need, we can still read x.
+--   Instead we can drop min x y coins from the bank and take min x y of its characters
+--   If the bank still has coins remaining, it is /replaced/ onto the queue after the deduction of x
+--   otherwise, the next bank is /also/ asked for the remaining (x - y) characters required.
+--   If we were bankrupt, then we just need to demand a flat character read, but can skip the length
+--   check.
+
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k

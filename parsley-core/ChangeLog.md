@@ -79,3 +79,9 @@ Input Reclamation:
 * Added `Common.QueueLike` to abstract both queue's common operations.
 * Moved the implementation of `Queue` into a `Queue.Impl` submodule, for `RewindQueue` and testing.
 * Added `GiveBursary` instruction to implement a variant of `RefundCoins`.
+* Added `canAfford` to `Context` and removed the broken `liquidate`.
+* Improved the input factoring for join points.
+
+Misc:
+
+* Removed the unneeded `genDefuncX` operations in `Core.Defunc`

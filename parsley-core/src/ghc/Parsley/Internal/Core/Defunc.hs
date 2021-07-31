@@ -13,7 +13,6 @@ import Parsley.Internal.Core.Lam     (normaliseGen, Lam(..))
   This will come in parsley-2.0.0.0.
 -}
 
-
 {-|
 This datatype is useful for providing an /inspectable/ representation of common Haskell functions.
 These can be provided in place of `WQ` to any combinator that requires it. The only difference is
@@ -77,9 +76,9 @@ instance Quapplicative Defunc where
   _val ID           = id
   _val COMPOSE      = (.)
   _val FLIP         = flip
-  _val (APP_H f x)  = (_val f) (_val x)
+  _val (APP_H f x)  = _val f (_val x)
   _val (LIFTED x)   = x
-  _val (EQ_H x)     = ((_val x) ==)
+  _val (EQ_H x)     = (_val x ==)
   _val CONS         = (:)
   _val CONST        = const
   _val EMPTY        = []
@@ -158,15 +157,6 @@ adaptLam f = lamTerm . f . defuncTerm
     defuncTerm (Let x f)  = LET_S (defuncTerm x) (defuncTerm . f . lamTerm)
     defuncTerm T          = LIFTED True
     defuncTerm F          = LIFTED False
-
-genDefunc :: Defunc a -> Code a
-genDefunc = normaliseGen . lamTerm
-
-genDefunc1 :: Defunc (a -> b) -> Code a -> Code b
-genDefunc1 f x = genDefunc (APP_H f (unsafeBLACK x))
-
-genDefunc2 :: Defunc (a -> b -> c) -> Code a -> Code b -> Code c
-genDefunc2 f x y = genDefunc (APP_H (APP_H f (unsafeBLACK x)) (unsafeBLACK y))
 
 unsafeBLACK :: Code a -> Defunc a
 unsafeBLACK = BLACK . WQ undefined

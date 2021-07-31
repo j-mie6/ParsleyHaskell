@@ -31,6 +31,16 @@ dequeue q@(outs -> [])
   | insz q /= 0 = dequeue (Queue (insz q) (reverse (ins q)) 0 [])
   | otherwise   = error "dequeue of empty queue"
 
+peek :: Queue a -> (a, Queue a)
+peek q =
+  let (x, q') = dequeue q
+  in (x, q' { outsz = outsz q' + 1, outs = x : outs q' })
+
+modifyHead :: (a -> a) -> Queue a -> Queue a
+modifyHead f q =
+  let (x, q') = dequeue q
+  in q' { outsz = outsz q' + 1, outs = f x : outs q' }
+
 null :: Queue a -> Bool
 null (Queue 0 [] 0 []) = True
 null _ = False

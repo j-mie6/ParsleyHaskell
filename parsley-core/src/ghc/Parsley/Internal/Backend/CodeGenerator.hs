@@ -59,7 +59,9 @@ codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p +
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
     finalise cg =
       let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
-      -- Why do we skip coins for let-bound things? Seems like a wasted opportunity?
+      -- let-bound things are not safe to factor length checks out of
+      -- This is because we do not know the cut characteristics of every caller
+      -- In theory this /could/ be computed as the union of every call site
       in if isJust letBound then m else addCoins (coinsNeeded m) m
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
@@ -193,14 +195,18 @@ freshM = mapVFreshT newScope
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
+-- TODO: We can inline anything that is /pure/ and has no large code foot-print, at the moment this
+--       is tripped up by lots of `Push` and `Pop`s.
 makeΦ :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
 makeΦ m | elidable m = return (id, m)
   where
     elidable :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> Bool
     -- This is double-φ optimisation:   If a φ-node points shallowly to another φ-node, then it can be elided
     elidable (In4 (Join _))             = True
+    elidable (In4 (Pop (In4 (Join _)))) = True
     -- This is terminal-φ optimisation: If a φ-node points shallowly to a terminal operation, then it can be elided
     elidable (In4 Ret)                  = True
+    elidable (In4 (Pop (In4 Ret)))      = True
     -- This is a form of double-φ optimisation: If a φ-node points shallowly to a jump, then it can be elided and the jump used instead
     -- Note that this should NOT be done for non-tail calls, as they may generate a large continuation
     elidable (In4 (Pop (In4 (Jump _)))) = True

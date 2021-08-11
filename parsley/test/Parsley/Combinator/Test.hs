@@ -8,6 +8,7 @@ import qualified Parsley.Combinator.Parsers as Parsers
 import Prelude hiding ((*>))
 import Parsley (runParser, (*>))
 import Parsley.Combinator (eof, more, char, item)
+import Parsley.Internal.Verbose
 
 tests :: TestTree
 tests = testGroup "Combinator" [ stringTests

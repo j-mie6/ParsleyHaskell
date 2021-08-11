@@ -33,6 +33,8 @@ The monad stack used to evaluate a parser machine, see `run`.
 -}
 type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
+--type MachineMonadPrim s o xs n r a = Ctx s o a -> Γ s o xs n r a -> Code (ST s (Maybe a))
+
 {-|
 Wraps up the `MachineMonad` type so that it can serve as the carrier of `Parsley.Internal.Common.Indexed.cata4`.
 

@@ -254,7 +254,8 @@ data MetaInstr (n :: Nat) where
 
   @since 1.5.0.0 -}
   GiveBursary :: Coins -> MetaInstr n
-
+  --TODO: doc
+  PrefetchChar :: Bool -> MetaInstr (Succ n)
 
 mkCoin :: (Coins -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 mkCoin _    (Coins 0 0) = id
@@ -407,7 +408,8 @@ instance Show (Handler o (Const4 (String -> String)) (o : xs) n r a) where
   show (Always k)    = getConst4 k ""
 
 instance Show (MetaInstr n) where
-  show (AddCoins n)    = "Add " ++ show n ++ " coins"
-  show (RefundCoins n) = "Refund " ++ show n ++ " coins"
-  show (DrainCoins n)  = "Using " ++ show n ++ " coins"
-  show (GiveBursary n) = "Bursary of " ++ show n ++ " coins"
+  show (AddCoins n)     = "Add " ++ show n ++ " coins"
+  show (RefundCoins n)  = "Refund " ++ show n ++ " coins"
+  show (DrainCoins n)   = "Using " ++ show n ++ " coins"
+  show (GiveBursary n)  = "Bursary of " ++ show n ++ " coins"
+  show (PrefetchChar b) = "Prefetch character " ++ (if b then "with" else "without") ++ " length-check"

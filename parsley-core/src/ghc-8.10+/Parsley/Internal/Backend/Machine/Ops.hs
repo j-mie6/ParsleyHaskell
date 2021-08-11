@@ -26,7 +26,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- * Core Machine Operations
     dup, returnST,
     -- ** Abstracted Input Operations
-    sat, emitLengthCheck,
+    sat, emitLengthCheck, fetch,
     -- ** Register Operations
     newΣ, writeΣ, readΣ,
     -- ** Handler Operations
@@ -116,13 +116,16 @@ exist or does not match.
 
 @since 1.0.0.0
 -}
-sat :: (?ops :: InputOps (Rep o))
-    => (Defunc Char -> Defunc Bool)        -- ^ Predicate to test the character with.
-    -> (Γ s o (Char : xs) n r a -> Code b) -- ^ Code to execute with updated state on success.
-    -> Code b                              -- ^ Code to execute on any failure.
-    -> Γ s o xs n r a                      -- ^ State @γ@ which contains the input.
+sat :: (Defunc Char -> Defunc Bool)                         -- ^ Predicate to test the character with.
+    -> ((Code Char -> Offset o -> aux -> Code b) -> Code b) -- ^ The source of the character
+    -> (Defunc Char -> Offset o -> aux -> Code b)           -- ^ Code to execute on success.
+    -> Code b                                               -- ^ Code to execute on failure.
     -> Code b
-sat p k bad γ@Γ{..} = next (offset input) $ \c offset' -> let v = FREEVAR c in _if (p v) (k (γ {operands = Op v operands, input = moveOne input offset'})) bad
+sat p src good bad = src $ \c input' aux -> let v = FREEVAR c in _if (p v) (good v input' aux) bad
+
+fetch :: (?ops :: InputOps (Rep o))
+      => Offset o -> (Code Char -> Offset o -> Code b) -> Code b
+fetch input k = next (offset input) $ \c offset' -> k c (moveOne input offset')
 
 {-|
 Emits a length check for a number of characters \(n\) in the most efficient

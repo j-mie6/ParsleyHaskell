@@ -20,8 +20,8 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 import Data.Dependent.Map                             (DMap)
 import Data.Functor                                   ((<&>))
 import Data.Void                                      (Void)
-import Control.Monad                                  (forM, liftM2, liftM3)
-import Control.Monad.Reader                           (ask, asks, local)
+import Control.Monad                                  (forM, liftM2, liftM3, when)
+import Control.Monad.Reader                           (ask, asks, reader, local)
 import Control.Monad.ST                               (runST)
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
@@ -33,8 +33,8 @@ import Parsley.Internal.Backend.Machine.LetRecBuilder (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types         (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume)
-import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, offset)
+import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume, int)
+import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, offset, Offset)
 import Parsley.Internal.Backend.Machine.Types.State   (Γ(..), OpStack(..))
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Trace                         (Trace(trace))
@@ -112,18 +112,42 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
+-- As it happens, it is possible to have coins but not loaded characters: it's important to check
+-- whether the character queue needs to be topped up too, even if we can afford to collect them without
+-- a check!
+-- Here's the crux:
+--   We have x coins and 0 characters: normally, in this situation we break a piggy bank for size y.
+--   That would generate a length check, which we don't need, we can still read x.
+--   Instead we can drop min x y coins from the bank and take min x y of its characters
+--   If the bank still has coins remaining, it is /replaced/ onto the queue after the deduction of x
+--   otherwise, the next bank is /also/ asked for the remaining (x - y) characters required.
+--   If we were bankrupt, then we just need to demand a flat character read, but can skip the length
+--   check.
 evalSat :: (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalSat p (Machine k) = do
+evalSat p k@(Machine k') = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
-  if | bankrupt -> maybeEmitCheck (Just 1) <$> k
-     | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
-     | otherwise -> trace "I have a piggy :)" $ local breakPiggy (asks ((maybeEmitCheck . Just) . coins) <*> local spendCoin k)
+  if | bankrupt -> maybeEmitCheck (Just 1) k
+     | hasChange -> local spendCoin (maybeEmitCheck Nothing k)
+     | otherwise -> trace "I have a piggy :)" $
+        local breakPiggy $
+          do check <- asks (maybeEmitCheck . Just . coins)
+             check (Machine (local spendCoin k'))
   where
-    maybeEmitCheck Nothing mk γ = sat (ap p) mk (raise γ) γ
-    maybeEmitCheck (Just n) mk γ =
-      --[|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (ap p) mk [||bad||]) [||bad||] γ)||]
-      emitLengthCheck n (sat (ap p) mk (raise γ) γ) (raise γ) (input γ)
+    maybeEmitCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
+                   => Maybe Int
+                   -> Machine s o (Char : xs) (Succ n) r a
+                   -> MachineMonad s o xs (Succ n) r a
+    maybeEmitCheck Nothing mk = reader $ \ctx γ -> sat (ap p) (fetch' ctx γ) (continue mk γ) (raise γ)
+    maybeEmitCheck (Just n) mk = do
+      sat <- maybeEmitCheck Nothing mk
+      return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (input γ)
+
+    continue mk γ c input' = run mk (γ {input = input', operands = Op c (operands γ)})
+
+    fetch' :: (?ops :: InputOps (Rep o)) => Ctx s o a -> Γ s o xs n r a -> (Code Char -> Offset o -> Ctx s o a -> Code b) -> Code b
+    --fetch' ctx γ k = fetch (input γ) (\c o -> k c o ctx)
+    fetch' ctx γ = readChar ctx (fetch (input γ))
 
 evalEmpt :: MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -186,15 +210,15 @@ evalDup (Machine k) = k <&> \mk γ ->
   in dup x $ \dupx -> mk (γ {operands = Op dupx (Op dupx xs)})
 
 evalMake :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-evalMake σ a k = asks $ \ctx γ ->
+evalMake σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in newΣ σ a x (run k (γ {operands = xs})) ctx
 
 evalGet :: ΣVar x -> Access -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
-evalGet σ a k = asks $ \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
+evalGet σ a k = reader $ \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
 
 evalPut :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-evalPut σ a k = asks $ \ctx γ ->
+evalPut σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
@@ -211,19 +235,14 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
--- As it happens, it is possible to have coins but not loaded characters: it's important to check
--- whether the character queue needs to be topped up too, even if we can afford to collect them without
--- a check!
--- Here's the crux:
---   We have x coins and 0 characters: normally, in this situation we break a piggy bank for size y.
---   That would generate a length check, which we don't need, we can still read x.
---   Instead we can drop min x y coins from the bank and take min x y of its characters
---   If the bank still has coins remaining, it is /replaced/ onto the queue after the deduction of x
---   otherwise, the next bank is /also/ asked for the remaining (x - y) characters required.
---   If we were bankrupt, then we just need to demand a flat character read, but can skip the length
---   check.
+{- TODO: We aren't taking this route anymore:
 
+All characters must go via the rewind queue
+However, only one character can be factored at a time, and only at a branch point
+It can remain integrated with the coin system, but is largely separate.
+
+-}
+evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
@@ -236,5 +255,12 @@ evalMeta (DrainCoins coins) (Machine k) =
   liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ))
          (asks (canAfford (willConsume coins)))
          k
---TODO: This needs to actually collect the advertised characters into the rewind queue
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
+evalMeta (PrefetchChar check) k =
+  do bankrupt <- asks isBankrupt
+     when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
+     mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
+  where
+    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (input γ)
+    mkCheck False k = k
+    prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))

@@ -1,4 +1,4 @@
-{-# LANGUAGE DerivingStrategies, MagicHash #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Offset
 Description : Statically refined offsets.

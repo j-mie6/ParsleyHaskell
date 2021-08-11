@@ -198,3 +198,8 @@ evalMeta (DrainCoins coins) (Machine k) =
          (asks (canAfford (willConsume coins)))
          k
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins (willConsume coins)) k
+evalMeta (PrefetchChar check) (Machine k) =
+  do requiresPiggy <- asks hasCoin
+     if | not check     -> k
+        | requiresPiggy -> k local (storePiggy 1) k
+        | otherwise     -> local (giveCoins 1) k <&> \mk γ -> emitLengthCheck 1 mk (raise γ) γ

@@ -254,7 +254,11 @@ data MetaInstr (n :: Nat) where
 
   @since 1.5.0.0 -}
   GiveBursary :: Coins -> MetaInstr n
-  --TODO: doc
+  {-| Fetches a character to read in advance. This is used to factor out a common token from alternatives.
+      The boolean argument represents whether or not the read is covered by a factored length check, or
+      requires its own.
+
+  @since 1.5.0.0 -}
   PrefetchChar :: Bool -> MetaInstr (Succ n)
 
 mkCoin :: (Coins -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
@@ -293,6 +297,11 @@ Smart-constuctor around `RefundCoins`.
 giveBursary :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 giveBursary = mkCoin GiveBursary
 
+{-|
+Smart-constructor around `PrefetchChar`.
+
+@since 1.5.0.0 
+-}
 prefetchChar :: Bool -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 prefetchChar check = In4 . MetaInstr (PrefetchChar check)
 

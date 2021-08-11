@@ -1,5 +1,21 @@
 {-# LANGUAGE PatternSynonyms, TypeApplications #-}
-module Parsley.Internal.Core.Defunc (module Parsley.Internal.Core.Defunc) where
+{-|
+Module      : Parsley.Internal.Core.Defunc
+Description : Combinator-level defunctionalisation
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains the infrastructure and definitions of defunctionalised
+terms that can be used by the user and the frontend.
+
+@since 1.0.0.0
+-}
+module Parsley.Internal.Core.Defunc (
+    Defunc(..),
+    pattern COMPOSE_H, pattern FLIP_H, pattern FLIP_CONST, pattern UNIT,
+    lamTerm, lamTermBool
+  ) where
 
 --import Data.Typeable                 (Typeable, (:~:)(Refl), eqT)
 import Language.Haskell.TH.Syntax    (Lift(..))
@@ -27,40 +43,40 @@ optimisations. They can also be more convenient than constructing the `WQ` objec
 data Defunc a where
   -- | Corresponds to the standard @id@ function
   ID      :: Defunc (a -> a)
-  -- | Corresponds to the standard @(.)@ function applied to no arguments
+  -- | Corresponds to the standard @(.)@ function applied to no arguments.
   COMPOSE :: Defunc ((b -> c) -> (a -> b) -> (a -> c))
-  -- | Corresponds to the standard @flip@ function applied to no arguments
+  -- | Corresponds to the standard @flip@ function applied to no arguments.
   FLIP    :: Defunc ((a -> b -> c) -> b -> a -> c)
-  -- | Corresponds to function application of two other `Defunc` values
+  -- | Corresponds to function application of two other `Defunc` values.
   APP_H   :: Defunc (a -> b) -> Defunc a -> Defunc b
-  -- | Corresponds to the partially applied @(== x)@ for some `Defunc` value @x@
+  -- | Corresponds to the partially applied @(== x)@ for some `Defunc` value @x@.
   EQ_H    :: Eq a => Defunc a -> Defunc (a -> Bool)
-  -- | Represents a liftable, showable value
+  -- | Represents a liftable, showable value.
   LIFTED  :: (Show a, Lift a{-, Typeable a-}) => a -> Defunc a
-  -- | Represents the standard @(:)@ function applied to no arguments
+  -- | Represents the standard @(:)@ function applied to no arguments.
   CONS    :: Defunc (a -> [a] -> [a])
-  -- | Represents the standard @const@ function applied to no arguments
+  -- | Represents the standard @const@ function applied to no arguments.
   CONST   :: Defunc (a -> b -> a)
-  -- | Represents the empty list @[]@
+  -- | Represents the empty list @[]@.
   EMPTY   :: Defunc [a]
-  -- | Wraps up any value of type `WQ`
+  -- | Wraps up any value of type `WQ`.
   BLACK   :: WQ a -> Defunc a
 
   -- Syntax constructors
   {-|
-  Represents the regular Haskell @if@ syntax
+  Represents the regular Haskell @if@ syntax.
 
   @since 0.1.1.0
   -}
   IF_S    :: Defunc Bool -> Defunc a -> Defunc a -> Defunc a
   {-|
-  Represents a Haskell lambda abstraction
+  Represents a Haskell lambda abstraction.
 
   @since 0.1.1.0
   -}
   LAM_S   :: (Defunc a -> Defunc b) -> Defunc (a -> b)
   {-|
-  Represents a Haskell let binding
+  Represents a Haskell let binding.
 
   @since 0.1.1.0
   -}
@@ -91,44 +107,53 @@ instance Quapplicative Defunc where
   (>*<) = APP_H
 
 {-|
-This pattern represents fully applied composition of two `Defunc` values
+This pattern represents fully applied composition of two `Defunc` values.
 
 @since 0.1.0.0
 -}
 pattern COMPOSE_H     :: () => ((x -> y -> z) ~ ((b -> c) -> (a -> b) -> a -> c)) => Defunc x -> Defunc y -> Defunc z
 pattern COMPOSE_H f g = APP_H (APP_H COMPOSE f) g
 {-|
-This pattern corresponds to the standard @flip@ function applied to a single argument
+This pattern corresponds to the standard @flip@ function applied to a single argument.
 
 @since 0.1.0.0
 -}
 pattern FLIP_H        :: () => ((x -> y) ~ ((a -> b -> c) -> b -> a -> c)) => Defunc x -> Defunc y
 pattern FLIP_H f      = APP_H FLIP f
 {-|
-Represents the flipped standard @const@ function applied to no arguments
+Represents the flipped standard @const@ function applied to no arguments.
 
 @since 0.1.0.0
 -}
 pattern FLIP_CONST    :: () => (x ~ (a -> b -> b)) => Defunc x
 pattern FLIP_CONST    = FLIP_H CONST
 {-|
-This pattern represents the unit value @()@
+This pattern represents the unit value @()@.
 
 @since 0.1.0.0
 -}
 pattern UNIT          :: Defunc ()
 pattern UNIT          = LIFTED ()
 
-ap :: Defunc (a -> b) -> Defunc a -> Defunc b
-ap = APP_H
-
 -- TODO: This is deprecated in favour of Typeable as of parsley 2.0.0.0
+{-|
+Specialised conversion for functions returning `Bool`. This will go
+as soon as `Defunc` has a `Typeable` constraint in parsley 2.
+
+@since 1.0.1.0
+-}
 lamTermBool :: Defunc (a -> Bool) -> Lam (a -> Bool)
 lamTermBool (APP_H CONST (LIFTED True)) = Abs (const T)
 lamTermBool (APP_H CONST (LIFTED False)) = Abs (const F)
 lamTermBool f = lamTerm f
 
-lamTerm :: forall a. Defunc a -> Lam a
+{-|
+Converts a `Defunc` value into an equivalent `Lam` value, discarding
+the inspectivity of functions.
+
+@since 1.0.1.0
+-}
+lamTerm :: {-forall a.-} Defunc a -> Lam a
 lamTerm ID = Abs id
 lamTerm COMPOSE = Abs (\f -> Abs (\g -> Abs (App f . App g)))
 lamTerm FLIP = Abs (\f -> Abs (\x -> Abs (\y -> App (App f y) x)))

@@ -1,3 +1,14 @@
+{-|
+Module      : Parsley.Internal.Core.InputTypes
+Description : Auxilliary input types.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+Extra types of input specialised for specific scenarios.
+
+@since 1.0.0.0
+-}
 module Parsley.Internal.Core.InputTypes (module Parsley.Internal.Core.InputTypes) where
 
 import Data.Text (Text)
@@ -6,7 +17,7 @@ import Data.Text (Text)
 By wrapping a regular @Text@ input with this newtype, Parsley will assume that all
 of the characters fit into exactly one 16-bit chunk. This allows the consumption of
 characters in the datatype to be consumed much faster, but does not support multi-word
-characters. 
+characters.
 
 @since 0.1.0.0
 -}

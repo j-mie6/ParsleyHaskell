@@ -114,7 +114,7 @@ code to execute on failure, and a state @γ@, tries to read a character
 from the input within @γ@, executing the failure code if it does not
 exist or does not match.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
 sat :: (Defunc Char -> Defunc Bool)                         -- ^ Predicate to test the character with.
     -> ((Code Char -> Offset o -> aux -> Code b) -> Code b) -- ^ The source of the character
@@ -123,6 +123,11 @@ sat :: (Defunc Char -> Defunc Bool)                         -- ^ Predicate to te
     -> Code b
 sat p src good bad = src $ \c input' aux -> let v = FREEVAR c in _if (p v) (good v input' aux) bad
 
+{-|
+Consumes the next character and adjusts the offset to match.
+
+@since 1.5.0.0
+-}
 fetch :: (?ops :: InputOps (Rep o))
       => Offset o -> (Code Char -> Offset o -> Code b) -> Code b
 fetch input k = next (offset input) $ \c offset' -> k c (moveOne input offset')

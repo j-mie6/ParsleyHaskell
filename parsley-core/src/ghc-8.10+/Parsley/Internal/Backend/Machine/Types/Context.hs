@@ -306,7 +306,6 @@ freshUnique f =
   do unique <- asks offsetUniq
      local nextUnique (f unique)
 
---TODO: new doc for input reclamation
 -- Token Credit System (Piggy-banks)
 {- $piggy-doc
 Parsley has analysis in place to factor out length checks when it is statically known that
@@ -333,6 +332,10 @@ extra edge-case operations that are described in their corresponding documentati
 reason why piggy-banks are stored in the context and /not/ consumed immediately to add to
 the coin count is so that length checks are delayed to the last possible moment: you should
 have used all of your current allocation before asking for more!
+
+In addition to this above system, Parsley stores previously read characters in a rewind queue:
+this means that when backtracking is performed (i.e. when looking ahead) the characters can be
+statically rewound and made available for free.
 -}
 {-|
 Place a piggy-bank into the reserve, delaying the corresponding length check until it is
@@ -414,14 +417,31 @@ of size \(n\) if this quota cannot be reached.
 canAfford :: Int -> Ctx s o a -> Bool
 canAfford n = (>= n) . coins
 
+{-|
+Caches a known character and the next offset into the context so that it
+can be retrieved later.
+
+@since 1.5.0.0
+-}
 addChar :: Code Char -> Offset o -> Ctx s o a -> Ctx s o a
 addChar c o ctx = ctx { knownChars = enqueue (c, o) (knownChars ctx) }
 
-readChar :: Ctx s o a -> ((Code Char -> Offset o -> Code b) -> Code b) -> (Code Char -> Offset o -> Ctx s o a -> Code b) -> Code b
+{-|
+Reads a character from the context's retrieval queue if one exists.
+If not, reads a character from another given source (and adds it to the
+rewind buffer).
+
+@since 1.5.0.0
+-}
+readChar :: Ctx s o a                                      -- ^ The original context.
+         -> ((Code Char -> Offset o -> Code b) -> Code b)  -- ^ The fallback source of input.
+         -> (Code Char -> Offset o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
+         -> Code b
 readChar ctx fallback k
-  | not (Queue.null (knownChars ctx)) = unsafeReadChar ctx k
-  | otherwise                         = fallback $ \c o -> unsafeReadChar (addChar c o ctx) k
+  | reclaimable = unsafeReadChar ctx k
+  | otherwise   = fallback $ \c o -> unsafeReadChar (addChar c o ctx) k
   where
+    reclaimable = not (Queue.null (knownChars ctx))
     unsafeReadChar ctx k = let ((c, o), q) = dequeue (knownChars ctx) in k c o (ctx { knownChars = q })
 
 -- Exceptions

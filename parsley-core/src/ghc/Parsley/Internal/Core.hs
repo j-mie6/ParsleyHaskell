@@ -14,6 +14,6 @@ module Parsley.Internal.Core (
     module Parsley.Internal.Core.InputTypes
   ) where
 
-import Parsley.Internal.Core.Defunc hiding (ap, unsafeBLACK, lamTerm, lamTermBool, adaptLam)
+import Parsley.Internal.Core.Defunc hiding (lamTerm, lamTermBool)
 import Parsley.Internal.Core.InputTypes
 import Parsley.Internal.Core.Primitives (Parser, ParserOps)

@@ -1,6 +1,18 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# LANGUAGE DerivingStrategies,
              GeneralizedNewtypeDeriving #-}
+{-|
+Module      : Parsley.Internal.Backend.Machine.Identifiers
+Description : frontend specific identifiers.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module defines "identifiers", which are used to uniquely identify different
+nodes in the combinator tree (and abstract machine).
+
+@since 1.0.0.0
+-}
 module Parsley.Internal.Core.Identifiers (
     MVar(..), IMVar,
     ΣVar(..), IΣVar, SomeΣVar(..), getIΣVar
@@ -14,9 +26,31 @@ import Data.Typeable     ((:~:)(Refl))
 import Data.Word         (Word64)
 import Unsafe.Coerce     (unsafeCoerce)
 
+{-|
+An identifier representing concrete registers and mutable state.
+
+@since 0.1.0.0
+-}
 newtype ΣVar (a :: Type) = ΣVar IΣVar
+{-|
+An identifier representing let-bound parsers, recursion, and iteration.
+
+@since 0.1.0.0
+-}
 newtype MVar (a :: Type) = MVar IMVar
+
+{-|
+Underlying untyped identifier, which is numeric but otherwise opaque.
+
+@since 0.1.0.0
+-}
 newtype IMVar = IMVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show, Ix)
+
+{-|
+Underlying untyped identifier, which is numeric but otherwise opaque.
+
+@since 0.1.0.0
+-}
 newtype IΣVar = IΣVar Word64 deriving newtype (Ord, Eq, Num, Enum, Show, Ix)
 
 instance Show (MVar a) where show (MVar μ) = "μ" ++ show μ
@@ -33,11 +67,21 @@ instance GCompare ΣVar where
     EQ -> case geq σ1 σ2 of Just Refl -> GEQ
     GT -> GGT
 
+{-|
+An identifier representing some concrete register, but where the type is existential.
+
+@since 0.1.0.0
+-}
 data SomeΣVar = forall r. SomeΣVar (ΣVar r)
 instance Eq SomeΣVar where (==) = (==) `on` getIΣVar
 instance Ord SomeΣVar where compare = compare `on` getIΣVar
 instance Show SomeΣVar where show (SomeΣVar σ) = show σ
 
+{-|
+Fetch the untyped identifier from under the existential.
+
+@since 0.1.0.0
+-}
 getIΣVar :: SomeΣVar -> IΣVar
 getIΣVar (SomeΣVar (ΣVar σ)) = σ
 

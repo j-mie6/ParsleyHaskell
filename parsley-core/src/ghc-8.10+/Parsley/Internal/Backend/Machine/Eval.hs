@@ -116,11 +116,11 @@ evalSat :: (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => Defunc (Cha
 evalSat p k@(Machine k') = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
-  if | bankrupt -> maybeEmitCheck (Just 1) k
-     | hasChange -> local spendCoin (maybeEmitCheck Nothing k)
+  if | bankrupt -> emitCheckAndFetch 1 k
+     | hasChange -> local spendCoin (satFetch k)
      | otherwise -> trace "I have a piggy :)" $
         local breakPiggy $
-          do check <- asks (maybeEmitCheck . Just . coins)
+          do check <- asks (emitCheckAndFetch . coins)
              check (Machine (local spendCoin k'))
   where
     satFetch :: (?ops :: InputOps (Rep o))
@@ -131,12 +131,11 @@ evalSat p k@(Machine k') = do
                  (continue mk γ)
                  (raise γ)
 
-    maybeEmitCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
-                   => Maybe Int
-                   -> Machine s o (Char : xs) (Succ n) r a
-                   -> MachineMonad s o xs (Succ n) r a
-    maybeEmitCheck Nothing mk = satFetch mk
-    maybeEmitCheck (Just n) mk = do
+    emitCheckAndFetch :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
+                      => Int
+                      -> Machine s o (Char : xs) (Succ n) r a
+                      -> MachineMonad s o xs (Succ n) r a
+    emitCheckAndFetch n mk = do
       sat <- satFetch mk
       return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (input γ)
 

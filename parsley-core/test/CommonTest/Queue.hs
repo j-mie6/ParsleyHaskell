@@ -12,7 +12,7 @@ import Test.Tasty.QuickCheck
     Property )
 
 import Prelude hiding (null)
-import Parsley.Internal.Common.QueueLike  (QueueLike(empty, null, size, enqueue, dequeue, enqueueAll, peek, modifyHead))
+import Parsley.Internal.Common.QueueLike  (QueueLike(empty, null, size, enqueue, dequeue, enqueueAll))
 import Parsley.Internal.Common.Queue ()
 import Parsley.Internal.Common.Queue.Impl (Queue(..))
 import qualified Parsley.Internal.Common.Queue.Impl as Queue
@@ -40,8 +40,6 @@ genTests = [ emptyTests @q
            , enqueueTests @q
            , testProperty "toList should roundtrip with enqueueAll" $ toListRound @q
            , dequeueTests @q
-           , peekTests @q
-           , modifyHeadTests @q
            ]
 
 emptyTests :: forall q. TestContext q => TestTree
@@ -84,58 +82,6 @@ dequeueIsTail :: forall q. TestContext q => Queue Integer -> Property
 dequeueIsTail q = not (Queue.null q) ==>
   let (x, q') = Queue.dequeue q
   in Queue.toList q === x : Queue.toList q'
-
-peekTests :: forall q. TestContext q => TestTree
-peekTests = testGroup "peek should" [
-    testProperty "leave the size unchanged when non-empty" $ peekSizeUnchanged @q,
-    testProperty "leave the content unchanged when non-empty" $ peekContentUnchanged @q,
-    testProperty "return the first element when non-empty" $ peekReturnFirst @q
-  ]
-
-peekSizeUnchanged :: forall q. TestContext q => Queue Integer -> Property
-peekSizeUnchanged q = not (Queue.null q) ==> Queue.size q === Queue.size (snd (Queue.peek q))
-
-peekContentUnchanged :: forall q. TestContext q => Queue Integer -> Property
-peekContentUnchanged q = not (Queue.null q) ==> Queue.toList q === Queue.toList (snd (Queue.peek q))
-
-peekReturnFirst :: forall q. TestContext q => Queue Integer -> Property
-peekReturnFirst q = not (Queue.null q) ==> head (Queue.toList q) === fst (Queue.peek q)
-
-modifyHeadTests :: forall q. TestContext q => TestTree
-modifyHeadTests = testGroup "modifyHead should" [
-    testProperty "leave the size unchanged when non-empty" $ modifySizeUnchanged @q,
-    testProperty "change the first element when non-empty" $ modifyFirstChanged @q,
-    testProperty "leave the /rest/ of the content unchanged" $ modifyContentUnchanged @q
-  ]
-
-modifySizeUnchanged :: forall q. TestContext q => Queue Integer -> Property
-modifySizeUnchanged q = not (Queue.null q) ==> Queue.size q === Queue.size (Queue.modifyHead id q)
-
-modifyFirstChanged:: forall q. TestContext q => Queue Integer -> Property
-modifyFirstChanged q = not (Queue.null q) ==>
-       worksWith id
-  .&&. worksWith (* 4)
-  .&&. worksWith (+ 3)
-  .&&. worksWith (^ 2)
-  where
-    worksWith :: (Integer -> Integer) -> Property
-    worksWith f = f x === head (Queue.toList (Queue.modifyHead f q))
-
-    x :: Integer
-    x = head (Queue.toList q)
-
-modifyContentUnchanged :: forall q. TestContext q => Queue Integer -> Property
-modifyContentUnchanged q = not (Queue.null q) ==>
-       worksWith id
-  .&&. worksWith (* 4)
-  .&&. worksWith (+ 3)
-  .&&. worksWith (^ 2)
-  where
-    worksWith :: (Integer -> Integer) -> Property
-    worksWith f = xs === tail (Queue.toList (Queue.modifyHead f q))
-
-    xs :: [Integer]
-    xs = tail (Queue.toList q)
 
 toListRound :: forall q. TestContext q => [Integer] -> Property
 toListRound xs = toList @q (enqueueAll xs empty) === xs

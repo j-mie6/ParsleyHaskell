@@ -417,13 +417,12 @@ canAfford n = (>= n) . coins
 addChar :: Code Char -> Offset o -> Ctx s o a -> Ctx s o a
 addChar c o ctx = ctx { knownChars = enqueue (c, o) (knownChars ctx) }
 
-unsafeReadChar :: Ctx s o a -> (Code Char -> Offset o -> Ctx s o a -> b) -> b
-unsafeReadChar ctx k = let ((c, o), q) = dequeue (knownChars ctx) in k c o (ctx { knownChars = q })
-
 readChar :: Ctx s o a -> ((Code Char -> Offset o -> Code b) -> Code b) -> (Code Char -> Offset o -> Ctx s o a -> Code b) -> Code b
 readChar ctx fallback k
   | not (Queue.null (knownChars ctx)) = unsafeReadChar ctx k
   | otherwise                         = fallback $ \c o -> unsafeReadChar (addChar c o ctx) k
+  where
+    unsafeReadChar ctx k = let ((c, o), q) = dequeue (knownChars ctx) in k c o (ctx { knownChars = q })
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

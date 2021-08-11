@@ -52,7 +52,7 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- ** Getters
     coins, hasCoin, isBankrupt, canAfford,
     -- ** Input Reclamation
-    addChar, readChar, knownChars
+    addChar, readChar
   ) where
 
 import Control.Exception                               (Exception, throw)

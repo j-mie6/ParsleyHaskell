@@ -24,7 +24,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
     -- * Smart Instructions
     _App, _Fmap, _Modify, _Make, _Put, _Get,
     -- * Smart Meta-Instructions
-    addCoins, refundCoins, drainCoins, giveBursary
+    addCoins, refundCoins, drainCoins, giveBursary, prefetchChar
   ) where
 
 import Data.Kind                                    (Type)
@@ -292,6 +292,9 @@ Smart-constuctor around `RefundCoins`.
 -}
 giveBursary :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 giveBursary = mkCoin GiveBursary
+
+prefetchChar :: Bool -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+prefetchChar check = In4 . MetaInstr (PrefetchChar check)
 
 {-|
 Applies a value on the top of the stack to a function on the second-most top of the stack.

@@ -56,7 +56,7 @@ this meets requirements for internal major change.
 * Code restructuring and refactoring
 * Added copious amounts of documentation
 
-## 1.5.0.0 -- TBD
+## 1.5.0.0 -- 2021-08-12
 Infrastructure for improved handler analysis:
 
 * Refactored `LetBinding` to include more generic metadata.
@@ -79,9 +79,13 @@ Input Reclamation:
 * Added `Common.QueueLike` to abstract both queue's common operations.
 * Moved the implementation of `Queue` into a `Queue.Impl` submodule, for `RewindQueue` and testing.
 * Added `GiveBursary` instruction to implement a variant of `RefundCoins`.
+* Added `PrefetchChar` instruction for future prefetching on branches.
 * Added `canAfford` to `Context` and removed the broken `liquidate`.
 * Improved the input factoring for join points.
 
 Misc:
 
-* Removed the unneeded `genDefuncX` operations in `Core.Defunc`
+* Removed the unneeded `genDefuncX` operations in `Core.Defunc`, and `ap`, hid others.
+* Added type to `next` in `CharList`.
+* Added auxilliary information parameter to `sat`.
+* Added `fetch` and broke it out of `sat`.

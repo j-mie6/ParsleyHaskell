@@ -56,7 +56,9 @@ this meets requirements for internal major change.
 * Code restructuring and refactoring
 * Added copious amounts of documentation
 
-## 1.5.0.0 -- TBD
+## 1.5.0.0 -- 2021-08-12
+Infrastructure for improved handler analysis:
+
 * Refactored `LetBinding` to include more generic metadata.
 * Added metadata to `StaSubroutine` and introduced `StaSubroutine#` and associated functions.
 * Fed metadata through `letRec`'s `genBinding` and into `buildRec`.
@@ -68,3 +70,22 @@ this meets requirements for internal major change.
 * Refactored the `CombinatorAnalyser` into an `Analysis.Cut` module (and moved `Dependencies` there too)
 * Refactored the `InstructionAnalyser` into an `Analysis.Coins` and `Analysis.Relevancy` modules
 * More documentation
+
+Input Reclamation:
+
+* Added `Machine.Types.Coins`, which separates coins for length checks from input reclamation.
+* `Analysis.Coins` now deals wiith the `Coins` type, as do the instructions.
+* Added `Common.RewindQueue` to handle rewindable input caching.
+* Added `Common.QueueLike` to abstract both queue's common operations.
+* Moved the implementation of `Queue` into a `Queue.Impl` submodule, for `RewindQueue` and testing.
+* Added `GiveBursary` instruction to implement a variant of `RefundCoins`.
+* Added `PrefetchChar` instruction for future prefetching on branches.
+* Added `canAfford` to `Context` and removed the broken `liquidate`.
+* Improved the input factoring for join points.
+
+Misc:
+
+* Removed the unneeded `genDefuncX` operations in `Core.Defunc`, and `ap`, hid others.
+* Added type to `next` in `CharList`.
+* Added auxilliary information parameter to `sat`.
+* Added `fetch` and broke it out of `sat`.

@@ -48,9 +48,11 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- $piggy-doc
 
     -- ** Modifiers
-    storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins,
+    storePiggy, breakPiggy, spendCoin, giveCoins, refundCoins, voidCoins,
     -- ** Getters
-    coins, hasCoin, isBankrupt, liquidate
+    coins, hasCoin, isBankrupt, canAfford,
+    -- ** Input Reclamation
+    addChar, readChar
   ) where
 
 import Control.Exception                               (Exception, throw)
@@ -62,12 +64,15 @@ import Data.Maybe                                      (fromMaybe)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
+import Parsley.Internal.Backend.Machine.Types.Coins    (Coins, willConsume, canReclaim)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
+import Parsley.Internal.Backend.Machine.Types.Offset   (Offset)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code)
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
 
-import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
-import qualified Parsley.Internal.Common.Queue as Queue (empty, null, foldr)
+import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
+import qualified Parsley.Internal.Common.QueueLike            as Queue (empty, null)
+import qualified Parsley.Internal.Common.RewindQueue          as Queue (rewind)
 
 -- Core Data-types
 {-|
@@ -77,13 +82,14 @@ may form part of the generated code.
 
 @since 1.0.0.0
 -}
-data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a) -- ^ Map of subroutine bindings.
-                     , φs         :: DMap ΦVar (QJoin s o a)       -- ^ Map of join point bindings.
-                     , σs         :: DMap ΣVar (Reg s)             -- ^ Map of available registers.
-                     , debugLevel :: Int                           -- ^ Approximate depth of debug combinator.
-                     , coins      :: Int                           -- ^ Number of tokens free to consume without length check.
-                     , offsetUniq :: Word                          -- ^ Next unique offset identifier.
-                     , piggies    :: Queue Int                     -- ^ Queue of future length check credit.
+data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a)     -- ^ Map of subroutine bindings.
+                     , φs         :: DMap ΦVar (QJoin s o a)           -- ^ Map of join point bindings.
+                     , σs         :: DMap ΣVar (Reg s)                 -- ^ Map of available registers.
+                     , debugLevel :: Int                               -- ^ Approximate depth of debug combinator.
+                     , coins      :: Int                               -- ^ Number of tokens free to consume without length check.
+                     , offsetUniq :: Word                              -- ^ Next unique offset identifier.
+                     , piggies    :: Queue Coins                       -- ^ Queue of future length check credit.
+                     , knownChars :: RewindQueue (Code Char, Offset o) -- ^ Characters that can be reclaimed on backtrack.
                      }
 
 {-|
@@ -101,7 +107,7 @@ bindings: information about their required free-registers is included.
 @since 1.0.0.0
 -}
 emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty Queue.empty
 
 -- Subroutines
 {- $sub-doc
@@ -326,14 +332,18 @@ extra edge-case operations that are described in their corresponding documentati
 reason why piggy-banks are stored in the context and /not/ consumed immediately to add to
 the coin count is so that length checks are delayed to the last possible moment: you should
 have used all of your current allocation before asking for more!
+
+In addition to this above system, Parsley stores previously read characters in a rewind queue:
+this means that when backtracking is performed (i.e. when looking ahead) the characters can be
+statically rewound and made available for free.
 -}
 {-|
 Place a piggy-bank into the reserve, delaying the corresponding length check until it is
 broken.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-storePiggy :: Int -> Ctx s o a -> Ctx s o a
+storePiggy :: Coins -> Ctx s o a -> Ctx s o a
 storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
 
 {-|
@@ -344,7 +354,7 @@ __Note__: This should generate a length check when used!
 @since 1.0.0.0
 -}
 breakPiggy :: Ctx s o a -> Ctx s o a
-breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
+breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = willConsume coins, piggies = piggies'}
 
 {-|
 Does the context have coins available?
@@ -352,7 +362,7 @@ Does the context have coins available?
 @since 1.0.0.0
 -}
 hasCoin :: Ctx s o a -> Bool
-hasCoin = (> 0) . coins
+hasCoin = canAfford 1
 
 {-|
 Is it the case that there are no coins /and/ no piggy-banks remaining?
@@ -373,10 +383,20 @@ spendCoin ctx = ctx {coins = coins ctx - 1}
 {-|
 Adds coins into the current supply.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-giveCoins :: Int -> Ctx s o a -> Ctx s o a
-giveCoins c ctx = ctx {coins = coins ctx + c}
+giveCoins :: Coins -> Ctx s o a -> Ctx s o a
+giveCoins c ctx = ctx {coins = coins ctx + willConsume c}
+
+{-|
+Adds coins into the current supply.
+
+@since 1.5.0.0
+-}
+refundCoins :: Coins -> Ctx s o a -> Ctx s o a
+refundCoins c ctx = ctx { coins = coins ctx + willConsume c
+                        , knownChars = Queue.rewind (canReclaim c) (knownChars ctx)
+                        }
 
 {-|
 Removes all coins and piggy-banks, such that @isBankrupt == True@.
@@ -384,18 +404,45 @@ Removes all coins and piggy-banks, such that @isBankrupt == True@.
 @since 1.0.0.0
 -}
 voidCoins :: Ctx s o a -> Ctx s o a
-voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
+voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty}
 
 {-|
-Collect all coins and the value of every piggy bank.
+Asks if the current coin total can afford a charge of \(n\) characters.
 
-This is used when a join-point is called, so that a length check can be
-generated to cover the cost of the binding.
+This is used by `DrainCoins`, which will have to emit a full length check
+of size \(n\) if this quota cannot be reached.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-liquidate :: Ctx s o a -> Int
-liquidate ctx = Queue.foldr (+) (coins ctx) (piggies ctx)
+canAfford :: Int -> Ctx s o a -> Bool
+canAfford n = (>= n) . coins
+
+{-|
+Caches a known character and the next offset into the context so that it
+can be retrieved later.
+
+@since 1.5.0.0
+-}
+addChar :: Code Char -> Offset o -> Ctx s o a -> Ctx s o a
+addChar c o ctx = ctx { knownChars = enqueue (c, o) (knownChars ctx) }
+
+{-|
+Reads a character from the context's retrieval queue if one exists.
+If not, reads a character from another given source (and adds it to the
+rewind buffer).
+
+@since 1.5.0.0
+-}
+readChar :: Ctx s o a                                      -- ^ The original context.
+         -> ((Code Char -> Offset o -> Code b) -> Code b)  -- ^ The fallback source of input.
+         -> (Code Char -> Offset o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
+         -> Code b
+readChar ctx fallback k
+  | reclaimable = unsafeReadChar ctx k
+  | otherwise   = fallback $ \c o -> unsafeReadChar (addChar c o ctx) k
+  where
+    reclaimable = not (Queue.null (knownChars ctx))
+    unsafeReadChar ctx k = let ((c, o), q) = dequeue (knownChars ctx) in k c o (ctx { knownChars = q })
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

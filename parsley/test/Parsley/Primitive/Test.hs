@@ -84,8 +84,14 @@ satisfyTests = testGroup "satisfy should"
   , testCase "consume more than 1 piece of input with two" $ twoDigits "12" @?= Just '2'
   ]
 
+lookAheadDigit :: String -> Maybe Char
+lookAheadDigit = $$(runParserMocked Parsers.lookAheadDigit [||Parsers.lookAheadDigit||])
+
 lookAheadTests :: TestTree
-lookAheadTests = testGroup "lookAhead should" []
+lookAheadTests = testGroup "lookAhead should"
+  [ testCase "rollback consumed input" $ lookAheadDigit "9" @?= Just '9'
+  , testCase "fail when given no input when expected" $ lookAheadDigit "" @?= Nothing
+  ]
 
 notFollowedByTests :: TestTree
 notFollowedByTests = testGroup "notFollowedBy should" []

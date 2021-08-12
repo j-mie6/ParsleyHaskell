@@ -26,3 +26,6 @@ recursive :: Parser [Char]
 recursive =
   let r = item <:> r <|> pure EMPTY
   in r
+
+lookAheadDigit :: Parser Char
+lookAheadDigit = lookAhead digit *> digit

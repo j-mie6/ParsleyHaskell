@@ -20,8 +20,8 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 import Data.Dependent.Map                             (DMap)
 import Data.Functor                                   ((<&>))
 import Data.Void                                      (Void)
-import Control.Monad                                  (forM, liftM2, liftM3)
-import Control.Monad.Reader                           (ask, asks, local)
+import Control.Monad                                  (forM, liftM2, liftM3, when)
+import Control.Monad.Reader                           (ask, asks, reader, local)
 import Control.Monad.ST                               (runST)
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
@@ -33,6 +33,7 @@ import Parsley.Internal.Backend.Machine.LetRecBuilder (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types         (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
+import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume, int)
 import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, offset)
 import Parsley.Internal.Backend.Machine.Types.State   (Γ(..), OpStack(..))
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -112,17 +113,33 @@ evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad 
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
 evalSat :: (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalSat p (Machine k) = do
+evalSat p k@(Machine k') = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
-  if | bankrupt -> maybeEmitCheck (Just 1) <$> k
-     | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
-     | otherwise -> trace "I have a piggy :)" $ local breakPiggy (asks ((maybeEmitCheck . Just) . coins) <*> local spendCoin k)
+  if | bankrupt -> emitCheckAndFetch 1 k
+     | hasChange -> local spendCoin (satFetch k)
+     | otherwise -> trace "I have a piggy :)" $
+        local breakPiggy $
+          do check <- asks (emitCheckAndFetch . coins)
+             check (Machine (local spendCoin k'))
   where
-    maybeEmitCheck Nothing mk γ = sat (ap p) mk (raise γ) γ
-    maybeEmitCheck (Just n) mk γ =
-      --[|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (ap p) mk [||bad||]) [||bad||] γ)||]
-      emitLengthCheck n (sat (ap p) mk (raise γ) γ) (raise γ) (input γ)
+    satFetch :: (?ops :: InputOps (Rep o))
+             => Machine s o (Char : xs) (Succ n) r a
+             -> MachineMonad s o xs (Succ n) r a
+    satFetch mk = reader $ \ctx γ ->
+      sat (ap p) (readChar ctx (fetch (input γ)))
+                 (continue mk γ)
+                 (raise γ)
+
+    emitCheckAndFetch :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
+                      => Int
+                      -> Machine s o (Char : xs) (Succ n) r a
+                      -> MachineMonad s o xs (Succ n) r a
+    emitCheckAndFetch n mk = do
+      sat <- satFetch mk
+      return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (input γ)
+
+    continue mk γ c input' = run mk (γ {input = input', operands = Op c (operands γ)})
 
 evalEmpt :: MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -185,15 +202,15 @@ evalDup (Machine k) = k <&> \mk γ ->
   in dup x $ \dupx -> mk (γ {operands = Op dupx (Op dupx xs)})
 
 evalMake :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-evalMake σ a k = asks $ \ctx γ ->
+evalMake σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in newΣ σ a x (run k (γ {operands = xs})) ctx
 
 evalGet :: ΣVar x -> Access -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
-evalGet σ a k = asks $ \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
+evalGet σ a k = reader $ \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
 
 evalPut :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
-evalPut σ a k = asks $ \ctx γ ->
+evalPut σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
@@ -214,6 +231,21 @@ evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Ma
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins (mk γ) (raise γ) (input γ)
-evalMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
-evalMeta (DrainCoins coins) (Machine k) = liftM2 (\n mk γ -> emitLengthCheck n (mk γ) (raise γ) (input γ)) (asks ((coins -) . liquidate)) k
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ)
+evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
+-- No interaction with input reclamation here!
+evalMeta (DrainCoins coins) (Machine k) =
+  -- If there are enough coins left to cover the cost, no length check is required
+  -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
+  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ))
+         (asks (canAfford (willConsume coins)))
+         k
+evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
+evalMeta (PrefetchChar check) k =
+  do bankrupt <- asks isBankrupt
+     when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
+     mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
+  where
+    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (input γ)
+    mkCheck False k = k
+    prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))

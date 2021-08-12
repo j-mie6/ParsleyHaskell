@@ -24,12 +24,13 @@ module Parsley.Internal.Backend.Machine.Instructions (
     -- * Smart Instructions
     _App, _Fmap, _Modify, _Make, _Put, _Get,
     -- * Smart Meta-Instructions
-    addCoins, refundCoins, drainCoins
+    addCoins, refundCoins, drainCoins, giveBursary, prefetchChar
   ) where
 
 import Data.Kind                                    (Type)
 import Data.Void                                    (Void)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.Types.Coins (Coins(Coins))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 
 import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
@@ -64,20 +65,20 @@ data Instr (o :: Type)                                  -- The FIXED input type
   {-| Applies a function to the top two elements of the stack, converting them to something else and pushing it back on.
 
   @since 1.0.0.0 -}
-  Lift2     :: Machine.Defunc (x -> y -> z) {- ^ Function to apply. -} 
-            -> k (z : xs) n r a             {- ^ Machine requiring new value. -} 
+  Lift2     :: Machine.Defunc (x -> y -> z) {- ^ Function to apply. -}
+            -> k (z : xs) n r a             {- ^ Machine requiring new value. -}
             -> Instr o k (y : x : xs) n r a
   {-| Reads a character so long as it matches a given predicate. If it does not, or no input is available, this instruction fails.
 
   @since 1.0.0.0 -}
-  Sat       :: Machine.Defunc (Char -> Bool) {- ^ Predicate to apply. -} 
-            -> k (Char : xs) (Succ n) r a    {- ^ Machine requiring read character. -} 
+  Sat       :: Machine.Defunc (Char -> Bool) {- ^ Predicate to apply. -}
+            -> k (Char : xs) (Succ n) r a    {- ^ Machine requiring read character. -}
             -> Instr o k xs (Succ n) r a
   {-| Calls another let-bound parser.
 
   @since 1.0.0.0 -}
-  Call      :: MVar x                  {- ^ The binding to invoke. -} 
-            -> k (x : xs) (Succ n) r a {- ^ Continuation to do after the call. -} 
+  Call      :: MVar x                  {- ^ The binding to invoke. -}
+            -> k (x : xs) (Succ n) r a {- ^ Continuation to do after the call. -}
             -> Instr o k xs (Succ n) r a
   {-| Jumps to another let-bound parser tail-recursively.
 
@@ -94,8 +95,8 @@ data Instr (o :: Type)                                  -- The FIXED input type
   {-| Registers a handler to deal with possible failure in the given machine.
 
   @since 1.4.0.0 -}
-  Catch     :: k xs (Succ n) r a          {- ^ Machine where failure is handled by the handler. -} 
-            -> Handler o k (o : xs) n r a {- ^ The handler to register. -} 
+  Catch     :: k xs (Succ n) r a          {- ^ Machine where failure is handled by the handler. -}
+            -> Handler o k (o : xs) n r a {- ^ The handler to register. -}
             -> Instr o k xs n r a
   {-| Pushes the current input offset onto the stack.
 
@@ -108,24 +109,24 @@ data Instr (o :: Type)                                  -- The FIXED input type
   {-| Picks one of two continuations based on whether a `Left` or `Right` is on the stack.
 
   @since 1.0.0.0 -}
-  Case      :: k (x : xs) n r a {- ^ Machine to execute if `Left` on stack. -} 
-            -> k (y : xs) n r a {- ^ Machine to execute if `Right` on stack. -} 
+  Case      :: k (x : xs) n r a {- ^ Machine to execute if `Left` on stack. -}
+            -> k (y : xs) n r a {- ^ Machine to execute if `Right` on stack. -}
             -> Instr o k (Either x y : xs) n r a
   {-| Given a collection of predicates and machines, this instruction will execute the first machine
       for which the corresponding predicate returns true for the value on the top of the stack.
 
   @since 1.0.0.0 -}
-  Choices   :: [Machine.Defunc (x -> Bool)] {- ^ A list of predicates to try. -} 
-            -> [k xs n r a]                 {- ^ A corresponding list of machines. -} 
+  Choices   :: [Machine.Defunc (x -> Bool)] {- ^ A list of predicates to try. -}
+            -> [k xs n r a]                 {- ^ A corresponding list of machines. -}
             -> k xs n r a                   {- ^ A default machine to execute if no predicates match. -}
             -> Instr o k (x : xs) n r a
   {-| Sets up an iteration, where the second argument is executed repeatedly until it fails, which is
       handled by the given handler. The use of `Void` indicates that `Ret` is illegal within the loop.
 
   @since 1.0.0.0 -}
-  Iter      :: MVar Void                  {- ^ The name of the binding. -} 
-            -> k '[] One Void a           {- ^ The body of the loop: it cannot return "normally". -} 
-            -> Handler o k (o : xs) n r a {- ^ The handler for the loop's exit. -} 
+  Iter      :: MVar Void                  {- ^ The name of the binding. -}
+            -> k '[] One Void a           {- ^ The body of the loop: it cannot return "normally". -}
+            -> Handler o k (o : xs) n r a {- ^ The handler for the loop's exit. -}
             -> Instr o k xs n r a
   {-| Jumps to a given join point.
 
@@ -134,9 +135,9 @@ data Instr (o :: Type)                                  -- The FIXED input type
   {-| Sets up a new join point binding.
 
   @since 1.0.0.0 -}
-  MkJoin    :: ΦVar x           {- ^ The name of the binding that can be referred to later. -} 
-            -> k (x : xs) n r a {- ^ The body of the join point binding. -} 
-            -> k xs n r a       {- ^ The scope within which the binding is valid.  -} 
+  MkJoin    :: ΦVar x           {- ^ The name of the binding that can be referred to later. -}
+            -> k (x : xs) n r a {- ^ The body of the join point binding. -}
+            -> k xs n r a       {- ^ The scope within which the binding is valid.  -}
             -> Instr o k xs n r a
   {-| Swaps the top two elements on the stack
 
@@ -149,44 +150,44 @@ data Instr (o :: Type)                                  -- The FIXED input type
   {-| Initialises a new register for use within the continuation. Initial value is on the stack.
 
   @since 1.0.0.0 -}
-  Make      :: ΣVar x     {- ^ The name of the new register. -} 
-            -> Access     {- ^ Whether or not the register is "concrete". -} 
-            -> k xs n r a {- ^ The scope within which the register is accessible. -} 
+  Make      :: ΣVar x     {- ^ The name of the new register. -}
+            -> Access     {- ^ Whether or not the register is "concrete". -}
+            -> k xs n r a {- ^ The scope within which the register is accessible. -}
             -> Instr o k (x : xs) n r a
   {-| Pushes the value contained within a register onto the stack.
 
   @since 1.0.0.0 -}
-  Get       :: ΣVar x           {- ^ Name of the register to read. -} 
-            -> Access           {- ^ Whether or not the value is cached. -} 
-            -> k (x : xs) n r a {- ^ The machine that requires the value. -} 
+  Get       :: ΣVar x           {- ^ Name of the register to read. -}
+            -> Access           {- ^ Whether or not the value is cached. -}
+            -> k (x : xs) n r a {- ^ The machine that requires the value. -}
             -> Instr o k xs n r a
   {-| Places the value on the top of the stack into a given register.
 
   @since 1.0.0.0 -}
-  Put       :: ΣVar x     {- ^ Name of the register to update. -} 
-            -> Access     {- ^ Whether or not the value needs to be stored in a concrete register. -} 
-            -> k xs n r a 
+  Put       :: ΣVar x     {- ^ Name of the register to update. -}
+            -> Access     {- ^ Whether or not the value needs to be stored in a concrete register. -}
+            -> k xs n r a
             -> Instr o k (x : xs) n r a
   {-| Begins a debugging scope, the inner scope requires /two/ handlers,
       the first is the log handler itself, and then the second is the
       "real" fail handler for when the log handler is executed.
 
   @since 1.0.0.0 -}
-  LogEnter  :: String                   {- ^ The message to be printed. -} 
-            -> k xs (Succ (Succ n)) r a {- ^ The machine to be debugged. -} 
+  LogEnter  :: String                   {- ^ The message to be printed. -}
+            -> k xs (Succ (Succ n)) r a {- ^ The machine to be debugged. -}
             -> Instr o k xs (Succ n) r a
   {-| Ends the log scope after a succesful execution.
 
   @since 1.0.0.0 -}
-  LogExit   :: String     {- ^ The message to be printed. -} 
-            -> k xs n r a {- ^ The machine that follows. -} 
+  LogExit   :: String     {- ^ The message to be printed. -}
+            -> k xs n r a {- ^ The machine that follows. -}
             -> Instr o k xs n r a
   {-| Executes a meta-instruction, which is interacting with
       implementation specific static information.
 
   @since 1.0.0.0 -}
-  MetaInstr :: MetaInstr n {- ^ A meta-instruction to perform. -} 
-            -> k xs n r a  {- ^ The machine that follows. -} 
+  MetaInstr :: MetaInstr n {- ^ A meta-instruction to perform. -}
+            -> k xs n r a  {- ^ The machine that follows. -}
             -> Instr o k xs n r a
 
 {-|
@@ -233,49 +234,76 @@ data MetaInstr (n :: Nat) where
 
       A handler is required, in case the length check fails.
 
-  @since 1.0.0.0 -}
-  AddCoins    :: Int -> MetaInstr (Succ n)
+  @since 1.5.0.0 -}
+  AddCoins    :: Coins -> MetaInstr (Succ n)
   {-| Refunds to the piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information).
       This always happens for free, and is added straight to the coins.
 
-  @since 1.0.0.0 -}
-  RefundCoins :: Int -> MetaInstr n
+  @since 1.5.0.0 -}
+  RefundCoins :: Coins -> MetaInstr n
   {-| Remove coins from piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information)
       This is used to pay for more expensive calls to bindings with known required input.
 
       A handler is required, as there may not be enough coins to pay the cost and a length check causes a failure.
 
-  @since 1.0.0.0 -}
-  DrainCoins  :: Int -> MetaInstr (Succ n)
+  @since 1.5.0.0 -}
+  DrainCoins  :: Coins -> MetaInstr (Succ n)
+  {-| Refunds to the piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information).
+      This always happens for free, and is added straight to the coins. Unlike `RefundCoins` this cannot reclaim
+      input, nor is is subtractive in the analysis.
 
+  @since 1.5.0.0 -}
+  GiveBursary :: Coins -> MetaInstr n
+  {-| Fetches a character to read in advance. This is used to factor out a common token from alternatives.
+      The boolean argument represents whether or not the read is covered by a factored length check, or
+      requires its own.
 
-mkCoin :: (Int -> MetaInstr n) -> Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-mkCoin _    0 = id
-mkCoin meta n = In4 . MetaInstr (meta n)
+  @since 1.5.0.0 -}
+  PrefetchChar :: Bool -> MetaInstr (Succ n)
+
+mkCoin :: (Coins -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
+mkCoin _    (Coins 0 0) = id
+mkCoin meta n           = In4 . MetaInstr (meta n)
 
 {-|
 Smart-constuctor around `AddCoins`.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-addCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+addCoins :: Coins -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 addCoins = mkCoin AddCoins
 
 {-|
 Smart-constuctor around `RefundCoins`.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-refundCoins :: Int -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
+refundCoins :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 refundCoins = mkCoin RefundCoins
 
 {-|
 Smart-constuctor around `DrainCoins`.
 
-@since 1.0.0.0
+@since 1.5.0.0
 -}
-drainCoins :: Int -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+drainCoins :: Coins -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 drainCoins = mkCoin DrainCoins
+
+{-|
+Smart-constuctor around `RefundCoins`.
+
+@since 1.5.0.0
+-}
+giveBursary :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
+giveBursary = mkCoin GiveBursary
+
+{-|
+Smart-constructor around `PrefetchChar`.
+
+@since 1.5.0.0 
+-}
+prefetchChar :: Bool -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+prefetchChar check = In4 . MetaInstr (PrefetchChar check)
 
 {-|
 Applies a value on the top of the stack to a function on the second-most top of the stack.
@@ -392,6 +420,8 @@ instance Show (Handler o (Const4 (String -> String)) (o : xs) n r a) where
   show (Always k)    = getConst4 k ""
 
 instance Show (MetaInstr n) where
-  show (AddCoins n)    = "Add " ++ show n ++ " coins"
-  show (RefundCoins n) = "Refund " ++ show n ++ " coins"
-  show (DrainCoins n)  = "Using " ++ show n ++ " coins"
+  show (AddCoins n)     = "Add " ++ show n ++ " coins"
+  show (RefundCoins n)  = "Refund " ++ show n ++ " coins"
+  show (DrainCoins n)   = "Using " ++ show n ++ " coins"
+  show (GiveBursary n)  = "Bursary of " ++ show n ++ " coins"
+  show (PrefetchChar b) = "Prefetch character " ++ (if b then "with" else "without") ++ " length-check"

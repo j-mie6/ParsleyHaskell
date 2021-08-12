@@ -27,8 +27,8 @@ import Parsley.Internal.Core.Identifiers -- for re-export
 import Unsafe.Coerce                     (unsafeCoerce)
 
 {-|
-Represents a join point which requires an argument
-of type @a@. 
+Represents a join point which requires an argument.
+of type @a@.
 
 @since 1.0.0.0
 -}

@@ -183,6 +183,7 @@ instance InputPrep ByteString where
 instance InputPrep CharList where
   prepare qinput = [||
       let CharList input = $$qinput
+          next :: (# Int#, [Char] #) -> (# Char, (# Int#, [Char] #) #)
           next (# i#, c:cs #) = (# c, (# i# +# 1#, cs #) #)
           more :: (# Int#, [Char] #) -> Bool
           more (# _, [] #) = False

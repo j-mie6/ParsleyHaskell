@@ -19,7 +19,8 @@ import Data.Set                            (Set, elems)
 import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                             _Fmap, _App, _Modify, _Get, _Put, _Make,
-                                            addCoins, refundCoins, drainCoins,
+                                            addCoins, refundCoins, drainCoins, giveBursary,
+                                            minus, minCoins, maxCoins, zero,
                                             IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded)
 import Parsley.Internal.Common.Fresh       (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
@@ -58,6 +59,9 @@ codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p +
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
     finalise cg =
       let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
+      -- let-bound things are not safe to factor length checks out of
+      -- This is because we do not know the cut characteristics of every caller
+      -- In theory this /could/ be computed as the union of every call site
       in if isJust letBound then m else addCoins (coinsNeeded m) m
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
@@ -83,8 +87,8 @@ altNoCutCompile p q handler post m =
      qc <- freshΦ (runCodeGen q φ)
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
-     let dp = np - min np nq
-     let dq = nq - min np nq
+     let dp = np `minus` minCoins np nq
+     let dq = nq `minus` minCoins np nq
      return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
 
 chainPreCompile :: CodeGen o a (x -> x) -> CodeGen o a x
@@ -136,27 +140,28 @@ shallow Empty         _ = do return $! In4 Empt
 shallow (p :<|>: q)   m = do altNoCutCompile p q parsecHandler id m
 shallow (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 shallow (LookAhead p) m =
-  do n <- fmap coinsNeeded (runCodeGen p (In4 Empt)) -- Dodgy hack, but oh well
+  do n <- fmap coinsNeeded (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
-     return $! In4 (Catch (addCoins (max (np - nm) 0) (In4 (Tell pc))) (Always (In4 (Seek (In4 (Push (user UNIT) m))))))
+     -- The minus here is used because the shared coins are propagated out front, neat.
+     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc))) (Always (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
      qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (_App φ)))))
      let minc = coinsNeeded (In4 (Case pc qc))
-     let dp = max 0 (coinsNeeded pc - minc)
-     let dq = max 0 (coinsNeeded qc - minc)
+     let dp = maxCoins zero (coinsNeeded pc `minus` minc)
+     let dq = maxCoins zero (coinsNeeded qc `minus` minc)
      fmap binder (runCodeGen b (In4 (Case (addCoins dp pc) (addCoins dq qc))))
 shallow (Match p fs qs def) m =
   do (binder, φ) <- makeΦ m
      qcs <- traverse (\q -> freshΦ (runCodeGen q φ)) qs
      defc <- freshΦ (runCodeGen def φ)
      let minc = coinsNeeded (In4 (Choices (map userBool fs) qcs defc))
-     let defc':qcs' = map (max 0 . subtract minc . coinsNeeded >>= addCoins) (defc:qcs)
+     let defc':qcs' = map (maxCoins zero . (`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ _)            m = do return $! tailCallOptimise μ m
 shallow (ChainPre op p)        m = do chainPreCompile op p addCoinsNeeded id m
@@ -190,19 +195,23 @@ freshM = mapVFreshT newScope
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
+-- TODO: We can inline anything that is /pure/ and has no large code foot-print, at the moment this
+--       is tripped up by lots of `Push` and `Pop`s.
 makeΦ :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
 makeΦ m | elidable m = return (id, m)
   where
     elidable :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> Bool
     -- This is double-φ optimisation:   If a φ-node points shallowly to another φ-node, then it can be elided
     elidable (In4 (Join _))             = True
+    elidable (In4 (Pop (In4 (Join _)))) = True
     -- This is terminal-φ optimisation: If a φ-node points shallowly to a terminal operation, then it can be elided
     elidable (In4 Ret)                  = True
+    elidable (In4 (Pop (In4 Ret)))      = True
     -- This is a form of double-φ optimisation: If a φ-node points shallowly to a jump, then it can be elided and the jump used instead
     -- Note that this should NOT be done for non-tail calls, as they may generate a large continuation
     elidable (In4 (Pop (In4 (Jump _)))) = True
     elidable _                          = False
-makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In4 . MkJoin φ (addCoins n m), drainCoins n (In4 (Join φ)))) askΦ
+makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In4 . MkJoin φ (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
 
 freshΣ :: CodeGenStack (ΣVar a)
 freshΣ = lift (lift (construct ΣVar))

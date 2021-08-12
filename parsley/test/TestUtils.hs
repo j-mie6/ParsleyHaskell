@@ -1,9 +1,9 @@
-{-# LANGUAGE TemplateHaskell, TypeApplications, DeriveAnyClass, StandaloneDeriving, CPP, FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell, TypeApplications, DeriveAnyClass, StandaloneDeriving, CPP, FlexibleInstances, MonoLocalBinds #-}
 module TestUtils where
 
 import Parsley (runParser, Parser, Code)
---import Parsley.Internal.Verbose ()
-import Language.Haskell.TH.Syntax 
+import Parsley.Internal.Trace (Trace)
+import Language.Haskell.TH.Syntax
 #if MIN_VERSION_template_haskell(2,17,0)
   hiding (Code)
 #endif
@@ -21,7 +21,7 @@ unTypeCode = unTypeQ
 #endif
 
 -- TODO Use WQ: requires lift plugin to not require any Lift instance for variables (if missing)
-runParserMocked :: Parser a -> Code (Parser a) -> Code (String -> Maybe a)
+runParserMocked :: Trace => Parser a -> Code (Parser a) -> Code (String -> Maybe a)
 runParserMocked p qp = [|| \s ->
     runParserMocked' $$qp `deepseq` $$(runParser p) s
   ||]

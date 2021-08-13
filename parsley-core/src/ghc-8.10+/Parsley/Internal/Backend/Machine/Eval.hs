@@ -149,9 +149,9 @@ evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ 
 
 evalCatch :: (PositionOps (Rep o), HandlerOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) h = freshUnique $ \u -> case h of
-  Always (Machine h) ->
+  Always _ (Machine h) ->
     liftM2 (\mk mh γ -> bindAlwaysHandler γ (buildHandler γ mh u) mk) k h
-  Same (Machine yes) (Machine no) ->
+  Same _ (Machine yes) _ (Machine no) ->
     liftM3 (\mk myes mno γ -> bindSameHandler γ (buildYesHandler γ myes u) (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
@@ -182,9 +182,9 @@ evalIter μ l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       case h of
-        Always (Machine h) ->
+        Always _ (Machine h) ->
           liftM2 (\mh ctx γ -> buildIterAlways ctx μ l (buildHandler γ mh u1) (input γ) u2) h ask
-        Same (Machine yes) (Machine no) ->
+        Same _ (Machine yes) _ (Machine no) ->
           liftM3 (\myes mno ctx γ ->  buildIterSame ctx μ l (buildYesHandler γ myes u1) (buildHandler γ mno u1) (input γ) u2) yes no ask
 
 evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a

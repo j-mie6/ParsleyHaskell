@@ -68,10 +68,10 @@ pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
 rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
-rollbackHandler = Always (In4 (Seek (In4 Empt)))
+rollbackHandler = Always True (In4 (Seek (In4 Empt)))
 
 parsecHandler :: Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
-parsecHandler k = Same k (In4 Empt)
+parsecHandler k = Same True k True (In4 Empt)
 
 altNoCutCompile :: CodeGen o a y -> CodeGen o a x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
@@ -110,9 +110,9 @@ chainPostCompile p op preOp preM m =
 
 deep :: Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
-deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q (Always . In4 . Seek) id
-deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (Always . In4 . Seek) (In4 . Pop . In4 . Push (user x))
-deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (Always . In4 . Seek) (In4 . _Fmap (user f))
+deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q (Always True . In4 . Seek) id
+deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (Always True . In4 . Seek) (In4 . Pop . In4 . Push (user x))
+deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q (Always True . In4 . Seek) (In4 . _Fmap (user f))
 deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
@@ -143,7 +143,7 @@ shallow (NotFollowedBy p) m =
      let np = coinsNeeded pc
      let nm = coinsNeeded m
      -- The minus here is used because the shared coins are propagated out front, neat.
-     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc))) (Always (In4 (Seek (In4 (Push (user UNIT) m))))))
+     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc))) (Always True (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))

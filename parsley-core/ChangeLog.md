@@ -96,3 +96,7 @@ Fix for issue #27
 * Added `BlockCoins` instruction and `CutImmune` node.
 * Changed how cut compliance is determined, and stopped some incorrect factoring.
 * Removed unneeded flags for analysis.
+
+## 1.7.0.0 -- TBD
+
+* Added fields to the handlers to signify if they should generate a binding or not.

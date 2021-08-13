@@ -73,5 +73,5 @@ alg (LogExit _ k)      n         = getStack k n
 alg (MetaInstr _ k)    n         = getStack k n
 
 algHandler :: Handler o RelevancyStack xs n r a -> SNat (Length xs) -> Vec (Length xs) Bool
-algHandler (Same yes no) (SSucc n) = VCons True (let VCons _ xs = zipRelevancy (VCons False (getStack yes n)) (getStack no (SSucc n)) in xs)
-algHandler (Always k) n = getStack k n
+algHandler (Same _ yes _ no) (SSucc n) = VCons True (let VCons _ xs = zipRelevancy (VCons False (getStack yes n)) (getStack no (SSucc n)) in xs)
+algHandler (Always _ k) n = getStack k n

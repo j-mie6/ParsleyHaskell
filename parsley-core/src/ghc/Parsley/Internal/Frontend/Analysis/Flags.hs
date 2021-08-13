@@ -9,20 +9,15 @@ Contains flags that can control how analysis should proceed.
 
 @since 1.5.0.0
 -}
-module Parsley.Internal.Frontend.Analysis.Flags (AnalysisFlags(letBound), emptyFlags) where
+module Parsley.Internal.Frontend.Analysis.Flags (AnalysisFlags, emptyFlags) where
 
 {-|
 The packaged flags object.
 
 @since 1.5.0.0
 -}
-newtype AnalysisFlags = AnalysisFlags {
-  {-|
-  Is the binding used in this analysis let-bound?
+data AnalysisFlags = AnalysisFlags {
 
-  @since 1.5.0.0
-  -}
-  letBound :: Bool
 }
 
 {-|
@@ -31,4 +26,4 @@ An empty `AnalysisFlags` instance populated with sensible default values.
 @since 1.5.0.0
 -}
 emptyFlags :: AnalysisFlags
-emptyFlags = AnalysisFlags False
+emptyFlags = AnalysisFlags {}

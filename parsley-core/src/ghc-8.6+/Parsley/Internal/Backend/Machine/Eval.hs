@@ -203,3 +203,4 @@ evalMeta (PrefetchChar check) (Machine k) =
      if | not check     -> k
         | requiresPiggy -> local (storePiggy 1) k
         | otherwise     -> local (giveCoins 1) k <&> \mk γ -> emitLengthCheck 1 mk (raise γ) γ
+evalMeta BlockCoins (Machine k) = k

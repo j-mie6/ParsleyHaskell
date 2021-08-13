@@ -28,8 +28,8 @@ coinsNeeded = fst . getConst4 . cata4 (Const4 . alg)
 first :: (a -> b) -> (a, x) -> (b, x)
 first = flip bimap id
 
-second :: (a -> b) -> (x, a) -> (x, b)
-second = bimap id
+--second :: (a -> b) -> (x, a) -> (x, b)
+--second = bimap id
 
 bimap :: (a -> b) -> (c -> d) -> (a, c) -> (b, d)
 bimap = curry (bilift2 ($) ($))
@@ -72,9 +72,10 @@ alg (LogEnter _ k)                          = getConst4 k
 alg (LogExit _ k)                           = getConst4 k
 alg (MetaInstr (AddCoins _) (Const4 k))     = k
 alg (MetaInstr (RefundCoins n) (Const4 k))  = first (minCoins zero . (`minus` n)) k -- These were refunded, so deduct
-alg (MetaInstr (DrainCoins _) (Const4 k))   = second (const False) k
-alg (MetaInstr (GiveBursary n) (Const4 _))  = (n, False)                            -- We know that `n` is the required for `k`
+alg (MetaInstr (DrainCoins n) _)            = (n, False)                            -- Used to be `second (const False) k`, but these should be additive?
+alg (MetaInstr (GiveBursary n) _)           = (n, False)                            -- We know that `n` is the required for `k`
 alg (MetaInstr (PrefetchChar _) (Const4 k)) = k
+alg (MetaInstr BlockCoins (Const4 k))       = first (const zero) k
 
 algHandler :: Handler o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)
 algHandler (Same yes no) = algCatch (getConst4 yes) (getConst4 no)

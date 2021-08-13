@@ -19,7 +19,7 @@ import Parsley.Internal.Core.CombinatorAST             (Combinator)
 import Parsley.Internal.Frontend.Analysis.Cut          (cutAnalysis)
 import Parsley.Internal.Frontend.Analysis.Dependencies (dependencyAnalysis)
 
-import Parsley.Internal.Frontend.Analysis.Flags as Flags (emptyFlags, AnalysisFlags(letBound))
+import Parsley.Internal.Frontend.Analysis.Flags as Flags (emptyFlags, AnalysisFlags)
 
 {-|
 Performs Cut-Analysis on the combinator tree (See "Parsley.Internal.Frontend.Analysis.Cut")
@@ -27,4 +27,4 @@ Performs Cut-Analysis on the combinator tree (See "Parsley.Internal.Frontend.Ana
 @since 1.5.0.0
 -}
 analyse :: AnalysisFlags -> Fix Combinator a -> Fix Combinator a
-analyse flags = cutAnalysis (letBound flags)
+analyse _ = cutAnalysis

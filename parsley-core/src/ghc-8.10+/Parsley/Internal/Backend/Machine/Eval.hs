@@ -249,3 +249,4 @@ evalMeta (PrefetchChar check) k =
     mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (input γ)
     mkCheck False k = k
     prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
+evalMeta BlockCoins (Machine k) = k

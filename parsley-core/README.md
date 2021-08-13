@@ -1,8 +1,8 @@
 # Parsley Internals
 
-This package contains the internals for the [`parsley`](https://hackage.haskell.org/package/parsley-core) library. 
+This package contains the internals for the [`parsley`](https://hackage.haskell.org/package/parsley) library.
 
-The version policy adheres to the regular Haskell PVP, but the two major versions are distinguished: 
+The version policy adheres to the regular Haskell PVP, but the two major versions are distinguished:
 the first is the _Public API_ major version, which represents backwards incompatible changes
 in the regular PVP sense that effect the `parsley` package itself and its users; the second version is the
 _Internal API_ major version, which would only effect users who use part of the internal parsley

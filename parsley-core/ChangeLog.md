@@ -89,3 +89,9 @@ Misc:
 * Added type to `next` in `CharList`.
 * Added auxilliary information parameter to `sat`.
 * Added `fetch` and broke it out of `sat`.
+
+## 1.6.0.0 -- 2021-08-12
+Fix for issue #27
+
+* Added `BlockCoins` instruction and `CutImmune` node
+* Changed how cut compliance is determined, and stopped some incorrect factoring

@@ -14,12 +14,11 @@ to the low-level representation.
 -}
 module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 
-import Data.Maybe                          (isJust)
 import Data.Set                            (Set, elems)
 import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                             _Fmap, _App, _Modify, _Get, _Put, _Make,
-                                            addCoins, refundCoins, drainCoins, giveBursary,
+                                            addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
                                             minus, minCoins, maxCoins, zero,
                                             IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded)
@@ -57,12 +56,9 @@ codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p +
     m = finalise (histo alg p)
     alg :: Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
-    finalise cg =
-      let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
-      -- let-bound things are not safe to factor length checks out of
-      -- This is because we do not know the cut characteristics of every caller
-      -- In theory this /could/ be computed as the union of every call site
-      in if isJust letBound then m else addCoins (coinsNeeded m) m
+    -- It is never safe to add coins to the top of a binding
+    -- This is because we don't know the characteristics of the caller (even the top-level!)
+    finalise cg = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
 pattern f :<$>: p <- (_ :< Pure f) :<*>: p
@@ -163,14 +159,15 @@ shallow (Match p fs qs def) m =
      let minc = coinsNeeded (In4 (Choices (map userBool fs) qcs defc))
      let defc':qcs' = map (maxCoins zero . (`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
-shallow (Let _ μ _)            m = do return $! tailCallOptimise μ m
-shallow (ChainPre op p)        m = do chainPreCompile op p addCoinsNeeded id m
-shallow (ChainPost p op)       m = do chainPostCompile p op addCoinsNeeded id m
-shallow (MakeRegister σ p q)   m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
-shallow (GetRegister σ)        m = do return $! In4 (_Get σ m)
-shallow (PutRegister σ p)      m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) m))))
-shallow (Debug name p)         m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
-shallow (MetaCombinator Cut p) m = do runCodeGen p (addCoins (coinsNeeded m) m)
+shallow (Let _ μ _)                  m = do return $! tailCallOptimise μ m
+shallow (ChainPre op p)              m = do chainPreCompile op p addCoinsNeeded id m
+shallow (ChainPost p op)             m = do chainPostCompile p op addCoinsNeeded id m
+shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
+shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
+shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) m))))
+shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
+shallow (MetaCombinator Cut p)       m = do blockCoins <$> runCodeGen p (addCoins (coinsNeeded m) m)
+shallow (MetaCombinator CutImmune p) m = do addCoins . coinsNeeded <$> runCodeGen p (In4 Ret) <*> runCodeGen p m
 
 tailCallOptimise :: MVar x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 tailCallOptimise μ (In4 Ret) = In4 (Jump μ)

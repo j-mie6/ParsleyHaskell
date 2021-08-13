@@ -5,7 +5,7 @@ name:                parsley-core
 --                   | +------- breaking internal API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             1.5.0.0
+version:             1.6.0.0
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
 description:         This package contains the internals of the @parsley@ package.
                      .
@@ -167,6 +167,13 @@ test-suite common-test
   build-depends:       tasty-hunit, tasty-quickcheck
   main-is:             CommonTest.hs
   other-modules:       CommonTest.Queue, CommonTest.RewindQueue
+
+test-suite regression-test
+  import:              test-common
+  type:                exitcode-stdio-1.0
+  build-depends:       tasty-hunit, tasty-quickcheck, containers
+  main-is:             RegressionTest.hs
+  other-modules:       Regression.Issue27
 
 source-repository head
   type:                git

@@ -25,9 +25,8 @@ Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
 
 @since 1.5.0.0
 -}
-cutAnalysis :: Bool -- ^ Whether or not the parser in question is a let-bound parser.
-            -> Fix Combinator a -> Fix Combinator a
-cutAnalysis letBound = fst . ($ letBound) . doCut . zygo (CutAnalysis . cutAlg) compliance
+cutAnalysis :: Fix Combinator a -> Fix Combinator a
+cutAnalysis = fst . ($ True) . doCut . zygo (CutAnalysis . cutAlg) compliance
 
 data Compliance (k :: Type) = DomComp | NonComp | Comp | FullPure deriving stock (Show, Eq)
 newtype CutAnalysis a = CutAnalysis { doCut :: Bool -> (Fix Combinator a, Bool) }
@@ -75,11 +74,24 @@ cutAlg (Pure x) _ = (In (Pure x), False)
 cutAlg (Satisfy f) cut = (mkCut cut (In (Satisfy f)), True)
 cutAlg Empty _ = (In Empty, False)
 cutAlg (Let r μ p) cut = (mkCut (not cut) (In (Let r μ (fst (doCut (ifst p) True)))), False) -- If there is no cut, we generate a piggy for the continuation
-cutAlg (Try p) _ = False <$ rewrap Try False (ifst p)
-cutAlg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (requiresCut (In (fst (doCut p True) :<|>: fst (doCut q False))), True)
+cutAlg (Try p) cut = (In (Try (mkImmune cut (fst (doCut (ifst p) False)))), False)
+-- Special case of below, but we know immunity is useless within `q`
+cutAlg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (requiresCut (In (fst (doCut p True) :<|>: fst (doCut q False))), False)
+-- both branches have to handle a cut, if `p` fails having consumed input that satisfies a cut
+-- but if it doesn't, then `q` will need to handle the cut instead. When `q` has no cut to handle,
+-- then that means it is immune to cuts, which is handy!
+cutAlg ((p :*: NonComp) :<|>: q) cut =
+  let (p', handled) = doCut p True
+      (q', handled') = doCut (ifst q) cut
+  in (requiresCut (In (p' :<|>: mkImmune (not cut) q')), handled && handled')
+-- Why cut in both branches? Good question
+-- The point here is that, even though `p` doesn't require a cut, this will enable an immunity
+-- allowing for internal factoring  of input. However, if we are not under a cut requirement, we'd
+-- like this input to be factored out further.
 cutAlg (p :<|>: q) cut =
-  let (q', handled) = doCut (ifst q) cut
-  in (In (fst (doCut (ifst p) False) :<|>: q'), handled)
+  let (p', handled) = doCut (ifst p) cut
+      (q', handled') = doCut (ifst q) cut
+  in (In (p' :<|>: q'), handled && handled')
 cutAlg (l :<*>: r) cut = seqCutAlg (:<*>:) cut (ifst l) (ifst r)
 cutAlg (l :<*: r) cut = seqCutAlg (:<*:) cut (ifst l) (ifst r)
 cutAlg (l :*>: r) cut = seqCutAlg (:*>:) cut (ifst l) (ifst r)
@@ -88,16 +100,18 @@ cutAlg (NotFollowedBy p) _ = False <$ rewrap NotFollowedBy False (ifst p)
 cutAlg (Debug msg p) cut = rewrap (Debug msg) cut (ifst p)
 cutAlg (ChainPre (op :*: NonComp) p) _ =
   let (op', _) = doCut op True
-      (p', _) = doCut (ifst p) False
-  in (requiresCut (In (ChainPre op' p')), True)
+      (p', handled) = doCut (ifst p) False
+  -- the loop could terminate having read no `op`s, so only `p` can decide if its handled.
+  in (requiresCut (In (ChainPre op' p')), handled)
 cutAlg (ChainPre op p) cut =
   let (op', _) = doCut (ifst op) False
       (p', handled) = doCut (ifst p) cut
   in (mkCut (not cut) (In (ChainPre op' p')), handled)
 cutAlg (ChainPost p (op :*: NonComp)) cut =
-  let (p', _) = doCut (ifst p) cut
+  let (p', handled) = doCut (ifst p) cut
       (op', _) = doCut op True
-  in (requiresCut (In (ChainPost p' op')), True)
+  -- the loop could terminate having read no `op`s, so only `p` can decide if its handled.
+  in (requiresCut (In (ChainPost p' op')), handled)
 cutAlg (ChainPost p op) cut =
   let (p', handled) = doCut (ifst p) cut
       (op', _) = doCut (ifst op) False
@@ -120,6 +134,10 @@ cutAlg (MetaCombinator m p) cut = rewrap (MetaCombinator m) cut (ifst p)
 mkCut :: Bool -> Fix Combinator a -> Fix Combinator a
 mkCut True = In . MetaCombinator Cut
 mkCut False = id
+
+mkImmune :: Bool -> Fix Combinator a -> Fix Combinator a
+mkImmune True = In . MetaCombinator CutImmune
+mkImmune False = id
 
 requiresCut :: Fix Combinator a -> Fix Combinator a
 requiresCut = In . MetaCombinator RequiresCut

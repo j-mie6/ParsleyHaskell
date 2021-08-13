@@ -50,8 +50,14 @@ It is the abstracted representation of a runtime storage location.
 newtype Reg (r :: Type) a = Reg (ΣVar a)
 
 data MetaCombinator where
+  -- | After this combinator exits, a cut has happened
   Cut         :: MetaCombinator
+  -- | This combinator requires a cut from below to respect parsec semantics
   RequiresCut :: MetaCombinator
+  -- | This combinator denotes that within its scope, cut semantics are not enforced
+  -- 
+  -- @since 1.6.0.0
+  CutImmune   :: MetaCombinator
 
 -- Instances
 instance IFunctor Combinator where
@@ -107,6 +113,7 @@ instance IFunctor ScopeRegister where
 instance Show MetaCombinator where
   show Cut = "coins after"
   show RequiresCut = "requires cut"
+  show CutImmune = "immune to cuts"
 
 {-# INLINE traverseCombinator #-}
 traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)

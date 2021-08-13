@@ -25,7 +25,6 @@ import Data.HashMap.Strict                 (HashMap)
 import Data.HashSet                        (HashSet)
 import Data.IORef                          (IORef, newIORef, readIORef, writeIORef)
 import Data.Kind                           (Type)
-import Data.Maybe                          (isJust)
 import Data.Set                            (Set)
 import Control.Arrow                       (first, second)
 import Control.Monad                       (void, when)
@@ -40,7 +39,7 @@ import Parsley.Internal.Common.Fresh       (HFreshT, newVar, runFreshT)
 import Parsley.Internal.Common.Indexed     (Fix(In), cata, cata', IFunctor(imap), (:+:)(..), (\/), Const1(..))
 import Parsley.Internal.Common.State       (State, get, gets, runState, execState, modify', MonadState)
 import Parsley.Internal.Frontend.Optimiser (optimise)
-import Parsley.Internal.Frontend.Analysis  (analyse, emptyFlags, letBound, dependencyAnalysis)
+import Parsley.Internal.Frontend.Analysis  (analyse, emptyFlags, dependencyAnalysis)
 import Parsley.Internal.Trace              (Trace(trace))
 import System.IO.Unsafe                    (unsafePerformIO)
 
@@ -71,7 +70,7 @@ compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.s
     freeRegs = maybe Set.empty (\(MVar v) -> frs Map.! v)
 
     codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
-    codeGen' letBound p = codeGen letBound (analyse (emptyFlags {letBound = isJust letBound}) p) (freeRegs letBound) (maxV + 1) (maxΣ + 1)
+    codeGen' letBound p = codeGen letBound (analyse emptyFlags p) (freeRegs letBound) (maxV + 1) (maxΣ + 1)
 
 preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 preprocess p =

@@ -68,7 +68,7 @@ the compilation pipeline when "Parsley.Internal.Verbose" is imported.
 runParser :: (Trace, Input input)
           => Parser a                -- ^ The parser to be compiled
           -> Code (input -> Maybe a) -- ^ The generated parsing function
-runParser p = [||\input -> $$(eval [||input||] (compile p codeGen))||]
+runParser p = [||\input -> $$(eval [||input||] (compile (try p) codeGen))||]
 
 {-|
 This function generates a function that reads input from a file

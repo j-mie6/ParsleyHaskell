@@ -23,3 +23,7 @@
 ## 1.0.0.1 -- 2021-06-29
 
 * Improved implementation of `oneOf` and `noneOf` to use ranges and not exhaustive character search
+
+## 1.0.0.2 -- 2021-08-13
+
+* Added small optimisation to accomodate new core changes: added `try` for all top-level parsers.

@@ -29,7 +29,7 @@ toAST :: Parser a -> Fix Combinator a
 toAST = cata (In \/ undefined) . unParser
 
 codeGen' :: Fix Combinator a -> Binding o a a
-codeGen' p = body (codeGen Nothing p Set.empty 0 0)
+codeGen' p = body (codeGen Nothing p Set.empty 0)
 
 ex1_p :: Fix Combinator String
 ex1_p = toAST $ try $ string "123" <|> string "45"

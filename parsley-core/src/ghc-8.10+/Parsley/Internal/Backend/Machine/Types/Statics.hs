@@ -21,7 +21,7 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
 
     -- ** @StaHandler@ Builders
     -- | The following functions are builders of `StaHandler`.
-    mkStaHandler, mkStaHandlerNoOffset, mkStaHandlerDyn, mkStaHandlerFull,
+    mkStaHandler, mkStaHandlerSta, mkStaHandlerDyn, mkStaHandlerFull,
 
     -- ** @StaHandler@ Interpreters
     -- | The following functions interpret or extract information from `StaHandler`.
@@ -89,9 +89,6 @@ attached to.
 staHandler# :: StaHandler s o a -> StaHandler# s o a
 staHandler# (StaHandler _ sh _) = unWrapSta (unknown sh)
 
-_mkStaHandler :: Maybe (Offset o) -> StaHandler# s o a -> StaHandler s o a
-_mkStaHandler o sh = StaHandler o (mkUnknownSta sh) Nothing
-
 {-|
 Augments a `StaHandler#` with information about what the offset is that
 the handler has captured. This is a purely static handler, which is not
@@ -99,18 +96,8 @@ derived from a dynamic one.
 
 @since 1.4.0.0
 -}
-mkStaHandler :: Offset o -> StaHandler# s o a -> StaHandler s o a
-mkStaHandler = _mkStaHandler . Just
-
-{-|
-Converts a `StaHandler#` into a `StaHandler` without any information
-about the captured offset. This is a purely static handler, not derived
-from a dynamic one.
-
-@since 1.4.0.0
--}
-mkStaHandlerNoOffset :: StaHandler# s o a -> StaHandler s o a
-mkStaHandlerNoOffset = _mkStaHandler Nothing
+mkStaHandlerSta :: Maybe (Offset o) -> StaHandler# s o a -> StaHandler s o a
+mkStaHandlerSta o sh = StaHandler o (mkUnknownSta sh) Nothing
 
 {-|
 Converts a `Parsley.Internal.Machine.Types.Dynamics.DynHandler` into a
@@ -123,6 +110,9 @@ if it is converted back the conversion is free.
 -}
 mkStaHandlerDyn :: forall s o a. Maybe (Offset o) -> DynHandler s o a -> StaHandler s o a
 mkStaHandlerDyn c dh = StaHandler c (mkUnknownSta (mkStaHandler# @o dh)) (Just (mkUnknownDyn dh))
+
+mkStaHandler :: Maybe (Offset o) -> Either (DynHandler s o a) (StaHandler# s o a) -> StaHandler s o a
+mkStaHandler o = either (mkStaHandlerDyn o) (mkStaHandlerSta o)
 
 {-|
 When the behaviours of a handler given input that matches or does not match

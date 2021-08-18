@@ -12,7 +12,7 @@ Stability   : experimental
 This module contains the parts of the code-base that deal with levity-polymorphic code.
 
 For performance, and to help GHC optimise, parsley takes an aggressive stance with unboxing
-and representing input using unlifted types. This means that the code generator is levity 
+and representing input using unlifted types. This means that the code generator is levity
 polymorphic. While the generated code itself is not polymorphic, to respect the soundness
 of GHC, any code that is generated which explicitly creates an unlifted value is kept in
 type-class methods and instantiated for every input type. All of these classes are found
@@ -76,7 +76,7 @@ Generates join-point bindings.
 @since 1.4.0.0
 -}
 class JoinBuilder o where
-  {-| 
+  {-|
   Generate a let-bound join point and provide it to another continuation.
 
   @since 1.4.0.0
@@ -169,7 +169,7 @@ class MarshalOps o where
 #define deriveMarshalOps(_o)                                          \
 instance MarshalOps _o where                                          \
 {                                                                     \
-  dynHandler# sh = [||\ !(o# :: Rep _o) -> $$(sh [||o#||]) ||];       \
+  dynHandler# sh = [||\ (o# :: Rep _o) -> $$(sh [||o#||]) ||];        \
   dynCont# sk = [||\ x (o# :: Rep _o) -> $$(sk [||x||] [||o#||]) ||]; \
 };
 inputInstances(deriveMarshalOps)

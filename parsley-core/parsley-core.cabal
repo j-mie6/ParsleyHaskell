@@ -85,6 +85,7 @@ library
                        Parsley.Internal.Backend.Machine.InputRep,
                        Parsley.Internal.Backend.Machine.Instructions,
                        Parsley.Internal.Backend.Machine.Ops,
+                       Parsley.Internal.Backend.Machine.THUtils,
 
                        Parsley.Internal.Backend.Machine.Types,
                        Parsley.Internal.Backend.Machine.Types.Coins,

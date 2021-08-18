@@ -149,10 +149,10 @@ evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ 
 
 evalCatch :: (PositionOps (Rep o), HandlerOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) h = freshUnique $ \u -> case h of
-  Always _ (Machine h) ->
-    liftM2 (\mk mh γ -> bindAlwaysHandler γ (buildHandler γ mh u) mk) k h
-  Same _ (Machine yes) _ (Machine no) ->
-    liftM3 (\mk myes mno γ -> bindSameHandler γ (buildYesHandler γ myes u) (buildHandler γ mno u) mk) k yes no
+  Always gh (Machine h) ->
+    liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
+  Same gyes (Machine yes) gno (Machine no) ->
+    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes u) gno (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (OFFSET (input γ)) (operands γ)})
@@ -182,10 +182,10 @@ evalIter μ l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       case h of
-        Always _ (Machine h) ->
-          liftM2 (\mh ctx γ -> buildIterAlways ctx μ l (buildHandler γ mh u1) (input γ) u2) h ask
-        Same _ (Machine yes) _ (Machine no) ->
-          liftM3 (\myes mno ctx γ ->  buildIterSame ctx μ l (buildYesHandler γ myes u1) (buildHandler γ mno u1) (input γ) u2) yes no ask
+        Always gh (Machine h) ->
+          liftM2 (\mh ctx γ -> buildIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
+        Same gyes (Machine yes) gno (Machine no) ->
+          liftM3 (\myes mno ctx γ ->  buildIterSame ctx μ l gyes (buildYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
 
 evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume
@@ -217,7 +217,7 @@ evalPut σ a k = reader $ \ctx γ ->
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) = freshUnique $ \u ->
-  liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindAlwaysHandler γ (logHandler name ctx γ u) k)||])
+  liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindAlwaysHandler γ True (logHandler name ctx γ u) k)||])
     (local debugUp mk)
     ask
 

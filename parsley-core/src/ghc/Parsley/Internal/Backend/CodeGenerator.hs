@@ -17,22 +17,22 @@ module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 import Data.Set                            (Set, elems)
 import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
-                                            _Fmap, _App, _Modify, _Get, _Put, _Make,
+                                            _Fmap, _App, _Get, _Put, _Make,
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
                                             minus, minCoins, maxCoins, zero,
-                                            IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
+                                            IMVar, IΦVar, MVar(..), ΦVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline)
-import Parsley.Internal.Common.Fresh       (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
+import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
 import Parsley.Internal.Common.Indexed     (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
-import Parsley.Internal.Core.Defunc        (Defunc(COMPOSE, ID), pattern FLIP_H, pattern UNIT)
+import Parsley.Internal.Core.Defunc        (pattern UNIT)
 import Parsley.Internal.Trace              (Trace(trace))
 
 import Parsley.Internal.Core.Defunc as Core (Defunc)
 
-type CodeGenStack a = VFreshT IΦVar (VFreshT IMVar (HFresh IΣVar)) a
-runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> IΣVar -> a
-runCodeGenStack m μ0 φ0 = evalFresh (evalFreshT (evalFreshT m φ0) μ0)
+type CodeGenStack a = VFreshT IΦVar (VFresh IMVar) a
+runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> a
+runCodeGenStack m μ0 φ0 = evalFresh (evalFreshT m φ0) μ0
 
 newtype CodeGen o a x =
   CodeGen {runCodeGen :: forall xs n r. Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)}
@@ -48,9 +48,8 @@ codeGen :: Trace
         -> Fix Combinator x -- ^ The definition of the parser.
         -> Set SomeΣVar     -- ^ The free registers it requires to run.
         -> IMVar            -- ^ The binding identifier to start name generation from.
-        -> IΣVar            -- ^ The register identifier to start name generation from.
         -> LetBinding o a x
-codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs newMeta
+codeGen letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs newMeta
   where
     name = maybe "TOP LEVEL" show letBound
     m = finalise (histo alg p)
@@ -58,7 +57,7 @@ codeGen letBound p rs μ0 σ0 = trace ("GENERATING " ++ name ++ ": " ++ show p +
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
     -- It is never safe to add coins to the top of a binding
     -- This is because we don't know the characteristics of the caller (even the top-level!)
-    finalise cg = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 σ0
+    finalise cg = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
 pattern f :<$>: p <- (_ :< Pure f) :<*>: p
@@ -90,26 +89,15 @@ altNoCutCompile p q handler post m =
      let dq = nq `minus` minCoins np nq
      return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
 
-chainPreCompile :: CodeGen o a (x -> x) -> CodeGen o a x
-                -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
-                -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
-                -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
-chainPreCompile op p preOp preP m =
+loopCompile :: CodeGen o a () -> CodeGen o a x
+            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
+            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
+            -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
+loopCompile body exit prebody preExit m =
   do μ <- askM
-     σ <- freshΣ
-     opc <- freshM (runCodeGen op (In4 (_Fmap (user (FLIP_H COMPOSE)) (In4 (_Modify σ (In4 (Jump μ)))))))
-     pc <- freshM (runCodeGen p (In4 (_App m)))
-     return $! In4 (Push (user ID) (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preP pc)))))))))
-
-chainPostCompile :: CodeGen o a x -> CodeGen o a (x -> x)
-                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
-                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
-                 -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
-chainPostCompile p op preOp preM m =
-  do μ <- askM
-     σ <- freshΣ
-     opc <- freshM (runCodeGen op (In4 (_Modify σ (In4 (Jump μ)))))
-     freshM (runCodeGen p (In4 (_Make σ (In4 (Iter μ (preOp opc) (parsecHandler (In4 (_Get σ (preM m)))))))))
+     bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (Jump μ)))))
+     exitc <- freshM (runCodeGen exit m)
+     return $! In4 (Iter μ (prebody bodyc) (parsecHandler (preExit exitc)))
 
 deep :: Trace => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
@@ -121,9 +109,8 @@ deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ Code
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
      qc <- freshΦ (runCodeGen q φ)
      return $! binder (In4 (Catch pc (parsecHandler qc)))
-deep (MetaCombinator RequiresCut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ chainPreCompile op p id addCoinsNeeded
-deep (MetaCombinator RequiresCut (_ :< ChainPost (p :< _) (op :< _))) = Just $ CodeGen $ chainPostCompile p op id addCoinsNeeded
-deep (MetaCombinator Cut (_ :< ChainPre (op :< _) (p :< _))) = Just $ CodeGen $ chainPreCompile op p addCoinsNeeded addCoinsNeeded
+deep (MetaCombinator RequiresCut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit id addCoinsNeeded
+deep (MetaCombinator Cut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit addCoinsNeeded addCoinsNeeded
 deep _ = Nothing
 
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
@@ -163,8 +150,7 @@ shallow (Match p fs qs def) m =
      let defc':qcs' = map (maxCoins zero . (`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m
-shallow (ChainPre op p)              m = do chainPreCompile op p addCoinsNeeded id m
-shallow (ChainPost p op)             m = do chainPostCompile p op addCoinsNeeded id m
+shallow (Loop body exit)             m = do loopCompile body exit addCoinsNeeded id m
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
 shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) m))))
@@ -210,6 +196,3 @@ makeΦ m | shouldInline m = trace ("eliding " ++ show m) $ return (id, m)
     elidable (In4 (Pop (In4 (Jump _)))) = True
     elidable _                          = False-}
 makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In4 . MkJoin φ (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
-
-freshΣ :: CodeGenStack (ΣVar a)
-freshΣ = lift (lift (construct ΣVar))

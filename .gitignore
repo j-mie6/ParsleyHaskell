@@ -3,7 +3,7 @@
 *.svg
 /dist-newstyle/
 *.dump*
-/dump-core/
+*/dump-core/
 .vscode/
 *.hp
 *.prof

@@ -28,11 +28,11 @@ import Data.STRef                           (newSTRef, readSTRef, writeSTRef)
 import Parsley.Internal.Common.Indexed      (Fix, cata, Const1(..), (:*:)(..), zipper)
 import Parsley.Internal.Common.State        (State, MonadState, execState, modify')
 import Parsley.Internal.Core.CombinatorAST  (Combinator(..), traverseCombinator)
-import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), IΣVar, ΣVar, SomeΣVar(..), getIΣVar)
+import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), ΣVar, SomeΣVar(..))
 
 import qualified Data.Dependent.Map as DMap (foldrWithKey, filterWithKey)
-import qualified Data.Map.Strict    as Map  ((!), empty, insert, mapMaybeWithKey, findMax, elems, lookup, foldMapWithKey)
-import qualified Data.Set           as Set  (elems, empty, insert, lookupMax)
+import qualified Data.Map.Strict    as Map  ((!), empty, insert, mapMaybeWithKey, findMax, elems, lookup)
+import qualified Data.Set           as Set  (elems, empty, insert)
 
 type Graph = Array IMVar [IMVar]
 
@@ -51,7 +51,7 @@ free index for any registers created in code generation.
 -}
 -- TODO This actually should be in the backend... dead bindings and the topological ordering can be computed here
 --      but the register stuff should come after register optimisation and instruction peephole
-dependencyAnalysis :: Fix Combinator a -> DMap MVar (Fix Combinator) -> (DMap MVar (Fix Combinator), Map IMVar (Set SomeΣVar), IΣVar)
+dependencyAnalysis :: Fix Combinator a -> DMap MVar (Fix Combinator) -> (DMap MVar (Fix Combinator), Map IMVar (Set SomeΣVar))
 dependencyAnalysis toplevel μs =
   let -- Step 1: find roots of the toplevel
       roots = directDependencies toplevel
@@ -79,8 +79,7 @@ dependencyAnalysis toplevel μs =
                              in Just $ (uses \\ defs) `union` (subUses \\ subDefs)
         | otherwise        = Nothing
       trueRegs = Map.mapMaybeWithKey addNewRegs usedRegisters
-      largestRegister = maybe (-1) getIΣVar (Set.lookupMax (Map.foldMapWithKey (const id) definedRegisters))
-  in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, trueRegs, largestRegister)
+  in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, trueRegs)
 
 minMax :: Ord a => [a] -> (a, a)
 minMax []     = error "cannot find minimum or maximum of empty list"

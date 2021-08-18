@@ -58,10 +58,8 @@ compliance (l :*>: r)               = seqCompliance l r
 compliance (LookAhead c)            = c -- Lookahead will consume input on failure, so its compliance matches that which is beneath it
 compliance (NotFollowedBy _)        = FullPure
 compliance (Debug _ c)              = c
-compliance (ChainPre NonComp p)     = seqCompliance Comp p
-compliance (ChainPre _ p)           = seqCompliance NonComp p
-compliance (ChainPost p NonComp)    = seqCompliance p Comp
-compliance (ChainPost p _)          = seqCompliance p NonComp
+compliance (Loop NonComp exit)      = seqCompliance Comp exit
+compliance (Loop _ exit)            = seqCompliance NonComp exit
 compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
 compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
 compliance (MakeRegister _ l r)     = seqCompliance l r
@@ -98,24 +96,15 @@ cutAlg (l :*>: r) cut = seqCutAlg (:*>:) cut (ifst l) (ifst r)
 cutAlg (LookAhead p) cut = rewrap LookAhead cut (ifst p)
 cutAlg (NotFollowedBy p) _ = False <$ rewrap NotFollowedBy False (ifst p)
 cutAlg (Debug msg p) cut = rewrap (Debug msg) cut (ifst p)
-cutAlg (ChainPre (op :*: NonComp) p) _ =
-  let (op', _) = doCut op True
-      (p', handled) = doCut (ifst p) False
-  -- the loop could terminate having read no `op`s, so only `p` can decide if its handled.
-  in (requiresCut (In (ChainPre op' p')), handled)
-cutAlg (ChainPre op p) cut =
-  let (op', _) = doCut (ifst op) False
-      (p', handled) = doCut (ifst p) cut
-  in (mkCut (not cut) (In (ChainPre op' p')), handled)
-cutAlg (ChainPost p (op :*: NonComp)) cut =
-  let (p', handled) = doCut (ifst p) cut
-      (op', _) = doCut op True
-  -- the loop could terminate having read no `op`s, so only `p` can decide if its handled.
-  in (requiresCut (In (ChainPost p' op')), handled)
-cutAlg (ChainPost p op) cut =
-  let (p', handled) = doCut (ifst p) cut
-      (op', _) = doCut (ifst op) False
-  in (mkCut (cut && handled) (In (ChainPost p' op')), handled)
+cutAlg (Loop (body :*: NonComp) exit) _ =
+  let (body', _) = doCut body True
+      (exit', handled) = doCut (ifst exit) False
+  -- the loop could terminate having read no `body`s, so only `exit` can decide if its handled.
+  in (requiresCut (In (Loop body' exit')), handled)
+cutAlg (Loop body exit) cut =
+  let (body', _) = doCut (ifst body) False
+      (exit', handled) = doCut (ifst exit) cut
+  in (mkCut (not cut) (In (Loop body' exit')), handled)
 cutAlg (Branch b p q) cut =
   let (b', handled) = doCut (ifst b) cut
       (p', handled') = doCut (ifst p) (cut && not handled)

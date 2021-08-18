@@ -26,7 +26,7 @@ import Parsley.Internal.Core.Primitives as Primitives (
     pure, (<*>), (*>), (<*),
     (<|>), empty,
     satisfy, lookAhead, try, notFollowedBy,
-    chainPre, chainPost,
+    chainPre, chainPost, loop,
     Reg, newRegister, get, put,
     conditional, branch,
     debug

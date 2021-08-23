@@ -11,7 +11,8 @@ import Criterion.Main         (Benchmark, bgroup, defaultMain)
 import Control.DeepSeq        (NFData)
 import GHC.Generics           (Generic)
 import Data.ByteString        (ByteString)
-import Parsley.InputExtras    (Text16(..), CharList(..))
+import Parsley.InputExtras    (CharList(..))
+import Data.Text              (Text)
 --import Parsley.Internal.Verbose ()
 import qualified BrainfuckBench.Parsley.Parser
 import qualified BrainfuckBench.Parsec.Parser
@@ -33,7 +34,7 @@ deriving instance NFData BrainFuckOp
 brainfuckParsleyS :: String -> Maybe [BrainFuckOp]
 brainfuckParsleyS = $$(Parsley.runParser BrainfuckBench.Parsley.Parser.brainfuck)
 
-brainfuckParsleyT :: Text16 -> Maybe [BrainFuckOp]
+brainfuckParsleyT :: Text -> Maybe [BrainFuckOp]
 brainfuckParsleyT = $$(Parsley.runParser BrainfuckBench.Parsley.Parser.brainfuck)
 
 brainfuckParsleyB :: ByteString -> Maybe [BrainFuckOp]
@@ -50,9 +51,9 @@ brainfuck =
   let bfTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe [BrainFuckOp]) -> Benchmark
       bfTest = benchmark ["benchmarks/inputs/helloworld.bf", "benchmarks/inputs/helloworld_golfed.bf", "benchmarks/inputs/compiler.bf"]
   in bgroup "Brainfuck"
-       [ bfTest string          "Parsley (Stream)"          (brainfuckParsleySS . CharList)
+       [ bfTest string          "Parsley (CharList)"        (brainfuckParsleySS . CharList)
        , bfTest string          "Parsley (String)"          brainfuckParsleyS
-       , bfTest text            "Parsley (Text)"            (brainfuckParsleyT . Text16)
+       , bfTest text            "Parsley (Text)"            brainfuckParsleyT
        , bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB
        --, bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
        , bfTest string          "Handrolled"                BrainfuckBench.Handrolled.Parser.brainfuck

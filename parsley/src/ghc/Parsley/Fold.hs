@@ -92,7 +92,7 @@ chainl1' :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (b -> a -> b) ->
 chainl1' f p op = chainPost (f <$> p) (FLIP <$> op <*> p)
 
 {-|
-The classic version of the left-associative chain combinator. See `chainl1\'`.
+The classic version of the left-associative chain combinator. See 'chainl1''.
 
 > chainl1 p op = chainl1' ID p op
 
@@ -116,7 +116,7 @@ chainr1' f p op = newRegister_ ID $ \acc ->
   in go <**> get acc
 
 {-|
-The classic version of the right-associative chain combinator. See `chainr1\'`.
+The classic version of the right-associative chain combinator. See 'chainr1''.
 
 > chainr1 p op = chainr1' ID p op
 

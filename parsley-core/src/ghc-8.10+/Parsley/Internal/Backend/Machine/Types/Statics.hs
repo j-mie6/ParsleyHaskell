@@ -17,16 +17,18 @@ call boundaries.
 -}
 module Parsley.Internal.Backend.Machine.Types.Statics (
     -- * Handlers
-    StaHandler#, StaHandler(..), StaHandlerCase, WStaHandler#, WDynHandler,
+    StaHandler#, StaHandler, AugmentedStaHandler, StaHandlerCase,
 
-    -- ** @StaHandler@ Builders
-    -- | The following functions are builders of `StaHandler`.
-    mkStaHandler, mkStaHandlerSta, mkStaHandlerDyn, mkStaHandlerFull,
+    -- ** @StaHandler@ Operations
+    fromStaHandler#, fromDynHandler, staHandler#,
 
-    -- ** @StaHandler@ Interpreters
+    -- ** @AugmentedStaHandler@ Builders
+    -- | The following functions are builders of `AugmentedStaHandler`.
+    mkStaHandler, mkStaHandlerSta, mkStaHandlerDyn, mkStaHandlerFull, mkStaHandlerFull',
+
+    -- ** @AugmentedStaHandler@ Interpreters
     -- | The following functions interpret or extract information from `StaHandler`.
-    staHandler#, staHandlerEval,
-    staHandlerCharacteristicSta, staHandlerCharacteristicDyn,
+    staHandlerEval, staHandlerCharacteristicSta, staHandlerCharacteristicDyn,
 
     -- * Return Continuations
     StaCont#, StaCont(..),
@@ -65,6 +67,20 @@ type StaHandler# s o a = Code (Rep o) -> Code (ST s (Maybe a))
 mkStaHandler# :: forall o s a. DynHandler s o a -> StaHandler# s o a
 mkStaHandler# dh qo# = [||$$dh $$(qo#)||]
 
+data StaHandler s o a = StaHandler {
+    staHandler# :: StaHandler# s o a,
+    dynOrigin :: Maybe (DynHandler s o a)
+  }
+
+dynHandler :: (StaHandler# s o a -> DynHandler s o a) -> StaHandler s o a -> DynHandler s o a
+dynHandler conv = fromMaybe . conv . staHandler# <*> dynOrigin
+
+fromStaHandler# :: StaHandler# s o a -> StaHandler s o a
+fromStaHandler# h = StaHandler h Nothing
+
+fromDynHandler :: forall s o a. DynHandler s o a -> StaHandler s o a
+fromDynHandler h = StaHandler (mkStaHandler# @o h) (Just h)
+
 {-|
 Compared with `StaHandler#`, this type allows for the encoding of various static
 properties of handlers which can be carried around during the lifetime of the handlers.
@@ -73,21 +89,10 @@ domain-specific optimisation data.
 
 @since 1.5.0.0
 -}
-data StaHandler s o a =
-  StaHandler
-    (Maybe (Offset o))                         -- ^ The statically bound offset for this handler, if available.
-    (StaHandlerCase WStaHandler# s o a)        -- ^ The static function representing this handler when offsets are incomparable.
-    (Maybe (StaHandlerCase WDynHandler s o a)) -- ^ The dynamic handler that has been wrapped in this handler, if available.
-
-{-|
-Given a static handler, extracts the underlying handler which
-has "forgotten" any static domain-specific information it had been
-attached to.
-
-@since 1.4.0.0
--}
-staHandler# :: StaHandler s o a -> StaHandler# s o a
-staHandler# (StaHandler _ sh _) = unWrapSta (unknown sh)
+data AugmentedStaHandler s o a =
+  AugmentedStaHandler
+    (Maybe (Offset o))     -- ^ The statically bound offset for this handler, if available.
+    (StaHandlerCase s o a) -- ^ The relevant cases for the handlers behaviour
 
 {-|
 Augments a `StaHandler#` with information about what the offset is that
@@ -96,23 +101,23 @@ derived from a dynamic one.
 
 @since 1.4.0.0
 -}
-mkStaHandlerSta :: Maybe (Offset o) -> StaHandler# s o a -> StaHandler s o a
-mkStaHandlerSta o sh = StaHandler o (mkUnknownSta sh) Nothing
+mkStaHandlerSta :: Maybe (Offset o) -> StaHandler# s o a -> AugmentedStaHandler s o a
+mkStaHandlerSta o sh = mkStaHandler o (StaHandler sh Nothing)
 
 {-|
 Converts a `Parsley.Internal.Machine.Types.Dynamics.DynHandler` into a
-`StaHandler` taking into account the possibility that captured offset
+`AugmentedStaHandler` taking into account the possibility that captured offset
 information is available. The dynamic handler used to construct this
 static handler is maintained as the origin of the handler. This means
 if it is converted back the conversion is free.
 
 @since 1.4.0.0
 -}
-mkStaHandlerDyn :: forall s o a. Maybe (Offset o) -> DynHandler s o a -> StaHandler s o a
-mkStaHandlerDyn c dh = StaHandler c (mkUnknownSta (mkStaHandler# @o dh)) (Just (mkUnknownDyn dh))
+mkStaHandlerDyn :: forall s o a. Maybe (Offset o) -> DynHandler s o a -> AugmentedStaHandler s o a
+mkStaHandlerDyn c dh = mkStaHandler c (StaHandler (mkStaHandler# @o dh) (Just dh))
 
-mkStaHandler :: Maybe (Offset o) -> Either (DynHandler s o a) (StaHandler# s o a) -> StaHandler s o a
-mkStaHandler o = either (mkStaHandlerDyn o) (mkStaHandlerSta o)
+mkStaHandler :: Maybe (Offset o) -> StaHandler s o a -> AugmentedStaHandler s o a
+mkStaHandler c = AugmentedStaHandler c . mkUnknown
 
 {-|
 When the behaviours of a handler given input that matches or does not match
@@ -127,12 +132,21 @@ mkStaHandlerFull :: forall s o a. Offset o -- ^ The offset captured by the creat
                  -> DynHandler s o a       -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
                  -> Code (ST s (Maybe a))  -- ^ The code that is executed when the captured offset matches the input.
                  -> DynHandler s o a       -- ^ The handler to be executed when offsets are known not to match.
-                 -> StaHandler s o a       -- ^ A handler that carries this information around for later refinement.
-mkStaHandlerFull c handler yes no = StaHandler (Just c)
-  (mkFullSta (mkStaHandler# @o handler)
-             yes
-             (mkStaHandler# @o no))
-  (Just (mkFullDyn handler yes no))
+                 -> AugmentedStaHandler s o a       -- ^ A handler that carries this information around for later refinement.
+mkStaHandlerFull c handler yes no = AugmentedStaHandler (Just c)
+  (mkFull (StaHandler (mkStaHandler# @o handler) (Just handler))
+           yes
+          (StaHandler (mkStaHandler# @o no) (Just no)))
+
+mkStaHandlerFull' :: Offset o -- ^ The offset captured by the creation of the handler.
+                  -> StaHandler s o a       -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
+                  -> Code (ST s (Maybe a))  -- ^ The code that is executed when the captured offset matches the input.
+                  -> StaHandler s o a       -- ^ The handler to be executed when offsets are known not to match.
+                  -> AugmentedStaHandler s o a       -- ^ A handler that carries this information around for later refinement.
+mkStaHandlerFull' c handler yes no = AugmentedStaHandler (Just c)
+  (mkFull handler
+          yes
+          no)
 
 {-|
 Unlike `staHandler#`, which returns a handler that accepts @'Code' ('Rep' o)@, this
@@ -149,16 +163,11 @@ which can be used to refine the outcome of the execution of the handler as follo
 
 @since 1.4.0.0
 -}
-staHandlerEval :: StaHandler s o a -> Offset o -> Code (ST s (Maybe a))
-staHandlerEval (StaHandler (Just c) sh _) o
-  | Just True <- same c o            = maybe (unWrapSta (unknown sh)) const (yesSame sh) (offset o)
-  | Just False <- same c o           = unWrapSta (fromMaybe (unknown sh) (notSame sh)) (offset o)
-staHandlerEval (StaHandler _ sh _) o = unWrapSta (unknown sh) (offset o)
-
-staHandlerCharacteristic :: StaHandlerCase h s o a -> (Code (ST s (Maybe a)) -> h s o a) -> InputCharacteristic -> h s o a
-staHandlerCharacteristic sh conv NeverConsumes      = maybe (unknown sh) conv (yesSame sh)
-staHandlerCharacteristic sh _    (AlwaysConsumes _) = fromMaybe (unknown sh) (notSame sh)
-staHandlerCharacteristic sh _    MayConsume         = unknown sh
+staHandlerEval :: AugmentedStaHandler s o a -> Offset o -> Code (ST s (Maybe a))
+staHandlerEval (AugmentedStaHandler (Just c) sh) o
+  | Just True <- same c o                   = maybe (staHandler# (unknown sh)) const (yesSame sh) (offset o)
+  | Just False <- same c o                  = staHandler# (fromMaybe (unknown sh) (notSame sh)) (offset o)
+staHandlerEval (AugmentedStaHandler _ sh) o = staHandler# (unknown sh) (offset o)
 
 {-|
 Selects the correct case out of a `StaHandlerCase` depending on what the `InputCharacteristic` that
@@ -166,20 +175,16 @@ governs the use of the handler is. This means that it can select any of the thre
 
 @since 1.5.0.0
 -}
-staHandlerCharacteristicSta :: StaHandlerCase WStaHandler# s o a -> InputCharacteristic -> StaHandler# s o a
-staHandlerCharacteristicSta h = unWrapSta . staHandlerCharacteristic h (WrapSta . const)
+staHandlerCharacteristic :: AugmentedStaHandler s o a -> (StaHandler# s o a -> DynHandler s o a) -> InputCharacteristic -> StaHandler s o a
+staHandlerCharacteristic (AugmentedStaHandler _ sh) conv NeverConsumes      = maybe (unknown sh) (StaHandler <$> const <*> Just . conv . const) (yesSame sh)
+staHandlerCharacteristic (AugmentedStaHandler _ sh) _    (AlwaysConsumes _) = fromMaybe (unknown sh) (notSame sh)
+staHandlerCharacteristic (AugmentedStaHandler _ sh) _    MayConsume         = unknown sh
 
-{-|
-Selects the correct case out of a `StaHandlerCase` depending on what the `InputCharacteristic` that
-governs the use of the handler is. This means that it can select any of the three cases.
+staHandlerCharacteristicSta :: AugmentedStaHandler s o a -> InputCharacteristic -> StaHandler# s o a
+staHandlerCharacteristicSta sh = staHandler# . staHandlerCharacteristic sh undefined
 
-@since 1.5.0.0
--}
-staHandlerCharacteristicDyn :: StaHandlerCase WDynHandler s o a
-                            -> (Code (ST s (Maybe a)) -> DynHandler s o a) -- ^ How to convert the input-same case to a `DynHandler`.
-                            -> InputCharacteristic
-                            -> DynHandler s o a
-staHandlerCharacteristicDyn h conv = unWrapDyn . staHandlerCharacteristic h (WrapDyn . conv)
+staHandlerCharacteristicDyn :: AugmentedStaHandler s o a -> (StaHandler# s o a -> DynHandler s o a) -> InputCharacteristic -> DynHandler s o a
+staHandlerCharacteristicDyn sh conv = dynHandler conv . staHandlerCharacteristic sh conv
 
 {-|
 Represents potentially three handlers: one for unknown offset cases, one for offset known to be
@@ -188,46 +193,20 @@ a generic handler type, which is instantiated to one of `WStaHandler#` or `WDynH
 
 @since 1.5.0.0
 -}
-data StaHandlerCase h s (o :: Type) a = StaHandlerCase {
+data StaHandlerCase s (o :: Type) a = StaHandlerCase {
   -- | The static function representing this handler when offsets are incomparable.
-  unknown :: h s o a,
+  unknown :: StaHandler s o a,
   -- | The static value representing this handler when offsets are known to match, if available.
   yesSame :: Maybe (Code (ST s (Maybe a))),
   -- | The static function representing this handler when offsets are known not to match, if available.
-  notSame :: Maybe (h s o a)
+  notSame :: Maybe (StaHandler s o a)
 }
 
-{-|
-Wraps a `StaHandler#`.
-
-@since 1.5.0.0
--}
-newtype WStaHandler# s o a = WrapSta { unWrapSta :: StaHandler# s o a }
-
-{-|
-Wraps a `DynHandler`.
-
-@since 1.5.0.0
--}
-newtype WDynHandler s o a = WrapDyn { unWrapDyn :: DynHandler s o a }
-
-mkUnknown :: h s o a -> StaHandlerCase h s o a
+mkUnknown :: StaHandler s o a -> StaHandlerCase s o a
 mkUnknown h = StaHandlerCase h Nothing Nothing
 
-mkUnknownSta :: StaHandler# s o a -> StaHandlerCase WStaHandler# s o a
-mkUnknownSta = mkUnknown . WrapSta
-
-mkUnknownDyn :: DynHandler s o a -> StaHandlerCase WDynHandler s o a
-mkUnknownDyn = mkUnknown . WrapDyn
-
-mkFull :: h s o a -> Code (ST s (Maybe a)) -> h s o a -> StaHandlerCase h s o a
+mkFull :: StaHandler s o a -> Code (ST s (Maybe a)) -> StaHandler s o a -> StaHandlerCase s o a
 mkFull h yes no = StaHandlerCase h (Just yes) (Just no)
-
-mkFullSta :: StaHandler# s o a -> Code (ST s (Maybe a)) -> StaHandler# s o a -> StaHandlerCase WStaHandler# s o a
-mkFullSta h yes no = mkFull (WrapSta h) yes (WrapSta no)
-
-mkFullDyn :: DynHandler s o a -> Code (ST s (Maybe a)) -> DynHandler s o a -> StaHandlerCase WDynHandler s o a
-mkFullDyn h yes no = mkFull (WrapDyn h) yes (WrapDyn no)
 
 -- Continuations
 {-|

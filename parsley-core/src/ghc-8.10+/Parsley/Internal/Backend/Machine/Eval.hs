@@ -183,9 +183,9 @@ evalIter μ l h =
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       case h of
         Always gh (Machine h) ->
-          liftM2 (\mh ctx γ -> buildIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
+          liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
         Same gyes (Machine yes) gno (Machine no) ->
-          liftM3 (\myes mno ctx γ ->  buildIterSame ctx μ l gyes (buildYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
+          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
 
 evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume

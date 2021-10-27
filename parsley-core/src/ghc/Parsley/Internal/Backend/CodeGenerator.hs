@@ -21,12 +21,14 @@ import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetB
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
                                             minus, minCoins, maxCoins, zero,
                                             IMVar, IΦVar, IΣVar, MVar(..), ΦVar(..), ΣVar(..), SomeΣVar)
-import Parsley.Internal.Backend.Analysis   (coinsNeeded)
+import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline)
 import Parsley.Internal.Common.Fresh       (VFreshT, HFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
 import Parsley.Internal.Common.Indexed     (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 import Parsley.Internal.Core.Defunc        (Defunc(COMPOSE, ID), pattern FLIP_H, pattern UNIT)
 import Parsley.Internal.Trace              (Trace(trace))
+
+import qualified Debug.Trace as Debug (trace)
 
 import Parsley.Internal.Core.Defunc as Core (Defunc)
 
@@ -195,7 +197,7 @@ freshΦ = newScope
 -- TODO: We can inline anything that is /pure/ and has no large code foot-print, at the moment this
 --       is tripped up by lots of `Push` and `Pop`s.
 makeΦ :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
-makeΦ m | elidable m = return (id, m)
+makeΦ m | shouldInline m = Debug.trace ("eliding " ++ show m) $ return (id, m)
   where
     elidable :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> Bool
     -- This is double-φ optimisation:   If a φ-node points shallowly to another φ-node, then it can be elided

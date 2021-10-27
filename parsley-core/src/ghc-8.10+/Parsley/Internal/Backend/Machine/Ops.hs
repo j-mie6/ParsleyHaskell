@@ -250,8 +250,6 @@ not.
 
 @since 1.4.0.0
 -}
---TODO: annoyingly, a `try` on its own binds a handler, even though it's footprint is negligable
---      we should introduce a `noBinding` flag to the Always handler to mitigate this.
 bindAlwaysHandler :: forall s o xs n r a b. HandlerOps o
                   => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
                   -> Bool                              -- ^ Whether or not a binding is required

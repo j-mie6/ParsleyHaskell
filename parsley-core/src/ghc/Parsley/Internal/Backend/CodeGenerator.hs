@@ -68,10 +68,10 @@ pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
 rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
-rollbackHandler = Always {-False-} True (In4 (Seek (In4 Empt)))
+rollbackHandler = Always False (In4 (Seek (In4 Empt)))
 
 parsecHandler :: Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
-parsecHandler k = Same True k {-False-} True (In4 Empt)
+parsecHandler k = Same True k False (In4 Empt)
 
 altNoCutCompile :: CodeGen o a y -> CodeGen o a x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)

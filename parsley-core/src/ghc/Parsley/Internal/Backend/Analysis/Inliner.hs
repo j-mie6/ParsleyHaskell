@@ -13,11 +13,11 @@ as opposed to bound in the generated code.
 module Parsley.Internal.Backend.Analysis.Inliner (shouldInline) where
 
 import Data.Ratio                       ((%))
-import Parsley.Internal.Backend.Machine (Instr(..), Handler(..))
+import Parsley.Internal.Backend.Machine (Instr(..), Handler(..), Access(Hard, Soft))
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Nat)
 
 inlineThreshold :: Rational
-inlineThreshold = 2
+inlineThreshold = 13 % 10
 
 {-|
 Provides a conservative estimate on whether or not each of the elements of the stack on
@@ -50,9 +50,12 @@ alg (Join _)           = 0
 alg (MkJoin _ b k)     = 2 % 5 + getWeight b + getWeight k
 alg (Swap k)           = 0 + getWeight k
 alg (Dup k)            = 1 % 10 + getWeight k
-alg (Make _ _ k)       = 1 % 4 + getWeight k
-alg (Get _ _ k)        = 1 % 4 + getWeight k
-alg (Put _ _ k)        = 1 % 4 + getWeight k
+alg (Make _ Hard k)    = 1 % 3 + getWeight k
+alg (Get _ Hard k)     = 1 % 3 + getWeight k
+alg (Put _ Hard k)     = 1 % 3 + getWeight k
+alg (Make _ Soft k)    = 1 % 10 + getWeight k
+alg (Get _ Soft k)     = 0 + getWeight k
+alg (Put _ Soft k)     = 1 % 10 + getWeight k
 alg (LogEnter _ k)     = 1 % 4 + getWeight k
 alg (LogExit _ k)      = 1 % 4 + getWeight k
 alg (MetaInstr _ k)    = 0 + getWeight k

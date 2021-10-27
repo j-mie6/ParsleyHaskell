@@ -282,7 +282,7 @@ bindSameHandler γ yesNeeded yes noNeeded no k =
     bindHandlerInline# noNeeded (staHandler# (no (input γ))) $ \qno ->
       let handler o = [||if $$(same (offset (input γ)) o) then $$qyes else $$(staHandler# qno o)||]
       in bindHandlerInline# @o True handler $ \qhandler ->
-          k (γ {handlers = VCons (mkStaHandlerFull' (input γ) qhandler qyes qno) (handlers γ)})
+          k (γ {handlers = VCons (mkStaHandlerFull (input γ) qhandler qyes qno) (handlers γ)})
 
 {- Continuation Operations -}
 -- Basic continuations and operations
@@ -433,7 +433,7 @@ bindIterSame ctx μ l neededYes yes neededNo no o u =
       in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
-          in run l (Γ Empty noreturn off (VCons (mkStaHandlerFull' off (qhandler qo#) (staHandler# qyes qo#) (qno qo#)) VNil))
+          in run l (Γ Empty noreturn off (VCons (mkStaHandlerFull off (qhandler qo#) (staHandler# qyes qo#) (qno qo#)) VNil))
                    (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {- Recursion Operations -}

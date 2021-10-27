@@ -24,7 +24,7 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
 
     -- ** @AugmentedStaHandler@ Builders
     -- | The following functions are builders of `AugmentedStaHandler`.
-    mkStaHandler, mkStaHandlerSta, mkStaHandlerDyn, mkStaHandlerFull, mkStaHandlerFull',
+    mkStaHandler, mkStaHandlerSta, mkStaHandlerDyn, mkStaHandlerFull,
 
     -- ** @AugmentedStaHandler@ Interpreters
     -- | The following functions interpret or extract information from `StaHandler`.
@@ -102,7 +102,7 @@ derived from a dynamic one.
 @since 1.4.0.0
 -}
 mkStaHandlerSta :: Maybe (Offset o) -> StaHandler# s o a -> AugmentedStaHandler s o a
-mkStaHandlerSta o sh = mkStaHandler o (StaHandler sh Nothing)
+mkStaHandlerSta o = mkStaHandler o . fromStaHandler#
 
 {-|
 Converts a `Parsley.Internal.Machine.Types.Dynamics.DynHandler` into a
@@ -114,7 +114,7 @@ if it is converted back the conversion is free.
 @since 1.4.0.0
 -}
 mkStaHandlerDyn :: forall s o a. Maybe (Offset o) -> DynHandler s o a -> AugmentedStaHandler s o a
-mkStaHandlerDyn c dh = mkStaHandler c (StaHandler (mkStaHandler# @o dh) (Just dh))
+mkStaHandlerDyn c = mkStaHandler c . fromDynHandler
 
 mkStaHandler :: Maybe (Offset o) -> StaHandler s o a -> AugmentedStaHandler s o a
 mkStaHandler c = AugmentedStaHandler c . mkUnknown
@@ -122,28 +122,18 @@ mkStaHandler c = AugmentedStaHandler c . mkUnknown
 {-|
 When the behaviours of a handler given input that matches or does not match
 its captured offset are known, this function can be used to construct a
-`StaHandler` that stores this information. This can in turn be used in
+`AugmentedStaHandler` that stores this information. This can in turn be used in
 conjunction with `staHandlerEval` to statically refine the application of
 a handler to its argument.
 
 @since 1.4.0.0
 -}
-mkStaHandlerFull :: forall s o a. Offset o -- ^ The offset captured by the creation of the handler.
-                 -> DynHandler s o a       -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
-                 -> Code (ST s (Maybe a))  -- ^ The code that is executed when the captured offset matches the input.
-                 -> DynHandler s o a       -- ^ The handler to be executed when offsets are known not to match.
-                 -> AugmentedStaHandler s o a       -- ^ A handler that carries this information around for later refinement.
+mkStaHandlerFull :: Offset o                   -- ^ The offset captured by the creation of the handler.
+                  -> StaHandler s o a          -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
+                  -> Code (ST s (Maybe a))     -- ^ The code that is executed when the captured offset matches the input.
+                  -> StaHandler s o a          -- ^ The handler to be executed when offsets are known not to match.
+                  -> AugmentedStaHandler s o a -- ^ A handler that carries this information around for later refinement.
 mkStaHandlerFull c handler yes no = AugmentedStaHandler (Just c)
-  (mkFull (StaHandler (mkStaHandler# @o handler) (Just handler))
-           yes
-          (StaHandler (mkStaHandler# @o no) (Just no)))
-
-mkStaHandlerFull' :: Offset o -- ^ The offset captured by the creation of the handler.
-                  -> StaHandler s o a       -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
-                  -> Code (ST s (Maybe a))  -- ^ The code that is executed when the captured offset matches the input.
-                  -> StaHandler s o a       -- ^ The handler to be executed when offsets are known not to match.
-                  -> AugmentedStaHandler s o a       -- ^ A handler that carries this information around for later refinement.
-mkStaHandlerFull' c handler yes no = AugmentedStaHandler (Just c)
   (mkFull handler
           yes
           no)

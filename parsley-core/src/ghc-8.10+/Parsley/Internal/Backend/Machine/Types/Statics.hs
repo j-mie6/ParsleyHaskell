@@ -24,7 +24,7 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
 
     -- ** @AugmentedStaHandler@ Builders
     -- | The following functions are builders of `AugmentedStaHandler`.
-    mkStaHandler, mkStaHandlerSta, mkStaHandlerDyn, mkStaHandlerFull,
+    augmentHandler, augmentHandlerSta, augmentHandlerDyn, augmentHandlerFull,
 
     -- ** @AugmentedStaHandler@ Interpreters
     -- | The following functions interpret or extract information from `StaHandler`.
@@ -67,7 +67,17 @@ type StaHandler# s o a = Code (Rep o) -> Code (ST s (Maybe a))
 mkStaHandler# :: forall o s a. DynHandler s o a -> StaHandler# s o a
 mkStaHandler# dh qo# = [||$$dh $$(qo#)||]
 
+{-|
+Encapsulates a static handler with its possible dynamic origin for costless conversion.
+
+@since 1.7.0.0
+-}
 data StaHandler s o a = StaHandler {
+    {-|
+    Extracts the raw static component out of a static handler.
+
+    @since 1.7.0.0
+    -}
     staHandler# :: StaHandler# s o a,
     dynOrigin :: Maybe (DynHandler s o a)
   }
@@ -75,9 +85,19 @@ data StaHandler s o a = StaHandler {
 dynHandler :: (StaHandler# s o a -> DynHandler s o a) -> StaHandler s o a -> DynHandler s o a
 dynHandler conv = fromMaybe . conv . staHandler# <*> dynOrigin
 
+{-|
+Builds a `StaHandler` out of a `StaHandler#`, assumed to have no dynamic component.
+
+@since 1.7.0.0
+-}
 fromStaHandler# :: StaHandler# s o a -> StaHandler s o a
 fromStaHandler# h = StaHandler h Nothing
 
+{-|
+Builds a `StaHandler` out of a `DynHandler`, which is converted in the process.
+
+@since 1.7.0.0
+-}
 fromDynHandler :: forall s o a. DynHandler s o a -> StaHandler s o a
 fromDynHandler h = StaHandler (mkStaHandler# @o h) (Just h)
 
@@ -87,7 +107,7 @@ properties of handlers which can be carried around during the lifetime of the ha
 This information allows the engine to optimise more aggressively, leveraging
 domain-specific optimisation data.
 
-@since 1.5.0.0
+@since 1.7.0.0
 -}
 data AugmentedStaHandler s o a =
   AugmentedStaHandler
@@ -99,10 +119,10 @@ Augments a `StaHandler#` with information about what the offset is that
 the handler has captured. This is a purely static handler, which is not
 derived from a dynamic one.
 
-@since 1.4.0.0
+@since 1.7.0.0
 -}
-mkStaHandlerSta :: Maybe (Offset o) -> StaHandler# s o a -> AugmentedStaHandler s o a
-mkStaHandlerSta o = mkStaHandler o . fromStaHandler#
+augmentHandlerSta :: Maybe (Offset o) -> StaHandler# s o a -> AugmentedStaHandler s o a
+augmentHandlerSta o = augmentHandler o . fromStaHandler#
 
 {-|
 Converts a `Parsley.Internal.Machine.Types.Dynamics.DynHandler` into a
@@ -111,13 +131,18 @@ information is available. The dynamic handler used to construct this
 static handler is maintained as the origin of the handler. This means
 if it is converted back the conversion is free.
 
-@since 1.4.0.0
+@since 1.7.0.0
 -}
-mkStaHandlerDyn :: forall s o a. Maybe (Offset o) -> DynHandler s o a -> AugmentedStaHandler s o a
-mkStaHandlerDyn c = mkStaHandler c . fromDynHandler
+augmentHandlerDyn :: forall s o a. Maybe (Offset o) -> DynHandler s o a -> AugmentedStaHandler s o a
+augmentHandlerDyn c = augmentHandler c . fromDynHandler
 
-mkStaHandler :: Maybe (Offset o) -> StaHandler s o a -> AugmentedStaHandler s o a
-mkStaHandler c = AugmentedStaHandler c . mkUnknown
+{-|
+Augments a static handler with information about its captured offset.
+
+@since 1.7.0.0
+-}
+augmentHandler :: Maybe (Offset o) -> StaHandler s o a -> AugmentedStaHandler s o a
+augmentHandler c = AugmentedStaHandler c . mkUnknown
 
 {-|
 When the behaviours of a handler given input that matches or does not match
@@ -126,14 +151,14 @@ its captured offset are known, this function can be used to construct a
 conjunction with `staHandlerEval` to statically refine the application of
 a handler to its argument.
 
-@since 1.4.0.0
+@since 1.7.0.0
 -}
-mkStaHandlerFull :: Offset o                   -- ^ The offset captured by the creation of the handler.
-                  -> StaHandler s o a          -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
-                  -> Code (ST s (Maybe a))     -- ^ The code that is executed when the captured offset matches the input.
-                  -> StaHandler s o a          -- ^ The handler to be executed when offsets are known not to match.
-                  -> AugmentedStaHandler s o a -- ^ A handler that carries this information around for later refinement.
-mkStaHandlerFull c handler yes no = AugmentedStaHandler (Just c)
+augmentHandlerFull :: Offset o                  -- ^ The offset captured by the creation of the handler.
+                   -> StaHandler s o a          -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
+                   -> Code (ST s (Maybe a))     -- ^ The code that is executed when the captured offset matches the input.
+                   -> StaHandler s o a          -- ^ The handler to be executed when offsets are known not to match.
+                   -> AugmentedStaHandler s o a -- ^ A handler that carries this information around for later refinement.
+augmentHandlerFull c handler yes no = AugmentedStaHandler (Just c)
   (mkFull handler
           yes
           no)
@@ -145,13 +170,13 @@ which can be used to refine the outcome of the execution of the handler as follo
 
   * If the handler has a registered captured offset, and these offsets are comparable:
 
-      * If the offsets are equal, use the code to be executed on matching offset (See `mkStaHandlerFull`)
-      * If the offsets are not equal, invoke the sub-handler, skipping the if check (see `mkStaHandlerFull`)
+      * If the offsets are equal, use the code to be executed on matching offset (See `augmentHandlerFull`)
+      * If the offsets are not equal, invoke the sub-handler, skipping the if check (see `augmentHandlerFull`)
 
   * If the handler is missing a captured offset, or they are incomparable (from different sources)
      then execute the full handler, which will perform a runtime check for equivalence.
 
-@since 1.4.0.0
+@since 1.7.0.0
 -}
 staHandlerEval :: AugmentedStaHandler s o a -> Offset o -> Code (ST s (Maybe a))
 staHandlerEval (AugmentedStaHandler (Just c) sh) o
@@ -160,28 +185,41 @@ staHandlerEval (AugmentedStaHandler (Just c) sh) o
 staHandlerEval (AugmentedStaHandler _ sh) o = staHandler# (unknown sh) (offset o)
 
 {-|
-Selects the correct case out of a `StaHandlerCase` depending on what the `InputCharacteristic` that
+Selects the correct case out of a `AugmentedStaHandler` depending on what the `InputCharacteristic` that
 governs the use of the handler is. This means that it can select any of the three cases.
 
-@since 1.5.0.0
+@since 1.7.0.0
 -}
 staHandlerCharacteristic :: AugmentedStaHandler s o a -> (StaHandler# s o a -> DynHandler s o a) -> InputCharacteristic -> StaHandler s o a
 staHandlerCharacteristic (AugmentedStaHandler _ sh) conv NeverConsumes      = maybe (unknown sh) (StaHandler <$> const <*> Just . conv . const) (yesSame sh)
 staHandlerCharacteristic (AugmentedStaHandler _ sh) _    (AlwaysConsumes _) = fromMaybe (unknown sh) (notSame sh)
 staHandlerCharacteristic (AugmentedStaHandler _ sh) _    MayConsume         = unknown sh
 
+{-|
+Selects the correct case out of a `AugmentedStaHandler` depending on what the `InputCharacteristic` that
+governs the use of the handler is. This means that it can select any of the three cases. Extracts the
+static handler out of the result.
+
+@since 1.7.0.0
+-}
 staHandlerCharacteristicSta :: AugmentedStaHandler s o a -> InputCharacteristic -> StaHandler# s o a
 staHandlerCharacteristicSta sh = staHandler# . staHandlerCharacteristic sh undefined
 
+{-|
+Selects the correct case out of a `AugmentedStaHandler` depending on what the `InputCharacteristic` that
+governs the use of the handler is. This means that it can select any of the three cases. Extracts a
+dynamic result out of the static handler given a conversion function.
+
+@since 1.7.0.0
+-}
 staHandlerCharacteristicDyn :: AugmentedStaHandler s o a -> (StaHandler# s o a -> DynHandler s o a) -> InputCharacteristic -> DynHandler s o a
 staHandlerCharacteristicDyn sh conv = dynHandler conv . staHandlerCharacteristic sh conv
 
 {-|
 Represents potentially three handlers: one for unknown offset cases, one for offset known to be
-the same, and another for offset known to be different (see `mkStaHandlerFull`). Parameterised by
-a generic handler type, which is instantiated to one of `WStaHandler#` or `WDynHandler`.
+the same, and another for offset known to be different (see `augmentHandlerFull`).
 
-@since 1.5.0.0
+@since 1.7.0.0
 -}
 data StaHandlerCase s (o :: Type) a = StaHandlerCase {
   -- | The static function representing this handler when offsets are incomparable.

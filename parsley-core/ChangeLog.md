@@ -100,3 +100,10 @@ Fix for issue #27
 ## 1.7.0.0 -- TBD
 
 * Added fields to the handlers to signify if they should generate a binding or not.
+* Added two `Inliner` modules to handle inlining in front- and back-ends.
+* Removed field from `Let` which contains the body, it was a wart.
+* Refactored the internal representation of static handlers, making them more uniform.
+* Added basic eta-reduction capabilities to the low-level generators: this can be improved and expanded!
+* Renamed `buildIterAlways` and `buildIterSame` to `bindIterAlways` and `bindIterSame`.
+* Renamed `StaHandler` to `AugmentedStaHandler`
+* 

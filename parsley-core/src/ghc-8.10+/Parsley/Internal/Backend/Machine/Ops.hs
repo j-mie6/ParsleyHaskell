@@ -202,7 +202,7 @@ by returning @Nothing@.
 @since 1.2.0.0
 -}
 fatal :: AugmentedStaHandler s o a
-fatal = mkStaHandlerSta Nothing (const [|| returnST Nothing ||])
+fatal = augmentHandlerSta Nothing (const [|| returnST Nothing ||])
 
 {-|
 Fails by evaluating the next handler with the current input. Makes
@@ -257,7 +257,7 @@ bindAlwaysHandler :: forall s o xs n r a b. HandlerOps o
                   -> (Γ s o xs (Succ n) r a -> Code b) -- ^ The parser to receive the binding.
                   -> Code b
 bindAlwaysHandler γ needed h k = bindHandlerInline# needed (staHandler# (h (input γ))) $ \qh ->
-  k (γ {handlers = VCons (mkStaHandler (Just (input γ)) qh) (handlers γ)})
+  k (γ {handlers = VCons (augmentHandler (Just (input γ)) qh) (handlers γ)})
 
 {-|
 Wraps around `bindHandler#` to create /three/ bindings for a handler that acts
@@ -280,7 +280,7 @@ bindSameHandler γ yesNeeded yes noNeeded no k =
     bindHandlerInline# noNeeded (staHandler# (no (input γ))) $ \qno ->
       let handler o = [||if $$(same (offset (input γ)) o) then $$qyes else $$(staHandler# qno o)||]
       in bindHandlerInline# @o True handler $ \qhandler ->
-          k (γ {handlers = VCons (mkStaHandlerFull (input γ) qhandler qyes qno) (handlers γ)})
+          k (γ {handlers = VCons (augmentHandlerFull (input γ) qhandler qyes qno) (handlers γ)})
 
 {- Continuation Operations -}
 -- Basic continuations and operations
@@ -404,7 +404,7 @@ bindIterAlways ctx μ l needed h o u =
   bindIterHandlerInline# @o needed (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
     bindIter# @o (offset o) $ \qloop qo# ->
       let off = mkOffset qo# u
-      in run l (Γ Empty noreturn off (VCons (mkStaHandler (Just off) (qhandler qo#)) VNil))
+      in run l (Γ Empty noreturn off (VCons (augmentHandler (Just off) (qhandler qo#)) VNil))
                (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {-|
@@ -431,7 +431,7 @@ bindIterSame ctx μ l neededYes yes neededNo no o u =
       in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
-          in run l (Γ Empty noreturn off (VCons (mkStaHandlerFull off (qhandler qo#) (staHandler# qyes qo#) (qno qo#)) VNil))
+          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler qo#) (staHandler# qyes qo#) (qno qo#)) VNil))
                    (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {- Recursion Operations -}
@@ -453,7 +453,7 @@ buildRec :: forall rs s o a r. RecBuilder o
 buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qo# qh ->
-      run k (Γ Empty (mkStaContDyn qret) (mkOffset qo# 0) (VCons (mkStaHandlerDyn Nothing qh) VNil))
+      run k (Γ Empty (mkStaContDyn qret) (mkOffset qo# 0) (VCons (augmentHandlerDyn Nothing qh) VNil))
             (insertSub μ (mkStaSubroutineMeta meta $ \k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
 
 {- Binding Operations -}

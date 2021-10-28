@@ -13,7 +13,7 @@ this includes the traditional `many` and `some` combinators.
 -}
 module Parsley.Fold (
     many, some, manyN,
-    skipMany, skipSome, skipManyN,
+    skipMany, skipSome, skipManyN, --loop,
     sepBy, sepBy1, endBy, endBy1, sepEndBy, sepEndBy1,
     chainl1, chainr1, chainl, chainr,
     chainl1', chainr1', chainPre, chainPost,
@@ -24,7 +24,7 @@ module Parsley.Fold (
 import Prelude hiding      (pure, (<*>), (<$>), (*>), (<*))
 import Parsley.Alternative ((<|>), option)
 import Parsley.Applicative (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
-import Parsley.Internal    (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), ParserOps, pattern FLIP_H, pattern COMPOSE_H, pattern UNIT, chainPre, chainPost)
+import Parsley.Internal    (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), ParserOps, pattern FLIP_H, pattern COMPOSE_H, pattern UNIT, chainPre, chainPost{-, loop-})
 import Parsley.Register    (bind, get, modify, newRegister_)
 
 {-chainPre :: Parser (a -> a) -> Parser a -> Parser a
@@ -177,6 +177,7 @@ Like `many`, excepts discards its results.
 skipMany :: Parser a -> Parser ()
 --skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
 skipMany = void . pfoldl CONST UNIT -- the void here will encourage the optimiser to recognise that the register is unused
+--skipMany = flip loop (pure UNIT) . void -- This should be the optimal one, with register removed, but apparently not?! something is amiss, perhaps space leak?
 
 {-|
 Like `manyN`, excepts discards its results.

@@ -1,5 +1,4 @@
-{-# LANGUAGE ApplicativeDo,
-             OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Parsley.Internal.Core.CombinatorAST (module Parsley.Internal.Core.CombinatorAST) where
 
 import Data.Kind                         (Type)
@@ -29,8 +28,7 @@ data Combinator (k :: Type -> Type) (a :: Type) where
   NotFollowedBy  :: k a -> Combinator k ()
   Branch         :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Combinator k c
   Match          :: k a -> [Defunc (a -> Bool)] -> [k b] -> k b -> Combinator k b
-  ChainPre       :: k (a -> a) -> k a -> Combinator k a
-  ChainPost      :: k a -> k (a -> a) -> Combinator k a
+  Loop           :: k () -> k a -> Combinator k a
   MakeRegister   :: ΣVar a -> k a -> k b -> Combinator k b
   GetRegister    :: ΣVar a -> Combinator k a
   PutRegister    :: ΣVar a -> k a -> Combinator k ()
@@ -74,8 +72,7 @@ instance IFunctor Combinator where
   imap f (NotFollowedBy p)    = NotFollowedBy (f p)
   imap f (Branch b p q)       = Branch (f b) (f p) (f q)
   imap f (Match p fs qs d)    = Match (f p) fs (map f qs) (f d)
-  imap f (ChainPre op p)      = ChainPre (f op) (f p)
-  imap f (ChainPost p op)     = ChainPost (f p) (f op)
+  imap f (Loop body exit)     = Loop (f body) (f exit)
   imap f (MakeRegister σ p q) = MakeRegister σ (f p) (f q)
   imap _ (GetRegister σ)      = GetRegister σ
   imap f (PutRegister σ p)    = PutRegister σ (f p)
@@ -99,8 +96,7 @@ instance Show (Fix Combinator a) where
       alg (NotFollowedBy (Const1 p))                = "(notFollowedBy " . p . ")"
       alg (Branch (Const1 b) (Const1 p) (Const1 q)) = "(branch " . b . " " . p . " " . q . ")"
       alg (Match (Const1 p) fs qs (Const1 def))     = "(match " . p . " " . shows fs . " [" . intercalateDiff ", " (map getConst1 qs) . "] "  . def . ")"
-      alg (ChainPre (Const1 op) (Const1 p))         = "(chainPre " . op . " " . p . ")"
-      alg (ChainPost (Const1 p) (Const1 op))        = "(chainPost " . p . " " . op . ")"
+      alg (Loop (Const1 body) (Const1 exit))        = "(loop " . body . " " . exit . ")"
       alg (MakeRegister σ (Const1 p) (Const1 q))    = "(make " . shows σ . " " . p . " " . q . ")"
       alg (GetRegister σ)                           = "(get " . shows σ . ")"
       alg (PutRegister σ (Const1 p))                = "(put " . shows σ . " " . p . ")"
@@ -117,23 +113,22 @@ instance Show MetaCombinator where
 
 {-# INLINE traverseCombinator #-}
 traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)
-traverseCombinator expose (pf :<*>: px)        = do pf' <- expose pf; px' <- expose px; pure (pf' :<*>: px')
-traverseCombinator expose (p :*>: q)           = do p' <- expose p; q' <- expose q; pure (p' :*>: q')
-traverseCombinator expose (p :<*: q)           = do p' <- expose p; q' <- expose q; pure (p' :<*: q')
-traverseCombinator expose (p :<|>: q)          = do p' <- expose p; q' <- expose q; pure (p' :<|>: q')
-traverseCombinator _      Empty                = do pure Empty
-traverseCombinator expose (Try p)              = do p' <- expose p; pure (Try p')
-traverseCombinator expose (LookAhead p)        = do p' <- expose p; pure (LookAhead p')
-traverseCombinator expose (NotFollowedBy p)    = do p' <- expose p; pure (NotFollowedBy p')
-traverseCombinator expose (Branch b p q)       = do b' <- expose b; p' <- expose p; q' <- expose q; pure (Branch b' p' q')
-traverseCombinator expose (Match p fs qs d)    = do p' <- expose p; qs' <- traverse expose qs; d' <- expose d; pure (Match p' fs qs' d')
-traverseCombinator expose (ChainPre op p)      = do op' <- expose op; p' <- expose p; pure (ChainPre op' p')
-traverseCombinator expose (ChainPost p op)     = do p' <- expose p; op' <- expose op; pure (ChainPost p' op')
-traverseCombinator expose (MakeRegister σ p q) = do p' <- expose p; q' <- expose q; pure (MakeRegister σ p' q')
-traverseCombinator _      (GetRegister σ)      = do pure (GetRegister σ)
-traverseCombinator expose (PutRegister σ p)    = do p' <- expose p; pure (PutRegister σ p')
-traverseCombinator expose (Debug name p)       = do p' <- expose p; pure (Debug name p')
-traverseCombinator _      (Pure x)             = do pure (Pure x)
-traverseCombinator _      (Satisfy f)          = do pure (Satisfy f)
-traverseCombinator _      (Let r v)            = do pure (Let r v)
-traverseCombinator expose (MetaCombinator m p) = do p' <- expose p; pure (MetaCombinator m p')
+traverseCombinator expose (pf :<*>: px)        = (:<*>:) <$> expose pf <*> expose px
+traverseCombinator expose (p :*>: q)           = (:*>:) <$> expose p <*> expose q
+traverseCombinator expose (p :<*: q)           = (:<*:) <$> expose p <*> expose q
+traverseCombinator expose (p :<|>: q)          = (:<|>:) <$> expose p <*> expose q
+traverseCombinator _      Empty                = pure Empty
+traverseCombinator expose (Try p)              = Try <$> expose p
+traverseCombinator expose (LookAhead p)        = LookAhead <$> expose p
+traverseCombinator expose (NotFollowedBy p)    = NotFollowedBy <$> expose p
+traverseCombinator expose (Branch b p q)       = Branch <$> expose b <*> expose p <*> expose q
+traverseCombinator expose (Match p fs qs d)    = Match <$> expose p <*> pure fs <*> traverse expose qs <*> expose d
+traverseCombinator expose (Loop body exit)     = Loop <$> expose body <*> expose exit
+traverseCombinator expose (MakeRegister σ p q) = MakeRegister σ <$> expose p <*> expose q
+traverseCombinator _      (GetRegister σ)      = pure (GetRegister σ)
+traverseCombinator expose (PutRegister σ p)    = PutRegister σ <$> expose p
+traverseCombinator expose (Debug name p)       = Debug name <$> expose p
+traverseCombinator _      (Pure x)             = pure (Pure x)
+traverseCombinator _      (Satisfy f)          = pure (Satisfy f)
+traverseCombinator _      (Let r v)            = pure (Let r v)
+traverseCombinator expose (MetaCombinator m p) = MetaCombinator m <$> expose p

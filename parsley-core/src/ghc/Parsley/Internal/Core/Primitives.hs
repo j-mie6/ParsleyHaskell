@@ -1,12 +1,13 @@
+{-# LANGUAGE PatternSynonyms #-}
 module Parsley.Internal.Core.Primitives (
     Parser,
     Reg,
     module Parsley.Internal.Core.Primitives
   ) where
 
-import Prelude hiding                      (pure)
+import Prelude hiding                      (pure, (<*>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..))
-import Parsley.Internal.Core.Defunc        (Defunc(BLACK))
+import Parsley.Internal.Core.Defunc        (Defunc(BLACK, ID, COMPOSE), pattern FLIP_H)
 import Parsley.Internal.Common.Indexed     (Fix(In), (:+:)(..))
 import Parsley.Internal.Common.Utils       (WQ)
 
@@ -189,7 +190,11 @@ primarily used to parse prefix operators in expressions.
 @since 0.1.0.0
 -}
 chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre (Parser op) (Parser p) = Parser (In (L (ChainPre op p)))
+chainPre op p =
+  newRegister (pure ID) (\r ->
+    loop (put r (pure (FLIP_H COMPOSE) <*> op <*> get r))
+         (get r))
+  <*> p
 
 {-|
 This combinator parses repeated applications of an operator to a single initial operand. This is
@@ -198,7 +203,21 @@ primarily used to parse postfix operators in expressions.
 @since 0.1.0.0
 -}
 chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost (Parser p) (Parser op) = Parser (In (L (ChainPost p op)))
+chainPost p op =
+  newRegister p $ \r ->
+    loop (put r (op <*> get r))
+         (get r)
+
+{-|
+The combinator @loop body exit@ parses @body@ zero or more times until it fails. If the final @body@
+failed having not consumed input, @exit@ is performed, otherwise the combinator fails:
+
+> loop body exit = let go = body *> go <|> exit in go
+
+@since 1.1.0.0
+-}
+loop :: Parser () -> Parser a -> Parser a
+loop (Parser body) (Parser exit) = Parser (In (L (Loop body exit)))
 
 {-|
 Creates a new register initialised with the value obtained from parsing the first

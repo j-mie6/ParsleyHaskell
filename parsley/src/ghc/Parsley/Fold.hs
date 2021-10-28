@@ -13,7 +13,7 @@ this includes the traditional `many` and `some` combinators.
 -}
 module Parsley.Fold (
     many, some, manyN,
-    skipMany, skipSome, skipManyN, loop,
+    skipMany, skipSome, skipManyN, --loop,
     sepBy, sepBy1, endBy, endBy1, sepEndBy, sepEndBy1,
     chainl1, chainr1, chainl, chainr,
     chainl1', chainr1', chainPre, chainPost,
@@ -24,7 +24,7 @@ module Parsley.Fold (
 import Prelude hiding      (pure, (<*>), (<$>), (*>), (<*))
 import Parsley.Alternative ((<|>), option)
 import Parsley.Applicative (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
-import Parsley.Internal    (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), ParserOps, pattern FLIP_H, pattern COMPOSE_H, pattern UNIT, chainPre, chainPost, loop)
+import Parsley.Internal    (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), ParserOps, pattern FLIP_H, pattern COMPOSE_H, pattern UNIT, chainPre, chainPost{-, loop-})
 import Parsley.Register    (bind, get, modify, newRegister_)
 
 {-chainPre :: Parser (a -> a) -> Parser a -> Parser a

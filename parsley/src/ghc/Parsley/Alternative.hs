@@ -18,9 +18,32 @@ module Parsley.Alternative (
     (<+>), option, optionally, optional, choice, maybeP, manyTill
   ) where
 
-import Prelude hiding      (pure, (<$>))
-import Parsley.Applicative (pure, (<$>), ($>), (<:>))
-import Parsley.Internal    (makeQ, Parser, Defunc(EMPTY), pattern UNIT, ParserOps, (<|>), empty)
+import Prelude hiding           (pure, (<$>))
+import Parsley.Applicative      (pure, (<$>), ($>), (<:>))
+import Parsley.Defunctionalized (Defunc(EMPTY), pattern UNIT)
+import Parsley.Internal         (makeQ, Parser)
+import Parsley.ParserOps        (ParserOps)
+
+import qualified Parsley.Internal as Internal ((<|>), empty)
+
+{-|
+This combinator always fails.
+
+@since 0.1.0.0
+-}
+empty :: Parser a
+empty = Internal.empty
+
+{-|
+This combinator implements branching within a parser. It is left-biased, so that if the first branch
+succeeds, the second will not be attempted. In accordance with @parsec@ semantics, if the first
+branch failed having consumed input the second branch cannot be taken. (see `Parsley.Combinator.try`)
+
+@since 0.1.0.0
+-}
+infixr 3 <|>
+(<|>) :: Parser a -> Parser a -> Parser a
+(<|>) = (Internal.<|>)
 
 {-|
 This combinator is similar to @(`<|>`)@, except it allows both branches to differ in type by

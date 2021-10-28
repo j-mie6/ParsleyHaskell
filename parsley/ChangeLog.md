@@ -27,3 +27,8 @@
 ## 1.0.0.2 -- 2021-08-13
 
 * Added small optimisation to accomodate new core changes: added `try` for all top-level parsers.
+
+## 1.0.0.3 -- TBD
+
+* Support for `parsley-core-2.0.0.0`.
+* Re-exports less from `parsley-core`, instead using (currently hidden) redefinition.

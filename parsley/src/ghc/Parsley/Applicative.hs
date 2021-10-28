@@ -23,8 +23,41 @@ module Parsley.Applicative (
     (>>)
   ) where
 
-import Prelude hiding   (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence, repeat)
-import Parsley.Internal (makeQ, Parser, Defunc(CONS, CONST, ID, EMPTY), pattern FLIP_H, pattern UNIT, ParserOps, pure, (<*>), (*>), (<*))
+import Prelude hiding           (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence, repeat)
+import Parsley.Defunctionalized (Defunc(CONS, CONST, ID, EMPTY), pattern FLIP_H, pattern UNIT)
+import Parsley.Internal         (makeQ, Parser)
+import Parsley.ParserOps        (ParserOps, pure)
+
+import qualified Parsley.Internal as Internal ((<*>), (*>), (<*))
+
+-- Applicative Operations
+{-|
+Sequential application of one parser's result to another's. The parsers must both succeed, one after
+the other to combine their results. If either parser fails then the combinator will fail.
+
+@since 0.1.0.0
+-}
+infixl 4 <*>
+(<*>) :: Parser (a -> b) -> Parser a -> Parser b
+(<*>) = (Internal.<*>)
+
+{-|
+Sequence two parsers, keeping the result of the second and discarding the result of the first.
+
+@since 0.1.0.0
+-}
+infixl 4 <*
+(<*) :: Parser a -> Parser b -> Parser a
+(<*) = (Internal.<*)
+
+{-|
+Sequence two parsers, keeping the result of the first and discarding the result of the second.
+
+@since 0.1.0.0
+-}
+infixl 4 *>
+(*>) :: Parser a -> Parser b -> Parser b
+(*>) = (Internal.*>)
 
 -- Functor Operations
 {-|

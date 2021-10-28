@@ -106,3 +106,7 @@ Fix for issue #27
 * Added basic eta-reduction capabilities to the low-level generators: this can be improved and expanded!
 * Renamed `buildIterAlways` and `buildIterSame` to `bindIterAlways` and `bindIterSame`.
 * Renamed `StaHandler` to `AugmentedStaHandler`.
+
+## 2.0.0.0 -- TBD
+
+* Removed `ChainPre` and `ChainPost` from the AST, simplifying the API.

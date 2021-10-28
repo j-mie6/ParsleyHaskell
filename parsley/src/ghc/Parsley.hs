@@ -35,9 +35,10 @@ import Parsley.Alternative              as Alternative
 import Parsley.Applicative              as Applicative
 import Parsley.Combinator               as Combinator  (item, char, string, satisfy, notFollowedBy, lookAhead, try)
 import Parsley.Fold                     as Fold        (many, some)
-import Parsley.Internal                 as Core        (Parser, ParserOps)
+import Parsley.Internal                 as Core        (Parser)
+import Parsley.ParserOps                as Core        (ParserOps)
 import Parsley.Internal                 as THUtils     (Quapplicative(..), WQ, Code)
-import Parsley.Internal                 as Primitives  (debug)
+import Parsley.Debug                    as Primitives  (debug)
 import Parsley.Selective                as Selective
 
 {-|

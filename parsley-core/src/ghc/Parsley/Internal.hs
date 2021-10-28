@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, CPP #-}
 {-|
 Module      : Parsley.Internal
 Description : The gateway into the internals: here be monsters!
@@ -26,7 +26,11 @@ import Parsley.Internal.Core.Primitives as Primitives (
     pure, (<*>), (*>), (<*),
     (<|>), empty,
     satisfy, lookAhead, try, notFollowedBy,
-    chainPre, chainPost, loop,
+#if MIN_VERSION_parsley_core(2,0,0)
+#else
+    chainPre, chainPost,
+#endif
+    loop,
     Reg, newRegister, get, put,
     conditional, branch,
     debug

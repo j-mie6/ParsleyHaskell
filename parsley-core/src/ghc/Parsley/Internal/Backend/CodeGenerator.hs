@@ -162,7 +162,7 @@ shallow (Match p fs qs def) m =
      let minc = coinsNeeded (In4 (Choices (map userBool fs) qcs defc))
      let defc':qcs' = map (maxCoins zero . (`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
-shallow (Let _ μ _)                  m = do return $! tailCallOptimise μ m
+shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m
 shallow (ChainPre op p)              m = do chainPreCompile op p addCoinsNeeded id m
 shallow (ChainPost p op)             m = do chainPostCompile p op addCoinsNeeded id m
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))

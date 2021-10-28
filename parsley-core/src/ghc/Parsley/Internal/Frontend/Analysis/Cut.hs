@@ -73,7 +73,7 @@ cutAlg :: Combinator (CutAnalysis :*: Compliance) a -> Bool -> (Fix Combinator a
 cutAlg (Pure x) _ = (In (Pure x), False)
 cutAlg (Satisfy f) cut = (mkCut cut (In (Satisfy f)), True)
 cutAlg Empty _ = (In Empty, False)
-cutAlg (Let r μ p) cut = (mkCut (not cut) (In (Let r μ (fst (doCut (ifst p) True)))), False) -- If there is no cut, we generate a piggy for the continuation
+cutAlg (Let r μ) cut = (mkCut (not cut) (In (Let r μ)), False) -- If there is no cut, we generate a piggy for the continuation
 cutAlg (Try p) cut = (In (Try (mkImmune cut (fst (doCut (ifst p) False)))), False)
 -- Special case of below, but we know immunity is useless within `q`
 cutAlg ((p :*: NonComp) :<|>: (q :*: FullPure)) _ = (requiresCut (In (fst (doCut p True) :<|>: fst (doCut q False))), False)

@@ -26,7 +26,7 @@ Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
 -}
 inliner :: Bool -> MVar a -> Fix Combinator a -> Fix Combinator a
 inliner recu _ body | not recu, shouldInline body = body
-inliner recu μ body = In (Let recu μ body)
+inliner recu μ _ = In (Let recu μ)
 
 shouldInline :: Fix Combinator a -> Bool
 shouldInline = (< inlineThreshold) . getWeight . cata (InlineWeight . alg)

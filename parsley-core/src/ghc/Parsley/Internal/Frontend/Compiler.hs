@@ -2,7 +2,6 @@
 {-# LANGUAGE AllowAmbiguousTypes,
              MagicHash,
              MultiParamTypeClasses,
-             RecursiveDo,
              UndecidableInstances #-}
 {-|
 Module      : Parsley.Internal.Frontend.Compiler
@@ -137,9 +136,8 @@ letInsertion lets recs p = (p', μs, μMax)
           v <- newVar
           let μ = MVar v
           modify' (first (HashMap.insert name v))
-          rec
-            modify' (second (DMap.insert μ q'))
-            q' <- doLetInserter (postprocess q) -- This line should be moved above when there is an inliner pass
+          q' <- doLetInserter (postprocess q)
+          modify' (second (DMap.insert μ q'))
           return $! inliner recu μ q'
       else do doLetInserter (postprocess q)
 

@@ -2,7 +2,6 @@
 {-# LANGUAGE AllowAmbiguousTypes,
              MagicHash,
              MultiParamTypeClasses,
-             RecursiveDo,
              UndecidableInstances #-}
 {-|
 Module      : Parsley.Internal.Frontend.Compiler
@@ -39,7 +38,7 @@ import Parsley.Internal.Common.Fresh       (HFreshT, newVar, runFreshT)
 import Parsley.Internal.Common.Indexed     (Fix(In), cata, cata', IFunctor(imap), (:+:)(..), (\/), Const1(..))
 import Parsley.Internal.Common.State       (State, get, gets, runState, execState, modify', MonadState)
 import Parsley.Internal.Frontend.Optimiser (optimise)
-import Parsley.Internal.Frontend.Analysis  (analyse, emptyFlags, dependencyAnalysis)
+import Parsley.Internal.Frontend.Analysis  (analyse, emptyFlags, dependencyAnalysis, inliner)
 import Parsley.Internal.Trace              (Trace(trace))
 import System.IO.Unsafe                    (unsafePerformIO)
 
@@ -132,15 +131,14 @@ letInsertion lets recs p = (p', μs, μMax)
       let bound = HashSet.member name lets
       let recu = HashSet.member name recs
       if bound || recu then case HashMap.lookup name vs of
-        Just v  -> let μ = MVar v in return $! optimise (Let recu μ (μs DMap.! μ))
+        Just v  -> let μ = MVar v in return $! inliner recu μ (μs DMap.! μ)
         Nothing -> do
           v <- newVar
           let μ = MVar v
           modify' (first (HashMap.insert name v))
-          rec
-            modify' (second (DMap.insert μ q'))
-            q' <- doLetInserter (postprocess q) -- This line should be moved above when there is an inliner pass
-          return $! optimise (Let recu μ q')
+          q' <- doLetInserter (postprocess q)
+          modify' (second (DMap.insert μ q'))
+          return $! inliner recu μ q'
       else do doLetInserter (postprocess q)
 
 postprocess :: Combinator LetInserter a -> LetInserter a

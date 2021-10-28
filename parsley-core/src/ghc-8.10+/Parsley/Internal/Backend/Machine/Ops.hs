@@ -45,8 +45,8 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Join Point Operations
     setupJoinPoint,
     -- ** Iteration Operations
-    buildIterAlways,
-    buildIterSame,
+    bindIterAlways,
+    bindIterSame,
     -- ** Recursion Operations
     buildRec,
     -- ** Marshalling Operations
@@ -74,6 +74,7 @@ import Parsley.Internal.Backend.Machine.InputOps       (PositionOps(..), LogOps(
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
 import Parsley.Internal.Backend.Machine.Instructions   (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic), InputCharacteristic(..))
+import Parsley.Internal.Backend.Machine.THUtils        (eta)
 import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
@@ -200,8 +201,8 @@ by returning @Nothing@.
 
 @since 1.2.0.0
 -}
-fatal :: StaHandler s o a
-fatal = mkStaHandlerNoOffset (const [|| returnST Nothing ||])
+fatal :: AugmentedStaHandler s o a
+fatal = augmentHandlerSta Nothing (const [|| returnST Nothing ||])
 
 {-|
 Fails by evaluating the next handler with the current input. Makes
@@ -226,7 +227,7 @@ buildHandler :: Γ s o xs n r a                                  -- ^ State to e
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a))) -- ^ Partial parser accepting the modified state.
              -> Word                                            -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o a
-buildHandler γ h u c = mkStaHandler c $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# u})
+buildHandler γ h u c = fromStaHandler# $ \o# -> h (γ {operands = Op (OFFSET c) (operands γ), input = mkOffset o# u})
 
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
@@ -239,7 +240,7 @@ buildYesHandler :: Γ s o xs n r a
                 -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
                 -> Word
                 -> StaHandler s o a
-buildYesHandler γ h u = mkStaHandlerNoOffset $ \o# -> h (γ {input = mkOffset o# u})
+buildYesHandler γ h u = fromStaHandler# $ \o# -> h (γ {input = mkOffset o# u})
 
 -- Handler binding
 {-|
@@ -249,15 +250,14 @@ not.
 
 @since 1.4.0.0
 -}
---TODO: annoyingly, a `try` on its own binds a handler, even though it's footprint is negligable
---      we should introduce a `noBinding` flag to the Always handler to mitigate this.
 bindAlwaysHandler :: forall s o xs n r a b. HandlerOps o
                   => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
+                  -> Bool                              -- ^ Whether or not a binding is required
                   -> StaHandlerBuilder s o a           -- ^ The handler waiting to receive the captured offset and be bound.
                   -> (Γ s o xs (Succ n) r a -> Code b) -- ^ The parser to receive the binding.
                   -> Code b
-bindAlwaysHandler γ h k = bindHandler# @o (staHandler# (h (input γ))) $ \qh ->
-  k (γ {handlers = VCons (mkStaHandlerDyn (Just (input γ)) qh) (handlers γ)})
+bindAlwaysHandler γ needed h k = bindHandlerInline# needed (staHandler# (h (input γ))) $ \qh ->
+  k (γ {handlers = VCons (augmentHandler (Just (input γ)) qh) (handlers γ)})
 
 {-|
 Wraps around `bindHandler#` to create /three/ bindings for a handler that acts
@@ -269,18 +269,18 @@ where they are unknown (which is defined in terms of the previous two).
 -}
 bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (Rep o))
                 => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
+                -> Bool                              -- ^ Is a binding required for the matching handler?
                 -> StaHandler s o a                  -- ^ The handler that handles matching input.
+                -> Bool                              -- ^ Is a binding required for the mismatched handler?
                 -> StaHandlerBuilder s o a           -- ^ The handler that handles mismatched input.
                 -> (Γ s o xs (Succ n) r a -> Code b) -- ^ The parser to receive the composite handler.
                 -> Code b
-bindSameHandler γ yes no k = [||
-    let yesSame = $$(staHandler# yes (offset (input γ)))
-    in $$(bindHandler# @o (staHandler# (no (input γ))) $ \qno ->
-            let handler = mkStaHandler (input γ) $ \o ->
-                  [||if $$(same (offset (input γ)) o) then yesSame else $$qno $$o||]
-            in bindHandler# @o (staHandler# handler) $ \qhandler ->
-                k (γ {handlers = VCons (mkStaHandlerFull (input γ) qhandler [||yesSame||] qno) (handlers γ)}))
-  ||]
+bindSameHandler γ yesNeeded yes noNeeded no k =
+  bindYesInline# yesNeeded (staHandler# yes (offset (input γ))) $ \qyes ->
+    bindHandlerInline# noNeeded (staHandler# (no (input γ))) $ \qno ->
+      let handler o = [||if $$(same (offset (input γ)) o) then $$qyes else $$(staHandler# qno o)||]
+      in bindHandlerInline# @o True handler $ \qhandler ->
+          k (γ {handlers = VCons (augmentHandlerFull (input γ) qhandler qyes qno) (handlers γ)})
 
 {- Continuation Operations -}
 -- Basic continuations and operations
@@ -324,7 +324,7 @@ callWithContinuation :: MarshalOps o
                      => StaSubroutine s o a x           -- ^ The subroutine @sub@ that will be called.
                      -> StaCont s o a x                 -- ^ The return continuation for the subroutine.
                      -> Code (Rep o)                    -- ^ The input to feed to @sub@.
-                     -> Vec (Succ n) (StaHandler s o a) -- ^ The stack from which to obtain the handler to pass to @sub@.
+                     -> Vec (Succ n) (AugmentedStaHandler s o a) -- ^ The stack from which to obtain the handler to pass to @sub@.
                      -> Code (ST s (Maybe a))
 callWithContinuation sub ret input (VCons h _) = staSubroutine# sub (dynCont ret) input (dynHandler h (failureInputCharacteristic (meta sub)))
 
@@ -391,45 +391,47 @@ the loop consumed input in its final iteration.
 
 @since 1.4.0.0
 -}
-buildIterAlways :: forall s o a. RecBuilder o
-                => Ctx s o a                  -- ^ The context to keep the binding
-                -> MVar Void                  -- ^ The name of the binding.
-                -> Machine s o '[] One Void a -- ^ The body of the loop.
-                -> StaHandlerBuilder s o a    -- ^ What to do after the loop exits (by failing)
-                -> Offset o                   -- ^ The initial offset to provide to the loop
-                -> Word                       -- ^ The unique name for captured offset /and/ iteration offset
-                -> Code (ST s (Maybe a))
-buildIterAlways ctx μ l h o u =
-  bindIterHandler# @o (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
+bindIterAlways :: forall s o a. RecBuilder o
+               => Ctx s o a                  -- ^ The context to keep the binding
+               -> MVar Void                  -- ^ The name of the binding.
+               -> Machine s o '[] One Void a -- ^ The body of the loop.
+               -> Bool                       -- ^ Does loop exit require a binding?
+               -> StaHandlerBuilder s o a    -- ^ What to do after the loop exits (by failing)
+               -> Offset o                   -- ^ The initial offset to provide to the loop
+               -> Word                       -- ^ The unique name for captured offset /and/ iteration offset
+               -> Code (ST s (Maybe a))
+bindIterAlways ctx μ l needed h o u =
+  bindIterHandlerInline# @o needed (\qc# -> staHandler# (h (mkOffset qc# u))) $ \qhandler ->
     bindIter# @o (offset o) $ \qloop qo# ->
       let off = mkOffset qo# u
-      in run l (Γ Empty noreturn off (VCons (mkStaHandlerDyn (Just off) [||$$qhandler $$(qo#)||]) VNil))
+      in run l (Γ Empty noreturn off (VCons (augmentHandler (Just off) (qhandler qo#)) VNil))
                (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {-|
-Similar to `buildIterAlways`, but builds a handler that performs in
+Similar to `bindIterAlways`, but builds a handler that performs in
 the same way as `bindSameHandler`.
 
 @since 1.4.0.0
 -}
-buildIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
-              => Ctx s o a                  -- ^ The context to store the binding in.
-              -> MVar Void                  -- ^ The name of the binding.
-              -> Machine s o '[] One Void a -- ^ The loop body.
-              -> StaHandler s o a           -- ^ The handler when input is the same.
-              -> StaHandlerBuilder s o a    -- ^ The handler when input differs.
-              -> Offset o                   -- ^ The initial offset of the loop.
-              -> Word                       -- ^ The unique name of the captured offsets /and/ the iteration offset.
-              -> Code (ST s (Maybe a))
-buildIterSame ctx μ l yes no o u =
-  bindHandler# @o (staHandler# yes) $ \qyes ->
-    bindIterHandler# @o (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
-      let handler qc# = mkStaHandler (mkOffset @o qc# u) $ \o ->
-            [||if $$(same qc# o) then $$qyes $$(qc#) else $$qno $$(qc#) $$o||]
-      in bindIterHandler# @o (staHandler# . handler) $ \qhandler ->
+bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
+             => Ctx s o a                  -- ^ The context to store the binding in.
+             -> MVar Void                  -- ^ The name of the binding.
+             -> Machine s o '[] One Void a -- ^ The loop body.
+             -> Bool                       -- ^ Is a binding required for the matching handler?
+             -> StaHandler s o a           -- ^ The handler when input is the same.
+             -> Bool                       -- ^ Is a binding required for the differing handler?
+             -> StaHandlerBuilder s o a    -- ^ The handler when input differs.
+             -> Offset o                   -- ^ The initial offset of the loop.
+             -> Word                       -- ^ The unique name of the captured offsets /and/ the iteration offset.
+             -> Code (ST s (Maybe a))
+bindIterSame ctx μ l neededYes yes neededNo no o u =
+  bindHandlerInline# @o neededYes (staHandler# yes) $ \qyes ->
+    bindIterHandlerInline# neededNo (\qc# -> staHandler# (no (mkOffset qc# u))) $ \qno ->
+      let handler qc# o = [||if $$(same qc# o) then $$(staHandler# qyes qc#) else $$(staHandler# (qno qc#) o)||]
+      in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (offset o) $ \qloop qo# ->
           let off = mkOffset qo# u
-          in run l (Γ Empty noreturn off (VCons (mkStaHandlerFull off [||$$qhandler $$(qo#)||] [||$$qyes $$(qo#)||] [||$$qno $$(qo#)||]) VNil))
+          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler qo#) (staHandler# qyes qo#) (qno qo#)) VNil))
                    (voidCoins (insertSub μ (mkStaSubroutine $ \_ o# _ -> [|| $$qloop $$(o#) ||]) ctx))
 
 {- Recursion Operations -}
@@ -451,8 +453,29 @@ buildRec :: forall rs s o a r. RecBuilder o
 buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qo# qh ->
-      run k (Γ Empty (mkStaContDyn qret) (mkOffset qo# 0) (VCons (mkStaHandlerDyn Nothing qh) VNil))
+      run k (Γ Empty (mkStaContDyn qret) (mkOffset qo# 0) (VCons (augmentHandlerDyn Nothing qh) VNil))
             (insertSub μ (mkStaSubroutineMeta meta $ \k o# h -> [|| $$qself $$k $$(o#) $$h ||]) (nextUnique ctx))
+
+{- Binding Operations -}
+bindHandlerInline# :: forall o s a b. HandlerOps o
+                   => Bool
+                   -> StaHandler# s o a
+                   -> (StaHandler s o a -> Code b)
+                   -> Code b
+bindHandlerInline# True  h k = bindHandler# @o h (k . fromDynHandler)
+bindHandlerInline# False h k = k (fromStaHandler# h)
+
+bindYesInline# :: Bool -> Code a -> (Code a -> Code b) -> Code b
+bindYesInline# True  v k = [|| let yesSame = $$v in $$(k [||yesSame||]) ||]
+bindYesInline# False v k = k v
+
+bindIterHandlerInline# :: forall o s a b. RecBuilder o
+                       => Bool
+                       -> (Code (Rep o) -> StaHandler# s o a)
+                       -> ((Code (Rep o) -> StaHandler s o a) -> Code b)
+                       -> Code b
+bindIterHandlerInline# True  h k = bindIterHandler# @o h $ \qh -> k (\qo -> fromDynHandler [||$$qh $$qo||])
+bindIterHandlerInline# False h k = k (fromStaHandler# . h)
 
 {- Marshalling Operations -}
 {-|
@@ -464,9 +487,8 @@ handler given knowledge about how it might be used.
 
 @since 1.5.0.0
 -}
-dynHandler :: forall s o a. MarshalOps o => StaHandler s o a -> InputCharacteristic -> DynHandler s o a
-dynHandler (StaHandler _ sh Nothing)  = dynHandler# @o . staHandlerCharacteristicSta sh
-dynHandler (StaHandler _ _ (Just dh)) = staHandlerCharacteristicDyn dh (dynHandler# @o . const)
+dynHandler :: forall s o a. MarshalOps o => AugmentedStaHandler s o a -> InputCharacteristic -> DynHandler s o a
+dynHandler h = staHandlerCharacteristicDyn h (eta . dynHandler# @o)
 
 {-|
 Wraps around `dynCont#`, but ensures that if the `StaCont`
@@ -475,7 +497,7 @@ originated from a `DynCont` itself, that no work is performed.
 @since 1.4.0.0
 -}
 dynCont :: forall s o a x. MarshalOps o => StaCont s o a x -> DynCont s o a x
-dynCont (StaCont sk Nothing) = dynCont# @o sk
+dynCont (StaCont sk Nothing)  = dynCont# @o sk
 dynCont (StaCont _ (Just dk)) = dk
 
 {- Log Operations =-}
@@ -486,8 +508,8 @@ having printed the debug information.
 @since 1.2.0.0
 -}
 logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
-logHandler name ctx γ u o = let VCons h _ = handlers γ in mkStaHandler o $ \o# -> [||
-    trace $$(preludeString name '<' (γ {input = mkOffset o# u}) ctx (color Red " Fail")) $$(staHandler# h o#)
+logHandler name ctx γ u _ = let VCons h _ = handlers γ in fromStaHandler# $ \o# -> let o = mkOffset o# u in [||
+    trace $$(preludeString name '<' (γ {input = o}) ctx (color Red " Fail")) $$(staHandlerEval h o)
   ||]
 
 {-|

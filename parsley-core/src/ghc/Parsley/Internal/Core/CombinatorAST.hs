@@ -25,7 +25,7 @@ data Combinator (k :: Type -> Type) (a :: Type) where
   Empty          :: Combinator k a
   Try            :: k a -> Combinator k a
   LookAhead      :: k a -> Combinator k a
-  Let            :: Bool -> MVar a -> k a -> Combinator k a
+  Let            :: Bool -> MVar a -> Combinator k a
   NotFollowedBy  :: k a -> Combinator k ()
   Branch         :: k (Either a b) -> k (a -> c) -> k (b -> c) -> Combinator k c
   Match          :: k a -> [Defunc (a -> Bool)] -> [k b] -> k b -> Combinator k b
@@ -55,7 +55,7 @@ data MetaCombinator where
   -- | This combinator requires a cut from below to respect parsec semantics
   RequiresCut :: MetaCombinator
   -- | This combinator denotes that within its scope, cut semantics are not enforced
-  -- 
+  --
   -- @since 1.6.0.0
   CutImmune   :: MetaCombinator
 
@@ -70,7 +70,7 @@ instance IFunctor Combinator where
   imap _ Empty                = Empty
   imap f (Try p)              = Try (f p)
   imap f (LookAhead p)        = LookAhead (f p)
-  imap f (Let r v p)          = Let r v (f p)
+  imap _ (Let r v)            = Let r v
   imap f (NotFollowedBy p)    = NotFollowedBy (f p)
   imap f (Branch b p q)       = Branch (f b) (f p) (f q)
   imap f (Match p fs qs d)    = Match (f p) fs (map f qs) (f d)
@@ -94,8 +94,8 @@ instance Show (Fix Combinator a) where
       alg Empty                                     = "empty"
       alg (Try (Const1 p))                          = "(try " . p . ")"
       alg (LookAhead (Const1 p))                    = "(lookAhead " . p . ")"
-      alg (Let False v _)                           = "(let-bound " . shows v . ")"
-      alg (Let True v _)                            = "(rec " . shows v . ")"
+      alg (Let False v)                             = "(let-bound " . shows v . ")"
+      alg (Let True v)                              = "(rec " . shows v . ")"
       alg (NotFollowedBy (Const1 p))                = "(notFollowedBy " . p . ")"
       alg (Branch (Const1 b) (Const1 p) (Const1 q)) = "(branch " . b . " " . p . " " . q . ")"
       alg (Match (Const1 p) fs qs (Const1 def))     = "(match " . p . " " . shows fs . " [" . intercalateDiff ", " (map getConst1 qs) . "] "  . def . ")"
@@ -135,5 +135,5 @@ traverseCombinator expose (PutRegister σ p)    = do p' <- expose p; pure (PutRe
 traverseCombinator expose (Debug name p)       = do p' <- expose p; pure (Debug name p')
 traverseCombinator _      (Pure x)             = do pure (Pure x)
 traverseCombinator _      (Satisfy f)          = do pure (Satisfy f)
-traverseCombinator expose (Let r v p)          = do p' <- expose p; pure (Let r v p')
+traverseCombinator _      (Let r v)            = do pure (Let r v)
 traverseCombinator expose (MetaCombinator m p) = do p' <- expose p; pure (MetaCombinator m p')

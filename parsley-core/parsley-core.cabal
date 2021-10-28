@@ -5,7 +5,7 @@ name:                parsley-core
 --                   | +------- breaking internal API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             1.6.0.0
+version:             1.7.0.0
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
 description:         This package contains the internals of the @parsley@ package.
                      .
@@ -66,6 +66,7 @@ library
                        Parsley.Internal.Frontend.Analysis.Cut,
                        Parsley.Internal.Frontend.Analysis.Dependencies,
                        Parsley.Internal.Frontend.Analysis.Flags,
+                       Parsley.Internal.Frontend.Analysis.Inliner,
 
                        Parsley.Internal.Backend,
                        Parsley.Internal.Backend.CodeGenerator,
@@ -73,6 +74,7 @@ library
 
                        Parsley.Internal.Backend.Analysis,
                        Parsley.Internal.Backend.Analysis.Coins,
+                       Parsley.Internal.Backend.Analysis.Inliner,
                        Parsley.Internal.Backend.Analysis.Relevancy,
 
                        Parsley.Internal.Backend.Machine,
@@ -85,6 +87,7 @@ library
                        Parsley.Internal.Backend.Machine.InputRep,
                        Parsley.Internal.Backend.Machine.Instructions,
                        Parsley.Internal.Backend.Machine.Ops,
+                       Parsley.Internal.Backend.Machine.THUtils,
 
                        Parsley.Internal.Backend.Machine.Types,
                        Parsley.Internal.Backend.Machine.Types.Coins,

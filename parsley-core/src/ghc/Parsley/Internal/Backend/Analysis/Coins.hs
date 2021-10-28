@@ -78,5 +78,5 @@ alg (MetaInstr (PrefetchChar _) (Const4 k)) = k
 alg (MetaInstr BlockCoins (Const4 k))       = first (const zero) k
 
 algHandler :: Handler o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)
-algHandler (Same yes no) = algCatch (getConst4 yes) (getConst4 no)
-algHandler (Always k) = getConst4 k
+algHandler (Same _ yes _ no) = algCatch (getConst4 yes) (getConst4 no)
+algHandler (Always _ k) = getConst4 k

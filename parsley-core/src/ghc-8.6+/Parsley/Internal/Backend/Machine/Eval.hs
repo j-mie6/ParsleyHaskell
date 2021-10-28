@@ -112,8 +112,8 @@ evalCatch :: (BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine 
 evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandler γ (buildHandler γ mh) mk) k h
 
 evalHandler :: PositionOps o => Instructions.Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
-evalHandler (Instructions.Always k) = k
-evalHandler (Instructions.Same yes no) =
+evalHandler (Instructions.Always _ k) = k
+evalHandler (Instructions.Same _ yes _ no) =
   Machine (evalDup (
     Machine (evalTell (
       Machine (evalLift2 SAME (

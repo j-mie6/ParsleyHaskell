@@ -12,10 +12,12 @@ the extended documentation in the submodules.
 -}
 module Parsley.Internal.Backend.Analysis (
     coinsNeeded,
+    shouldInline,
     relevancy
   ) where
 
 import Parsley.Internal.Backend.Analysis.Coins (coinsNeeded)
+import Parsley.Internal.Backend.Analysis.Inliner (shouldInline)
 import Parsley.Internal.Backend.Analysis.Relevancy (relevancy)
 
 {- TODO

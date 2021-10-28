@@ -1,5 +1,4 @@
-{-# LANGUAGE TupleSections,
-             CPP #-}
+{-# LANGUAGE TupleSections #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.LetRecBuilder
 Description : Function for building recursive groups.
@@ -19,24 +18,13 @@ import Data.Functor.Const                           (Const(..))
 import Data.GADT.Compare                            (GCompare)
 import Data.Some                                    (Some(Some))
 import Language.Haskell.TH                          (newName, Name)
-#if __GLASGOW_HASKELL__ < 900
-import Language.Haskell.TH.Syntax                   (Q, unTypeQ, unsafeTExpCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
-#else
-import Language.Haskell.TH.Syntax                   (unTypeCode, unsafeCodeCoerce, Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
-#endif
+import Language.Haskell.TH.Syntax                   (Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Metadata, Binding, Regs)
+import Parsley.Internal.Backend.Machine.THUtils     (unsafeCodeCoerce, unTypeCode)
 import Parsley.Internal.Backend.Machine.Types       (QSubroutine, qSubroutine, Func)
-
 import Parsley.Internal.Common.Utils                (Code)
 
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
-
-#if __GLASGOW_HASKELL__ < 900
-unsafeCodeCoerce :: Q Exp -> Code a
-unsafeCodeCoerce = unsafeTExpCoerce
-unTypeCode :: Code a -> Q Exp
-unTypeCode = unTypeQ
-#endif
 
 {-|
 Given a collection of bindings, generates a recursive binding group where each is allowed to

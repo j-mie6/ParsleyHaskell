@@ -66,6 +66,7 @@ library
                        Parsley.Internal.Frontend.Analysis.Cut,
                        Parsley.Internal.Frontend.Analysis.Dependencies,
                        Parsley.Internal.Frontend.Analysis.Flags,
+                       Parsley.Internal.Frontend.Analysis.Inliner,
 
                        Parsley.Internal.Backend,
                        Parsley.Internal.Backend.CodeGenerator,

@@ -40,7 +40,7 @@ alg (Call _ k)         = 2 % 3 + getWeight k
 alg (Jump _)           = 0
 alg Empt               = 0
 alg (Commit k)         = 0 + getWeight k
-alg (Catch k h)        = 1 % 4 + getWeight k + algHandler h
+alg (Catch k h)        = (if handlerInlined h then 0 else 1 % 4) + getWeight k + algHandler h
 alg (Tell k)           = 0 + getWeight k
 alg (Seek k)           = 0 + getWeight k
 alg (Case p q)         = 1 % 3 + getWeight p + getWeight q
@@ -63,3 +63,7 @@ alg (MetaInstr _ k)    = 0 + getWeight k
 algHandler :: Handler o InlineWeight xs n r a -> Rational
 algHandler (Always _ h) = getWeight h
 algHandler (Same _ y _ n) = getWeight y + getWeight n
+
+handlerInlined :: Handler o k xs n r a -> Bool
+handlerInlined (Always True _) = True
+handlerInlined _               = False

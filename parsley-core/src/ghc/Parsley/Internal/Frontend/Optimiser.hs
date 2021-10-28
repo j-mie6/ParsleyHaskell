@@ -169,10 +169,10 @@ optimise (Match (In (Pure x)) fs qs def)                 = foldr (\(f, q) k -> i
 -- Distributivity Law: f <$> match vs p g def            = match vs p ((f <$>) . g) (f <$> def)
 optimise (f :<$>: (In (Match p fs qs def)))              = In (Match p fs (map (optimise . (f :<$>:)) qs) (optimise (f :<$>: def)))
 -- Trivial let-bindings - NOTE: These will get moved when Let nodes no longer have the "source" in them
-optimise (Let False _ p@(In (Pure _)))                               = p
+{-optimise (Let False _ p@(In (Pure _)))                               = p
 optimise (Let False _ p@(In Empty))                                  = p
 optimise (Let False _ p@(In (Satisfy _)))                            = p
 optimise (Let False _ p@(In (In (Satisfy _) :$>: _)))                = p
 optimise (Let False _ p@(In (GetRegister _)))                        = p
-optimise (Let False _ p@(In (In (Pure _) :<*>: In (GetRegister _)))) = p
+optimise (Let False _ p@(In (In (Pure _) :<*>: In (GetRegister _)))) = p-}
 optimise p                                                           = In p

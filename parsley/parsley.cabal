@@ -5,7 +5,7 @@ name:                parsley
 --                   | +------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             1.0.0.2
+version:             1.0.0.3
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
 description:         Parsley is a staged selective parser combinator library, which means
                      it does not support monadic operations, and relies on Typed Template
@@ -43,6 +43,9 @@ library
                        Parsley.InputExtras,
                        Parsley.Precedence
 
+  other-modules:       Parsley.Debug
+                       Parsley.ParserOps
+
   default-extensions:  BangPatterns,
                        DataKinds,
                        GADTs,
@@ -59,7 +62,7 @@ library
 
 --                     ghc                  >= 8.6     && < 9.2,
   build-depends:       base                 >= 4.10    && < 4.16,
-                       parsley-core         >= 1       && < 2,
+                       parsley-core         >= 1       && < 3,
                        template-haskell     >= 2.14    && < 3,
                        text                 >= 1.2.3   && < 1.3,
   hs-source-dirs:      src/ghc
@@ -136,8 +139,8 @@ common benchmark-common
   other-extensions:    TemplateHaskellQuotes, TemplateHaskell
   other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -fno-spec-constr
-  if false && impl(ghc < 8.8)
+  ghc-options:         -rtsopts
+  if false && impl(ghc < 9)
     build-depends:     dump-core
     ghc-options:       -fplugin=DumpCore
 

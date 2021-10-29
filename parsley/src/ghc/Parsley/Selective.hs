@@ -27,7 +27,27 @@ import Data.Function              (fix)
 import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Alternative        (empty)
 import Parsley.Applicative        (pure, (<$>), liftA2, unit, constp)
-import Parsley.Internal           (makeQ, Parser, Defunc(ID, EQ_H, IF_S, LAM_S, LET_S, APP_H), ParserOps, conditional, branch)
+import Parsley.Defunctionalized   (Defunc(ID, EQ_H, IF_S, LAM_S, LET_S, APP_H))
+import Parsley.Internal           (makeQ, Parser)
+import Parsley.ParserOps          (ParserOps, conditional)
+
+import qualified Parsley.Internal as Internal (branch)
+
+{-|
+One of the core @Selective@ operations. The behaviour of @branch p l r@ is to first to parse
+@p@, if it fails then the combinator fails. If @p@ succeeded then if its result is a @Left@, then
+the parser @l@ is executed and applied to the result of @p@, otherwise @r@ is executed and applied
+to the right from a @Right@.
+
+Crucially, only one of @l@ or @r@ will be executed on @p@'s success.
+
+@since 0.1.0.0
+-}
+branch :: Parser (Either a b) -- ^ The first parser to execute
+       -> Parser (a -> c)     -- ^ The parser to execute if the first returned a @Left@
+       -> Parser (b -> c)     -- ^ The parser to execute if the first returned a @Right@
+       -> Parser c
+branch = Internal.branch
 
 {-|
 Similar to `branch`, except the given branch is only executed on a @Left@ returned.

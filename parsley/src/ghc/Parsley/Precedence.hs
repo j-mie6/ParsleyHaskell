@@ -16,11 +16,12 @@ implementation allows the precedence layers to change type in the table.
 -}
 module Parsley.Precedence (module Parsley.Precedence) where
 
-import Prelude hiding      ((<$>))
-import Parsley.Alternative (choice)
-import Parsley.Applicative ((<$>))
-import Parsley.Fold        (chainPre, chainPost, chainl1', chainr1')
-import Parsley.Internal    (WQ, Parser, Defunc(BLACK, ID))
+import Prelude hiding           ((<$>))
+import Parsley.Alternative      (choice)
+import Parsley.Applicative      ((<$>))
+import Parsley.Defunctionalized (Defunc(BLACK, ID))
+import Parsley.Fold             (chainPre, chainPost, chainl1', chainr1')
+import Parsley.Internal         (WQ, Parser)
 
 {-|
 This combinator will construct and expression parser will provided with a table of precedence along

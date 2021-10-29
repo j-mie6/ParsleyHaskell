@@ -22,11 +22,51 @@ module Parsley.Combinator (
     lookAhead, notFollowedBy
   ) where
 
-import Prelude hiding      (traverse, (*>))
-import Data.List           (sort)
-import Parsley.Alternative (manyTill)
-import Parsley.Applicative (($>), void, traverse, (<:>), (*>))
-import Parsley.Internal    (Code, Quapplicative(..), Parser, Defunc(LIFTED, EQ_H, CONST, LAM_S), pattern APP_H, pattern COMPOSE_H, satisfy, lookAhead, try, notFollowedBy)
+import Prelude hiding           (traverse, (*>))
+import Data.List                (sort)
+import Parsley.Alternative      (manyTill)
+import Parsley.Applicative      (($>), void, traverse, (<:>), (*>))
+import Parsley.Defunctionalized (Defunc(LIFTED, EQ_H, CONST, LAM_S), pattern APP_H, pattern COMPOSE_H)
+import Parsley.Internal         (Code, Quapplicative(..), Parser)
+import Parsley.ParserOps        (satisfy)
+
+import qualified Parsley.Internal as Internal (try, lookAhead, notFollowedBy)
+
+{-|
+This combinator will attempt to parse a given parser. If it succeeds, the result is returned without
+having consumed any input. If it fails, however, any consumed input remains consumed.
+
+@since 0.1.0.0
+-}
+lookAhead :: Parser a -> Parser a
+lookAhead = Internal.lookAhead
+
+{-|
+This combinator will ensure that a given parser fails. If the parser does fail, a @()@ is returned
+and no input is consumed. If the parser succeeded, then this combinator will fail, however it will
+not consume any input.
+
+@since 0.1.0.0
+-}
+notFollowedBy :: Parser a -> Parser ()
+notFollowedBy = Internal.notFollowedBy
+
+{-|
+This combinator allows a parser to backtrack on failure, which is to say that it will
+not have consumed any input if it were to fail. This is important since @parsec@ semantics demand
+that the second branch of @(`Parsley.Alternative.<|>`)@ can only be taken if the first did not consume input on failure.
+
+Excessive use of `try` will reduce the efficiency of the parser and effect the generated error
+messages. It should only be used in one of two circumstances:
+
+* When two branches of a parser share a common leading prefix (in which case, it is often better
+  to try and factor this out).
+* When a parser needs to be executed atomically (for example, tokens).
+
+@since 0.1.0.0
+-}
+try :: Parser a -> Parser a
+try = Internal.try
 
 {-|
 This combinator will attempt match a given string. If the parser fails midway through, this

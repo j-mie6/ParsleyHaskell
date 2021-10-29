@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, CPP #-}
 {-|
 Module      : Parsley.Fold
 Description : The "folding" combinators: chains and iterators
@@ -13,7 +13,7 @@ this includes the traditional `many` and `some` combinators.
 -}
 module Parsley.Fold (
     many, some, manyN,
-    skipMany, skipSome, skipManyN,
+    skipMany, skipSome, skipManyN, --loop,
     sepBy, sepBy1, endBy, endBy1, sepEndBy, sepEndBy1,
     chainl1, chainr1, chainl, chainr,
     chainl1', chainr1', chainPre, chainPost,
@@ -21,23 +21,79 @@ module Parsley.Fold (
     pfoldr1, pfoldl1
   ) where
 
-import Prelude hiding      (pure, (<*>), (<$>), (*>), (<*))
-import Parsley.Alternative ((<|>), option)
-import Parsley.Applicative (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
-import Parsley.Internal    (Parser, Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), ParserOps, pattern FLIP_H, pattern COMPOSE_H, pattern UNIT, chainPre, chainPost)
-import Parsley.Register    (bind, get, modify, newRegister_)
+import Prelude hiding           (pure, (<*>), (<$>), (*>), (<*))
+import Parsley.Alternative      ((<|>), option)
+import Parsley.Applicative      (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
+import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), pattern FLIP_H, pattern COMPOSE_H, pattern UNIT)
+import Parsley.Internal         (Parser)
+import Parsley.ParserOps        (ParserOps)
+#if MIN_VERSION_parsley_core(1,7,1)
+import Parsley.Register         (bind, get, put, modify, newRegister, newRegister_)
+#else
+import Parsley.Register         (bind, get, modify, newRegister_)
+#endif
 
-{-chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre op p = newRegister_ ID $ \acc ->
-  let go = modify acc (FLIP_H COMPOSE <$> op) *> go
-       <|> get acc
-  in go <*> p-}
+#if MIN_VERSION_parsley_core(1,7,1)
+import qualified Parsley.Internal as Internal (loop)
+#else
+import qualified Parsley.Internal as Internal (chainPre, chainPost)
+#endif
 
-{-chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost p op = newRegister p $ \acc ->
-  let go = modify acc op *> go
-       <|> get acc
-  in go-}
+#if MIN_VERSION_parsley_core(1,7,1)
+{-|
+The combinator @loop body exit@ parses @body@ zero or more times until it fails. If the final @body@
+failed having not consumed input, @exit@ is performed, otherwise the combinator fails:
+
+> loop body exit = let go = body *> go <|> exit in go
+
+@since 1.1.0.0
+-}
+loop :: Parser () -> Parser a -> Parser a
+loop = Internal.loop
+
+{-|
+This combinator parses repeated applications of an operator to a single final operand. This is
+primarily used to parse prefix operators in expressions.
+
+@since 0.1.0.0
+-}
+chainPre :: Parser (a -> a) -> Parser a -> Parser a
+chainPre op p =
+  newRegister (pure ID) (\r ->
+    loop (put r (pure (FLIP_H COMPOSE) <*> op <*> get r))
+         (get r))
+  <*> p
+
+{-|
+This combinator parses repeated applications of an operator to a single initial operand. This is
+primarily used to parse postfix operators in expressions.
+
+@since 0.1.0.0
+-}
+chainPost :: Parser a -> Parser (a -> a) -> Parser a
+chainPost p op =
+  newRegister p $ \r ->
+    loop (put r (op <*> get r))
+         (get r)
+#else
+{-|
+This combinator parses repeated applications of an operator to a single final operand. This is
+primarily used to parse prefix operators in expressions.
+
+@since 0.1.0.0
+-}
+chainPre :: Parser (a -> a) -> Parser a -> Parser a
+chainPre = Internal.chainPre
+
+{-|
+This combinator parses repeated applications of an operator to a single initial operand. This is
+primarily used to parse postfix operators in expressions.
+
+@since 0.1.0.0
+-}
+chainPost :: Parser a -> Parser (a -> a) -> Parser a
+chainPost = Internal.chainPost
+#endif
 
 -- Parser Folds
 {-|
@@ -177,6 +233,7 @@ Like `many`, excepts discards its results.
 skipMany :: Parser a -> Parser ()
 --skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
 skipMany = void . pfoldl CONST UNIT -- the void here will encourage the optimiser to recognise that the register is unused
+--skipMany = flip loop (pure UNIT) . void -- This should be the optimal one, with register removed, but apparently not?! something is amiss, perhaps space leak?
 
 {-|
 Like `manyN`, excepts discards its results.

@@ -30,5 +30,5 @@
 
 ## 1.0.0.3 -- TBD
 
-* Support for `parsley-core-2.0.0.0`.
+* Support for `parsley-core-2.0.0` and `parsley-core-1.7.1`.
 * Re-exports less from `parsley-core`, instead using (currently hidden) redefinition.

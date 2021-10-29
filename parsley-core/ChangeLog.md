@@ -107,6 +107,12 @@ Fix for issue #27
 * Renamed `buildIterAlways` and `buildIterSame` to `bindIterAlways` and `bindIterSame`.
 * Renamed `StaHandler` to `AugmentedStaHandler`.
 
+## 1.7.1.0 -- TBD
+
+* Moved `parse` into core API, this will reduce the area of incompatibility.
+* Added `loop` combinator.
+
 ## 2.0.0.0 -- TBD
 
 * Removed `ChainPre` and `ChainPost` from the AST, simplifying the API.
+* Removed `eval`, `codeGen`, and `compile` from the Major API.

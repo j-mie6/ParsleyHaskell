@@ -27,19 +27,19 @@ import Parsley.Applicative      (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), 
 import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), pattern FLIP_H, pattern COMPOSE_H, pattern UNIT)
 import Parsley.Internal         (Parser)
 import Parsley.ParserOps        (ParserOps)
-#if MIN_VERSION_parsley_core(2,0,0)
+#if MIN_VERSION_parsley_core(1,7,1)
 import Parsley.Register         (bind, get, put, modify, newRegister, newRegister_)
 #else
 import Parsley.Register         (bind, get, modify, newRegister_)
 #endif
 
-#if MIN_VERSION_parsley_core(2,0,0)
+#if MIN_VERSION_parsley_core(1,7,1)
 import qualified Parsley.Internal as Internal (loop)
 #else
 import qualified Parsley.Internal as Internal (chainPre, chainPost)
 #endif
 
-#if MIN_VERSION_parsley_core(2,0,0)
+#if MIN_VERSION_parsley_core(1,7,1)
 {-|
 The combinator @loop body exit@ parses @body@ zero or more times until it fails. If the final @body@
 failed having not consumed input, @exit@ is performed, otherwise the combinator fails:

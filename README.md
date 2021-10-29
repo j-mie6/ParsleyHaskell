@@ -6,7 +6,7 @@ parsec family, as well as Happy. To make this possible, it makes use of Typed Te
 to generate the code for the parsers.
 
 ## How do I use it? [![Hackage Version](https://img.shields.io/hackage/v/parsley)](https://hackage.haskell.org/package/parsley) ![Dependent repos (via libraries.io)](https://img.shields.io/librariesio/dependent-repos/hackage/parsley)
-Parsley is distributed on Hackage, and can be added by depending on the package `parsley`.
+Parsley is distributed on [Hackage](https://hackage.haskell.org/package/parsley), and can be added by depending on the package `parsley`.
 
 The version policy for `parsley-core` adheres to the regular Haskell PVP, but the two major versions are distinguished: the first is the _Public API_ major version, which represents backwards incompatible changes
 in the regular PVP sense that could affect `parsley` itself (note `parsley` _only_ imports from `Parsley.Internal` itself); the second version is the

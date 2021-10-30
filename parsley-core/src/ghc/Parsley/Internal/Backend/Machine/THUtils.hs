@@ -1,4 +1,16 @@
 {-# LANGUAGE CPP #-}
+{-|
+Module      : Parsley.Internal.Backend.Machine.THUtils
+Description : Functions for low-level template haskell manipulation
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains some Template Haskell related functions for manipulating
+template haskell as a lower, combinator-based, level.
+
+@since 1.7.0.0
+-}
 module Parsley.Internal.Backend.Machine.THUtils (eta, unsafeCodeCoerce, unTypeCode) where
 
 import GHC.Types                     (TYPE)
@@ -14,7 +26,7 @@ import Parsley.Internal.Common.Utils (Code)
 
 {-|
 Given a function (of arbitrarily many arguments, but it must at /least/ have 1), eta-reduces
-it to remove redundant arguments. This
+it to remove redundant arguments.
 
 @since 1.7.0.0
 -}

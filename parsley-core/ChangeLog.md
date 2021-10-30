@@ -111,3 +111,8 @@ Fix for issue #27
 
 * Moved `parse` into core API, this will reduce the area of incompatibility.
 * Added `loop` combinator.
+
+## 1.7.1.1 -- 2021-10-30
+
+* Improved eta-reduction to handle multiple arguments.
+* Added eta-reduction to constructed return continutations.

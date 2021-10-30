@@ -497,7 +497,7 @@ originated from a `DynCont` itself, that no work is performed.
 @since 1.4.0.0
 -}
 dynCont :: forall s o a x. MarshalOps o => StaCont s o a x -> DynCont s o a x
-dynCont (StaCont sk Nothing)  = dynCont# @o sk
+dynCont (StaCont sk Nothing)  = eta (dynCont# @o sk)
 dynCont (StaCont _ (Just dk)) = dk
 
 {- Log Operations =-}

@@ -6,6 +6,7 @@ module Parsley.Internal.Core.Primitives (
   ) where
 
 import Prelude hiding                      (pure, (<*>))
+import Control.Arrow                       (first)
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..))
 #if MIN_VERSION_parsley_core(2,0,0)
 import Parsley.Internal.Core.Defunc        (Defunc)
@@ -40,7 +41,7 @@ class ParserOps rep where
 instance ParserOps WQ where
   pure = pure . BLACK
   satisfy = satisfy . BLACK
-  conditional = conditional . map (\(f, t) -> (BLACK f, t))
+  conditional = conditional . map (first BLACK)
 
 instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
   pure = _pure

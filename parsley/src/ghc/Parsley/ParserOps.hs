@@ -1,6 +1,7 @@
 module Parsley.ParserOps (module Parsley.ParserOps) where
 
 import Prelude hiding (pure)
+import Control.Arrow    (first)
 import Parsley.Internal (Parser, WQ, Defunc(BLACK))
 
 import qualified Parsley.Internal as Internal (pure, satisfy, conditional)
@@ -50,7 +51,7 @@ This is the default representation used for user-level functions and values: pla
 instance ParserOps WQ where
   pure = pure . BLACK
   satisfy = satisfy . BLACK
-  conditional = conditional . map (\(f, t) -> (BLACK f, t))
+  conditional = conditional . map (first BLACK)
 
 {-|
 This is used to allow defunctionalised versions of many standard Haskell functions to be used

@@ -17,7 +17,7 @@ module Parsley.Internal.Backend.Machine.Types.State (
   ) where
 
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc)
-import Parsley.Internal.Backend.Machine.Types.Offset  (Offset)
+import Parsley.Internal.Backend.Machine.Types.Offset  (Input)
 import Parsley.Internal.Backend.Machine.Types.Statics (StaCont, AugmentedStaHandler)
 import Parsley.Internal.Common.Vec                    (Vec)
 
@@ -43,6 +43,6 @@ of a parser in their variously statically augmented forms.
 -}
 data Γ s o xs n r a = Γ { operands :: OpStack xs                        -- ^ The current values available for applicative application.
                         , retCont  :: StaCont s o a r                   -- ^ The current return continuation when this parser is finished.
-                        , input    :: Offset o                          -- ^ The current offset into the input of the parser.
+                        , input    :: Input o                           -- ^ The current offset into the input of the parser.
                         , handlers :: Vec n (AugmentedStaHandler s o a) -- ^ The failure handlers that are used to process failure during a parser.
                         }

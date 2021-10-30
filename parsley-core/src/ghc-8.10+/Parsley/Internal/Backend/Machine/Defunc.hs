@@ -20,7 +20,7 @@ module Parsley.Internal.Backend.Machine.Defunc (
     pattern NormLam, pattern FREEVAR
   ) where
 
-import Parsley.Internal.Backend.Machine.Types.Offset (Offset)
+import Parsley.Internal.Backend.Machine.Types.Offset (Input(off))
 import Parsley.Internal.Common.Utils                 (Code)
 import Parsley.Internal.Core.Lam                     (Lam, normaliseGen, normalise)
 
@@ -55,7 +55,7 @@ data Defunc a where
 
   @since 1.4.0.0
   -}
-  OFFSET  :: Offset o -> Defunc o
+  OFFSET  :: Input o -> Defunc o
 
 {-|
 Promotes a @Defunc@ value from the Frontend API into a Backend one.
@@ -135,4 +135,4 @@ instance Show (Defunc a) where
   show (LAM x) = show x
   show BOTTOM = "[[irrelevant]]"
   show (FREEVAR _) = "x"
-  show (OFFSET o)  = "offset " ++ show o
+  show (OFFSET o)  = "offset " ++ show (off o)

@@ -66,7 +66,7 @@ import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦV
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Coins    (Coins, willConsume, canReclaim)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
-import Parsley.Internal.Backend.Machine.Types.Offset   (Offset)
+import Parsley.Internal.Backend.Machine.Types.Offset   (Input)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
 import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
 
@@ -89,7 +89,7 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a)     -- ^ Map
                      , coins      :: Int                               -- ^ Number of tokens free to consume without length check.
                      , offsetUniq :: Word                              -- ^ Next unique offset identifier.
                      , piggies    :: Queue Coins                       -- ^ Queue of future length check credit.
-                     , knownChars :: RewindQueue (Code Char, Offset o) -- ^ Characters that can be reclaimed on backtrack.
+                     , knownChars :: RewindQueue (Code Char, Input o) -- ^ Characters that can be reclaimed on backtrack.
                      }
 
 {-|
@@ -423,7 +423,7 @@ can be retrieved later.
 
 @since 1.5.0.0
 -}
-addChar :: Code Char -> Offset o -> Ctx s o a -> Ctx s o a
+addChar :: Code Char -> Input o -> Ctx s o a -> Ctx s o a
 addChar c o ctx = ctx { knownChars = enqueue (c, o) (knownChars ctx) }
 
 {-|
@@ -433,9 +433,9 @@ rewind buffer).
 
 @since 1.5.0.0
 -}
-readChar :: Ctx s o a                                      -- ^ The original context.
-         -> ((Code Char -> Offset o -> Code b) -> Code b)  -- ^ The fallback source of input.
-         -> (Code Char -> Offset o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
+readChar :: Ctx s o a                                     -- ^ The original context.
+         -> ((Code Char -> Input o -> Code b) -> Code b)  -- ^ The fallback source of input.
+         -> (Code Char -> Input o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
          -> Code b
 readChar ctx fallback k
   | reclaimable = unsafeReadChar ctx k

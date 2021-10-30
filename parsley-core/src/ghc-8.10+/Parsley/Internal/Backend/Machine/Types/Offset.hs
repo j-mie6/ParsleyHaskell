@@ -13,11 +13,19 @@ a parser as it is evaluated.
 @since 1.4.0.0
 -}
 module Parsley.Internal.Backend.Machine.Types.Offset (
-    Offset, mkOffset, offset, moveOne, moveN, same
+    Offset, mkOffset, offset, moveOne, moveN, same,
+    Input(..)
   ) where
 
-import Parsley.Internal.Backend.Machine.InputRep    (Rep)
-import Parsley.Internal.Common.Utils                (Code)
+import Parsley.Internal.Backend.Machine.InputRep   (Rep)
+import Parsley.Internal.Backend.Machine.Types.Base (Line, Col)
+import Parsley.Internal.Common.Utils               (Code)
+
+data Input o = Input {
+    off  :: Offset o,
+    line :: Code Line,
+    col  :: Code Col
+  }
 
 {-|
 Augments a regular @'Code' ('Rep' o)@ with information about its origins and

@@ -1,4 +1,5 @@
 {-# LANGUAGE ImplicitParams,
+             MagicHash,
              MultiWayIf,
              PatternSynonyms,
              RecordWildCards,
@@ -34,7 +35,7 @@ import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types         (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, offset)
+import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, Input(Input, off))
 import Parsley.Internal.Backend.Machine.Types.State   (Γ(..), OpStack(..))
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Trace                         (Trace(trace))
@@ -58,7 +59,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty halt (mkOffset [||offset||] 0) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty halt (Input (mkOffset [||offset||] 0) [||1#||] [||1#||]) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -101,7 +102,7 @@ evalCall :: forall s o a x xs n r. MarshalOps o => MVar x -> Machine s o (x : xs
 evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
 
 evalJump :: forall s o a x n. MarshalOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
-evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont (offset input) handlers
+evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
@@ -137,7 +138,7 @@ evalSat p k@(Machine k') = do
                       -> MachineMonad s o xs (Succ n) r a
     emitCheckAndFetch n mk = do
       sat <- satFetch mk
-      return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (input γ)
+      return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (off (input γ))
 
     continue mk γ c input' = run mk (γ {input = input', operands = Op c (operands γ)})
 
@@ -231,13 +232,13 @@ evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Ma
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ)
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise γ) (off (input γ))
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
   -- If there are enough coins left to cover the cost, no length check is required
   -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
-  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ))
+  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise γ) (off (input γ)))
          (asks (canAfford (willConsume coins)))
          k
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
@@ -246,7 +247,7 @@ evalMeta (PrefetchChar check) k =
      when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
      mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
   where
-    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (input γ)
+    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (off (input γ))
     mkCheck False k = k
     prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
 evalMeta BlockCoins (Machine k) = k

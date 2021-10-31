@@ -13,10 +13,11 @@ the extended documentation in the submodules.
 module Parsley.Internal.Backend.Analysis (
     coinsNeeded,
     shouldInline,
-    relevancy
+    relevancy,
+    reclaimable
   ) where
 
-import Parsley.Internal.Backend.Analysis.Coins (coinsNeeded)
+import Parsley.Internal.Backend.Analysis.Coins (coinsNeeded, reclaimable)
 import Parsley.Internal.Backend.Analysis.Inliner (shouldInline)
 import Parsley.Internal.Backend.Analysis.Relevancy (relevancy)
 

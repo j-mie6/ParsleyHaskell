@@ -116,3 +116,8 @@ Fix for issue #27
 
 * Improved eta-reduction to handle multiple arguments.
 * Added eta-reduction to constructed return continutations.
+
+## 1.7.2.0 -- 2021-10-31
+
+* Added `reclaimable` to backend analysis, this allows `lookAhead` to calculate reclaim ignoring `BlockCoins`
+* Fixed small bug in coin analysis that meant that `lookAhead` always contributes `0` coins (`min 0` vs `max 0`).

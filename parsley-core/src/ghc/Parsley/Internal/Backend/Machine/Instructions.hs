@@ -317,7 +317,7 @@ prefetchChar :: Bool -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Suc
 prefetchChar check = In4 . MetaInstr (PrefetchChar check)
 
 {-|
-Smart-constructor around `PrefetchChar`.
+Smart-constructor around `BlockCoins`.
 
 @since 1.6.0.0
 -}

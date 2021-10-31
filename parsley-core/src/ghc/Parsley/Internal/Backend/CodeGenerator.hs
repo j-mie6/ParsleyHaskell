@@ -21,7 +21,7 @@ import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetB
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
                                             minus, minCoins, maxCoins, zero,
                                             IMVar, IΦVar, MVar(..), ΦVar(..), SomeΣVar)
-import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline)
+import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline, reclaimable)
 import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
 import Parsley.Internal.Common.Indexed     (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
@@ -126,7 +126,7 @@ shallow Empty         _ = do return $! In4 Empt
 shallow (p :<|>: q)   m = do altNoCutCompile p q parsecHandler id m
 shallow (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 shallow (LookAhead p) m =
-  do n <- fmap coinsNeeded (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
+  do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))

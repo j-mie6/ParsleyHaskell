@@ -82,24 +82,24 @@ instance IFunctor Combinator where
 instance Show (Fix Combinator a) where
   show = ($ "") . getConst1 . cata (Const1 . alg)
     where
-      alg (Pure x)                                  = "(pure " . shows x . ")"
-      alg (Satisfy f)                               = "(satisfy " . shows f . ")"
+      alg (Pure x)                                  = "pure " . shows x
+      alg (Satisfy f)                               = "satisfy " . shows f
       alg (Const1 pf :<*>: Const1 px)               = "(" . pf . " <*> " .  px . ")"
       alg (Const1 p :*>: Const1 q)                  = "(" . p . " *> " . q . ")"
       alg (Const1 p :<*: Const1 q)                  = "(" . p . " <* " . q . ")"
       alg (Const1 p :<|>: Const1 q)                 = "(" . p . " <|> " . q . ")"
       alg Empty                                     = "empty"
-      alg (Try (Const1 p))                          = "(try " . p . ")"
-      alg (LookAhead (Const1 p))                    = "(lookAhead " . p . ")"
-      alg (Let False v)                             = "(let-bound " . shows v . ")"
-      alg (Let True v)                              = "(rec " . shows v . ")"
-      alg (NotFollowedBy (Const1 p))                = "(notFollowedBy " . p . ")"
-      alg (Branch (Const1 b) (Const1 p) (Const1 q)) = "(branch " . b . " " . p . " " . q . ")"
-      alg (Match (Const1 p) fs qs (Const1 def))     = "(match " . p . " " . shows fs . " [" . intercalateDiff ", " (map getConst1 qs) . "] "  . def . ")"
-      alg (Loop (Const1 body) (Const1 exit))        = "(loop " . body . " " . exit . ")"
-      alg (MakeRegister σ (Const1 p) (Const1 q))    = "(make " . shows σ . " " . p . " " . q . ")"
-      alg (GetRegister σ)                           = "(get " . shows σ . ")"
-      alg (PutRegister σ (Const1 p))                = "(put " . shows σ . " " . p . ")"
+      alg (Try (Const1 p))                          = "try (". p . ")"
+      alg (LookAhead (Const1 p))                    = "lookAhead (" . p . ")"
+      alg (Let False v)                             = "let-bound " . shows v
+      alg (Let True v)                              = "rec " . shows v
+      alg (NotFollowedBy (Const1 p))                = "notFollowedBy (" . p . ")"
+      alg (Branch (Const1 b) (Const1 p) (Const1 q)) = "branch (" . b . ") (" . p . ") (" . q . ")"
+      alg (Match (Const1 p) fs qs (Const1 def))     = "match (" . p . ") " . shows fs . " [" . intercalateDiff ", " (map getConst1 qs) . "] ("  . def . ")"
+      alg (Loop (Const1 body) (Const1 exit))        = "loop (" . body . ") (" . exit . ")"
+      alg (MakeRegister σ (Const1 p) (Const1 q))    = "make " . shows σ . " (" . p . ") (" . q . ")"
+      alg (GetRegister σ)                           = "get " . shows σ
+      alg (PutRegister σ (Const1 p))                = "put " . shows σ . " (" . p . ")"
       alg (Debug _ (Const1 p))                      = p
       alg (MetaCombinator m (Const1 p))             = p . " [" . shows m . "]"
 

@@ -1,3 +1,4 @@
+{-# LANGUAGE UnboxedTuples #-}
 module Parsley.Internal.Backend.Machine.Types.Input (module Parsley.Internal.Backend.Machine.Types.Input) where
 
 import Parsley.Internal.Backend.Machine.Types.Base         (Pos)

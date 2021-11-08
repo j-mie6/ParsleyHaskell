@@ -24,9 +24,9 @@ updatePos# pos _    = pos `plusWord#` 1##
 #else
 initPos = [|| (# 1##, 1## #) ||]
 
-updatePos (# line, _ #)   '\n' = (# line `plusWord#` 1##, 1## #)
-updatePos (# line, col #) '\t' = (# line, ((col `plusWord#` 3##) `and#` (0## `minusWord#` 4##)) `or#` 1## #) -- nearest tab boundary `c + (4 - (c - 1) % 4)`
-updatePos (# line, col #) _    = (# line, col `plusWord#` 1## #)
+updatePos# (# line, _ #)   '\n' = (# line `plusWord#` 1##, 1## #)
+updatePos# (# line, col #) '\t' = (# line, ((col `plusWord#` 3##) `and#` (0## `minusWord#` 4##)) `or#` 1## #) -- nearest tab boundary `c + (4 - (c - 1) % 4)`
+updatePos# (# line, col #) _    = (# line, col `plusWord#` 1## #)
 #endif
 
 updatePos :: Code Pos -> Code Char -> Code Pos

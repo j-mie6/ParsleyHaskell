@@ -75,6 +75,7 @@ import Parsley.Internal.Backend.Machine.InputOps       (PositionOps(..), LogOps(
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
 import Parsley.Internal.Backend.Machine.Instructions   (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic), InputCharacteristic(..))
+import Parsley.Internal.Backend.Machine.PosOps         (updatePos)
 import Parsley.Internal.Backend.Machine.THUtils        (eta)
 import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
@@ -131,11 +132,11 @@ Consumes the next character and adjusts the offset to match.
 
 @since 1.5.0.0
 -}
--- TODO: position correction!
 fetch :: (?ops :: InputOps (Rep o))
       => Input o -> (Code Char -> Input o -> Code b) -> Code b
-fetch input k = next (offset (off input)) $ \c offset' -> k c (input {off = moveOne (off input) offset'})
-
+fetch input k = next (offset (off input)) $ \c offset' ->
+  k c (input {off = moveOne (off input) offset',
+              pos = updatePos (pos input) c})
 {-|
 Emits a length check for a number of characters \(n\) in the most efficient
 way it can. It takes two continuations a @good@ and a @bad@: the @good@ is used

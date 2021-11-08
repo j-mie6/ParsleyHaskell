@@ -18,28 +18,30 @@ This module exports the `eval` functions used to convert a machine into code.
 -}
 module Parsley.Internal.Backend.Machine.Eval (eval) where
 
-import Data.Dependent.Map                             (DMap)
-import Data.Functor                                   ((<&>))
-import Data.Void                                      (Void)
-import Control.Monad                                  (forM, liftM2, liftM3, when)
-import Control.Monad.Reader                           (ask, asks, reader, local)
-import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET), pattern FREEVAR, genDefunc, ap, ap2, _if)
-import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps      (InputDependant, InputOps(InputOps))
-import Parsley.Internal.Backend.Machine.InputRep      (Rep)
-import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..), Handler(..))
-import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(body))
-import Parsley.Internal.Backend.Machine.LetRecBuilder (letRec)
+import Data.Dependent.Map                                  (DMap)
+import Data.Functor                                        ((<&>))
+import Data.Void                                           (Void)
+import Control.Monad                                       (forM, liftM2, liftM3, when)
+import Control.Monad.Reader                                (ask, asks, reader, local)
+import Control.Monad.ST                                    (runST)
+import Parsley.Internal.Backend.Machine.Defunc             (Defunc(OFFSET), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps))
+import Parsley.Internal.Backend.Machine.InputRep           (Rep)
+import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..))
+import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
+import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
-import Parsley.Internal.Backend.Machine.Types         (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, Input(Input, off))
-import Parsley.Internal.Backend.Machine.Types.State   (Γ(..), OpStack(..))
-import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
-import Parsley.Internal.Trace                         (Trace(trace))
-import System.Console.Pretty                          (color, Color(Green))
+import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
+import Parsley.Internal.Backend.Machine.Types.Input        (Input(Input, off))
+import Parsley.Internal.Backend.Machine.Types.Input.Offset (mkOffset)
+import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
+import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Trace                              (Trace(trace))
+import System.Console.Pretty                               (color, Color(Green))
 
 import qualified Debug.Trace (trace)
 
@@ -59,7 +61,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty halt (Input (mkOffset [||offset||] 0) [||1##||] [||1##||]) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty halt (Input (mkOffset [||offset||] 0) initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String

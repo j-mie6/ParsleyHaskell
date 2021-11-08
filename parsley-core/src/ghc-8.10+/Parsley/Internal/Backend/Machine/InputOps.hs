@@ -18,8 +18,7 @@ parsing machinery to work with input.
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), LogOps(..),
     InputOps(..), more, next,
-    InputDependant,
-    updatePos,
+    InputDependant
   ) where
 
 import Data.Array.Base                             (UArray(..), listArray)
@@ -29,23 +28,16 @@ import Data.Text.Internal                          (Text(..))
 import Data.Text.Unsafe                            (iter, Iter(..){-, iter_, reverseIter_-})
 import GHC.Exts                                    (Int(..), Char(..), TYPE, Int#)
 import GHC.ForeignPtr                              (ForeignPtr(..))
-import GHC.Prim                                    (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#), plusWord#, minusWord#, and#)
+import GHC.Prim                                    (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
                                                     textShiftRight, textShiftLeft, byteStringShiftRight,
                                                     byteStringShiftLeft, max#)
-import Parsley.Internal.Backend.Machine.Types.Base (Line, Col)
 import Parsley.Internal.Common.Utils               (Code)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
-
-{- Position Tracking -}
-updatePos :: Line -> Col -> Char -> (# Line, Col #)
-updatePos line _   '\n' = (# line `plusWord#` 1##, 1## #)
-updatePos line col '\t' = (# line, col `plusWord#` (4## `minusWord#` ((col `minusWord#` 1##) `and#` 3##)) #) -- nearest tab boundary `c + (4 - (c - 1) % 4)`
-updatePos line col _    = (# line, col `plusWord#` 1## #)
 
 {- Auxillary Representation -}
 {-|

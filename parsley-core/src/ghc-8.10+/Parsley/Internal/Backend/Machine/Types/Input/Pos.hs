@@ -1,0 +1,1 @@
+module Parsley.Internal.Backend.Machine.Types.Input.Pos ({-module Parsley.Internal.Backend.Machine.Types.Input.Pos-}) where

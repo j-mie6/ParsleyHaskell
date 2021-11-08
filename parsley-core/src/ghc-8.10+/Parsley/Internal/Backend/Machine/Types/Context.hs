@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass,
              MagicHash,
-             DerivingStrategies #-}
+             DerivingStrategies,
+             UnboxedTuples #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Context
 Description : Fully static context required to generate a parser
@@ -66,7 +67,7 @@ import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦV
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Coins    (Coins, willConsume, canReclaim)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
-import Parsley.Internal.Backend.Machine.Types.Offset   (Input)
+import Parsley.Internal.Backend.Machine.Types.Input    (Input)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
 import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
 

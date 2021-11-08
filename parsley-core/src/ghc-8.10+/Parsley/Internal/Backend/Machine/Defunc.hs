@@ -20,9 +20,9 @@ module Parsley.Internal.Backend.Machine.Defunc (
     pattern NormLam, pattern FREEVAR
   ) where
 
-import Parsley.Internal.Backend.Machine.Types.Offset (Input(off))
-import Parsley.Internal.Common.Utils                 (Code)
-import Parsley.Internal.Core.Lam                     (Lam, normaliseGen, normalise)
+import Parsley.Internal.Backend.Machine.Types.Input (Input(off))
+import Parsley.Internal.Common.Utils                (Code)
+import Parsley.Internal.Core.Lam                    (Lam, normaliseGen, normalise)
 
 import qualified Parsley.Internal.Core.Defunc as Core (Defunc, lamTerm, lamTermBool)
 import qualified Parsley.Internal.Core.Lam    as Lam  (Lam(..))

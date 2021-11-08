@@ -31,6 +31,11 @@ tested-with:         GHC == 8.6.1,  GHC == 8.6.2,  GHC == 8.6.3,  GHC == 8.6.4, 
                      GHC == 8.10.4, GHC == 8.10.5,
                      GHC == 9.0.1
 
+flag full-width-positions
+  description: Make line and column numbers 64-bit (on 64-bit platforms): normally they are 32-bits each for line and column.
+  default:     False
+  manual:      True
+
 library
   exposed-modules:     Parsley.Internal,
                        Parsley.Internal.Trace,
@@ -95,12 +100,16 @@ library
 
   if impl(ghc >= 8.10)
     exposed-modules:   Parsley.Internal.Backend.Machine.BindingOps,
+                       Parsley.Internal.Backend.Machine.PosOps,
 
                        Parsley.Internal.Backend.Machine.Types.Base,
                        Parsley.Internal.Backend.Machine.Types.Context,
                        Parsley.Internal.Backend.Machine.Types.Dynamics,
-                       Parsley.Internal.Backend.Machine.Types.Offset,
-                       Parsley.Internal.Backend.Machine.Types.Statics
+                       Parsley.Internal.Backend.Machine.Types.Input,
+                       Parsley.Internal.Backend.Machine.Types.Statics,
+
+                       Parsley.Internal.Backend.Machine.Types.Input.Offset,
+                       Parsley.Internal.Backend.Machine.Types.Input.Pos
 
   default-extensions:  BangPatterns,
                        DataKinds,
@@ -156,6 +165,8 @@ library
     ghc-options:       -Wno-missing-safe-haskell-mode
                        -Wno-prepositive-qualified-module
                        -Wno-unused-packages
+  if flag(full-width-positions)
+    cpp-options:       -DFULL_WIDTH_POSITIONS
 
 common test-common
   build-depends:       base >=4.10 && <5,

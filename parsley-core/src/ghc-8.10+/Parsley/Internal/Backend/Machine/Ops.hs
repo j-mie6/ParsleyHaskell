@@ -8,7 +8,8 @@
              NamedFieldPuns,
              PatternSynonyms,
              RecordWildCards,
-             TypeApplications #-}
+             TypeApplications,
+             UnboxedTuples #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Ops
 Description : Higher-level operations used by evaluation.
@@ -78,12 +79,13 @@ import Parsley.Internal.Backend.Machine.THUtils        (eta)
 import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
+import Parsley.Internal.Backend.Machine.Types.Input    (Input(..))
 import Parsley.Internal.Backend.Machine.Types.State    (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                         (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                           (color, Color(Green, White, Red, Blue))
 
-import Parsley.Internal.Backend.Machine.Types.Offset as Offset (Offset(..), Input(..), moveOne, moveN)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), moveOne, moveN)
 
 {- General Operations -}
 {-|
@@ -361,10 +363,10 @@ callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseOffset (succes
 
     -- TODO: move to Offset module (along with Input#?)
     chooseOffset :: InputCharacteristic -> Input# o -> Input o
-    chooseOffset (AlwaysConsumes n) inp#  = inp { off = moveN n (off inp) (off# inp#), line = line# inp#, col = line# inp# }
+    chooseOffset (AlwaysConsumes n) inp#  = inp { off = moveN n (off inp) (off# inp#), pos = pos# inp# }
     -- Technically, in this case, we know the whole input is unchanged. This essentially ignores the continuation arguments
     -- hopefully GHC could optimise this better?
-    chooseOffset NeverConsumes      _inp# = inp -- { off = (off inp) {offset = off# inp# }, line = line# inp#, col = line# inp# }
+    chooseOffset NeverConsumes      _inp# = inp -- { off = (off inp) {offset = off# inp# }, pos = pos# inp# }
     chooseOffset MayConsume         inp#  = toInput u inp#
 
 {- Join Point Operations -}
@@ -409,7 +411,7 @@ bindIterAlways ctx μ l needed h inp u =
     bindIter# @o (fromInput inp) $ \qloop inp# ->
       let inp = toInput u inp#
       in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
-               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(line# inp) $$(col# inp) $$(off# inp) ||]) ctx))
+               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
 
 {-|
 Similar to `bindIterAlways`, but builds a handler that performs in
@@ -436,7 +438,7 @@ bindIterSame ctx μ l neededYes yes neededNo no inp u =
         bindIter# @o (fromInput inp) $ \qloop inp# ->
           let off = toInput u inp#
           in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil))
-                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(line# inp) $$(col# inp) $$(off# inp) ||]) ctx))
+                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
 
 {- Recursion Operations -}
 {-|
@@ -458,7 +460,7 @@ buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qh inp ->
       run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil))
-            (insertSub μ (mkStaSubroutineMeta meta $ \k h inp -> [|| $$qself $$k $$h $$(line# inp) $$(col# inp) $$(off# inp) ||]) (nextUnique ctx))
+            (insertSub μ (mkStaSubroutineMeta meta $ \k h inp -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) ||]) (nextUnique ctx))
 
 {- Binding Operations -}
 bindHandlerInline# :: forall o s a b. HandlerOps o
@@ -478,7 +480,7 @@ bindIterHandlerInline# :: forall o s a b. RecBuilder o
                        -> (Input# o -> StaHandler# s o a)
                        -> ((Input# o -> StaHandler s o a) -> Code b)
                        -> Code b
-bindIterHandlerInline# True  h k = bindIterHandler# @o h $ \qh -> k (\inp -> fromDynHandler [||$$qh $$(line# inp) $$(col# inp) $$(off# inp)||])
+bindIterHandlerInline# True  h k = bindIterHandler# @o h $ \qh -> k (\inp -> fromDynHandler [||$$qh $$(pos# inp) $$(off# inp)||])
 bindIterHandlerInline# False h k = k (fromStaHandler# . h)
 
 {- Marshalling Operations -}

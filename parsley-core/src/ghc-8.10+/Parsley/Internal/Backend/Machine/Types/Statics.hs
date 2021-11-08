@@ -2,7 +2,8 @@
              MagicHash,
              RecordWildCards,
              TypeApplications,
-             TypeFamilies #-}
+             TypeFamilies,
+             UnboxedTuples #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Statics
 Description : Representation of components that exist within a statically known component
@@ -45,29 +46,29 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
     staSubroutine#, meta,
   ) where
 
-import Control.Monad.ST                                (ST)
-import Data.STRef                                      (STRef)
-import Data.Kind                                       (Type)
-import Data.Maybe                                      (fromMaybe)
-import Parsley.Internal.Backend.Machine.InputRep       (Rep)
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata, newMeta, InputCharacteristic(..))
-import Parsley.Internal.Backend.Machine.Types.Base     (Line, Col)
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynCont, DynHandler, DynFunc)
-import Parsley.Internal.Backend.Machine.Types.Offset   (Offset(offset), same, mkOffset, Input(..))
-import Parsley.Internal.Common.Utils                   (Code)
+import Control.Monad.ST                                    (ST)
+import Data.STRef                                          (STRef)
+import Data.Kind                                           (Type)
+import Data.Maybe                                          (fromMaybe)
+import Parsley.Internal.Backend.Machine.InputRep           (Rep)
+import Parsley.Internal.Backend.Machine.LetBindings        (Regs(..), Metadata, newMeta, InputCharacteristic(..))
+import Parsley.Internal.Backend.Machine.Types.Base         (Pos)
+import Parsley.Internal.Backend.Machine.Types.Dynamics     (DynCont, DynHandler, DynFunc)
+import Parsley.Internal.Backend.Machine.Types.Input        (Input(..))
+import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), same, mkOffset)
+import Parsley.Internal.Common.Utils                       (Code)
 
 -- Static Input
 data Input# o = Input# {
     off#  :: Code (Rep o),
-    line# :: Code Line,
-    col#  :: Code Col
+    pos#  :: Code Pos
   }
 
 fromInput :: Input o -> Input# o
-fromInput Input{..} = Input# (offset off) line col
+fromInput Input{..} = Input# (offset off) pos
 
 toInput :: Word -> Input# o -> Input o
-toInput u Input#{..} = Input (mkOffset off# u) line# col#
+toInput u Input#{..} = Input (mkOffset off# u) pos#
 
 -- Handlers
 {-|
@@ -80,7 +81,7 @@ on handlers, a simple form of inlining optimisation.
 type StaHandler# s o a = Input# o -> Code (ST s (Maybe a))
 
 mkStaHandler# :: forall o s a. DynHandler s o a -> StaHandler# s o a
-mkStaHandler# dh inp = [||$$dh $$(line# inp) $$(col# inp) $$(off# inp)||]
+mkStaHandler# dh inp = [||$$dh $$(pos# inp) $$(off# inp)||]
 
 {-|
 Encapsulates a static handler with its possible dynamic origin for costless conversion.
@@ -278,7 +279,7 @@ if it is converted back the conversion is free.
 @since 1.4.0.0
 -}
 mkStaContDyn :: DynCont s o a x -> StaCont s o a x
-mkStaContDyn dk = StaCont (\x inp -> [|| $$dk $$x $$(line# inp) $$(col# inp) $$(off# inp) ||]) (Just dk)
+mkStaContDyn dk = StaCont (\x inp -> [|| $$dk $$x $$(pos# inp) $$(off# inp) ||]) (Just dk)
 
 {-|
 Given a static continuation, extracts the underlying continuation which
@@ -367,5 +368,5 @@ qSubroutine :: forall s o a x rs. DynFunc rs s o a x -> Regs rs -> Metadata -> Q
 qSubroutine func frees meta = QSubroutine (staFunc frees func) frees
   where
     staFunc :: forall rs. Regs rs -> DynFunc rs s o a x -> StaFunc rs s o a x
-    staFunc NoRegs func = StaSubroutine (\dk dh inp -> [|| $$func $$dk $$dh $$(line# inp) $$(col# inp) $$(off# inp) ||]) meta
+    staFunc NoRegs func = StaSubroutine (\dk dh inp -> [|| $$func $$dk $$dh $$(pos# inp) $$(off# inp) ||]) meta
     staFunc (FreeReg _ witness) func = \r -> staFunc witness [|| $$func $$r ||]

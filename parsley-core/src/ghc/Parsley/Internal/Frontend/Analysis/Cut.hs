@@ -64,6 +64,7 @@ compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
 compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
 compliance (MakeRegister _ l r)     = seqCompliance l r
 compliance (GetRegister _)          = FullPure
+compliance (Position _)             = FullPure
 compliance (PutRegister _ c)        = coerce c
 compliance (MetaCombinator _ c)     = c
 
@@ -118,6 +119,7 @@ cutAlg (Match p f qs def) cut =
 cutAlg (MakeRegister σ l r) cut = seqCutAlg (MakeRegister σ) cut (ifst l) (ifst r)
 cutAlg (GetRegister σ) _ = (In (GetRegister σ), False)
 cutAlg (PutRegister σ p) cut = rewrap (PutRegister σ) cut (ifst p)
+cutAlg (Position sel) _ = (In (Position sel), False)
 cutAlg (MetaCombinator m p) cut = rewrap (MetaCombinator m) cut (ifst p)
 
 mkCut :: Bool -> Fix Combinator a -> Fix Combinator a

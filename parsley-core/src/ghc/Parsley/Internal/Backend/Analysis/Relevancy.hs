@@ -68,6 +68,7 @@ alg (Dup k)            n         = let VCons rel1 (VCons rel2 xs) = getStack k (
 alg (Make _ _ k)       (SSucc n) = VCons False (getStack k n)
 alg (Get _ _ k)        n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg (Put _ _ k)        (SSucc n) = VCons False (getStack k n)
+alg (SelectPos _ k)    n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg (LogEnter _ k)     n         = getStack k n
 alg (LogExit _ k)      n         = getStack k n
 alg (MetaInstr _ k)    n         = getStack k n

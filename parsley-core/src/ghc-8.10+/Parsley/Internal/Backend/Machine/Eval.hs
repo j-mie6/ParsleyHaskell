@@ -28,15 +28,15 @@ import Parsley.Internal.Backend.Machine.Defunc             (Defunc(OFFSET), patt
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.InputRep           (Rep)
-import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..))
+import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
 import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
-import Parsley.Internal.Backend.Machine.PosOps             (initPos)
+import Parsley.Internal.Backend.Machine.PosOps             (initPos, extractCol, extractLine)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Input        (Input(Input, off))
+import Parsley.Internal.Backend.Machine.Types.Input        (Input(Input, off, pos))
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (mkOffset)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -93,6 +93,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Make σ c k)        = evalMake σ c k
     alg (Get σ c k)         = evalGet σ c k
     alg (Put σ c k)         = evalPut σ c k
+    alg (SelectPos sel k)   = evalSelectPos sel k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
@@ -216,6 +217,11 @@ evalPut :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs
 evalPut σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
+
+-- TODO: FREEVAR is the wrong abstraction really...
+evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
+evalSelectPos Line (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (extractLine (pos (input γ)))) (operands γ)})
+evalSelectPos Col (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (extractCol (pos (input γ)))) (operands γ)})
 
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a

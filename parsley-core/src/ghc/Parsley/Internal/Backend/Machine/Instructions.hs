@@ -24,7 +24,9 @@ module Parsley.Internal.Backend.Machine.Instructions (
     -- * Smart Instructions
     _App, _Fmap, _Modify, _Make, _Put, _Get,
     -- * Smart Meta-Instructions
-    addCoins, refundCoins, drainCoins, giveBursary, prefetchChar, blockCoins
+    addCoins, refundCoins, drainCoins, giveBursary, prefetchChar, blockCoins,
+    -- * Re-exports
+    PosSelector(..)
   ) where
 
 import Data.Kind                                    (Type)
@@ -32,6 +34,7 @@ import Data.Void                                    (Void)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.Types.Coins (Coins(Coins))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
+import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))
 
 import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
 import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
@@ -168,6 +171,7 @@ data Instr (o :: Type)                                  -- The FIXED input type
             -> Access     {- ^ Whether or not the value needs to be stored in a concrete register. -}
             -> k xs n r a
             -> Instr o k (x : xs) n r a
+  SelectPos :: PosSelector -> k (Int : xs) n r a -> Instr o k xs n r a
   {-| Begins a debugging scope, the inner scope requires /two/ handlers,
       the first is the log handler itself, and then the second is the
       "real" fail handler for when the log handler is executed.
@@ -396,6 +400,7 @@ instance IFunctor4 (Instr o) where
   imap4 f (Make σ a k)        = Make σ a (f k)
   imap4 f (Get σ a k)         = Get σ a (f k)
   imap4 f (Put σ a k)         = Put σ a (f k)
+  imap4 f (SelectPos sel k)   = SelectPos sel (f k)
   imap4 f (LogEnter name k)   = LogEnter name (f k)
   imap4 f (LogExit name k)    = LogExit name (f k)
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
@@ -430,6 +435,8 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (Make σ a k)             = "(Make " . shows σ . " " . shows a . " " . getConst4 k . ")"
       alg (Get σ a k)              = "(Get " . shows σ . " " . shows a . " " . getConst4 k . ")"
       alg (Put σ a k)              = "(Put " . shows σ . " " . shows a . " " . getConst4 k . ")"
+      alg (SelectPos Line k)       = "(Line " . getConst4 k . ")"
+      alg (SelectPos Col k)        = "(Col " . getConst4 k . ")"
       alg (LogEnter _ k)           = getConst4 k
       alg (LogExit _ k)            = getConst4 k
       alg (MetaInstr BlockCoins k) = getConst4 k

@@ -125,5 +125,8 @@ Fix for issue #27
 ## 1.8.0.0 -- TBD
 
 * Reversed order of arguments on `Subroutine#`, offset comes last.
-* Added `Line` and `Col` types.
-* Added `Input o` and `Input# o`, which package an `Offset o` or `Code (Rep o)` with `Line` and `Col` information.
+* Added `Pos` type, and threaded it through
+* Added `Input o` and `Input# o`, which package an `Offset o` or `Code (Rep o)` with `Pos` information.
+* Added cabal flag to control the packed or unpacked representation of positions
+* Added `PosSelector`
+* Added `line` and `col` to primitives and `Position` to Combinator AST, as well as `SelectPos` to instructions.

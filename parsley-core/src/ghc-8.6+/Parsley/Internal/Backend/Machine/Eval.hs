@@ -14,7 +14,7 @@ import Control.Monad.ST                               (runST)
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc(LAM, SAME), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
-import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..))
+import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
 import Parsley.Internal.Backend.Machine.Ops
@@ -36,7 +36,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names _meta -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty (halt @o) [||offset||] (VCons (fatal @o) VNil)) . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty (halt @o) [||offset||] ([||1||], [||1||]) (VCons (fatal @o) VNil)) . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -68,6 +68,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Make σ c k)        = evalMake σ c k
     alg (Get σ c k)         = evalGet σ c k
     alg (Put σ c k)         = evalPut σ c k
+    alg (SelectPos sel k)   = evalSelectPos sel k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
@@ -76,10 +77,10 @@ evalRet :: ContOps o => MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
 evalCall :: ContOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) input handlers) k (askSub μ)
+evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) input pos handlers) k (askSub μ)
 
 evalJump :: ContOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
-evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation sub retCont input handlers
+evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation sub retCont input pos handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
@@ -143,7 +144,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
 evalIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
          => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
          -> MachineMonad s o xs n r a
-evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ)) h ask
+evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ) (pos γ)) h ask
 
 evalJoin :: ContOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume
@@ -171,6 +172,10 @@ evalPut :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs
 evalPut σ a k = asks $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
+
+evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
+evalSelectPos Line (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (fst (pos γ))) (operands γ)})
+evalSelectPos Col (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (snd (pos γ))) (operands γ)})
 
 evalLogEnter :: (?ops :: InputOps o, LogHandler o) => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) =

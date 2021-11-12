@@ -9,10 +9,13 @@ module Parsley.Internal.Backend.Machine.PosOps (module Parsley.Internal.Backend.
 import Parsley.Internal.Backend.Machine.Types.Base (Pos)
 import Parsley.Internal.Common                     (Code)
 import GHC.Exts                                    (Int(..))
-import GHC.Prim                                    (plusWord#, and#, or#, word2Int#, uncheckedShiftRL#)
+import GHC.Prim                                    (plusWord#, and#, or#, word2Int#,
 #ifdef FULL_WIDTH_POSITIONS
-import GHC.Prim                                    (minusWord#)
+                                                    minusWord#
+#else
+                                                    uncheckedShiftRL#
 #endif
+                                                   )
 
 initPos :: Code Pos
 {-# INLINEABLE updatePos# #-}

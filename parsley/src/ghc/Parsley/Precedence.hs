@@ -1,5 +1,4 @@
-{-# LANGUAGE AllowAmbiguousTypes,
-             MultiParamTypeClasses #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-|
 Module      : Parsley.Precedence
 Description : The precedence parser functionality
@@ -16,94 +15,77 @@ implementation allows the precedence layers to change type in the table.
 -}
 module Parsley.Precedence (module Parsley.Precedence) where
 
-import Prelude hiding           ((<$>))
-import Parsley.Alternative      (choice)
-import Parsley.Applicative      ((<$>))
-import Parsley.Defunctionalized (Defunc(BLACK, ID))
-import Parsley.Fold             (chainPre, chainPost, chainl1', chainr1')
-import Parsley.Internal         (WQ, Parser)
+import Prelude hiding                ((<$>), (<*>), pure)
+import Data.List                     (foldl')
+
+import Parsley.Alternative           (choice, (<|>))
+import Parsley.Applicative           ((<$>), (<*>), pure, (<**>))
+import Parsley.Fold                  (prefix, postfix, infixl1, infixr1)
+import Parsley.Internal.Common.Utils (WQ(WQ))
+import Parsley.Internal.Core         (Parser, Defunc(BLACK, ID, FLIP))
 
 {-|
-This combinator will construct and expression parser will provided with a table of precedence along
-with a terminal atom.
+This combinator will construct and expression parser will provided with a table of precedence..
 
-@since 0.1.0.0
+@since 2.0.0.0
 -}
-precedence :: Prec a b -> Parser a -> Parser b
-precedence NoLevel atom = atom
-precedence (Level lvl lvls) atom = precedence lvls (level lvl atom)
+precedence :: Prec a -> Parser a
+precedence (Atom atom) = atom
+precedence (Level lvls op) = level (precedence lvls) op
   where
-    level (InfixL ops wrap) atom  = chainl1' wrap atom (choice ops)
-    level (InfixR ops wrap) atom  = chainr1' wrap atom (choice ops)
-    level (Prefix ops wrap) atom  = chainPre (choice ops) (wrap <$> atom)
-    level (Postfix ops wrap) atom = chainPost (wrap <$> atom) (choice ops)
+    level :: Parser a -> Op a b -> Parser b
+    level atom (Op InfixL op wrap) = infixl1 wrap atom op
+    level atom (Op InfixR op wrap) = infixr1 wrap atom op
+    level atom (Op InfixN op wrap) = atom <**> (FLIP <$> op <*> atom <|> pure wrap)
+    level atom (Op Prefix op wrap) = prefix op (wrap <$> atom)
+    level atom (Op Postfix op wrap) = postfix (wrap <$> atom) op
 
 {-|
 A simplified version of `precedence` that does not use the heterogeneous list `Prec`, but
 instead requires all layers of the table to have the same type.
 
-@since 0.1.0.0
+@since 2.0.0.0
 -}
-monolith :: [Level a a] -> Prec a a
-monolith = foldr Level NoLevel
+precHomo :: Parser a -> [Op a a] -> Parser a
+precHomo atom = precedence . foldl' (>+) (Atom atom)
+
+data Fixity a b sig where
+  InfixL  :: Fixity a b (b -> a -> b)
+  InfixR  :: Fixity a b (a -> b -> b)
+  InfixN  :: Fixity a b (a -> a -> b)
+  Prefix  :: Fixity a b (b -> b)
+  Postfix :: Fixity a b (b -> b)
+
+data Op a b where
+  Op :: Fixity a b sig -> Parser sig -> Defunc (a -> b) -> Op a b
+
+gops :: Fixity a b sig -> [Parser sig] -> WQ (a -> b) -> Op a b
+gops fixity ps wrap = Op fixity (choice ps) (BLACK wrap)
+
+ops :: Fixity a a sig -> [Parser sig] -> Op a a
+ops fixity ps = Op fixity (choice ps) ID
+
+class Subtype sub sup where
+  upcast   :: sub -> sup
+  downcast :: sup -> Maybe sub
+
+sops :: Subtype a b => Fixity a b sig -> [Parser sig] -> Op a b
+sops fixity ps = gops fixity ps (WQ upcast [||upcast||])
 
 {-|
-A heterogeneous list that represents a precedence table so that @Prec a b@ transforms the type @a@
-into @b@ via various layers of operators.
+A heterogeneous list that represents a precedence table so that @Prec a@ produces values of type
+@a@.
 
-@since 0.1.0.0
+@since 1.0.0.0
 -}
-data Prec a b where
-  NoLevel :: Prec a a
-  Level :: Level a b -> Prec b c -> Prec a c
+data Prec a where
+  Level :: Prec a -> Op a b -> Prec b
+  Atom :: Parser a -> Prec a
 
-{-|
-This datatype represents levels of the precedence table `Prec`, where each constructor
-takes many parsers of the same level and fixity.
+infixl 5 >+
+(>+) :: Prec a -> Op a b -> Prec b
+(>+) = Level
 
-@since 0.1.0.0
--}
-data Level a b = InfixL  [Parser (b -> a -> b)] (Defunc (a -> b)) -- ^ left-associative infix operators
-               | InfixR  [Parser (a -> b -> b)] (Defunc (a -> b)) -- ^ right-associative infix operators
-               | Prefix  [Parser (b -> b)]      (Defunc (a -> b)) -- ^ prefix unary operators
-               | Postfix [Parser (b -> b)]      (Defunc (a -> b)) -- ^ postfix unary operators
-
-{-|
-This class provides a way of working with the t`Level` datatype without needing to
-provide wrappers, or not providing `Defunc` arguments.
-
-@since 0.1.0.0
--}
-class Monolith a b c where
-  -- | Used to construct a precedence level of infix left-associative operators
-  infixL  :: [Parser (b -> a -> b)] -> c
-  -- | Used to construct a precedence level of infix right-associative operators
-  infixR  :: [Parser (a -> b -> b)] -> c
-  -- | Used to construct a precedence level of prefix operators
-  prefix  :: [Parser (b -> b)]      -> c
-  -- | Used to construct a precedence level of postfix operators
-  postfix :: [Parser (b -> b)]      -> c
-
-{-|
-This instance is used to handle monolithic types where the input and output are the same,
-it does not require the wrapping function to be provided.
-
-@since 0.1.0.0
--}
-instance x ~ a => Monolith x a (Level a a) where
-  infixL  = flip InfixL ID
-  infixR  = flip InfixR ID
-  prefix  = flip Prefix ID
-  postfix = flip Postfix ID
-
-{-|
-This instance is used to handle non-monolithic types: i.e. where the input and output types of
-a level differ.
-
-@since 0.1.0.0
--}
-instance {-# INCOHERENT #-} x ~ (WQ (a -> b) -> Level a b) => Monolith a b x where
-  infixL  ops = InfixL ops . BLACK
-  infixR  ops = InfixR ops . BLACK
-  prefix  ops = Prefix ops . BLACK
-  postfix ops = Postfix ops . BLACK
+infixr 5 +<
+(+<) :: Op a b -> Prec a -> Prec b
+(+<) = flip (>+)

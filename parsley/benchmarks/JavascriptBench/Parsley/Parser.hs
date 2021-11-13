@@ -8,7 +8,7 @@ module JavascriptBench.Parsley.Parser where
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
 import Parsley.Combinator (token, oneOf, noneOf, eof)
-import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, pfoldl1, chainl1)
+import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, somel, chainl1)
 import Parsley.Precedence (precHomo, ops, Fixity(InfixL, Prefix, Postfix))
 import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED, LAM_S), pattern FLIP_H, pattern COMPOSE_H)
 import JavascriptBench.Shared
@@ -161,7 +161,7 @@ javascript = whitespace *> many element <* eof
     octal = oneOf "oO" *> number (LIFTED 8) (oneOf ['0'..'7'])
 
     number :: Defunc Int -> Parser Char -> Parser Int
-    number qbase digit = pfoldl1 addDigit (LIFTED 0) digit
+    number qbase digit = somel addDigit (LIFTED 0) digit
       where
         addDigit = [|\x d -> $qbase * x + digitToInt d|]
 

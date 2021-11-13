@@ -43,6 +43,7 @@ jobs:
       - name: Test
         run: |
           cabal test parsley-core $CONFIG
+          cabal test parsley-core --flag full-width-positions
           cabal test parsley $CONFIG
 
       - name: Doc

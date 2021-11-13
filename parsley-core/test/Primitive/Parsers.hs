@@ -5,6 +5,12 @@ import Prelude hiding (pure, (<*>), (*>), (<*))
 import Data.Char (isDigit)
 import Parsley.Internal (Parser, Defunc(EMPTY, LIFTED, EQ_H, CONS, LAM_S), makeQ, pure, satisfy, (*>), (<*), (<|>), (<*>), satisfy, lookAhead)
 
+char :: Char -> Parser Char
+char c = satisfy (EQ_H (LIFTED c))
+
+item :: Parser Char
+item = satisfy (LAM_S (const (LIFTED True)))
+
 pure7 :: Parser Int
 pure7 = pure (LIFTED 7)
 
@@ -15,14 +21,14 @@ twoDigits :: Parser Char
 twoDigits = digit *> digit
 
 abOrC :: Parser String
-abOrC = (satisfy (EQ_H (LIFTED 'a')) *> satisfy (EQ_H (LIFTED 'b')) *> pure (LIFTED "ab")) <|> (satisfy (EQ_H (LIFTED 'c')) *> pure (LIFTED "c"))
+abOrC = (char 'a' *> char 'b' *> pure (LIFTED "ab")) <|> (char 'c' *> pure (LIFTED "c"))
 
 abOrCThenD :: Parser String
-abOrCThenD = abOrC <* satisfy (EQ_H (LIFTED 'd'))
+abOrCThenD = abOrC <* char 'd'
 
 recursive :: Parser [Char]
 recursive =
-  let r = pure CONS <*> satisfy (LAM_S (const (LIFTED True))) <*> r <|> pure EMPTY
+  let r = pure CONS <*> item <*> r <|> pure EMPTY
   in r
 
 lookAheadDigit :: Parser Char

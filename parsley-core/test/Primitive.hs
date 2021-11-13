@@ -5,7 +5,7 @@ import Test.Tasty.HUnit
 import TestUtils
 import qualified Primitive.Parsers as Parsers
 
-import Parsley.Internal (empty)
+import Parsley.Internal (empty, line, col)
 
 main :: IO ()
 main = defaultMain tests
@@ -24,6 +24,7 @@ tests = testGroup "Primitive Combinator Tests" [ pureTests
                                                , branchTests
                                                , conditionalTests
                                                , recursionTests
+                                               , positionTests
                                                ]
 
 pure7 :: String -> Maybe Int
@@ -114,4 +115,16 @@ manyAny = $$(parseMocked Parsers.recursive [||Parsers.recursive||])
 recursionTests :: TestTree
 recursionTests = testGroup "recursion should"
   [ testCase "work properly" $ manyAny "abc" @?= Just "abc"
+  ]
+
+lineStarts1 :: String -> Maybe Int
+lineStarts1 = $$(parseMocked line [||line||])
+
+columnStarts1 :: String -> Maybe Int
+columnStarts1 = $$(parseMocked col [||col||])
+
+positionTests :: TestTree
+positionTests = testGroup "position combinators should"
+  [ testCase "start at line 1" $ lineStarts1 "" @?= Just 1
+  , testCase "start at column 1" $ columnStarts1 "" @?= Just 1
   ]

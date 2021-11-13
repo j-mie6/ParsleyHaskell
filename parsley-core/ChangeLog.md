@@ -122,7 +122,7 @@ Fix for issue #27
 * Added `reclaimable` to backend analysis, this allows `lookAhead` to calculate reclaim ignoring `BlockCoins`
 * Fixed small bug in coin analysis that meant that `lookAhead` always contributes `0` coins (`min 0` vs `max 0`).
 
-## 1.8.0.0 -- TBD
+## 1.8.0.0 -- 2021-11-13
 
 * Reversed order of arguments on `Subroutine#`, offset comes last.
 * Added `Pos` type, and threaded it through

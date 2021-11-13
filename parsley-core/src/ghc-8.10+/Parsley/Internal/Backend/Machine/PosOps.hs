@@ -1,4 +1,16 @@
 {-# LANGUAGE CPP, MagicHash, UnboxedTuples, NumericUnderscores #-}
+{-|
+Module      : Parsley.Internal.Backend.Machine.PosOps
+Description : Collection of platform dependent position operations
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains the implementations of updates on positions: these depend on the number of
+bits in a word, or if the @full-width-positions@ flag was set on the @parsley-core@ library.
+
+@since 1.8.0.0
+-}
 module Parsley.Internal.Backend.Machine.PosOps (module Parsley.Internal.Backend.Machine.PosOps) where
 
 #include "MachDeps.h"
@@ -17,10 +29,42 @@ import GHC.Prim                                    (plusWord#, and#, or#, word2I
 #endif
                                                    )
 
+{-|
+Given a position and a character, returns the representation of the updated position.
+
+@since 1.8.0.0
+-}
+updatePos :: Code Pos -> Code Char -> Code Pos
+updatePos pos c = [||updatePos# $$pos $$c||]
+
+{-|
+The initial position used by the parser. This is some representation of (1, 1).
+
+@since 1.8.0.0
+-}
 initPos :: Code Pos
+
 {-# INLINEABLE updatePos# #-}
+{-|
+Updates a given position assuming the given character was read. Tab characters are aligned to the
+nearest 4th space boundary.
+
+@since 1.8.0.0
+-}
 updatePos# :: Pos -> Char -> Pos
+
+{-|
+Given the opaque representation of a position, extracts the line number out of it.
+
+@since 1.8.0.0
+-}
 extractLine :: Code Pos -> Code Int
+
+{-|
+Given the opaque representation of a position, extracts the column number out of it.
+
+@since 1.8.0.0
+-}
 extractCol :: Code Pos -> Code Int
 
 #ifndef FULL_WIDTH_POSITIONS
@@ -43,6 +87,3 @@ updatePos# (# line, col #) _    = (# line, col `plusWord#` 1## #)
 extractLine qpos = [|| case $$qpos of (# line, _ #) -> I# (word2Int# line) ||]
 extractCol qpos = [|| case $$qpos of (# _, col #) -> I# (word2Int# col) ||]
 #endif
-
-updatePos :: Code Pos -> Code Char -> Code Pos
-updatePos pos c = [||updatePos# $$pos $$c||]

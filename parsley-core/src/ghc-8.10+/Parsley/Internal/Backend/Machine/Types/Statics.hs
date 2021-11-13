@@ -19,7 +19,7 @@ call boundaries.
 -}
 module Parsley.Internal.Backend.Machine.Types.Statics (
     -- * Handlers
-    StaHandler#, StaHandler, AugmentedStaHandler, StaHandlerCase, Input#(..), toInput, fromInput,
+    StaHandler#, StaHandler, AugmentedStaHandler, StaHandlerCase,
 
     -- ** @StaHandler@ Operations
     fromStaHandler#, fromDynHandler, staHandler#,
@@ -50,25 +50,11 @@ import Control.Monad.ST                                    (ST)
 import Data.STRef                                          (STRef)
 import Data.Kind                                           (Type)
 import Data.Maybe                                          (fromMaybe)
-import Parsley.Internal.Backend.Machine.InputRep           (Rep)
 import Parsley.Internal.Backend.Machine.LetBindings        (Regs(..), Metadata, newMeta, InputCharacteristic(..))
-import Parsley.Internal.Backend.Machine.Types.Base         (Pos)
 import Parsley.Internal.Backend.Machine.Types.Dynamics     (DynCont, DynHandler, DynFunc)
-import Parsley.Internal.Backend.Machine.Types.Input        (Input(..))
-import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), same, mkOffset)
+import Parsley.Internal.Backend.Machine.Types.Input        (Input(..), Input#(..), fromInput)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset, same)
 import Parsley.Internal.Common.Utils                       (Code)
-
--- Static Input
-data Input# o = Input# {
-    off#  :: Code (Rep o),
-    pos#  :: Code Pos
-  }
-
-fromInput :: Input o -> Input# o
-fromInput Input{..} = Input# (offset off) pos
-
-toInput :: Word -> Input# o -> Input o
-toInput u Input#{..} = Input (mkOffset off# u) pos#
 
 -- Handlers
 {-|
@@ -76,7 +62,7 @@ This represents the translation of `Parsley.Internal.Backend.Machine.Types.Base.
 but where the static function structure has been exposed. This allows for β-reduction
 on handlers, a simple form of inlining optimisation.
 
-@since 1.4.0.0
+@since 1.8.0.0
 -}
 type StaHandler# s o a = Input# o -> Code (ST s (Maybe a))
 
@@ -135,7 +121,7 @@ Augments a `StaHandler#` with information about what the offset is that
 the handler has captured. This is a purely static handler, which is not
 derived from a dynamic one.
 
-@since 1.7.0.0
+@since 1.8.0.0
 -}
 augmentHandlerSta :: Maybe (Input o) -> StaHandler# s o a -> AugmentedStaHandler s o a
 augmentHandlerSta o = augmentHandler o . fromStaHandler#
@@ -180,7 +166,7 @@ augmentHandlerFull c handler yes no = AugmentedStaHandler (Just (off c))
           no)
 
 {-|
-Unlike `staHandler#`, which returns a handler that accepts @'Code' ('Rep' o)@, this
+Unlike `staHandler#`, which returns a handler that accepts @'Input' o@, this
 function accepts a full `Parsley.Internal.Backend.Machine.Types.Offset.Offset`,
 which can be used to refine the outcome of the execution of the handler as follows:
 
@@ -258,7 +244,7 @@ This represents the translation of `Parsley.Internal.Backend.Machine.Types.Base.
 but where the static function structure has been exposed. This allows for β-reduction
 on continuations, a simple form of inlining optimisation.
 
-@since 1.4.0.0
+@since 1.8.0.0
 -}
 type StaCont# s o a x = Code x -> Input# o -> Code (ST s (Maybe a))
 
@@ -306,7 +292,7 @@ This represents the translation of `Parsley.Internal.Backend.Machine.Types.Base.
 but where the static function structure has been exposed. This allows for β-reduction
 on subroutines, a simple form of inlining optimisation: useful for iteration.
 
-@since 1.5.0.0
+@since 1.8.0.0
 -}
 type StaSubroutine# s o a x = DynCont s o a x -> DynHandler s o a -> Input# o -> Code (ST s (Maybe a))
 

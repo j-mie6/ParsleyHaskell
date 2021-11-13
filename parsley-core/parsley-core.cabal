@@ -108,8 +108,8 @@ library
                        Parsley.Internal.Backend.Machine.Types.Input,
                        Parsley.Internal.Backend.Machine.Types.Statics,
 
-                       Parsley.Internal.Backend.Machine.Types.Input.Offset,
-                       Parsley.Internal.Backend.Machine.Types.Input.Pos
+                       Parsley.Internal.Backend.Machine.Types.Input.Offset
+                       --Parsley.Internal.Backend.Machine.Types.Input.Pos
 
   default-extensions:  BangPatterns,
                        DataKinds,

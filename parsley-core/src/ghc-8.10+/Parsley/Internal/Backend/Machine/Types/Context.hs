@@ -410,7 +410,7 @@ voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty}
 {-|
 Asks if the current coin total can afford a charge of \(n\) characters.
 
-This is used by `DrainCoins`, which will have to emit a full length check
+This is used by `Parsley.Internal.Backend.Instructions.DrainCoins`, which will have to emit a full length check
 of size \(n\) if this quota cannot be reached.
 
 @since 1.5.0.0

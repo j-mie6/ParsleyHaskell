@@ -69,7 +69,7 @@ import Debug.Trace                                     (trace)
 import GHC.Exts                                        (Int(..), (-#))
 import Language.Haskell.TH.Syntax                      (liftTyped)
 import Parsley.Internal.Backend.Machine.BindingOps
-import Parsley.Internal.Backend.Machine.Defunc         (Defunc(OFFSET), genDefunc, _if, pattern FREEVAR)
+import Parsley.Internal.Backend.Machine.Defunc         (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps       (PositionOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
@@ -80,7 +80,7 @@ import Parsley.Internal.Backend.Machine.THUtils        (eta)
 import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Input    (Input(..))
+import Parsley.Internal.Backend.Machine.Types.Input    (Input(..), Input#(..), toInput, fromInput)
 import Parsley.Internal.Backend.Machine.Types.State    (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                         (One, Code, Vec(..), Nat(..))
@@ -97,7 +97,7 @@ used multiple times without re-computation.
 -}
 dup :: Defunc x -> (Defunc x -> Code r) -> Code r
 dup (FREEVAR x) k = k (FREEVAR x)
-dup (OFFSET o) k = k (OFFSET o)
+dup (INPUT o) k = k (INPUT o)
 dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
 
 {-|
@@ -118,7 +118,7 @@ code to execute on failure, and a state @γ@, tries to read a character
 from the input within @γ@, executing the failure code if it does not
 exist or does not match.
 
-@since 1.5.0.0
+@since 1.8.0.0
 -}
 sat :: (Defunc Char -> Defunc Bool)                        -- ^ Predicate to test the character with.
     -> ((Code Char -> Input o -> aux -> Code b) -> Code b) -- ^ The source of the character
@@ -130,7 +130,7 @@ sat p src good bad = src $ \c input' aux -> let v = FREEVAR c in _if (p v) (good
 {-|
 Consumes the next character and adjusts the offset to match.
 
-@since 1.5.0.0
+@since 1.8.0.0
 -}
 fetch :: (?ops :: InputOps (Rep o))
       => Input o -> (Code Char -> Input o -> Code b) -> Code b
@@ -231,7 +231,7 @@ buildHandler :: Γ s o xs n r a                                  -- ^ State to e
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a))) -- ^ Partial parser accepting the modified state.
              -> Word                                            -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o a
-buildHandler γ h u c = fromStaHandler# $ \inp -> h (γ {operands = Op (OFFSET c) (operands γ), input = toInput u inp})
+buildHandler γ h u c = fromStaHandler# $ \inp -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp})
 
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
@@ -322,7 +322,7 @@ A form of @callCC@, this calls a subroutine with a given return continuation
 passed to it. This may be the current continuation, but also may just be a
 previous return continuation in the case of a tail call.
 
-@since 1.2.0.0
+@since 1.8.0.0
 -}
 callWithContinuation :: MarshalOps o
                      => StaSubroutine s o a x           -- ^ The subroutine @sub@ that will be called.
@@ -337,7 +337,7 @@ callWithContinuation sub ret input (VCons h _) = staSubroutine# sub (dynCont ret
 Converts a partial parser into a return continuation in a manner similar
 to `buildHandler`.
 
-@since 1.5.0.0
+@since 1.8.0.0
 -}
 suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -- ^ The partial parser to turn into a return continuation.
         -> Γ s o xs n r a                                  -- ^ The state to execute the continuation with.
@@ -396,7 +396,7 @@ from its loop body and return continuation. The exit of a loop is done
 using failure, and this failure does not discriminate whether or not
 the loop consumed input in its final iteration.
 
-@since 1.4.0.0
+@since 1.8.0.0
 -}
 bindIterAlways :: forall s o a. RecBuilder o
                => Ctx s o a                  -- ^ The context to keep the binding
@@ -418,7 +418,7 @@ bindIterAlways ctx μ l needed h inp u =
 Similar to `bindIterAlways`, but builds a handler that performs in
 the same way as `bindSameHandler`.
 
-@since 1.4.0.0
+@since 1.8.0.0
 -}
 bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
              => Ctx s o a                  -- ^ The context to store the binding in.

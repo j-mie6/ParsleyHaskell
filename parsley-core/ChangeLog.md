@@ -130,3 +130,4 @@ Fix for issue #27
 * Added cabal flag to control the packed or unpacked representation of positions
 * Added `PosSelector`
 * Added `line` and `col` to primitives and `Position` to Combinator AST, as well as `SelectPos` to instructions.
+* Changed `OFFSET` to `INPUT` in `Defunc`

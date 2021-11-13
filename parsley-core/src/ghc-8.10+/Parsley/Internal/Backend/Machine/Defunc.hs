@@ -48,14 +48,14 @@ data Defunc a where
   -}
   BOTTOM  :: Defunc a
   {-|
-  Allows the static `Offset`s to be pushed onto the operand stack, which
+  Allows the static `Input`s to be pushed onto the operand stack, which
   is the easiest way to get them to persist as arguments to handlers, and
   interact with `Parsley.Internal.Backend.Machine.Instructions.Seek` and
   `Parsley.Internal.Backend.Machine.Instructions.Tell`.
 
-  @since 1.4.0.0
+  @since 1.8.0.0
   -}
-  OFFSET  :: Input o -> Defunc o
+  INPUT  :: Input o -> Defunc o
 
 {-|
 Promotes a @Defunc@ value from the Frontend API into a Backend one.
@@ -110,7 +110,7 @@ Generate the Haskell code that represents this defunctionalised value.
 genDefunc :: Defunc a -> Code a
 genDefunc (LAM x)    = normaliseGen x
 genDefunc BOTTOM      = [||undefined||]
-genDefunc (OFFSET _)  = error "Cannot materialise an unboxed offset in the regular way"
+genDefunc (INPUT _)  = error "Cannot materialise an input in the regular way"
 
 {-|
 Pattern that normalises a `Lam` before returning it.
@@ -135,4 +135,4 @@ instance Show (Defunc a) where
   show (LAM x) = show x
   show BOTTOM = "[[irrelevant]]"
   show (FREEVAR _) = "x"
-  show (OFFSET o)  = "offset " ++ show (off o)
+  show (INPUT inp)  = "input " ++ show (off inp)

@@ -70,7 +70,7 @@ extractCol :: Code Pos -> Code Int
 #ifndef FULL_WIDTH_POSITIONS
 initPos = [|| 0x00000001_00000001## ||]
 
-updatePos# pos '\n' = (pos `plusWord#` 0x00000001_00000000##) `and#` 0xffffffff_00000001##
+updatePos# pos '\n' = (pos `and#` 0xffffffff_00000000##) `plusWord#` 0x00000001_00000001##
 updatePos# pos '\t' = ((pos `plusWord#` 0x00000000_00000003##) `and#` 0xffffffff_fffffffc##) `or#` 0x00000000_00000001##
 updatePos# pos _    = pos `plusWord#` 0x00000000_00000001##
 

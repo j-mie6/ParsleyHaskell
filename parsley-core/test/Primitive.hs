@@ -123,8 +123,20 @@ lineStarts1 = $$(parseMocked line [||line||])
 columnStarts1 :: String -> Maybe Int
 columnStarts1 = $$(parseMocked col [||col||])
 
+posAfterA :: String -> Maybe (Int, Int)
+posAfterA = $$(parseMocked Parsers.posAfterA  [||Parsers.posAfterA||])
+
+posAfterNewline :: String -> Maybe ((Int, Int), (Int, Int))
+posAfterNewline = $$(parseMocked Parsers.posAfterNewline  [||Parsers.posAfterNewline||])
+
+posAfterTab :: String -> Maybe ((Int, Int), (Int, Int))
+posAfterTab = $$(parseMocked Parsers.posAfterTab  [||Parsers.posAfterTab||])
+
 positionTests :: TestTree
 positionTests = testGroup "position combinators should"
   [ testCase "start at line 1" $ lineStarts1 "" @?= Just 1
   , testCase "start at column 1" $ columnStarts1 "" @?= Just 1
+  , testCase "advance by 1 column only after regular character" $ posAfterA "a" @?= Just (1, 2)
+  , testCase "advance by 1 line and reset column after newline" $ posAfterNewline "a\n\n" @?= Just ((2, 1), (3, 1))
+  , testCase "advance to nearest tab boundary on tab" $ posAfterTab "\ta\t" @?= Just ((1, 5), (1, 9))
   ]

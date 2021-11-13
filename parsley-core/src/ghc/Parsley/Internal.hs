@@ -48,6 +48,7 @@ import Parsley.Internal.Core.Primitives as Primitives (
     loop,
     Reg, newRegister, get, put,
     conditional, branch,
+    line, col,
     debug
   )
 import Parsley.Internal.Common.Utils    as THUtils    (Quapplicative(..), WQ, Code, makeQ)

@@ -18,23 +18,23 @@ parsing machinery to work with input.
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), LogOps(..),
     InputOps(..), more, next,
-    InputDependant,
+    InputDependant
   ) where
 
-import Data.Array.Base                           (UArray(..), listArray)
-import Data.ByteString.Internal                  (ByteString(..))
-import Data.Text.Array                           (aBA{-, empty-})
-import Data.Text.Internal                        (Text(..))
-import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, reverseIter_-})
-import GHC.Exts                                  (Int(..), Char(..), TYPE, Int#)
-import GHC.ForeignPtr                            (ForeignPtr(..))
-import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
-import Parsley.Internal.Backend.Machine.InputRep (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
-                                                  offWith, emptyUnpackedLazyByteString, intSame, intLess,
-                                                  offsetText, offWithSame, offWithShiftRight, dropStream,
-                                                  textShiftRight, textShiftLeft, byteStringShiftRight,
-                                                  byteStringShiftLeft, max#)
-import Parsley.Internal.Common.Utils             (Code)
+import Data.Array.Base                             (UArray(..), listArray)
+import Data.ByteString.Internal                    (ByteString(..))
+import Data.Text.Array                             (aBA{-, empty-})
+import Data.Text.Internal                          (Text(..))
+import Data.Text.Unsafe                            (iter, Iter(..){-, iter_, reverseIter_-})
+import GHC.Exts                                    (Int(..), Char(..), TYPE, Int#)
+import GHC.ForeignPtr                              (ForeignPtr(..))
+import GHC.Prim                                    (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
+import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
+                                                    offWith, emptyUnpackedLazyByteString, intSame, intLess,
+                                                    offsetText, offWithSame, offWithShiftRight, dropStream,
+                                                    textShiftRight, textShiftLeft, byteStringShiftRight,
+                                                    byteStringShiftLeft, max#)
+import Parsley.Internal.Common.Utils               (Code)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)

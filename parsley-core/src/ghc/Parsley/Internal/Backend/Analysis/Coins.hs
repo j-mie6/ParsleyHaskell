@@ -68,6 +68,7 @@ alg _     (Dup k)                                 = getConst4 k
 alg _     (Make _ _ k)                            = getConst4 k
 alg _     (Get _ _ k)                             = getConst4 k
 alg _     (Put _ _ k)                             = getConst4 k
+alg _     (SelectPos _ k)                         = getConst4 k
 alg _     (LogEnter _ k)                          = getConst4 k
 alg _     (LogExit _ k)                           = getConst4 k
 alg _     (MetaInstr (AddCoins _) (Const4 k))     = k

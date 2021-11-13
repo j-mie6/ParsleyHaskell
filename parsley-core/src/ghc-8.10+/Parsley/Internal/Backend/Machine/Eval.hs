@@ -1,4 +1,5 @@
 {-# LANGUAGE ImplicitParams,
+             MagicHash,
              MultiWayIf,
              PatternSynonyms,
              RecordWildCards,
@@ -17,28 +18,30 @@ This module exports the `eval` functions used to convert a machine into code.
 -}
 module Parsley.Internal.Backend.Machine.Eval (eval) where
 
-import Data.Dependent.Map                             (DMap)
-import Data.Functor                                   ((<&>))
-import Data.Void                                      (Void)
-import Control.Monad                                  (forM, liftM2, liftM3, when)
-import Control.Monad.Reader                           (ask, asks, reader, local)
-import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc(OFFSET), pattern FREEVAR, genDefunc, ap, ap2, _if)
-import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps      (InputDependant, InputOps(InputOps))
-import Parsley.Internal.Backend.Machine.InputRep      (Rep)
-import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..), Handler(..))
-import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(body))
-import Parsley.Internal.Backend.Machine.LetRecBuilder (letRec)
+import Data.Dependent.Map                                  (DMap)
+import Data.Functor                                        ((<&>))
+import Data.Void                                           (Void)
+import Control.Monad                                       (forM, liftM2, liftM3, when)
+import Control.Monad.Reader                                (ask, asks, reader, local)
+import Control.Monad.ST                                    (runST)
+import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps))
+import Parsley.Internal.Backend.Machine.InputRep           (Rep)
+import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
+import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
+import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
-import Parsley.Internal.Backend.Machine.Types         (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.PosOps             (initPos, extractCol, extractLine)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Offset  (mkOffset, offset)
-import Parsley.Internal.Backend.Machine.Types.State   (Γ(..), OpStack(..))
-import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
-import Parsley.Internal.Trace                         (Trace(trace))
-import System.Console.Pretty                          (color, Color(Green))
+import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
+import Parsley.Internal.Backend.Machine.Types.Input        (Input(Input, off, pos))
+import Parsley.Internal.Backend.Machine.Types.Input.Offset (mkOffset)
+import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
+import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Trace                              (Trace(trace))
+import System.Console.Pretty                               (color, Color(Green))
 
 import qualified Debug.Trace (trace)
 
@@ -58,7 +61,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty halt (mkOffset [||offset||] 0) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty halt (Input (mkOffset [||offset||] 0) initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -90,6 +93,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Make σ c k)        = evalMake σ c k
     alg (Get σ c k)         = evalGet σ c k
     alg (Put σ c k)         = evalPut σ c k
+    alg (SelectPos sel k)   = evalSelectPos sel k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
@@ -101,7 +105,7 @@ evalCall :: forall s o a x xs n r. MarshalOps o => MVar x -> Machine s o (x : xs
 evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
 
 evalJump :: forall s o a x n. MarshalOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
-evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont (offset input) handlers
+evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
@@ -137,7 +141,7 @@ evalSat p k@(Machine k') = do
                       -> MachineMonad s o xs (Succ n) r a
     emitCheckAndFetch n mk = do
       sat <- satFetch mk
-      return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (input γ)
+      return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (off (input γ))
 
     continue mk γ c input' = run mk (γ {input = input', operands = Op c (operands γ)})
 
@@ -155,10 +159,10 @@ evalCatch (Machine k) h = freshUnique $ \u -> case h of
     liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes u) gno (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
-evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (OFFSET (input γ)) (operands γ)})
+evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ)) (operands γ)})
 
 evalSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
-evalSeek (Machine k) = k <&> \mk γ -> let Op (OFFSET input) xs = operands γ in mk (γ {operands = xs, input = input})
+evalSeek (Machine k) = k <&> \mk γ -> let Op (INPUT input) xs = operands γ in mk (γ {operands = xs, input = input})
 
 evalCase :: Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
 evalCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
@@ -214,6 +218,11 @@ evalPut σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
+-- TODO: FREEVAR is the wrong abstraction really...
+evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
+evalSelectPos Line (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (extractLine (pos (input γ)))) (operands γ)})
+evalSelectPos Col (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (extractCol (pos (input γ)))) (operands γ)})
+
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) = freshUnique $ \u ->
@@ -231,13 +240,13 @@ evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Ma
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ)
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise γ) (off (input γ))
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
   -- If there are enough coins left to cover the cost, no length check is required
   -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
-  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise γ) (input γ))
+  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise γ) (off (input γ)))
          (asks (canAfford (willConsume coins)))
          k
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
@@ -246,7 +255,7 @@ evalMeta (PrefetchChar check) k =
      when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
      mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
   where
-    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (input γ)
+    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (off (input γ))
     mkCheck False k = k
     prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
 evalMeta BlockCoins (Machine k) = k

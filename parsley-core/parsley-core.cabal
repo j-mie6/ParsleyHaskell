@@ -5,7 +5,7 @@ name:                parsley-core
 --                   | +------- breaking internal API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             1.7.2.0
+version:             1.8.0.0
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
 description:         This package contains the internals of the @parsley@ package.
                      .
@@ -28,8 +28,13 @@ extra-doc-files:     ChangeLog.md
                      README.md
 tested-with:         GHC == 8.6.1,  GHC == 8.6.2,  GHC == 8.6.3,  GHC == 8.6.4,  GHC == 8.6.5,
                      GHC == 8.8.1,  GHC == 8.8.2,  GHC == 8.8.3,  GHC == 8.8.4,
-                     GHC == 8.10.4, GHC == 8.10.5,
+                     GHC == 8.10.4, GHC == 8.10.5, GHC == 8.10.7,
                      GHC == 9.0.1
+
+flag full-width-positions
+  description: Make line and column numbers 64-bit (on 64-bit platforms): normally they are 32-bits each for line and column.
+  default:     False
+  manual:      True
 
 library
   exposed-modules:     Parsley.Internal,
@@ -95,12 +100,16 @@ library
 
   if impl(ghc >= 8.10)
     exposed-modules:   Parsley.Internal.Backend.Machine.BindingOps,
+                       Parsley.Internal.Backend.Machine.PosOps,
 
                        Parsley.Internal.Backend.Machine.Types.Base,
                        Parsley.Internal.Backend.Machine.Types.Context,
                        Parsley.Internal.Backend.Machine.Types.Dynamics,
-                       Parsley.Internal.Backend.Machine.Types.Offset,
-                       Parsley.Internal.Backend.Machine.Types.Statics
+                       Parsley.Internal.Backend.Machine.Types.Input,
+                       Parsley.Internal.Backend.Machine.Types.Statics,
+
+                       Parsley.Internal.Backend.Machine.Types.Input.Offset
+                       --Parsley.Internal.Backend.Machine.Types.Input.Pos
 
   default-extensions:  BangPatterns,
                        DataKinds,
@@ -156,6 +165,8 @@ library
     ghc-options:       -Wno-missing-safe-haskell-mode
                        -Wno-prepositive-qualified-module
                        -Wno-unused-packages
+  if flag(full-width-positions)
+    cpp-options:       -DFULL_WIDTH_POSITIONS
 
 common test-common
   build-depends:       base >=4.10 && <5,
@@ -163,6 +174,13 @@ common test-common
                        tasty
   hs-source-dirs:      test
   default-language:    Haskell2010
+
+test-suite primitives-test
+  import:              test-common
+  type:                exitcode-stdio-1.0
+  build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq, template-haskell
+  main-is:             Primitive.hs
+  other-modules:       Primitive.Parsers, TestUtils
 
 test-suite common-test
   import:              test-common

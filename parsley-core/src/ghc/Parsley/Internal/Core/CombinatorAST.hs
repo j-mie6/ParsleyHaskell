@@ -32,11 +32,16 @@ data Combinator (k :: Type -> Type) (a :: Type) where
   MakeRegister   :: ΣVar a -> k a -> k b -> Combinator k b
   GetRegister    :: ΣVar a -> Combinator k a
   PutRegister    :: ΣVar a -> k a -> Combinator k ()
+  Position       :: PosSelector -> Combinator k Int
   Debug          :: String -> k a -> Combinator k a
   MetaCombinator :: MetaCombinator -> k a -> Combinator k a
 
 data ScopeRegister (k :: Type -> Type) (a :: Type) where
   ScopeRegister :: k a -> (forall r. Reg r a -> k b) -> ScopeRegister k b
+
+data PosSelector where
+  Line :: PosSelector
+  Col  :: PosSelector
 
 {-|
 This is an opaque representation of a parsing register. It cannot be manipulated as a user, and the
@@ -76,6 +81,7 @@ instance IFunctor Combinator where
   imap f (MakeRegister σ p q) = MakeRegister σ (f p) (f q)
   imap _ (GetRegister σ)      = GetRegister σ
   imap f (PutRegister σ p)    = PutRegister σ (f p)
+  imap _ (Position sel)       = Position sel
   imap f (Debug name p)       = Debug name (f p)
   imap f (MetaCombinator m p) = MetaCombinator m (f p)
 
@@ -100,6 +106,8 @@ instance Show (Fix Combinator a) where
       alg (MakeRegister σ (Const1 p) (Const1 q))    = "make " . shows σ . " (" . p . ") (" . q . ")"
       alg (GetRegister σ)                           = "get " . shows σ
       alg (PutRegister σ (Const1 p))                = "put " . shows σ . " (" . p . ")"
+      alg (Position Line)                           = "line"
+      alg (Position Col)                            = "col"
       alg (Debug _ (Const1 p))                      = p
       alg (MetaCombinator m (Const1 p))             = p . " [" . shows m . "]"
 
@@ -127,6 +135,7 @@ traverseCombinator expose (Loop body exit)     = Loop <$> expose body <*> expose
 traverseCombinator expose (MakeRegister σ p q) = MakeRegister σ <$> expose p <*> expose q
 traverseCombinator _      (GetRegister σ)      = pure (GetRegister σ)
 traverseCombinator expose (PutRegister σ p)    = PutRegister σ <$> expose p
+traverseCombinator _      (Position sel)       = pure (Position sel)
 traverseCombinator expose (Debug name p)       = Debug name <$> expose p
 traverseCombinator _      (Pure x)             = pure (Pure x)
 traverseCombinator _      (Satisfy f)          = pure (Satisfy f)

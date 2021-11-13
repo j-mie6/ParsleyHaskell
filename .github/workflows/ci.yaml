@@ -4,14 +4,15 @@ on: [push, pull_request]
 
 jobs:
   validate:
-    name: GHC ${{ matrix.ghc }}
+    name: GHC ${{ matrix.ghc }}, Cabal ${{ matrix.cabal }}
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
         ghc: ['8.6', '8.8', '8.10', '9.0']
+        cabal: ['3.4']
     env:
-      CONFIG: "--enable-tests --enable-doc"
+      CONFIG: "--enable-tests --enable-doc --builddir=build/no-full-width-positions"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2.3.4
@@ -20,30 +21,37 @@ jobs:
         uses: haskell/actions/setup@v1.2.2
         with:
           ghc-version: ${{ matrix.ghc }}
-          cabal-version: '3.4.0.0'
+          cabal-version: ${{ matrix.cabal }}
 
       - name: Determine Dependencies
         run: |
           cabal update
-          cabal freeze $CONFIG
+          cabal freeze
 
       - name: Check Cache
         uses: actions/cache@v2
         with:
           path: |
             ~/.cabal/store
-            dist-newstyle
-          key: ${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('cabal.project.freeze') }}
+            build/no-full-width-positions
+            build/full-width-positions
+          key: ${{ runner.os }}-${{ matrix.ghc }}-${{ matrix.cabal }}-${{ hashFiles('cabal.project.freeze') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.ghc }}-
+            ${{ runner.os }}-${{ matrix.ghc }}-${{ matrix.cabal }}-
 
       - name: Build
         run: cabal build parsley $CONFIG
 
-      - name: Test
+      - name: Test (-full-width-positions)
         run: |
           cabal test parsley-core $CONFIG
           cabal test parsley $CONFIG
 
+      - name: Test (+full-width-positions)
+        run: |
+          rm cabal.project.freeze
+          cabal test parsley-core --flag full-width-positions $CONFIG --builddir=build/full-width-positions
+          cabal test parsley --flag full-width-positions $CONFIG --builddir=build/full-width-positions
+          
       - name: Doc
         run: cabal haddock parsley $CONFIG

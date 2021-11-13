@@ -154,6 +154,7 @@ shallow (Loop body exit)             m = do loopCompile body exit addCoinsNeeded
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
 shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) m))))
+shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 shallow (MetaCombinator Cut p)       m = do blockCoins <$> runCodeGen p (addCoins (coinsNeeded m) m)
 shallow (MetaCombinator CutImmune p) m = do addCoins . coinsNeeded <$> runCodeGen p (In4 Ret) <*> runCodeGen p m

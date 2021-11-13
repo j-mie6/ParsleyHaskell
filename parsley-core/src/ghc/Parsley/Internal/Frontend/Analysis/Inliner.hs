@@ -53,4 +53,5 @@ alg (Match p _ qs def)   = fromIntegral (length qs + 1) % 3 + sum (map getWeight
 alg (MakeRegister _ l r) = 1 % 3 + getWeight l + getWeight r
 alg (GetRegister _)      = 1 % 3
 alg (PutRegister _ c)    = 1 % 3 + getWeight c
+alg (Position _)         = 1 % 5
 alg (MetaCombinator _ c) = getWeight c

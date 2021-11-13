@@ -53,6 +53,7 @@ alg (Dup k)            = 1 % 10 + getWeight k
 alg (Make _ Hard k)    = 1 % 3 + getWeight k
 alg (Get _ Hard k)     = 1 % 3 + getWeight k
 alg (Put _ Hard k)     = 1 % 3 + getWeight k
+alg (SelectPos _ k)    = 1 % 5 + getWeight k
 alg (Make _ Soft k)    = 1 % 10 + getWeight k
 alg (Get _ Soft k)     = 0 + getWeight k
 alg (Put _ Soft k)     = 1 % 10 + getWeight k

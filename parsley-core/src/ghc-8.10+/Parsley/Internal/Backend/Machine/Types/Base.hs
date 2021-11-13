@@ -1,5 +1,7 @@
-{-# LANGUAGE MagicHash,
-             TypeFamilies #-}
+{-# LANGUAGE CPP,
+             MagicHash,
+             TypeFamilies,
+             UnboxedTuples #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Base
 Description : Base types representing core machine components
@@ -19,17 +21,35 @@ module Parsley.Internal.Backend.Machine.Types.Base (
 import Control.Monad.ST                          (ST)
 import Data.STRef                                (STRef)
 import Data.Kind                                 (Type)
+import GHC.Prim                                  (Word#)
 import Parsley.Internal.Backend.Machine.InputRep (Rep)
+
+#include "MachDeps.h"
+#if WORD_SIZE_IN_BITS < 64
+#define FULL_WIDTH_POSITIONS
+#endif
+
+{-|
+The type of positions within a parser. This may or may not be packed into a single `Word#`
+
+@since 1.8.0.0
+-}
+#ifndef FULL_WIDTH_POSITIONS
+type Pos = Word#
+#else
+type Pos = (# Word#, Word# #)
+#endif
 
 {-|
 @Handler#@ represents the functions that handle failure within a
-parser. For most of their life, handlers are represented as 
+parser. For most of their life, handlers are represented as
 `Parsley.Internal.Backend.Machine.Types.Statics.StaHandler`,
 but @Handler#@ is used at the boundaries, such as for recursion.
 
 @since 1.4.0.0
 -}
-type Handler# s o a =  Rep o          -- ^ The current input on failure 
+type Handler# s o a =  Pos            -- ^ The current position
+                    -> Rep o          -- ^ The current input on failure
                     -> ST s (Maybe a)
 
 {-|
@@ -39,6 +59,7 @@ feed back their result @x@ back to the caller as well as the updated input.
 @since 1.4.0.0
 -}
 type Cont# s o a x =  x              -- ^ The value to be returned to the caller
+                   -> Pos            -- ^ The current position
                    -> Rep o          -- ^ The new input after the call is executed
                    -> ST s (Maybe a)
 
@@ -49,8 +70,9 @@ input, an error handler in order to produce (or contribute to) a result of type 
 @since 1.4.0.0
 -}
 type Subroutine# s o a x =  Cont# s o a x  -- ^ What to do when this parser returns
-                         -> Rep o          -- ^ The input on entry to the call
                          -> Handler# s o a -- ^ How to handle failure within the call
+                         -> Pos            -- ^ The current position
+                         -> Rep o          -- ^ The input on entry to the call
                          -> ST s (Maybe a)
 
 {-|

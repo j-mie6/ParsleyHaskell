@@ -7,7 +7,7 @@ module Parsley.Internal.Core.Primitives (
 
 import Prelude hiding                      (pure, (<*>))
 import Control.Arrow                       (first)
-import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..))
+import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..), PosSelector(..))
 #if MIN_VERSION_parsley_core(2,0,0)
 import Parsley.Internal.Core.Defunc        (Defunc)
 #else
@@ -133,6 +133,14 @@ get (Reg reg) = Parser (In (L (GetRegister reg)))
 {-# INLINE put #-}
 put :: Reg r a -> Parser a -> Parser ()
 put (Reg reg) (Parser p) = Parser (In (L (PutRegister reg p)))
+
+{-# INLINE line #-}
+line :: Parser Int
+line = Parser (In (L (Position Line)))
+
+{-# INLINE col #-}
+col :: Parser Int
+col = Parser (In (L (Position Col)))
 
 {-# INLINE debug #-}
 debug :: String -> Parser a -> Parser a

@@ -1,7 +1,8 @@
 {-# OPTIONS_GHC -Wno-monomorphism-restriction #-}
 {-# LANGUAGE AllowAmbiguousTypes,
              CPP,
-             MagicHash #-}
+             MagicHash,
+             UnboxedTuples #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.BindingOps
 Description : Various functions that handle levity-polymorphic code bindings
@@ -27,9 +28,10 @@ import Data.Array.Unboxed                              (UArray)
 import Data.ByteString.Internal                        (ByteString)
 import Data.Text                                       (Text)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
-import Parsley.Internal.Backend.Machine.Types.Base     (Handler#)
+import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#)
+import Parsley.Internal.Backend.Machine.Types.Input    (Input#(..))
+import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#, StaSubroutine#)
 import Parsley.Internal.Common.Utils                   (Code)
 import Parsley.Internal.Core.InputTypes                (Text16, CharList, Stream)
 
@@ -60,13 +62,14 @@ class HandlerOps o where
                -> (DynHandler s o a -> Code b) -- ^ The continuation that expects the bound handler
                -> Code b
 
-#define deriveHandlerOps(_o)                    \
-instance HandlerOps _o where                    \
-{                                               \
-  bindHandler# h k = [||                        \
-    let handler (o# :: Rep _o) = $$(h [||o#||]) \
-    in $$(k [||handler||])                      \
-  ||];                                          \
+#define deriveHandlerOps(_o)                  \
+instance HandlerOps _o where                  \
+{                                             \
+  bindHandler# h k = [||                      \
+    let handler (pos :: Pos) (o# :: Rep _o) = \
+          $$(h (Input# [||o#||] [||pos||]))   \
+    in $$(k [||handler||])                    \
+  ||];                                        \
 };
 inputInstances(deriveHandlerOps)
 
@@ -85,11 +88,12 @@ class JoinBuilder o where
                   -> (DynCont s o a x -> Code b) -- ^ The continuation that expects the bound join point
                   -> Code b
 
-#define deriveJoinBuilder(_o)                                                             \
-instance JoinBuilder _o where                                                             \
-{                                                                                         \
-  setupJoinPoint# binding k =                                                             \
-    [|| let join x !(o# :: Rep _o) = $$(binding [||x||] [||o#||]) in $$(k [||join||]) ||] \
+#define deriveJoinBuilder(_o)                                                         \
+instance JoinBuilder _o where                                                         \
+{                                                                                     \
+  setupJoinPoint# binding k =                                                         \
+    [|| let join x (pos :: Pos) !(o# :: Rep _o) =                                     \
+              $$(binding [||x||] (Input# [||o#||] [||pos||])) in $$(k [||join||]) ||] \
 };
 inputInstances(deriveJoinBuilder)
 
@@ -106,8 +110,8 @@ class RecBuilder o where
 
   @since 1.4.0.0
   -}
-  bindIterHandler# :: (Code (Rep o) -> StaHandler# s o a)        -- ^ The iter handler to bind
-                   -> (Code (Rep o -> Handler# s o a) -> Code b) -- ^ The continuation that accepts the bound handler
+  bindIterHandler# :: (Input# o -> StaHandler# s o a)                   -- ^ The iter handler to bind
+                   -> (Code (Pos -> Rep o -> Handler# s o a) -> Code b) -- ^ The continuation that accepts the bound handler
                    -> Code b
 
   {-|
@@ -115,31 +119,33 @@ class RecBuilder o where
 
   @since 1.4.0.0
   -}
-  bindIter# :: Code (Rep o)                                                -- ^ Initial offset for the loop.
-            -> (DynHandler s o a -> Code (Rep o) -> Code (ST s (Maybe a))) -- ^ The code for the loop given handler and offset.
-            -> Code (ST s (Maybe a))                                       -- ^ Code of the executing loop.
+  bindIter# :: Input# o                                                                     -- ^ Initial offset for the loop.
+            -> (Code (Pos -> Rep o -> ST s (Maybe a)) -> Input# o -> Code (ST s (Maybe a))) -- ^ The code for the loop given self-call and offset.
+            -> Code (ST s (Maybe a))                                                        -- ^ Code of the executing loop.
 
   {-|
   Creates a binding for a regular let-bound parser.
 
   @since 1.4.0.0
   -}
-  bindRec#  :: (DynSubroutine s o a x -> DynCont s o a x -> Code (Rep o) -> DynHandler s o a -> Code (ST s (Maybe a))) -- ^ Code for the binding, accepting itself as an argument.
-            -> DynSubroutine s o a x                                                                                   -- ^ The code that represents this binding's name.
+  bindRec#  :: (DynSubroutine s o a x -> StaSubroutine# s o a x) -- ^ Code for the binding, accepting itself as an argument.
+            -> DynSubroutine s o a x                             -- ^ The code that represents this binding's name.
 
-#define deriveRecBuilder(_o)                                                                           \
-instance RecBuilder _o where                                                                           \
-{                                                                                                      \
-  bindIterHandler# h k = [||                                                                           \
-      let handler (c# :: Rep _o) (o# :: Rep _o) = $$(h [||c#||] [||o#||]) in $$(k [||handler||])       \
-    ||];                                                                                               \
-  bindIter# o l = [||                                                                                  \
-      let loop !(o# :: Rep _o) = $$(l [||loop||] [||o#||])                                             \
-      in loop $$o                                                                                      \
-    ||];                                                                                               \
-  bindRec# binding =                                                                                   \
-    {- The idea here is to try and reduce the number of times registers have to be passed around -}    \
-    [|| let self ret !(o# :: Rep _o) h = $$(binding [||self||] [||ret||] [||o#||] [||h||]) in self ||] \
+#define deriveRecBuilder(_o)                                                                        \
+instance RecBuilder _o where                                                                        \
+{                                                                                                   \
+  bindIterHandler# h k = [||                                                                        \
+      let handler (posc :: Pos) (c# :: Rep _o) (poso :: Pos) (o# :: Rep _o) =                       \
+            $$(h (Input# [||c#||] [||posc||]) (Input# [||o#||] [||poso||])) in $$(k [||handler||])  \
+    ||];                                                                                            \
+  bindIter# inp l = [||                                                                             \
+      let loop (pos :: Pos) !(o# :: Rep _o) = $$(l [||loop||] (Input# [||o#||] [||pos||]))          \
+      in loop $$(pos# inp) $$(off# inp)                                                             \
+    ||];                                                                                            \
+  bindRec# binding =                                                                                \
+    {- The idea here is to try and reduce the number of times registers have to be passed around -} \
+    [|| let self ret h (pos :: Pos) !(o# :: Rep _o) =                                               \
+              $$(binding [||self||] [||ret||] [||h||] (Input# [||o#||] [||pos||])) in self ||]      \
 };
 inputInstances(deriveRecBuilder)
 
@@ -166,10 +172,10 @@ class MarshalOps o where
   -}
   dynCont# :: StaCont# s o a x -> DynCont s o a x
 
-#define deriveMarshalOps(_o)                                          \
-instance MarshalOps _o where                                          \
-{                                                                     \
-  dynHandler# sh = [||\ (o# :: Rep _o) -> $$(sh [||o#||]) ||];        \
-  dynCont# sk = [||\ x (o# :: Rep _o) -> $$(sk [||x||] [||o#||]) ||]; \
+#define deriveMarshalOps(_o)                                                                          \
+instance MarshalOps _o where                                                                          \
+{                                                                                                     \
+  dynHandler# sh = [||\ (pos :: Pos) (o# :: Rep _o) -> $$(sh (Input# [||o#||] [||pos||])) ||];        \
+  dynCont# sk = [||\ x (pos :: Pos) (o# :: Rep _o) -> $$(sk [||x||] (Input# [||o#||] [||pos||])) ||]; \
 };
 inputInstances(deriveMarshalOps)

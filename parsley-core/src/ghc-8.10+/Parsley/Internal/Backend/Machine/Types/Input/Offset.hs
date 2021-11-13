@@ -1,6 +1,6 @@
-{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingStrategies, UnboxedTuples #-}
 {-|
-Module      : Parsley.Internal.Backend.Machine.Types.Offset
+Module      : Parsley.Internal.Backend.Machine.Types.Input.Offset
 Description : Statically refined offsets.
 License     : BSD-3-Clause
 Maintainer  : Jamie Willis
@@ -10,14 +10,14 @@ This module contains the statically refined `Offset` type,
 which can be used to reason about input in different parts of
 a parser as it is evaluated.
 
-@since 1.4.0.0
+@since 1.8.0.0
 -}
-module Parsley.Internal.Backend.Machine.Types.Offset (
-    Offset, mkOffset, offset, moveOne, moveN, same
+module Parsley.Internal.Backend.Machine.Types.Input.Offset (
+    Offset, mkOffset, offset, moveOne, moveN, same,
   ) where
 
-import Parsley.Internal.Backend.Machine.InputRep    (Rep)
-import Parsley.Internal.Common.Utils                (Code)
+import Parsley.Internal.Backend.Machine.InputRep   (Rep)
+import Parsley.Internal.Common.Utils               (Code)
 
 {-|
 Augments a regular @'Code' ('Rep' o)@ with information about its origins and

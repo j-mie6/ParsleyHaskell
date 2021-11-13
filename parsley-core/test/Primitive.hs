@@ -1,30 +1,33 @@
 {-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, TypeApplications #-}
-module Parsley.Primitive.Test where
+module Main where
 import Test.Tasty
 import Test.Tasty.HUnit
 import TestUtils
-import qualified Parsley.Primitive.Parsers as Parsers
+import qualified Primitive.Parsers as Parsers
 
-import Parsley (runParser, empty)
+import Parsley.Internal (empty)
+
+main :: IO ()
+main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Primitive" [ pureTests
-                              , apTests
-                              , thenTests
-                              , prevTests
-                              , altTests
-                              , emptyTests
-                              , satisfyTests
-                              , lookAheadTests
-                              , notFollowedByTests
-                              , tryTests
-                              , branchTests
-                              , conditionalTests
-                              , recursionTests
-                              ]
+tests = testGroup "Primitive Combinator Tests" [ pureTests
+                                               , apTests
+                                               , thenTests
+                                               , prevTests
+                                               , altTests
+                                               , emptyTests
+                                               , satisfyTests
+                                               , lookAheadTests
+                                               , notFollowedByTests
+                                               , tryTests
+                                               , branchTests
+                                               , conditionalTests
+                                               , recursionTests
+                                               ]
 
 pure7 :: String -> Maybe Int
-pure7 = $$(runParserMocked Parsers.pure7 [||Parsers.pure7||])
+pure7 = $$(parseMocked Parsers.pure7 [||Parsers.pure7||])
 
 pureTests :: TestTree
 pureTests = testGroup "pure should"
@@ -42,10 +45,10 @@ prevTests :: TestTree
 prevTests = testGroup "<* should" []
 
 abOrC :: String -> Maybe String
-abOrC = $$(runParserMocked Parsers.abOrC [||Parsers.abOrC||])
+abOrC = $$(parseMocked Parsers.abOrC [||Parsers.abOrC||])
 
 abOrCThenD :: String -> Maybe String
-abOrCThenD = $$(runParserMocked Parsers.abOrCThenD [||Parsers.abOrCThenD||])
+abOrCThenD = $$(parseMocked Parsers.abOrCThenD [||Parsers.abOrCThenD||])
 
 altTests :: TestTree
 altTests = testGroup "<|> should"
@@ -61,7 +64,7 @@ altTests = testGroup "<|> should"
   ]
 
 constNothing :: String -> Maybe ()
-constNothing = $$(runParserMocked empty [||empty||])
+constNothing = $$(parseMocked empty [||empty||])
 
 emptyTests :: TestTree
 emptyTests = testGroup "empty should"
@@ -70,10 +73,10 @@ emptyTests = testGroup "empty should"
   ]
 
 digit :: String -> Maybe Char
-digit = $$(runParserMocked Parsers.digit [||Parsers.digit||])
+digit = $$(parseMocked Parsers.digit [||Parsers.digit||])
 
 twoDigits :: String -> Maybe Char
-twoDigits = $$(runParserMocked Parsers.twoDigits [||Parsers.twoDigits||])
+twoDigits = $$(parseMocked Parsers.twoDigits [||Parsers.twoDigits||])
 
 satisfyTests :: TestTree
 satisfyTests = testGroup "satisfy should"
@@ -85,7 +88,7 @@ satisfyTests = testGroup "satisfy should"
   ]
 
 lookAheadDigit :: String -> Maybe Char
-lookAheadDigit = $$(runParserMocked Parsers.lookAheadDigit [||Parsers.lookAheadDigit||])
+lookAheadDigit = $$(parseMocked Parsers.lookAheadDigit [||Parsers.lookAheadDigit||])
 
 lookAheadTests :: TestTree
 lookAheadTests = testGroup "lookAhead should"
@@ -106,7 +109,7 @@ conditionalTests :: TestTree
 conditionalTests = testGroup "conditional should" []
 
 manyAny :: String -> Maybe String
-manyAny = $$(runParserMocked Parsers.recursive [||Parsers.recursive||])
+manyAny = $$(parseMocked Parsers.recursive [||Parsers.recursive||])
 
 recursionTests :: TestTree
 recursionTests = testGroup "recursion should"

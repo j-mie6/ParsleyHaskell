@@ -29,6 +29,11 @@ import Parsley.Internal.Backend.Machine.InputRep (Rep)
 #define FULL_WIDTH_POSITIONS
 #endif
 
+{-|
+The type of positions within a parser. This may or may not be packed into a single `Word#`
+
+@since 1.8.0.0
+-}
 #ifndef FULL_WIDTH_POSITIONS
 type Pos = Word#
 #else

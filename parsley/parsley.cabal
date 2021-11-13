@@ -108,9 +108,9 @@ test-suite parsley-test
   build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq
   main-is:             Parsley/Tests.hs
   other-modules:       Parsley.Alternative.Test, Parsley.Applicative.Test, Parsley.Combinator.Test, Parsley.Fold.Test,
-                       Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test, Parsley.Primitive.Test,
+                       Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test,
                        Parsley.Alternative.Parsers, Parsley.Applicative.Parsers, Parsley.Combinator.Parsers, Parsley.Fold.Parsers,
-                       Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers, Parsley.Primitive.Parsers
+                       Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers
 
 test-suite regression-test
   import:              test-common

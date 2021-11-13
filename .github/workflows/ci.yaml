@@ -50,8 +50,8 @@ jobs:
       - name: Test (+full-width-positions)
         run: |
           rm cabal.project.freeze
-          cabal test parsley-core --flag full-width-positions $CONFIG --builddir=build/no-full-width-positions
-          cabal test parsley --flag full-width-positions $CONFIG --builddir=build/no-full-width-positions
-
+          cabal test parsley-core --flag full-width-positions $CONFIG --builddir=build/full-width-positions
+          cabal test parsley --flag full-width-positions $CONFIG --builddir=build/full-width-positions
+          
       - name: Doc
         run: cabal haddock parsley $CONFIG

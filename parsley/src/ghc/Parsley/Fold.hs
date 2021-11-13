@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms, CPP #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-|
 Module      : Parsley.Fold
 Description : The "folding" combinators: chains and iterators
@@ -27,19 +27,10 @@ import Parsley.Applicative      (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), 
 import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), pattern FLIP_H, pattern COMPOSE_H, pattern UNIT)
 import Parsley.Internal         (Parser)
 import Parsley.ParserOps        (ParserOps)
-#if MIN_VERSION_parsley_core(1,7,1)
 import Parsley.Register         (bind, get, put, modify, newRegister, newRegister_)
-#else
-import Parsley.Register         (bind, get, modify, newRegister_)
-#endif
 
-#if MIN_VERSION_parsley_core(1,7,1)
 import qualified Parsley.Internal as Internal (loop)
-#else
-import qualified Parsley.Internal as Internal (chainPre, chainPost)
-#endif
 
-#if MIN_VERSION_parsley_core(1,7,1)
 {-|
 The combinator @loop body exit@ parses @body@ zero or more times until it fails. If the final @body@
 failed having not consumed input, @exit@ is performed, otherwise the combinator fails:
@@ -75,25 +66,6 @@ chainPost p op =
   newRegister p $ \r ->
     loop (put r (op <*> get r))
          (get r)
-#else
-{-|
-This combinator parses repeated applications of an operator to a single final operand. This is
-primarily used to parse prefix operators in expressions.
-
-@since 0.1.0.0
--}
-chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre = Internal.chainPre
-
-{-|
-This combinator parses repeated applications of an operator to a single initial operand. This is
-primarily used to parse postfix operators in expressions.
-
-@since 0.1.0.0
--}
-chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost = Internal.chainPost
-#endif
 
 -- Parser Folds
 {-|

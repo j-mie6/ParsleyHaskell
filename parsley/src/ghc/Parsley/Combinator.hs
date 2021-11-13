@@ -19,18 +19,19 @@ module Parsley.Combinator (
     eof, more,
     someTill,
     try,
-    lookAhead, notFollowedBy
+    lookAhead, notFollowedBy,
+    line, col, pos
   ) where
 
 import Prelude hiding           (traverse, (*>))
 import Data.List                (sort)
 import Parsley.Alternative      (manyTill)
-import Parsley.Applicative      (($>), void, traverse, (<:>), (*>))
+import Parsley.Applicative      (($>), void, traverse, (<:>), (*>), (<~>))
 import Parsley.Defunctionalized (Defunc(LIFTED, EQ_H, CONST, LAM_S), pattern APP_H, pattern COMPOSE_H)
 import Parsley.Internal         (Code, Quapplicative(..), Parser)
 import Parsley.ParserOps        (satisfy)
 
-import qualified Parsley.Internal as Internal (try, lookAhead, notFollowedBy)
+import qualified Parsley.Internal as Internal (try, lookAhead, notFollowedBy, line, col)
 
 {-|
 This combinator will attempt to parse a given parser. If it succeeds, the result is returned without
@@ -174,3 +175,29 @@ so long as @end@ cannot be successfully parsed. It will return the results from 
 -}
 someTill :: Parser a -> Parser b -> Parser [a]
 someTill p end = notFollowedBy end *> (p <:> manyTill p end)
+
+{-|
+The `line` combinator returns the current line number at this point in the parse. Line numbers
+start from 1.
+
+@since 1.0.1.0
+-}
+line :: Parser Int
+line = Internal.line
+
+{-|
+The `col` combinator returns the current column number at this point in the parse. Column numbers
+start from 1.
+
+@since 1.0.1.0
+-}
+col :: Parser Int
+col = Internal.col
+
+{-|
+The `pos` combinator returns the current line and column number at this point in the parse.
+
+@since 1.0.1.0
+-}
+pos :: Parser (Int, Int)
+pos = line <~> col

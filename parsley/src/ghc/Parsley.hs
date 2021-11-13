@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE MultiParamTypeClasses, CPP #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-|
 Module      : Parsley
 Description : Main functionality exports
@@ -41,11 +41,7 @@ import Parsley.Internal                 as THUtils     (Quapplicative(..), WQ, C
 import Parsley.Debug                    as Primitives  (debug)
 import Parsley.Selective                as Selective
 
-#if MIN_VERSION_parsley_core(1,7,1)
 import qualified Parsley.Internal as Internal (parse)
-#else
-import qualified Parsley.Internal as Internal (eval, compile, codeGen)
-#endif
 
 {-|
 The standard way to compile a parser, it returns `Code`, which means
@@ -75,11 +71,7 @@ the compilation pipeline when "Parsley.Internal.Verbose" is imported.
 runParser :: (Trace, Input input)
           => Parser a                -- ^ The parser to be compiled
           -> Code (input -> Maybe a) -- ^ The generated parsing function
-#if MIN_VERSION_parsley_core(1,7,1)
 runParser = Internal.parse
-#else
-runParser p = [||\input -> $$(Internal.eval [||input||] (Internal.compile (try p) Internal.codeGen))||]
-#endif
 
 {-|
 This function generates a function that reads input from a file

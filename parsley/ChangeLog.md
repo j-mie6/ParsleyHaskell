@@ -32,3 +32,8 @@
 
 * Support for `parsley-core-2.0.0` and `parsley-core-1.7.1`.
 * Re-exports less from `parsley-core`, instead using (currently hidden) redefinition.
+
+## 1.0.1.0 -- 2021-11-13
+
+* Added `line` and `col` combinators.
+* Added `pos` combinator.

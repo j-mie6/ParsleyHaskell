@@ -21,7 +21,9 @@ module Parsley.Register (
     gets, gets_,
     modify, modify_,
     move, swap,
-    bind, local, rollback,
+    local, local_,
+    localModify, localModify_,
+    bind, rollback,
     for
   ) where
 
@@ -151,6 +153,35 @@ local :: Reg r a -> Parser a -> Parser b -> Parser b
 local r p q = bind (get r) $ \x -> put r p
                                 *> q
                                 <* put r x
+
+{-|
+@local_ reg x p@ stores @x@ in @reg@ for the /duration/ of parsing @p@.
+If @p@ succeeds, @reg@ will be restored to its original state.
+
+@since 1.0.2.0
+-}
+local_ :: ParserOps rep => Reg r a -> rep a -> Parser b -> Parser b
+local_ r = local r . pure
+
+{-|
+@localModify reg p q@ first parses @p@ and @reg@ with its returned function for the /duration/ of parsing @q@.
+If @q@ succeeds, @reg@ will be restored to its original state /before/ @p@ was parsed.
+
+@since 1.0.2.0
+-}
+localModify :: Reg r a -> Parser (a -> a) -> Parser b -> Parser b
+localModify r p q = bind (get r) $ \x -> modify r p
+                                *> q
+                                <* put r x
+
+{-|
+@localModify_ reg x p@ modifes @reg@ using @f@ for the /duration/ of parsing @p@.
+If @p@ succeeds, @reg@ will be restored to its original state.
+
+@since 1.0.2.0
+-}
+localModify_ :: ParserOps rep => Reg r a -> rep (a -> a) -> Parser b -> Parser b
+localModify_ r = localModify r . pure
 
 {-|
 This combinator will swap the values contained in two registers.

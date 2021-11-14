@@ -37,3 +37,8 @@
 
 * Added `line` and `col` combinators.
 * Added `pos` combinator.
+
+## 1.0.2.0 -- 2021-11-14
+
+* Added `local_` combinator to `Register`.
+* Added `localModify` and `localModify_` combinators to `Register`.

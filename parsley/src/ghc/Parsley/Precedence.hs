@@ -24,6 +24,8 @@ import Parsley.Fold                  (prefix, postfix, infixl1, infixr1)
 import Parsley.Internal.Common.Utils (WQ(WQ))
 import Parsley.Internal.Core         (Parser, Defunc(BLACK, ID, FLIP))
 
+--import qualified Data.GenericLens.Internal as GLens
+
 {-|
 This combinator will construct and expression parser will provided with a table of precedence..
 
@@ -68,6 +70,10 @@ ops fixity ps = Op fixity (choice ps) ID
 class Subtype sub sup where
   upcast   :: sub -> sup
   downcast :: sup -> Maybe sub
+
+{-instance GLens.AsSubtype sub sup => Subtype sub sup where
+  upcast = GLens.injectSub
+  downcast = GLens.projectSub-}
 
 sops :: Subtype a b => Fixity a b sig -> [Parser sig] -> Op a b
 sops fixity ps = gops fixity ps (WQ upcast [||upcast||])

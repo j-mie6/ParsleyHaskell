@@ -9,6 +9,7 @@ module Parsley.Patterns (
 
 import Prelude hiding (pure, (<*>))
 
+import Control.Monad (replicateM)
 import Data.List     (intercalate, elemIndex)
 import Language.Haskell.TH (Name, Q, reify, Info(TyConI, DataConI), Extension(KindSignatures), newName, mkName, isExtEnabled)
 import Language.Haskell.TH.Syntax (Type(ConT, AppT, ArrowT, ForallT, StarT),
@@ -26,6 +27,7 @@ import Language.Haskell.TH.Syntax (Type(MulArrowT), unsafeCodeCoerce)
 import Language.Haskell.TH.Syntax (unsafeTExpCoerce)
 #endif
 import Language.Haskell.TH.Lib (varE, varP, conE, conP, conT, forallT, funD, sigD, clause, normalB, lamE)
+
 import Parsley (Parser, makeQ)
 import Parsley.Combinator (pos)
 import Parsley.Precedence (Subtype(..))
@@ -40,7 +42,7 @@ deriveLiftedConstructors prefix = fmap concat . traverse deriveCon
     deriveCon :: Name -> Q [Dec]
     deriveCon con = do
       (con', tys', func, posIdx, nargs, forall) <- buildMeta True prefix con
-      args <- sequence (replicate nargs (newName "x"))
+      args <- replicateM nargs (newName "x")
       let posAp = maybe [e|id|] (const [e|(pos <**>)|]) posIdx
       sequence [ sigD con' (buildType forall (map return tys'))
                , funD con' [clause (map varP args) (normalB [e|$posAp $(applyArgs [|pure $func|] (map varE args)) |]) []]
@@ -80,7 +82,7 @@ buildMeta posLast prefix con = do
 
 buildLiftedLambda :: Bool -> Name -> Int -> Maybe Int -> Q Exp
 buildLiftedLambda posLast con nargs posIdx = do
-  args <- sequence (replicate nargs (newName "x"))
+  args <- replicateM nargs (newName "x")
   posArg <- newName "pos"
   let args' = map varP args
   let posArg' = maybe [] (const [varP posArg]) posIdx
@@ -203,7 +205,7 @@ deriveSubtypeUsing :: Name -> Name -> Name -> Q [Dec]
 deriveSubtypeUsing sub sup wrap = do
   x <- newName "x"
   [d|
-    instance Subtype $(conT sub) $(conT sup) where
+    instance {-# OVERLAPPING #-} Subtype $(conT sub) $(conT sup) where
       upcast = $(conE wrap)
       downcast $(conP wrap [varP x]) = Just $(varE x)
       downcast _ = Nothing |]

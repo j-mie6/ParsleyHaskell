@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE MultiParamTypeClasses, UndecidableInstances #-}
 {-|
 Module      : Parsley.Precedence
 Description : The precedence parser functionality
@@ -24,7 +24,8 @@ import Parsley.Fold                  (prefix, postfix, infixl1, infixr1)
 import Parsley.Internal.Common.Utils (WQ(WQ))
 import Parsley.Internal.Core         (Parser, Defunc(BLACK, ID, FLIP))
 
---import qualified Data.GenericLens.Internal as GLens
+--import qualified Data.Generics.Internal.Profunctor.Prism as GLens
+--import qualified Data.Generics.Sum.Internal.Subtype as GLens
 
 {-|
 This combinator will construct and expression parser will provided with a table of precedence..
@@ -61,8 +62,14 @@ data Fixity a b sig where
 data Op a b where
   Op :: Fixity a b sig -> Parser sig -> Defunc (a -> b) -> Op a b
 
-gops :: Fixity a b sig -> [Parser sig] -> WQ (a -> b) -> Op a b
-gops fixity ps wrap = Op fixity (choice ps) (BLACK wrap)
+class GOps rep where
+  gops :: Fixity a b sig -> [Parser sig] -> rep (a -> b) -> Op a b
+
+instance GOps WQ where
+  gops fixity ps = gops fixity ps . BLACK
+
+instance {-# INCOHERENT #-} x ~ Defunc => GOps x where
+  gops fixity ps = Op fixity (choice ps)
 
 ops :: Fixity a a sig -> [Parser sig] -> Op a a
 ops fixity ps = Op fixity (choice ps) ID
@@ -71,9 +78,9 @@ class Subtype sub sup where
   upcast   :: sub -> sup
   downcast :: sup -> Maybe sub
 
-{-instance GLens.AsSubtype sub sup => Subtype sub sup where
-  upcast = GLens.injectSub
-  downcast = GLens.projectSub-}
+{-instance GLens.Context sub sup => Subtype sub sup where
+  upcast = GLens.build GLens.derived
+  downcast = either (const Nothing) Just . GLens.match GLens.derived-}
 
 sops :: Subtype a b => Fixity a b sig -> [Parser sig] -> Op a b
 sops fixity ps = gops fixity ps (WQ upcast [||upcast||])

@@ -34,8 +34,20 @@ testParser'' = mkDX-}
 
 tests :: TestTree
 tests = testGroup "Precedence" [
+    precHomoTests
     --subtypeTests
   ]
+
+expr :: String -> Maybe Parsers.Expr
+expr = $$(runParserMocked Parsers.expr [||Parsers.expr||])
+
+precHomoTests :: TestTree
+precHomoTests = testGroup "precHomo should"
+  [ testCase "parse precedence with correct associativity" $ expr "1+3*negate5+4" @?=
+        Just (Parsers.Add (Parsers.Num 1)
+                          (Parsers.Add (Parsers.Mul (Parsers.Num 3)
+                                                    (Parsers.Negate (Parsers.Num 5)))
+                                       (Parsers.Num 4)))]
 
 {-subtypeTests :: TestTree
 subtypeTests = testGroup "Subtype should"

@@ -117,7 +117,7 @@ The function @wrap@ is used to transform the initial value from @p@ into the cor
 @since 2.0.0.0
 -}
 infixl1 :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (b -> a -> b) -> Parser b
-infixl1 f p op = postfix (f <$> p) (FLIP <$> op <*> p)
+infixl1 wrap p op = postfix (wrap <$> p) (FLIP <$> op <*> p)
 
 {-|
 The classic version of the left-associative chain combinator. See 'infixl1'.
@@ -137,10 +137,10 @@ The function @wrap@ is used to transform the final value from @p@ into the corre
 @since 2.0.0.0
 -}
 infixr1 :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
-infixr1 f p op = newRegister_ ID $ \acc ->
+infixr1 wrap p op = newRegister_ ID $ \acc ->
   let go = bind p $ \x ->
            modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go
-       <|> f <$> x
+       <|> wrap <$> x
   in go <**> get acc
 
 {-|

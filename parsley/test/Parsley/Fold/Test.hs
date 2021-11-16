@@ -17,6 +17,8 @@ tests = testGroup "Fold" [ prefixTests
                          , somelTests
                          , chainlTests
                          , chainrTests
+                         , infixl1Tests
+                         , infixr1Tests
                          , manyTests
                          , skipManyTests
                          , sepByTests
@@ -74,10 +76,16 @@ somelTests :: TestTree
 somelTests = testGroup "somel should" []
 
 chainlTests :: TestTree
-chainlTests = testGroup "chainl should" [] -- chainl1' chainl1 chainl
+chainlTests = testGroup "chainl should" [] -- chainl1 chainl
 
 chainrTests :: TestTree
-chainrTests = testGroup "chainr should" [] -- chainr1' chainr1 chainr
+chainrTests = testGroup "chainr should" [] -- chainr1 chainr
+
+infixl1Tests :: TestTree
+infixl1Tests = testGroup "infixl1 should" []
+
+infixr1Tests :: TestTree
+infixr1Tests = testGroup "infixr1 should" []
 
 manyAA :: String -> Maybe [String]
 manyAA = $$(runParserMocked Parsers.manyAA [||Parsers.manyAA||])

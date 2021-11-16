@@ -9,16 +9,25 @@ Stability   : stable
 This module exposes the required machinery for parsing expressions given by a precedence
 table. Unlike those found in [parser-combinators](https://hackage.haskell.org/package/parser-combinators-1.3.0/docs/Control-Monad-Combinators-Expr.html)
 or [parsec](https://hackage.haskell.org/package/parsec-3.1.14.0/docs/Text-Parsec-Expr.html), this
-implementation allows the precedence layers to change type in the table.
+implementation allows the precedence layers to change type in the table. This implementation is
+based off of /Design Patterns for Parser Combinators (Willis and Wu 21)/.
 
 @since 0.1.0.0
 -}
 module Parsley.Precedence (
+    -- * Main Precedence Combinators
+    -- $prec-doc
     precedence, precHomo,
+    -- * Operator Fixity
     Fixity(..),
+    -- * Level Construction
+    -- $ops-doc
     Op,
     GOps(..), sops, ops,
+    -- * Level Combining
+    -- $levels-doc
     Prec(..), (>+), (+<),
+    -- * Subtype Relation
     Subtype(..),
   ) where
 
@@ -34,8 +43,24 @@ import Parsley.Internal.Core         (Parser, Defunc(BLACK, ID, FLIP))
 --import qualified Data.Generics.Internal.Profunctor.Prism as GLens
 --import qualified Data.Generics.Sum.Internal.Subtype as GLens
 
+{- $prec-doc
+Compared to using chain combinators to construct parsers for expression grammars, precedence
+combinators provide a light-weight and convenient representation of a precedence table. In @parsley@
+these take two forms: a more traditional version called `precHomo` which takes a list of precedence
+levels which are all of the same, monolithic, type; and a heterogeneous version called `precedence`.
+
+In /Design Patterns for Parser Combinators/ it is mentioned that the homogeneous approach to
+encoding precedence tables can inadvertently misrepresent the grammar: say by changing
+left-associative operators into right-associative ones. When the grammar doesn't specify
+associativities, then `precHomo` is perfectly appropriate, as it becomes an implementation decision.
+Otherwise, `precedence` uses a heterogeneous list to form a precedence table, allowing each layer of
+operators to form part of a different datatype. By encoding the resulting AST as a hierarchy of
+independent datatypes for each grammar rule, the precedence table can be made to be very strict:
+reordering levels or switching their associativities will fail to compile!
+-}
+
 {-|
-This combinator will construct and expression parser will provided with a table of precedence..
+This combinator will construct and expression parser will provided with a table of precedence.
 
 @since 2.0.0.0
 -}
@@ -52,11 +77,14 @@ precedence (Level lvls op) = level (precedence lvls) op
 
 {-|
 A simplified version of `precedence` that does not use the heterogeneous list `Prec`, but
-instead requires all layers of the table to have the same type.
+instead requires all layers of the table to have the same type. The list encodes the precedence
+in strongest-to-weakest layout.
 
 @since 2.0.0.0
 -}
-precHomo :: Parser a -> [Op a a] -> Parser a
+precHomo :: Parser a -- ^ The root atom of the precedence hierarchy
+         -> [Op a a] -- ^ Each layer laid out strongest-to-weakest binding.
+         -> Parser a
 precHomo atom = precedence . foldl' (>+) (Atom atom)
 
 {-|
@@ -76,6 +104,26 @@ data Fixity a b sig where
   Prefix  :: Fixity a b (b -> b)
   -- | Denotes a postfix unary operator.
   Postfix :: Fixity a b (b -> b)
+
+{- $ops-doc
+By combining a `Fixity` with a `Parser` which can read the operators at a given level, a new
+level can be created, ready to add to the table. To provide uniformity and safety, the `Fixity`
+type exposes a @sig@ type that expresses the shape of operators that match it. The `Op` datatype,
+which is not constructed directly, ties the operators to this signature using existentials.
+
+There are three ways to create a value of type `Op`: `ops`, `sops`, and `gops`. These functions
+represent different degrees of relations between this layer of the table, and the one that comes
+below:
+
+  - `ops` says that the level below is the same type as this one, in other words the classic
+    @a -> a -> a@ type for binary operators.
+  - `sops` is stronger, and says that the level below must be a sub-type of this one (see `Subtype`).
+    This means that there is a known canonical embedding from one layer into the other, called an
+    `upcast`.
+  - `gops` is the most general, and says that the level below is related to this one by some more
+    complex transformation than the canonical sub-type embedding. Any arbitrary function from
+    @underlying -> this@ can be provided to this level to handle the translation.
+-}
 
 {-|
 Packages together a level of a precedence table, by associating a `Fixity` with the operators that
@@ -157,6 +205,22 @@ the two can be trivially provided as the `upcast` function.
 -}
 sops :: Subtype a b => Fixity a b sig -> [Parser sig] -> Op a b
 sops fixity ps = gops fixity ps (WQ upcast [||upcast||])
+
+{- $levels-doc
+Independently, `Op`s are meaningless: they must be combined together to form a table to be useful.
+The `Prec` datatype encodes the structure linking together each `Op` level in turn.
+
+The base case
+for the table is called `Atom`, which takes a parser for the root of the table: think numbers,
+variables, bracketed expressions, and the like.
+
+The `Level` constructor is used to add layers on top of the growing table. It's not designed to be
+used directly, which would be clunky, instead use the `(>+)` and `(+<)` operators. These operators
+are sugar for `Level`, but allow freedom over which way round the table should be expressed: use
+`(>+)` to build the table from strongest- to weakest-binding (with the atom at the front); use
+`(+<)` to build the table from weakest- to strongest-binding (with the atom at the end). The direction
+the table should be built in is purely stylistic.
+-}
 
 {-|
 A heterogeneous list that represents a precedence table so that @Prec a@ produces values of type

@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, MultiParamTypeClasses, GADTs, DeriveGeneric #-}
+{-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, MultiParamTypeClasses, GADTs, DeriveGeneric, TypeApplications #-}
 --{-# OPTIONS_GHC -ddump-splices #-}
 module Parsley.Precedence.Test where
 import Test.Tasty

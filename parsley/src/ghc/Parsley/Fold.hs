@@ -24,10 +24,10 @@ module Parsley.Fold (
 import Prelude hiding           (pure, (<*>), (<$>), (*>), (<*))
 import Parsley.Alternative      ((<|>), option)
 import Parsley.Applicative      (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
-import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), pattern FLIP_H, pattern COMPOSE_H, pattern UNIT)
+import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST, APP_H), pattern FLIP_H, pattern UNIT)
 import Parsley.Internal         (Parser)
 import Parsley.ParserOps        (ParserOps)
-import Parsley.Register         (bind, get, modify, newRegister, newRegister_)
+import Parsley.Register         (get, modify, newRegister, newRegister_)
 
 import qualified Parsley.Internal as Internal (loop)
 
@@ -137,14 +137,7 @@ The function @wrap@ is used to transform the final value from @p@ into the corre
 @since 2.0.0.0
 -}
 infixr1 :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
--- I'm not convinced that the register implementation of infixr1 beats the direct recursion implementation
--- This needs to be benchmarked! Perhaps with register optimisation removing the bind, it could be better?
---infixr1 wrap p op = let go = p <**> (FLIP <$> op <*> go <|> pure wrap) in go
-infixr1 wrap p op = newRegister_ ID $ \acc ->
-  let go = bind p $ \x ->
-           modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go
-       <|> wrap <$> x
-  in go <**> get acc
+infixr1 wrap p op = let go = p <**> (FLIP <$> op <*> go <|> pure wrap) in go
 
 {-|
 The classic version of the right-associative chain combinator. See 'infixr1'.
@@ -277,13 +270,7 @@ Returns a list of values returned by @p@.
 @since 0.1.0.0
 -}
 sepEndBy1 :: Parser a -> Parser b -> Parser [a]
-sepEndBy1 p sep = newRegister_ ID $ \acc ->
-  let go = modify acc (COMPOSE_H (FLIP_H COMPOSE) CONS <$> p)
-         *> (sep *> (go <|> get acc) <|> get acc)
-  in go <*> pure EMPTY
-
-{-sepEndBy1 :: Parser a -> Parser b -> Parser [a]
 sepEndBy1 p sep =
   let seb1 = p <**> (sep *> (FLIP_H CONS <$> option EMPTY seb1)
                  <|> pure (APP_H (FLIP_H CONS) EMPTY))
-  in seb1-}
+  in seb1

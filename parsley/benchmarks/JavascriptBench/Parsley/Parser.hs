@@ -66,15 +66,15 @@ javascript = whitespace *> many element <* eof
     expr' :: Parser JSExpr'
     expr' = precHomo ([|JSUnary|] <$> memOrCon)
       [ ops Prefix  [ operator "--" $> [|jsDec|], operator "++" $> [|jsInc|]
-                , operator "-" $> [|jsNeg|], operator "+" $> [|jsPlus|]
-                , operator "~" $> [|jsBitNeg|], operator "!" $> [|jsNot|] ]
+                    , operator "-" $> [|jsNeg|], operator "+" $> [|jsPlus|]
+                    , operator "~" $> [|jsBitNeg|], operator "!" $> [|jsNot|] ]
       , ops Postfix [ operator "--" $> [|jsDec|], operator "++" $> [|jsInc|] ]
       , ops InfixL  [ operator "*" $> [|JSMul|], operator "/" $> [|JSDiv|]
-                , operator "%" $> [|JSMod|] ]
+                    , operator "%" $> [|JSMod|] ]
       , ops InfixL  [ operator "+" $> [|JSAdd|], operator "-" $> [|JSSub|] ]
       , ops InfixL  [ operator "<<" $> [|JSShl|], operator ">>" $> [|JSShr|] ]
       , ops InfixL  [ operator "<=" $> [|JSLe|], operator "<" $> [|JSLt|]
-                , operator ">=" $> [|JSGe|], operator ">" $> [|JSGt|] ]
+                    , operator ">=" $> [|JSGe|], operator ">" $> [|JSGt|] ]
       , ops InfixL  [ operator "==" $> [|JSEq|], operator "!=" $> [|JSNe|] ]
       , ops InfixL  [ try (operator "&") $> [|JSBitAnd|] ]
       , ops InfixL  [ operator "^" $> [|JSBitXor|] ]
@@ -131,11 +131,11 @@ javascript = whitespace *> many element <* eof
     zeroNumFloat :: Parser (Either Int Double)
     zeroNumFloat = [|Left|] <$> (hexadecimal <|> octal)
                <|> decimalFloat
-               <|> (fromMaybeP (fractFloat <*> pure (LIFTED 0)) empty)
+               <|> fromMaybeP (fractFloat <*> pure (LIFTED 0)) empty
                <|> pure [|Left 0|]
 
     decimalFloat :: Parser (Either Int Double)
-    decimalFloat = fromMaybeP (decimal <**> (option (COMPOSE_H [|Just|] [|Left|]) fractFloat)) empty
+    decimalFloat = fromMaybeP (decimal <**> option (COMPOSE_H [|Just|] [|Left|]) fractFloat) empty
 
     fractFloat :: Parser (Int -> Maybe (Either Int Double))
     fractFloat = [|\g x -> liftM Right (g x)|] <$> fractExponent

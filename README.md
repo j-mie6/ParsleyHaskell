@@ -68,6 +68,7 @@ debug dump that I can check out.
 
 ## References
 * This work spawned a paper at ICFP 2020: [**Staged Selective Parser Combinators**](https://dl.acm.org/doi/10.1145/3409002)
+* Supports patterns and combinators from Haskell Symposium 2021: [**Design Patterns of Parser Combinators**](https://dl.acm.org/doi/10.1145/3471874.3472984)
 
 ### Talks
 For talks on how writing parsers changes when using Parsley see either of these:

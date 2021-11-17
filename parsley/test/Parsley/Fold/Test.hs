@@ -9,12 +9,16 @@ import Prelude hiding ()
 import Parsley (runParser)
 
 tests :: TestTree
-tests = testGroup "Fold" [ chainPreTests
-                         , chainPostTests
-                         , pfoldrTests
-                         , pfoldlTests
+tests = testGroup "Fold" [ prefixTests
+                         , postfixTests
+                         , manyrTests
+                         , somerTests
+                         , manylTests
+                         , somelTests
                          , chainlTests
                          , chainrTests
+                         , infixl1Tests
+                         , infixr1Tests
                          , manyTests
                          , skipManyTests
                          , sepByTests
@@ -30,8 +34,8 @@ plusOne' = $$(runParserMocked Parsers.plusOne' [||Parsers.plusOne'||])
 plusOnePure :: String -> Maybe Int
 plusOnePure = $$(runParserMocked Parsers.plusOnePure [||Parsers.plusOnePure||])
 
-chainPreTests :: TestTree
-chainPreTests = testGroup "chainPre should"
+prefixTests :: TestTree
+prefixTests = testGroup "prefix should"
   [ testCase "parse an operatorless value" $ do
       plusOne "1" @?= Just 1
       plusOne "" @?= Nothing
@@ -49,8 +53,8 @@ onePlus = $$(runParserMocked Parsers.onePlus [||Parsers.onePlus||])
 onePlus' :: String -> Maybe Int
 onePlus' = $$(runParserMocked Parsers.onePlus' [||Parsers.onePlus'||])
 
-chainPostTests :: TestTree
-chainPostTests = testGroup "chainPost should"
+postfixTests :: TestTree
+postfixTests = testGroup "postfix should"
   [ testCase "require an initial value" $ do
       onePlus "1" @?= Just 1
       onePlus "" @?= Nothing
@@ -59,17 +63,29 @@ chainPostTests = testGroup "chainPost should"
   , testCase "not fail if the operator fails with try" $ onePlus' "1+++" @?= Just 2
   ]
 
-pfoldrTests :: TestTree
-pfoldrTests = testGroup "pfoldr should" [] -- pfoldr pfoldr1
+manyrTests :: TestTree
+manyrTests = testGroup "manyr should" []
 
-pfoldlTests :: TestTree
-pfoldlTests = testGroup "pfoldl should" [] -- pfoldl pfoldl1
+somerTests :: TestTree
+somerTests = testGroup "somer should" []
+
+manylTests :: TestTree
+manylTests = testGroup "manyl should" []
+
+somelTests :: TestTree
+somelTests = testGroup "somel should" []
 
 chainlTests :: TestTree
-chainlTests = testGroup "chainl should" [] -- chainl1' chainl1 chainl
+chainlTests = testGroup "chainl should" [] -- chainl1 chainl
 
 chainrTests :: TestTree
-chainrTests = testGroup "chainr should" [] -- chainr1' chainr1 chainr
+chainrTests = testGroup "chainr should" [] -- chainr1 chainr
+
+infixl1Tests :: TestTree
+infixl1Tests = testGroup "infixl1 should" []
+
+infixr1Tests :: TestTree
+infixr1Tests = testGroup "infixr1 should" []
 
 manyAA :: String -> Maybe [String]
 manyAA = $$(runParserMocked Parsers.manyAA [||Parsers.manyAA||])

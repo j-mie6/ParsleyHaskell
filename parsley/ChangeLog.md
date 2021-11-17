@@ -42,3 +42,17 @@
 
 * Added `local_` combinator to `Register`.
 * Added `localModify` and `localModify_` combinators to `Register`.
+
+## 2.0.0.0 -- TBD
+
+* Incorporated API naming conventions from _Design Patterns for Parser Combinators_.
+    * `chainPre` -> `prefix`
+    * `chainPost` -> `postfix`
+    * `chainl1'` -> `infixl1`
+    * `chainr1'` -> `infixr1`
+    * `pfoldr` -> `manyr`
+    * `pfoldl` -> `manyl`
+    * `pfoldr1` -> `somer`
+    * `pfoldl1` -> `somel`
+* Reworked the `precedence` combinator system in line with the paper: the horrible overloading
+  has gone now!

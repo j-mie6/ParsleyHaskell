@@ -111,17 +111,17 @@ library
                        Parsley.Internal.Backend.Machine.Types.Input.Offset
                        --Parsley.Internal.Backend.Machine.Types.Input.Pos
 
-  default-extensions:  BangPatterns,
-                       DataKinds,
-                       GADTs,
-                       FlexibleContexts,
-                       FlexibleInstances,
-                       KindSignatures,
-                       PolyKinds,
-                       RankNTypes,
-                       ScopedTypeVariables,
-                       TemplateHaskell,
-                       TypeOperators,
+  default-extensions:  BangPatterns
+                       DataKinds
+                       GADTs
+                       FlexibleContexts
+                       FlexibleInstances
+                       KindSignatures
+                       PolyKinds
+                       RankNTypes
+                       ScopedTypeVariables
+                       TemplateHaskell
+                       TypeOperators
 
                        NoStarIsType
 

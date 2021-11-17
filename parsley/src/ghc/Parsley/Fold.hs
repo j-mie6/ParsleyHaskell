@@ -37,7 +37,7 @@ failed having not consumed input, @exit@ is performed, otherwise the combinator 
 
 > loop body exit = let go = body *> go <|> exit in go
 
-@since 1.1.0.0
+@since 2.0.0.0
 -}
 loop :: Parser () -> Parser a -> Parser a
 loop = Internal.loop
@@ -199,8 +199,8 @@ Like `many`, excepts discards its results.
 @since 0.1.0.0
 -}
 skipMany :: Parser a -> Parser ()
---skipMany p = let skipManyp = p *> skipManyp <|> unit in skipManyp
-skipMany = void . manyl CONST UNIT -- the void here will encourage the optimiser to recognise that the register is unused
+--skipMany p = loop (void p) unit
+skipMany = void . manyl CONST UNIT -- This is still faster, the above generates better code, but GHC starts doing weird things!
 
 {-|
 Like `manyN`, excepts discards its results.

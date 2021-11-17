@@ -27,7 +27,7 @@ import Parsley.Applicative      (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), 
 import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), pattern FLIP_H, pattern COMPOSE_H, pattern UNIT)
 import Parsley.Internal         (Parser)
 import Parsley.ParserOps        (ParserOps)
-import Parsley.Register         (bind, get, put, modify, newRegister, newRegister_)
+import Parsley.Register         (bind, get, modify, newRegister, newRegister_)
 
 import qualified Parsley.Internal as Internal (loop)
 
@@ -50,8 +50,8 @@ primarily used to parse prefix operators in expressions.
 -}
 prefix :: Parser (a -> a) -> Parser a -> Parser a
 prefix op p =
-  newRegister (pure ID) (\r ->
-    loop (put r (pure (FLIP_H COMPOSE) <*> op <*> get r))
+  newRegister_ ID (\r ->
+    loop (modify r (FLIP_H COMPOSE <$> op))
          (get r))
   <*> p
 
@@ -64,7 +64,7 @@ primarily used to parse postfix operators in expressions.
 postfix :: Parser a -> Parser (a -> a) -> Parser a
 postfix p op =
   newRegister p $ \r ->
-    loop (put r (op <*> get r))
+    loop (modify r op)
          (get r)
 
 -- Parser Folds
@@ -137,6 +137,9 @@ The function @wrap@ is used to transform the final value from @p@ into the corre
 @since 2.0.0.0
 -}
 infixr1 :: ParserOps rep => rep (a -> b) -> Parser a -> Parser (a -> b -> b) -> Parser b
+-- I'm not convinced that the register implementation of infixr1 beats the direct recursion implementation
+-- This needs to be benchmarked! Perhaps with register optimisation removing the bind, it could be better?
+--infixr1 wrap p op = let go = p <**> (FLIP <$> op <*> go <|> pure wrap) in go
 infixr1 wrap p op = newRegister_ ID $ \acc ->
   let go = bind p $ \x ->
            modify acc (FLIP_H COMPOSE <$> (op <*> x)) *> go

@@ -14,10 +14,11 @@ terms that can be used by the user and the frontend.
 module Parsley.Internal.Core.Defunc (
     Defunc(..),
     pattern COMPOSE_H, pattern FLIP_H, pattern FLIP_CONST, pattern UNIT,
-    lamTerm, lamTermBool
+    lamTerm
   ) where
 
---import Data.Typeable                 (Typeable, (:~:)(Refl), eqT)
+import Data.List                     (intercalate)
+import Data.Typeable                 (Typeable, (:~:)(Refl), eqT)
 import Language.Haskell.TH.Syntax    (Lift(..))
 import Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..))
 import Parsley.Internal.Core.Lam     (normaliseGen, Lam(..))
@@ -51,8 +52,8 @@ data Defunc a where
   APP_H   :: Defunc (a -> b) -> Defunc a -> Defunc b
   -- | Corresponds to the partially applied @(== x)@ for some `Defunc` value @x@.
   EQ_H    :: Eq a => Defunc a -> Defunc (a -> Bool)
-  -- | Represents a liftable, showable value.
-  LIFTED  :: (Show a, Lift a{-, Typeable a-}) => a -> Defunc a
+  -- | Represents a liftable, showable, typable value.
+  LIFTED  :: (Show a, Lift a, Typeable a) => a -> Defunc a
   -- | Represents the standard @(:)@ function applied to no arguments.
   CONS    :: Defunc (a -> [a] -> [a])
   -- | Represents the standard @const@ function applied to no arguments.
@@ -61,6 +62,16 @@ data Defunc a where
   EMPTY   :: Defunc [a]
   -- | Wraps up any value of type `WQ`.
   BLACK   :: WQ a -> Defunc a
+
+  {-|
+  Designed to be a specialised form of character predicate: is a character within some given ranges
+  (which are inclusive at both ends).
+
+  @since 2.0.0.0
+  -}
+  RANGES  :: Bool                  -- ^ Does the range test for membership (@True@) or /no/ membership (@False@).
+          -> [(Char, Char)]        -- ^ List of ranges of the form @(l, u)@: @l@ and @u@ are inclusive to the range.
+          -> Defunc (Char -> Bool)
 
   -- Syntax constructors
   {-|
@@ -88,21 +99,23 @@ This instance is used to manipulate values of `Defunc`.
 @since 0.1.0.0
 -}
 instance Quapplicative Defunc where
-  makeQ x qx        = BLACK (makeQ x qx)
-  _val ID           = id
-  _val COMPOSE      = (.)
-  _val FLIP         = flip
-  _val (APP_H f x)  = _val f (_val x)
-  _val (LIFTED x)   = x
-  _val (EQ_H x)     = (_val x ==)
-  _val CONS         = (:)
-  _val CONST        = const
-  _val EMPTY        = []
-  _val (BLACK f)    = _val f
+  makeQ x qx               = BLACK (makeQ x qx)
+  _val ID                  = id
+  _val COMPOSE             = (.)
+  _val FLIP                = flip
+  _val (APP_H f x)         = _val f (_val x)
+  _val (LIFTED x)          = x
+  _val (EQ_H x)            = (_val x ==)
+  _val CONS                = (:)
+  _val CONST               = const
+  _val EMPTY               = []
+  _val (BLACK f)           = _val f
   -- Syntax
-  _val (IF_S c t e) = if _val c then _val t else _val e
-  _val (LAM_S f)    = \x -> _val (f (makeQ x undefined))
-  _val (LET_S x f)  = let y = _val x in _val (f (makeQ y undefined))
+  _val (IF_S c t e)        = if _val c then _val t else _val e
+  _val (LAM_S f)           = \x -> _val (f (makeQ x undefined))
+  _val (LET_S x f)         = let y = _val x in _val (f (makeQ y undefined))
+  _val (RANGES True rngs)  = \c -> any (\(l, u) -> l <= c || c <= u) rngs
+  _val (RANGES False rngs) = \c -> all (\(l, u) -> l >= c || c >= u) rngs
   _code = normaliseGen . lamTerm
   (>*<) = APP_H
 
@@ -135,38 +148,36 @@ This pattern represents the unit value @()@.
 pattern UNIT          :: Defunc ()
 pattern UNIT          = LIFTED ()
 
--- TODO: This is deprecated in favour of Typeable as of parsley 2.0.0.0
-{-|
-Specialised conversion for functions returning `Bool`. This will go
-as soon as `Defunc` has a `Typeable` constraint in parsley 2.
-
-@since 1.0.1.0
--}
-lamTermBool :: Defunc (a -> Bool) -> Lam (a -> Bool)
-lamTermBool (APP_H CONST (LIFTED True)) = Abs (const T)
-lamTermBool (APP_H CONST (LIFTED False)) = Abs (const F)
-lamTermBool f = lamTerm f
-
 {-|
 Converts a `Defunc` value into an equivalent `Lam` value, discarding
 the inspectivity of functions.
 
 @since 1.0.1.0
 -}
-lamTerm :: {-forall a.-} Defunc a -> Lam a
+lamTerm :: forall a. Defunc a -> Lam a
 lamTerm ID = Abs id
 lamTerm COMPOSE = Abs (\f -> Abs (\g -> Abs (App f . App g)))
 lamTerm FLIP = Abs (\f -> Abs (\x -> Abs (\y -> App (App f y) x)))
 lamTerm (APP_H f x) = App (lamTerm f) (lamTerm x)
-{-lamTerm (LIFTED b) | Just Refl <- eqT @a @Bool = case b of
-  False -> F
-  True -> T-}
+lamTerm (LIFTED b) | Just Refl <- eqT @a @Bool = if b then T else F
 lamTerm (LIFTED x) = Var True [||x||]
 lamTerm (EQ_H x) = Abs (App (App (Var True [||(==)||]) (lamTerm x)))
 lamTerm CONS = Var True [||(:)||]
 lamTerm EMPTY = Var True [||[]||]
 lamTerm CONST = Abs (Abs . const)
 lamTerm (BLACK x) = Var False (_code x)
+lamTerm (RANGES incl []) = Abs (const (if incl then F else T))
+lamTerm (RANGES incl [(l, u)]) | l == minBound, u == maxBound = Abs (const (if incl then T else F))
+lamTerm (RANGES incl rngs) =
+  Abs $ \c ->
+    App (if incl then Abs id else Var True [||not||])
+        (foldr1 (App . App (Var True [||(||)||]))
+          (map (\(l, u) ->
+            if l == u then App (App (Var True [||(==)||]) c) (Var True [||l||])
+                      else App (App (Var True [||(&&)||])
+                               (App (App (Var True [||(<=)||]) (Var True [||l||])) c))
+                               (App (App (Var True [||(<=)||]) c) (Var True [||u||])))
+           rngs))
 lamTerm (LAM_S f) = Abs (adaptLam f)
 lamTerm (IF_S c t e) = If (lamTerm c) (lamTerm t) (lamTerm e)
 lamTerm (LET_S x f) = Let (lamTerm x) (adaptLam f)
@@ -200,4 +211,5 @@ instance Show (Defunc a) where
   show CONST = "const"
   show (IF_S c b e) = concat ["(if ", show c, " then ", show b, " else ", show e, ")"]
   show (LAM_S _) = "f"
+  show (RANGES incl rngs) = concat [if incl then "not " else "", "elem (", intercalate " ++ " (map (\(l, u) -> concat ["[", show l, "..", show u, "]"]) rngs), ")"]
   show _ = "x"

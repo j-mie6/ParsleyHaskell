@@ -27,8 +27,8 @@ import Prelude hiding           (traverse, (*>))
 import Data.List                (sort)
 import Parsley.Alternative      (manyTill)
 import Parsley.Applicative      (($>), void, traverse, (<:>), (*>), (<~>))
-import Parsley.Defunctionalized (Defunc(LIFTED, EQ_H, CONST, LAM_S), pattern APP_H, pattern COMPOSE_H)
-import Parsley.Internal         (Code, Quapplicative(..), Parser)
+import Parsley.Defunctionalized (Defunc(LIFTED, RANGES))
+import Parsley.Internal         (Parser)
 import Parsley.ParserOps        (satisfy)
 
 import qualified Parsley.Internal as Internal (try, lookAhead, notFollowedBy, line, col)
@@ -87,7 +87,7 @@ having consumed no input.
 @since 0.1.0.0
 -}
 oneOf :: [Char] -> Parser Char
-oneOf = satisfy . elem'
+oneOf = satisfy . RANGES True . ranges
 
 {-|
 This combinator will attempt to not match any one of the provided list of characters. If one of those
@@ -97,21 +97,10 @@ the character that was not an element of the provided list.
 @since 0.1.0.0
 -}
 noneOf :: [Char] -> Parser Char
-noneOf = satisfy . COMPOSE_H (makeQ not [||not||]) . elem'
-
-elem' :: [Char] -> Defunc (Char -> Bool)
-elem' cs = LAM_S (\c -> makeQ (elem (_val c) cs) (ofChars cs (_code c)))
-
-ofChars :: [Char] -> Code Char -> Code Bool
-ofChars [] _ = [||False||]
-ofChars cs qc = foldr1 (\p q -> [|| $$p || $$q ||]) (map (makePred qc) (ranges cs))
-
-makePred :: Code Char -> (Char, Char) -> Code Bool
-makePred qc (c, c')
-  | c == c' = [|| c == $$qc ||]
-  | otherwise = [|| c <= $$qc && $$qc <= c' ||]
+noneOf = satisfy . RANGES False . ranges
 
 ranges :: [Char] -> [(Char, Char)]
+ranges [] = []
 ranges (sort -> c:cs) = go c (fromEnum c) cs
   where
     go :: Char -> Int -> [Char] -> [(Char, Char)]
@@ -155,7 +144,7 @@ consumed any input.
 @since 0.1.0.0
 -}
 char :: Char -> Parser Char
-char c = satisfy (EQ_H (LIFTED c)) $> LIFTED c
+char c = satisfy (RANGES True [(c, c)]) $> LIFTED c
 
 {-|
 Reads any single character. This combinator will only fail if there is no more input remaining.
@@ -164,7 +153,7 @@ The parsed character is returned.
 @since 0.1.0.0
 -}
 item :: Parser Char
-item = satisfy (APP_H CONST (LIFTED True))
+item = satisfy (RANGES False [])
 
 -- Composite Combinators
 {-|

@@ -16,7 +16,7 @@ module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 
 import Data.Set                            (Set, elems)
 import Control.Monad.Trans                 (lift)
-import Parsley.Internal.Backend.Machine    (user, userBool, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
+import Parsley.Internal.Backend.Machine    (user, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                             _Fmap, _App, _Get, _Put, _Make,
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
                                             minus, minCoins, maxCoins, zero,
@@ -118,7 +118,7 @@ addCoinsNeeded = coinsNeeded >>= addCoins
 
 shallow :: Trace => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 shallow (Pure x)      m = do return $! In4 (Push (user x) m)
-shallow (Satisfy p)   m = do return $! In4 (Sat (userBool p) m)
+shallow (Satisfy p)   m = do return $! In4 (Sat (user p) m)
 shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf pxc
 shallow (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 shallow (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
@@ -146,7 +146,7 @@ shallow (Match p fs qs def) m =
   do (binder, φ) <- makeΦ m
      qcs <- traverse (\q -> freshΦ (runCodeGen q φ)) qs
      defc <- freshΦ (runCodeGen def φ)
-     let minc = coinsNeeded (In4 (Choices (map userBool fs) qcs defc))
+     let minc = coinsNeeded (In4 (Choices (map user fs) qcs defc))
      let defc':qcs' = map (maxCoins zero . (`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m

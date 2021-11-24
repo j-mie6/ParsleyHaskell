@@ -20,7 +20,7 @@ import Data.Array.Unboxed                            (UArray)
 import Data.ByteString                               (ByteString)
 import Data.Dependent.Map                            (DMap)
 import Data.Text                                     (Text)
-import Parsley.Internal.Backend.Machine.Defunc       (user, userBool)
+import Parsley.Internal.Backend.Machine.Defunc       (user)
 import Parsley.Internal.Backend.Machine.Identifiers
 import Parsley.Internal.Backend.Machine.InputOps     (InputPrep(..))
 import Parsley.Internal.Backend.Machine.InputRep     (Rep)

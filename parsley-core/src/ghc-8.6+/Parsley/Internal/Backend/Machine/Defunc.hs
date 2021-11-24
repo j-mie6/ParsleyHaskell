@@ -5,7 +5,7 @@ import Parsley.Internal.Backend.Machine.InputOps (PositionOps(same))
 import Parsley.Internal.Common.Utils             (Code)
 import Parsley.Internal.Core.Lam                 (Lam, normaliseGen, normalise)
 
-import qualified Parsley.Internal.Core.Defunc as Core (Defunc, lamTerm, lamTermBool)
+import qualified Parsley.Internal.Core.Defunc as Core (Defunc, lamTerm)
 import qualified Parsley.Internal.Core.Lam    as Lam  (Lam(..))
 
 data Defunc a where
@@ -15,9 +15,6 @@ data Defunc a where
 
 user :: Core.Defunc a -> Defunc a
 user = LAM . Core.lamTerm
-
-userBool :: Core.Defunc (a -> Bool) -> Defunc (a -> Bool)
-userBool = LAM . Core.lamTermBool
 
 ap :: Defunc (a -> b) -> Defunc a -> Defunc b
 ap f x = LAM (Lam.App (unliftDefunc f) (unliftDefunc x))

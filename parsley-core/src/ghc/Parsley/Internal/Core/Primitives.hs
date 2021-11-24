@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms, CPP #-}
+{-# LANGUAGE PatternSynonyms #-}
 module Parsley.Internal.Core.Primitives (
     Parser,
     Reg,
@@ -6,18 +6,11 @@ module Parsley.Internal.Core.Primitives (
   ) where
 
 import Prelude hiding                      (pure, (<*>))
-import Control.Arrow                       (first)
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..), PosSelector(..))
-#if MIN_VERSION_parsley_core(2,0,0)
 import Parsley.Internal.Core.Defunc        (Defunc)
-#else
-import Parsley.Internal.Core.Defunc        (Defunc(BLACK, ID, COMPOSE), pattern FLIP_H)
-import Parsley.Internal.Common.Utils       (WQ)
-#endif
 
 import Parsley.Internal.Common.Indexed     (Fix(In), (:+:)(..))
 
-#if MIN_VERSION_parsley_core(2,0,0)
 -- Core smart constructors
 {-# INLINE pure #-}
 pure :: Defunc a -> Parser a
@@ -32,37 +25,6 @@ conditional :: [(Defunc (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parse
 conditional cs (Parser p) (Parser def) =
   let (fs, qs) = unzip cs
   in Parser (In (L (Match p fs (map unParser qs) def)))
-#else
-class ParserOps rep where
-  pure :: rep a -> Parser a
-  satisfy :: rep (Char -> Bool) -> Parser Char
-  conditional :: [(rep (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
-
-instance ParserOps WQ where
-  pure = pure . BLACK
-  satisfy = satisfy . BLACK
-  conditional = conditional . map (first BLACK)
-
-instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
-  pure = _pure
-  satisfy = _satisfy
-  conditional = _conditional
-
--- Core smart constructors
-{-# INLINE _pure #-}
-_pure :: Defunc a -> Parser a
-_pure = Parser . In . L . Pure
-
-{-# INLINE _satisfy #-}
-_satisfy :: Defunc (Char -> Bool) -> Parser Char
-_satisfy = Parser . In . L . Satisfy
-
-{-# INLINE _conditional #-}
-_conditional :: [(Defunc (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b
-_conditional cs (Parser p) (Parser def) =
-  let (fs, qs) = unzip cs
-  in Parser (In (L (Match p fs (map unParser qs) def)))
-#endif
 
 {-# INLINE (<*>) #-}
 (<*>) :: Parser (a -> b) -> Parser a -> Parser b
@@ -99,24 +61,6 @@ try = Parser . In . L . Try . unParser
 {-# INLINE branch #-}
 branch :: Parser (Either a b) -> Parser (a -> c) -> Parser (b -> c) -> Parser c
 branch (Parser c) (Parser p) (Parser q) = Parser (In (L (Branch c p q)))
-
-#if MIN_VERSION_parsley_core(2,0,0)
-#else
-{-# INLINE chainPre #-}
-chainPre :: Parser (a -> a) -> Parser a -> Parser a
-chainPre op p =
-  newRegister (pure ID) (\r ->
-    loop (put r (pure (FLIP_H COMPOSE) <*> op <*> get r))
-         (get r))
-  <*> p
-
-{-# INLINE chainPost #-}
-chainPost :: Parser a -> Parser (a -> a) -> Parser a
-chainPost p op =
-  newRegister p $ \r ->
-    loop (put r (op <*> get r))
-         (get r)
-#endif
 
 {-# INLINE loop #-}
 loop :: Parser () -> Parser a -> Parser a

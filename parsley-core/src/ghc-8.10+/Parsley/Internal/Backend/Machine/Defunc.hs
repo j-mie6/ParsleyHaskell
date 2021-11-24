@@ -13,7 +13,7 @@ terms used solely within the machine.
 -}
 module Parsley.Internal.Backend.Machine.Defunc (
     Defunc(..),
-    user, userBool,
+    user,
     ap, ap2,
     _if,
     genDefunc,
@@ -24,7 +24,7 @@ import Parsley.Internal.Backend.Machine.Types.Input (Input(off))
 import Parsley.Internal.Common.Utils                (Code)
 import Parsley.Internal.Core.Lam                    (Lam, normaliseGen, normalise)
 
-import qualified Parsley.Internal.Core.Defunc as Core (Defunc, lamTerm, lamTermBool)
+import qualified Parsley.Internal.Core.Defunc as Core (Defunc, lamTerm)
 import qualified Parsley.Internal.Core.Lam    as Lam  (Lam(..))
 
 {-|
@@ -64,15 +64,6 @@ Promotes a @Defunc@ value from the Frontend API into a Backend one.
 -}
 user :: Core.Defunc a -> Defunc a
 user = LAM . Core.lamTerm
-
-{-|
-Promotes a @Defunc@ value from the Frontend API into a Backend one,
-for values representing @a -> Bool@.
-
-@since 1.3.0.0
--}
-userBool :: Core.Defunc (a -> Bool) -> Defunc (a -> Bool)
-userBool = LAM . Core.lamTermBool
 
 {-|
 Applies a function to a value when both are `Defunc`.

@@ -36,15 +36,14 @@ library
                        Parsley.Applicative,
                        Parsley.Alternative,
                        Parsley.Defunctionalized,
+                       Parsley.Debug,
                        Parsley.Selective,
                        Parsley.Register,
                        Parsley.Combinator,
                        Parsley.Fold,
                        --Parsley.Patterns,
                        Parsley.InputExtras,
-                       Parsley.Precedence
-
-  other-modules:       Parsley.Debug
+                       Parsley.Precedence,
                        Parsley.ParserOps
 
   default-extensions:  BangPatterns,
@@ -63,7 +62,7 @@ library
 
 --                     ghc                  >= 8.6     && < 9.2,
   build-depends:       base                 >= 4.10    && < 4.16,
-                       parsley-core         >= 1.8     && < 3,
+                       parsley-core         >= 2       && < 3,
                        template-haskell     >= 2.14    && < 3,
                        text                 >= 1.2.3   && < 1.3
 

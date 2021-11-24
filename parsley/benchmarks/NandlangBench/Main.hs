@@ -17,7 +17,7 @@ main :: IO ()
 main = defaultMain [nandlang]
 
 nandParsleyB :: ByteString -> Maybe ()
-nandParsleyB = $$(Parsley.runParser NandlangBench.Parsley.Parser.nandlang)
+nandParsleyB = $$(Parsley.parse NandlangBench.Parsley.Parser.nandlang)
 
 nandlang :: Benchmark
 nandlang =

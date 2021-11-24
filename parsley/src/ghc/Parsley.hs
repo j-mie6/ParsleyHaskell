@@ -7,7 +7,7 @@ License     : BSD-3-Clause
 Maintainer  : Jamie Willis
 Stability   : stable
 
-This module contains the core execution functions `runParser` and `parseFromFile`.
+This module contains the core execution functions `parse` and `parseFromFile`.
 It exports the `Parser` type, as well as the `ParserOps` typeclass, which may be needed
 as a constraint to create more general combinators. It also exports several of the more
 important modules and functionality in particular the core set of combinators.
@@ -15,7 +15,7 @@ important modules and functionality in particular the core set of combinators.
 @since 0.1.0.0
 -}
 module Parsley (
-    runParser, parseFromFile,
+    parse, parseFromFile,
     module Core,
     module Primitives,
     module Applicative,
@@ -56,7 +56,7 @@ function of type @input -> Maybe a@ for a chosen input type. As an example:
 /In @Main.hs@/:
 
 > parseHelloParsley :: String -> Maybe String
-> parseHelloParsley = $$(runParser helloParsley)
+> parseHelloParsley = $$(parse helloParsley)
 
 Note that the definition of the parser __must__ be in a separate module to
 the splice (@$$@).
@@ -66,25 +66,25 @@ See `Input` for what the valid input types for Parsley are.
 The `Trace` instance is used to enable verbose debugging output for
 the compilation pipeline when "Parsley.Internal.Verbose" is imported.
 
-@since 0.1.0.0
+@since 2.0.0.0
 -}
-runParser :: (Trace, Input input)
-          => Parser a                -- ^ The parser to be compiled
-          -> Code (input -> Maybe a) -- ^ The generated parsing function
-runParser = Internal.parse
+parse :: (Trace, Input input)
+      => Parser a                -- ^ The parser to be compiled
+      -> Code (input -> Maybe a) -- ^ The generated parsing function
+parse = Internal.parse
 
 {-|
 This function generates a function that reads input from a file
 and parses it. The input files contents are treated as `Text16`.
 
-See `runParser` for more information.
+See `parse` for more information.
 
 @since 0.1.0.0
 -}
 parseFromFile :: Trace
               => Parser a                        -- ^ The parser to be compiled
               -> Code (FilePath -> IO (Maybe a)) -- ^ The generated parsing function
-parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(runParser p) (Text16 input))||]
+parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(parse p) (Text16 input))||]
 
 {-|
 The default instance for `Trace`, which disables all debugging output about the parser compilation

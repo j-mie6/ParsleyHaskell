@@ -58,3 +58,4 @@
   has gone now!
 * Added in the `ParserOps` and `Debug` modules.
 * Added `RANGES` to the `Defunc` API.
+* Renamed `runParser` to `parse`.

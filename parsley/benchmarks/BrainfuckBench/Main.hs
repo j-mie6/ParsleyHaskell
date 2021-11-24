@@ -32,19 +32,19 @@ deriving instance Generic BrainFuckOp
 deriving instance NFData BrainFuckOp
 
 brainfuckParsleyS :: String -> Maybe [BrainFuckOp]
-brainfuckParsleyS = $$(Parsley.runParser BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleyS = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
 
 brainfuckParsleyT :: Text -> Maybe [BrainFuckOp]
-brainfuckParsleyT = $$(Parsley.runParser BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleyT = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
 
 brainfuckParsleyB :: ByteString -> Maybe [BrainFuckOp]
-brainfuckParsleyB = $$(Parsley.runParser BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleyB = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
 
 brainfuckParsleySS :: CharList -> Maybe [BrainFuckOp]
-brainfuckParsleySS = $$(Parsley.runParser BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleySS = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
 
 brainfuckParsleyLB :: Data.ByteString.Lazy.ByteString -> Maybe [BrainFuckOp]
-brainfuckParsleyLB = $$(Parsley.runParser BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleyLB = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
 
 brainfuck :: Benchmark
 brainfuck =

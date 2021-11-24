@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell, TypeApplications, DeriveAnyClass, StandaloneDeriving, CPP, FlexibleInstances, MonoLocalBinds #-}
 module TestUtils where
 
-import Parsley (runParser, Parser, Code)
+import Parsley (parse, Parser, Code)
 import Parsley.Internal.Trace (Trace)
 import Language.Haskell.TH.Syntax
 #if MIN_VERSION_template_haskell(2,17,0)
@@ -23,11 +23,11 @@ unTypeCode = unTypeQ
 -- TODO Use WQ: requires lift plugin to not require any Lift instance for variables (if missing)
 runParserMocked :: Trace => Parser a -> Code (Parser a) -> Code (String -> Maybe a)
 runParserMocked p qp = [|| \s ->
-    runParserMocked' $$qp `deepseq` $$(runParser p) s
+    runParserMocked' $$qp `deepseq` $$(parse p) s
   ||]
 
 runParserMocked' :: Parser a -> Exp
-runParserMocked' = runTestQ (QState MockQ [] []) . unTypeCode . runParser @String
+runParserMocked' = runTestQ (QState MockQ [] []) . unTypeCode . parse @String
 
 deriving instance NFData Exp
 deriving instance NFData Name

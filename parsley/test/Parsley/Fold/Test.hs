@@ -6,7 +6,6 @@ import TestUtils
 import qualified Parsley.Fold.Parsers as Parsers
 
 import Prelude hiding ()
-import Parsley (runParser)
 
 tests :: TestTree
 tests = testGroup "Fold" [ prefixTests

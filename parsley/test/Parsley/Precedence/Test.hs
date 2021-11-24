@@ -7,7 +7,7 @@ import TestUtils
 import qualified Parsley.Precedence.Parsers as Parsers
 
 import Prelude hiding (pred)
-import Parsley (runParser, empty, Parser)
+import Parsley (empty, Parser)
 --import Parsley.Patterns (deriveSubtype, deriveLiftedConstructors, deriveDeferredConstructors, Pos)
 import Parsley.Precedence (Subtype(..))
 --import GHC.Generics (Generic)

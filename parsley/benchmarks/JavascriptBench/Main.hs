@@ -42,10 +42,10 @@ deriving instance NFData JSCons
 deriving instance NFData JSAtom
 
 javascriptParsleyS :: String -> Maybe JSProgram
-javascriptParsleyS = $$(Parsley.runParser JavascriptBench.Parsley.Parser.javascript)
+javascriptParsleyS = $$(Parsley.parse JavascriptBench.Parsley.Parser.javascript)
 
 javascriptParsleyT :: Text -> Maybe JSProgram
-javascriptParsleyT = $$(Parsley.runParser JavascriptBench.Parsley.Parser.javascript)
+javascriptParsleyT = $$(Parsley.parse JavascriptBench.Parsley.Parser.javascript)
 
 javascript :: Benchmark
 javascript =

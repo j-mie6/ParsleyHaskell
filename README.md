@@ -77,3 +77,6 @@ For talks on how writing parsers changes when using Parsley see either of these:
 
 For the technical overview of how Parsley works:
 * [*Staged Selective Parser Combinators*](https://www.youtube.com/watch?v=lH65PvRgm8M) - ICFP 2020
+
+For information about how to write parsers cleanly:
+* [*Design Patterns for Parser Combinators*](https://www.youtube.com/watch?v=RwzX1XltOGY) - Haskell 2021

@@ -35,11 +35,12 @@ library
   exposed-modules:     Parsley,
                        Parsley.Applicative,
                        Parsley.Alternative,
+                       Parsley.Char,
+                       Parsley.Combinator,
                        Parsley.Defunctionalized,
                        Parsley.Debug,
                        Parsley.Selective,
                        Parsley.Register,
-                       Parsley.Combinator,
                        Parsley.Fold,
                        --Parsley.Patterns,
                        Parsley.InputExtras,
@@ -109,9 +110,9 @@ test-suite parsley-test
   build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq
   main-is:             Parsley/Tests.hs
   other-modules:       Parsley.Alternative.Test, Parsley.Applicative.Test, Parsley.Combinator.Test, Parsley.Fold.Test,
-                       Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test,
+                       Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test, Parsley.Char.Test,
                        Parsley.Alternative.Parsers, Parsley.Applicative.Parsers, Parsley.Combinator.Parsers, Parsley.Fold.Parsers,
-                       Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers
+                       Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers, Parsley.Char.Parsers
 
 test-suite regression-test
   import:              test-common

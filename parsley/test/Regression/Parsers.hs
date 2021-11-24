@@ -4,7 +4,7 @@ module Regression.Parsers where
 import Prelude hiding (pure, (<*>), (*>), (<*))
 import Data.Char (isDigit)
 import Parsley
-import Parsley.Combinator (token)
+import Parsley.Char (token)
 --import Parsley.Garnish
 
 issue26_ex1 :: Parser ()

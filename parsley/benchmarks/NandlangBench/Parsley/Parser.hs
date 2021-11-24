@@ -6,7 +6,8 @@ module NandlangBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
-import Parsley.Combinator (token, oneOf, eof)
+import Parsley.Combinator (eof)
+import Parsley.Char (token, oneOf)
 import Parsley.Fold (skipMany, skipSome)
 --import Parsley.Garnish
 import NandlangBench.Parsley.Functions

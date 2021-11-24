@@ -7,7 +7,8 @@ module BrainfuckBench.Parsley.Parser where
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import BrainfuckBench.Shared
 import Parsley
-import Parsley.Combinator (noneOf, eof)
+import Parsley.Combinator (eof)
+import Parsley.Char(noneOf)
 import Parsley.Fold (skipMany)
 --import Parsley.Garnish
 import Language.Haskell.TH.Syntax (Lift(..))

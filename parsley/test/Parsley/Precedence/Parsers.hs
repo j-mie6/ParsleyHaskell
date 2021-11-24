@@ -5,7 +5,7 @@ import Prelude hiding (pure, (<*>), (*>), (<*), (<$>), ($>), pred)
 import Parsley
 import Parsley.Precedence
 import Parsley.Fold (somel)
-import Parsley.Combinator (oneOf)
+import Parsley.Char (oneOf)
 import Data.Char (digitToInt)
 
 data Expr = Add Expr Expr | Mul Expr Expr | Negate Expr | Num Int deriving (Eq, Show)

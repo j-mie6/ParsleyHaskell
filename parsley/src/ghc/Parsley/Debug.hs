@@ -1,3 +1,14 @@
+{-|
+Module      : Parsley.Debug
+Description : Debug combinators
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : stable
+
+This module contains debugging combinators.
+
+@since 2.0.0.0
+-}
 module Parsley.Debug (debug) where
 
 import Parsley.Internal (Parser)

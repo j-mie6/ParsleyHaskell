@@ -17,12 +17,13 @@ important modules and functionality in particular the core set of combinators.
 module Parsley (
     parse, parseFromFile,
     module Core,
-    module Primitives,
     module Applicative,
     module Alternative,
     module Selective,
     module Combinator,
+    module Char,
     module Fold,
+    module Debug,
     module THUtils,
   ) where
 
@@ -33,12 +34,13 @@ import Parsley.Internal          (Input, Trace(trace))
 
 import Parsley.Alternative              as Alternative
 import Parsley.Applicative              as Applicative
-import Parsley.Combinator               as Combinator  (item, char, string, satisfy, notFollowedBy, lookAhead, try)
+import Parsley.Char                     as Char        (item, char, string, satisfy)
+import Parsley.Combinator               as Combinator  (notFollowedBy, lookAhead, try)
 import Parsley.Fold                     as Fold        (many, some)
 import Parsley.Internal                 as Core        (Parser)
 import Parsley.ParserOps                as Core        (ParserOps)
 import Parsley.Internal                 as THUtils     (Quapplicative(..), WQ, Code)
-import Parsley.Debug                    as Primitives  (debug)
+import Parsley.Debug                    as Debug       (debug)
 import Parsley.Selective                as Selective
 
 import qualified Parsley.Internal as Internal (parse)

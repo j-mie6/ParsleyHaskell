@@ -7,7 +7,8 @@ module JavascriptBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
-import Parsley.Combinator (token, oneOf, noneOf, eof)
+import Parsley.Char (token, oneOf, noneOf, digit)
+import Parsley.Combinator (eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, somel, chainl1)
 import Parsley.Precedence (precHomo, ops, Fixity(InfixL, Prefix, Postfix))
 import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED, LAM_S), pattern FLIP_H, pattern COMPOSE_H)
@@ -148,7 +149,7 @@ javascript = whitespace *> many element <* eof
         g = [|\exp n -> readMaybe (show n ++ exp)|]
 
     fraction :: Parser [Char]
-    fraction = char '.' <:> some (oneOf ['0'..'9'])
+    fraction = char '.' <:> some digit
 
     exponent' :: Parser [Char]
     exponent' = [|$(CONS) 'e'|] <$> (oneOf "eE"
@@ -156,7 +157,7 @@ javascript = whitespace *> many element <* eof
              <*> ([|show|] <$> decimal)))
 
     decimal :: Parser Int
-    decimal = number (LIFTED 10) (oneOf ['0'..'9'])
+    decimal = number (LIFTED 10) digit
     hexadecimal = oneOf "xX" *> number (LIFTED 16) (oneOf (['a'..'f'] ++ ['A'..'F'] ++ ['0'..'9']))
     octal = oneOf "oO" *> number (LIFTED 8) (oneOf ['0'..'7'])
 

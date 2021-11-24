@@ -1,3 +1,15 @@
+{-|
+Module      : Parsley.ParserOps
+Description : Combinators that interact with user-defined functions.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : stable
+
+This module contains the definition of `ParserOps`, which is used to generalise
+the representation of user-defined functions to either `Defunc` or `WQ`.
+
+@since 2.0.0.0
+-}
 module Parsley.ParserOps (module Parsley.ParserOps) where
 
 import Prelude hiding (pure)

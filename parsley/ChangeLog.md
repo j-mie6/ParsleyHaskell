@@ -59,3 +59,5 @@
 * Added in the `ParserOps` and `Debug` modules.
 * Added `RANGES` to the `Defunc` API.
 * Renamed `runParser` to `parse`.
+* Moved some functionality to `Parsley.Char`.
+* Added `digit`, `letter`, and `letterOrDigit`.

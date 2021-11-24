@@ -43,7 +43,7 @@
 * Added `local_` combinator to `Register`.
 * Added `localModify` and `localModify_` combinators to `Register`.
 
-## 2.0.0.0 -- TBD
+## 2.0.0.0 -- 2021-11-24
 
 * Incorporated API naming conventions from _Design Patterns for Parser Combinators_.
     * `chainPre` -> `prefix`

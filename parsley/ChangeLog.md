@@ -56,3 +56,5 @@
     * `pfoldl1` -> `somel`
 * Reworked the `precedence` combinator system in line with the paper: the horrible overloading
   has gone now!
+* Added in the `ParserOps` and `Debug` modules.
+* Added `RANGES` to the `Defunc` API.

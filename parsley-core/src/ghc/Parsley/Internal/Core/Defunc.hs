@@ -23,13 +23,6 @@ import Language.Haskell.TH.Syntax    (Lift(..))
 import Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..))
 import Parsley.Internal.Core.Lam     (normaliseGen, Lam(..))
 
-{-
-  TODO: We should support Typeable in LIFTED to be more general, but I don't want changes to
-  Defunc to impact back-compat in parsley itself. We should consider not exposing the datatype
-  anymore, but exposing smart-constructors in Parsley.Defunctionalized.
-  This will come in parsley-2.0.0.0.
--}
-
 {-|
 This datatype is useful for providing an /inspectable/ representation of common Haskell functions.
 These can be provided in place of `WQ` to any combinator that requires it. The only difference is

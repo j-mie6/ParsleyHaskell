@@ -132,10 +132,10 @@ Fix for issue #27
 * Added `line` and `col` to primitives and `Position` to Combinator AST, as well as `SelectPos` to instructions.
 * Changed `OFFSET` to `INPUT` in `Defunc`
 
-## 2.0.0.0 -- TBD
+## 2.0.0.0 -- 2021-11-24
 
 * Removed `compile`, `eval`, `codeGen` from the API.
 * Removed `chainPre` and `chainPost` from the API.
 * Added `Typeable` constraint to `LIFTED`.
 * Removed `lamTermBool` and `userBool` from the API: `Typeable` subsumes them.
-* Added `RANGES` to the `Defunc` API. 
+* Added `RANGES` to the `Defunc` API.

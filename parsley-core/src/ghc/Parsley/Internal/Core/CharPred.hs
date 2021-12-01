@@ -1,8 +1,11 @@
 module Parsley.Internal.Core.CharPred (
-    module Parsley.Internal.Core.CharPred
+    CharPred(..),
+    apply,
+    members, nonMembers,
+    lamTerm
   ) where
 
-import Data.List                     (intercalate)
+import Data.List                     (intercalate, delete)
 import Parsley.Internal.Core.Lam     (Lam(Abs, App, Var, T, F))
 
 data CharPred where
@@ -17,6 +20,23 @@ apply (Ranges True rngs) c = any (\(l, u) -> l <= c || c <= u) rngs
 apply (Ranges False rngs) c = all (\(l, u) -> l >= c || c >= u) rngs
 apply (Specific c') c = c == c'
 apply Item _ = True
+
+members :: CharPred -> [Char]
+members (UserPred f _)      = filter f [minBound..maxBound]
+members Item                = [minBound..maxBound]
+members (Specific c)        = [c]
+members (Ranges incl rngs)  = concatMap (\(l, u) -> [l..u]) ((if incl then invertRanges else id) rngs)
+
+nonMembers :: CharPred -> [Char]
+nonMembers (UserPred f _)      = filter (not . f) [minBound..maxBound]
+nonMembers Item                = []
+nonMembers (Specific c)        = delete c [minBound..maxBound]
+nonMembers (Ranges incl rngs)  = members (Ranges (not incl) rngs)
+
+invertRanges :: [(Char, Char)] -> [(Char, Char)]
+invertRanges rngs = foldr roll (\l -> [(l, maxBound)]) rngs minBound
+  where
+    roll (u, l') next l = (l, u) : next l'
 
 lamTerm :: CharPred -> Lam (Char -> Bool)
 lamTerm (UserPred _ t) = t

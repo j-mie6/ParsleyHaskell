@@ -19,7 +19,7 @@ import Data.STRef                                    (writeSTRef, readSTRef, new
 import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
-import Parsley.Internal.Backend.Machine.Defunc       (Defunc, pattern FREEVAR, genDefunc, _if)
+import Parsley.Internal.Backend.Machine.Defunc       (Defunc(LAM), pattern FREEVAR, genDefunc, ap, _if)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
@@ -28,6 +28,7 @@ import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.State  (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, Subroutine, OpStack(..), Func,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
 import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Core.CharPred                (CharPred, lamTerm)
 import System.Console.Pretty                         (color, Color(Green, White, Red, Blue))
 
 #define inputInstances(derivation) \
@@ -48,10 +49,10 @@ updatePos :: (Code Int, Code Int) -> Code Char -> ((Code Int, Code Int) -> Code 
 updatePos (qline, qcol) qc k = [|| case updatePos# $$qline $$qcol $$qc of (# line', col' #) -> $$(k ([||line'||], [||col'||])) ||]
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o) => (Defunc Char -> Defunc Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps o) => CharPred -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 sat p k bad γ@Γ{..} = next input $ \c input' -> let v = FREEVAR c in
                         updatePos pos c $ \pos' ->
-                          _if (p v)
+                          _if (ap (LAM (lamTerm p)) v)
                               (k (γ {operands = Op v operands, input = input', pos = pos'}))
                               bad
 

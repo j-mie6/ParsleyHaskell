@@ -24,7 +24,7 @@ import Data.Void                                           (Void)
 import Control.Monad                                       (forM, liftM2, liftM3, when)
 import Control.Monad.Reader                                (ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
-import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.InputRep           (Rep)
@@ -40,6 +40,7 @@ import Parsley.Internal.Backend.Machine.Types.Input        (Input(Input, off, po
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (mkOffset)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm)
 import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
@@ -116,7 +117,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p k@(Machine k') = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -131,9 +132,9 @@ evalSat p k@(Machine k') = do
              => Machine s o (Char : xs) (Succ n) r a
              -> MachineMonad s o xs (Succ n) r a
     satFetch mk = reader $ \ctx γ ->
-      sat (ap p) (readChar ctx (fetch (input γ)))
-                 (continue mk γ)
-                 (raise γ)
+      sat (ap (LAM (lamTerm p))) (readChar ctx (fetch (input γ)))
+                                 (continue mk γ)
+                                 (raise γ)
 
     emitCheckAndFetch :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
                       => Int

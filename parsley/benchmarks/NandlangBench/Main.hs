@@ -4,9 +4,9 @@
              UnboxedTuples,
              TypeApplications #-}
 module Main where
-import Criterion.Main         (Benchmark, bgroup, defaultMain)
-import Control.DeepSeq        (NFData)
-import Data.ByteString        (ByteString)
+import Gauge.Main      (Benchmark, bgroup)
+import Control.DeepSeq (NFData)
+import Data.ByteString (ByteString)
 --import Parsley.Internal.Verbose ()
 import qualified NandlangBench.Parsley.Parser
 import qualified NandlangBench.Bison.Parser
@@ -14,7 +14,7 @@ import qualified Parsley
 import Shared.BenchmarkUtils
 
 main :: IO ()
-main = defaultMain [nandlang]
+main = condensedMain [nandlang]
 
 nandParsleyB :: ByteString -> Maybe ()
 nandParsleyB = $$(Parsley.parse NandlangBench.Parsley.Parser.nandlang)

@@ -7,12 +7,12 @@
              UnboxedTuples,
              TypeApplications #-}
 module Main where
-import Criterion.Main         (Benchmark, bgroup, defaultMain)
-import Control.DeepSeq        (NFData)
-import GHC.Generics           (Generic)
-import Data.ByteString        (ByteString)
-import Parsley.InputExtras    (CharList(..))
-import Data.Text              (Text)
+import Gauge.Main          (Benchmark, bgroup)
+import Control.DeepSeq     (NFData)
+import GHC.Generics        (Generic)
+import Data.ByteString     (ByteString)
+import Parsley.InputExtras (CharList(..))
+import Data.Text           (Text)
 --import Parsley.Internal.Verbose ()
 import qualified BrainfuckBench.Parsley.Parser
 import qualified BrainfuckBench.Parsec.Parser
@@ -26,7 +26,7 @@ import BrainfuckBench.Shared
 import Shared.BenchmarkUtils
 
 main :: IO ()
-main = defaultMain [brainfuck]
+main = condensedMain [brainfuck]
 
 deriving instance Generic BrainFuckOp
 deriving instance NFData BrainFuckOp

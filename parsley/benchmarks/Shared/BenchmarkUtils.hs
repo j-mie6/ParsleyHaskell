@@ -2,7 +2,8 @@
            , FlexibleContexts #-}
 module Shared.BenchmarkUtils where
 
-import Criterion.Main         (Benchmark, bgroup, bench, nf, defaultMain, env)
+import Gauge.Main             (Benchmark, bgroup, bench, nf, defaultMainWith, env)
+import Gauge.Main.Options     (Config(displayMode), defaultConfig, DisplayMode(Condensed))
 import Control.DeepSeq        (NFData)
 import Control.Monad.Identity (Identity)
 import Data.Text              (Text)
@@ -38,3 +39,6 @@ benchmark :: (NFData a, NFData rep) => [FilePath] -> (FilePath -> IO rep) -> Str
 benchmark filenames load lib parser = env (traverse load filenames) (bgroup lib . (tasks filenames))
   where
     tasks filenames inputs = foldr (\f ts n -> bench f (nf parser (inputs !! n)) : ts (n+1)) (const []) filenames 0
+
+condensedMain :: [Benchmark] -> IO ()
+condensedMain = defaultMainWith (defaultConfig {displayMode = Condensed})

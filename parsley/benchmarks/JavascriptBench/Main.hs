@@ -7,10 +7,10 @@
              UnboxedTuples,
              TypeApplications #-}
 module Main where
-import Criterion.Main         (Benchmark, bgroup, defaultMain)
-import Control.DeepSeq        (NFData)
-import GHC.Generics           (Generic)
-import Data.Text              (Text)
+import Gauge.Main      (Benchmark, bgroup)
+import Control.DeepSeq (NFData)
+import GHC.Generics    (Generic)
+import Data.Text       (Text)
 --import Parsley.Internal.Verbose ()
 import qualified JavascriptBench.Parsley.Parser
 import qualified JavascriptBench.Parsec.Parser
@@ -22,7 +22,7 @@ import JavascriptBench.Shared
 import Shared.BenchmarkUtils
 
 main :: IO ()
-main = defaultMain [javascript]
+main = condensedMain [javascript]
 
 deriving instance Generic JSElement
 deriving instance Generic JSStm

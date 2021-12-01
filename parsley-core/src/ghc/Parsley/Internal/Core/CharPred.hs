@@ -36,7 +36,8 @@ nonMembers (Ranges incl rngs)  = members (Ranges (not incl) rngs)
 invertRanges :: [(Char, Char)] -> [(Char, Char)]
 invertRanges rngs = foldr roll (\l -> [(l, maxBound)]) rngs minBound
   where
-    roll (u, l') next l = (l, u) : next l'
+    roll (u, l') next l = (if l == u then id else ((l, pred u) :))        -- If they are equal, no range
+                          (if l' == maxBound then [] else next (succ l')) -- If the upper-bound is the top, stop
 
 lamTerm :: CharPred -> Lam (Char -> Bool)
 lamTerm (UserPred _ t) = t

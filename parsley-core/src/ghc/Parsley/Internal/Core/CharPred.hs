@@ -13,6 +13,7 @@ data CharPred where
   Ranges :: Bool -> [(Char, Char)] -> CharPred
   Item :: CharPred
   Specific :: Char -> CharPred
+  -- TODO: And is pretty poor as an abstraction, we want to write a proper merge!
   And :: CharPred -> CharPred -> CharPred
 
 apply :: CharPred -> Char -> Bool

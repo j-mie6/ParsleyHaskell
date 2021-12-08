@@ -46,15 +46,16 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
     staSubroutine#, meta,
   ) where
 
-import Control.Monad.ST                                    (ST)
-import Data.STRef                                          (STRef)
-import Data.Kind                                           (Type)
-import Data.Maybe                                          (fromMaybe)
-import Parsley.Internal.Backend.Machine.LetBindings        (Regs(..), Metadata, newMeta, InputCharacteristic(..))
-import Parsley.Internal.Backend.Machine.Types.Dynamics     (DynCont, DynHandler, DynFunc)
-import Parsley.Internal.Backend.Machine.Types.Input        (Input(..), Input#(..), fromInput)
-import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset, same)
-import Parsley.Internal.Common.Utils                       (Code)
+import Control.Monad.ST                                           (ST)
+import Data.STRef                                                 (STRef)
+import Data.Kind                                                  (Type)
+import Data.Maybe                                                 (fromMaybe)
+import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata, newMeta)
+import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc)
+import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), fromInput)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
+import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
+import Parsley.Internal.Common.Utils                              (Code)
 
 -- Handlers
 {-|

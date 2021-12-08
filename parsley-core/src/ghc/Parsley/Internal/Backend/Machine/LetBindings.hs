@@ -12,20 +12,21 @@ free registers.
 @since 1.0.0.0
 -}
 module Parsley.Internal.Backend.Machine.LetBindings (
-    LetBinding(..), Metadata, InputCharacteristic(..),
+    LetBinding(..), Metadata,
     Regs(..),
     makeLetBinding, newMeta,
     successInputCharacteristic, failureInputCharacteristic,
     Binding
   ) where
 
-import Prelude hiding                                (foldr)
-import Data.Kind                                     (Type)
-import Data.Set                                      (Set, foldr)
-import Data.Some                                     (Some, pattern Some)
-import Parsley.Internal.Backend.Machine.Identifiers  (ΣVar, SomeΣVar(..))
-import Parsley.Internal.Backend.Machine.Instructions (Instr)
-import Parsley.Internal.Common                       (Fix4, One)
+import Prelude hiding                                             (foldr)
+import Data.Kind                                                  (Type)
+import Data.Set                                                   (Set, foldr)
+import Data.Some                                                  (Some, pattern Some)
+import Parsley.Internal.Backend.Machine.Identifiers               (ΣVar, SomeΣVar(..))
+import Parsley.Internal.Backend.Machine.Instructions              (Instr)
+import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
+import Parsley.Internal.Common                                    (Fix4, One)
 
 {-|
 Type represents a binding, which is a completed parser that can
@@ -74,24 +75,6 @@ data Metadata = Metadata {
     -}
     failureInputCharacteristic :: InputCharacteristic
   }
-
-{-|
-Provides a way to describe how input is consumed in certain circumstances:
-
-* The input may be always the same on all paths
-* The input may always be consumed, but not the same on all paths
-* The input may never be consumed in any path
-* It may be inconsistent
-
-@since 1.5.0.0
--}
-data InputCharacteristic = AlwaysConsumes (Maybe Word)
-                         -- ^ On all paths, input must be consumed: `Nothing` when the extact
-                         --   amount is inconsistent across paths.
-                         | NeverConsumes
-                         -- ^ On all paths, no input is consumed.
-                         | MayConsume
-                         -- ^ The input characteristic is unknown or inconsistent.
 
 {-|
 Given a `Binding` , a set of existential `ΣVar`s, and some `Metadata`, produces a

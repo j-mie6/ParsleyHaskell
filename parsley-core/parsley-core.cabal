@@ -97,6 +97,7 @@ library
 
                        Parsley.Internal.Backend.Machine.Types,
                        Parsley.Internal.Backend.Machine.Types.Coins,
+                       Parsley.Internal.Backend.Machine.Types.InputCharacteristic,
                        Parsley.Internal.Backend.Machine.Types.State
 
   if impl(ghc >= 8.10)
@@ -109,8 +110,8 @@ library
                        Parsley.Internal.Backend.Machine.Types.Input,
                        Parsley.Internal.Backend.Machine.Types.Statics,
 
-                       Parsley.Internal.Backend.Machine.Types.Input.Offset
-                       --Parsley.Internal.Backend.Machine.Types.Input.Pos
+                       Parsley.Internal.Backend.Machine.Types.Input.Offset,
+                       Parsley.Internal.Backend.Machine.Types.Input.Pos
 
   default-extensions:  BangPatterns
                        DataKinds

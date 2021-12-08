@@ -36,8 +36,7 @@ import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machin
 import Parsley.Internal.Backend.Machine.PosOps             (initPos, extractCol, extractLine)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Input        (Input(Input, off, pos))
-import Parsley.Internal.Backend.Machine.Types.Input.Offset (mkOffset)
+import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm)
@@ -62,7 +61,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty halt (Input (mkOffset [||offset||] 0) initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -117,7 +116,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p k@(Machine k') = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -128,23 +127,18 @@ evalSat p k@(Machine k') = do
           do check <- asks (emitCheckAndFetch . coins)
              check (Machine (local spendCoin k'))
   where
-    satFetch :: (?ops :: InputOps (Rep o))
-             => Machine s o (Char : xs) (Succ n) r a
-             -> MachineMonad s o xs (Succ n) r a
+    satFetch :: Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     satFetch mk = reader $ \ctx γ ->
       sat (ap (LAM (lamTerm p))) (readChar ctx (fetch (input γ)))
                                  (continue mk γ)
                                  (raise γ)
 
-    emitCheckAndFetch :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
-                      => Int
-                      -> Machine s o (Char : xs) (Succ n) r a
-                      -> MachineMonad s o xs (Succ n) r a
+    emitCheckAndFetch :: Int -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     emitCheckAndFetch n mk = do
       sat <- satFetch mk
       return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (off (input γ))
 
-    continue mk γ c input' = run mk (γ {input = input', operands = Op c (operands γ)})
+    continue mk γ c input' = run mk (γ {input = updatePos input' p, operands = Op c (operands γ)})
 
 evalEmpt :: MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -221,8 +215,8 @@ evalPut σ a k = reader $ \ctx γ ->
 
 -- TODO: FREEVAR is the wrong abstraction really...
 evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
-evalSelectPos Line (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (extractLine (pos (input γ)))) (operands γ)})
-evalSelectPos Col (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (extractCol (pos (input γ)))) (operands γ)})
+evalSelectPos Line (Machine k) = k <&> \m γ -> forcePos (input γ) $ \pos input' -> m (γ {operands = Op (FREEVAR (extractLine pos)) (operands γ), input = input'})
+evalSelectPos Col (Machine k) = k <&> \m γ -> forcePos (input γ) $ \pos input' -> m (γ {operands = Op (FREEVAR (extractCol pos)) (operands γ), input = input'})
 
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
@@ -258,5 +252,6 @@ evalMeta (PrefetchChar check) k =
   where
     mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (off (input γ))
     mkCheck False k = k
+    -- TODO: This is annoying, ideally, the position update is delayed until more information is available!
     prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
 evalMeta BlockCoins (Machine k) = k

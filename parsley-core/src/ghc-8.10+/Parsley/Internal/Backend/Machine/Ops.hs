@@ -60,33 +60,33 @@ module Parsley.Internal.Backend.Machine.Ops (
     HandlerOps, JoinBuilder, RecBuilder, PositionOps, MarshalOps, LogOps
   ) where
 
-import Control.Monad                                   (liftM2)
-import Control.Monad.Reader                            (ask, local)
-import Control.Monad.ST                                (ST)
-import Data.STRef                                      (writeSTRef, readSTRef, newSTRef)
-import Data.Void                                       (Void)
-import Debug.Trace                                     (trace)
-import GHC.Exts                                        (Int(..), (-#))
-import Language.Haskell.TH.Syntax                      (liftTyped)
+import Control.Monad                                              (liftM2)
+import Control.Monad.Reader                                       (ask, local)
+import Control.Monad.ST                                           (ST)
+import Data.STRef                                                 (writeSTRef, readSTRef, newSTRef)
+import Data.Void                                                  (Void)
+import Debug.Trace                                                (trace)
+import GHC.Exts                                                   (Int(..), (-#))
+import Language.Haskell.TH.Syntax                                 (liftTyped)
 import Parsley.Internal.Backend.Machine.BindingOps
-import Parsley.Internal.Backend.Machine.Defunc         (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
-import Parsley.Internal.Backend.Machine.Identifiers    (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps       (PositionOps(..), LogOps(..), InputOps, next, more)
-import Parsley.Internal.Backend.Machine.InputRep       (Rep)
-import Parsley.Internal.Backend.Machine.Instructions   (Access(..))
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic), InputCharacteristic(..))
-import Parsley.Internal.Backend.Machine.PosOps         (updatePos)
-import Parsley.Internal.Backend.Machine.THUtils        (eta)
-import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
+import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
+import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
+import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
+import Parsley.Internal.Backend.Machine.THUtils                   (eta)
+import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Input    (Input(..), Input#(..), toInput, fromInput)
-import Parsley.Internal.Backend.Machine.Types.State    (Γ(..), OpStack(..))
+import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
+import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, consume, chooseInput)
+import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
+import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
-import Parsley.Internal.Common                         (One, Code, Vec(..), Nat(..))
-import System.Console.Pretty                           (color, Color(Green, White, Red, Blue))
+import Parsley.Internal.Common                                    (One, Code, Vec(..), Nat(..))
+import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
-import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), moveOne, moveN)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..))
 
 {- General Operations -}
 {-|
@@ -134,9 +134,8 @@ Consumes the next character and adjusts the offset to match.
 -}
 fetch :: (?ops :: InputOps (Rep o))
       => Input o -> (Code Char -> Input o -> Code b) -> Code b
-fetch input k = next (offset (off input)) $ \c offset' ->
-  k c (input {off = moveOne (off input) offset',
-              pos = updatePos (pos input) c})
+fetch input k = next (offset (off input)) $ \c offset' -> k c (consume c offset' input)
+
 {-|
 Emits a length check for a number of characters \(n\) in the most efficient
 way it can. It takes two continuations a @good@ and a @bad@: the @good@ is used
@@ -357,18 +356,10 @@ callCC :: forall s o xs n r a x. MarshalOps o
        -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
        -> Γ s o xs (Succ n) r a                                  --
        -> Code (ST s (Maybe a))
-callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseOffset (successInputCharacteristic (meta sub)))) inp (handlers γ)
+callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseInput (successInputCharacteristic (meta sub)) u inp)) inp (handlers γ)
   where
     inp :: Input o
     inp = input γ
-
-    -- TODO: move to Offset module (along with Input#?)
-    chooseOffset :: InputCharacteristic -> Input# o -> Input o
-    chooseOffset (AlwaysConsumes n) inp#  = inp { off = moveN n (off inp) (off# inp#), pos = pos# inp# }
-    -- Technically, in this case, we know the whole input is unchanged. This essentially ignores the continuation arguments
-    -- hopefully GHC could optimise this better?
-    chooseOffset NeverConsumes      _inp# = inp -- { off = (off inp) {offset = off# inp# }, pos = pos# inp# }
-    chooseOffset MayConsume         inp#  = toInput u inp#
 
 {- Join Point Operations -}
 {-|

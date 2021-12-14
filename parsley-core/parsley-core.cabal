@@ -190,7 +190,7 @@ test-suite common-test
   type:                exitcode-stdio-1.0
   build-depends:       tasty-hunit, tasty-quickcheck
   main-is:             CommonTest.hs
-  other-modules:       CommonTest.Queue, CommonTest.RewindQueue
+  other-modules:       CommonTest.Queue, CommonTest.RewindQueue, CommonTest.RangeSet
 
 test-suite regression-test
   import:              test-common
@@ -198,6 +198,22 @@ test-suite regression-test
   build-depends:       tasty-hunit, tasty-quickcheck, containers
   main-is:             RegressionTest.hs
   other-modules:       Regression.Issue27
+
+common benchmark-common
+  build-depends:       base >=4.10 && <5,
+                       parsley-core,
+                       gauge,
+                       deepseq
+  hs-source-dirs:      benchmarks
+  other-modules:       BenchmarkUtils
+  default-language:    Haskell2010
+
+benchmark rangeset-bench
+  import:              benchmark-common
+  type:                exitcode-stdio-1.0
+  build-depends:       containers,
+                       QuickCheck
+  main-is:             RangeSetBench.hs
 
 source-repository head
   type:                git

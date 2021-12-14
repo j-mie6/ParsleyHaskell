@@ -28,10 +28,20 @@ main :: IO ()
 main = do
   xss <- forM [1..10] $ \n -> generate (vectorOf (n * 10) (chooseInt (0, n * 20)))
   condensedMain [
+      rangeFromList,
       fromListBench xss,
       rangeMemberBench,
       setMemberBench
     ]
+
+rangeFromList :: Benchmark
+rangeFromList =
+  env (return (xs1, xs2, xs3, xs4)) $ \xs ->bgroup "RangeSet.fromList" [
+      bench "Pathological" $ nf RangeSet.fromList (pi4_1 xs),
+      bench "4 way split" $ nf RangeSet.fromList (pi4_2 xs),
+      bench "Small" $ nf RangeSet.fromList (pi4_3 xs),
+      bench "alphaNum" $ nf RangeSet.fromList (pi4_4 xs)
+  ]
 
 fromListBench :: [[Int]] -> Benchmark
 fromListBench xss =
@@ -68,14 +78,23 @@ rangeMemberBench =
                RangeSet.fromList xs2,
                RangeSet.fromList xs3,
                RangeSet.fromList xs4)) $ \t ->
-    bgroup "RangeSet.member" [
-      bench "Pathological" $ nf (f (pi4_1 t)) ys1,
-      bench "4 way split" $ nf (f (pi4_2 t)) ys1,
-      bench "Small" $ nf (f (pi4_3 t)) ys2,
-      bench "alphaNum" $ nf (f (pi4_4 t)) ys3
+    bgroup "RangeSet" [
+      bgroup "member" [
+        bench "Pathological" $ nf (f (pi4_1 t)) ys1,
+        bench "4 way split" $ nf (f (pi4_2 t)) ys1,
+        bench "Small" $ nf (f (pi4_3 t)) ys2,
+        bench "alphaNum" $ nf (f (pi4_4 t)) ys3
+      ],
+      bgroup "delete" [
+        bench "Pathological" $ nf (g (pi4_1 t)) ys1,
+        bench "4 way split" $ nf (g (pi4_2 t)) ys1,
+        bench "Small" $ nf (g (pi4_3 t)) ys2,
+        bench "alphaNum" $ nf (g (pi4_4 t)) ys3
+      ]
     ]
   where
     f t = List.foldl' (\ !_ y -> RangeSet.member y t) False
+    g t = List.foldl' (\ !t y -> RangeSet.delete y t) t
 
 setMemberBench :: Benchmark
 setMemberBench =
@@ -83,14 +102,23 @@ setMemberBench =
                Set.fromList xs2,
                Set.fromList xs3,
                Set.fromList xs4)) $ \t ->
-    bgroup "Set.member" [
-      bench "Pathological" $ nf (f (pi4_1 t)) ys1,
-      bench "4 way split" $ nf (f (pi4_2 t)) ys1,
-      bench "Small" $ nf (f (pi4_3 t)) ys2,
-      bench "alphaNum" $ nf (f (pi4_4 t)) ys3
+    bgroup "Set" [
+      bgroup "member" [
+        bench "Pathological" $ nf (f (pi4_1 t)) ys1,
+        bench "4 way split" $ nf (f (pi4_2 t)) ys1,
+        bench "Small" $ nf (f (pi4_3 t)) ys2,
+        bench "alphaNum" $ nf (f (pi4_4 t)) ys3
+      ],
+      bgroup "delete" [
+        bench "Pathological" $ nf (g (pi4_1 t)) ys1,
+        bench "4 way split" $ nf (g (pi4_2 t)) ys1,
+        bench "Small" $ nf (g (pi4_3 t)) ys2,
+        bench "alphaNum" $ nf (g (pi4_4 t)) ys3
+      ]
     ]
   where
     f t = List.foldl' (\ !_ y -> Set.member y t) False
+    g t = List.foldl' (\ !t y -> Set.delete y t) t
 
 makeBench :: NFData a => (a -> String) -> [(String, a -> Benchmarkable)] -> a -> Benchmark
 makeBench caseName cases x = env (return x) (\x ->

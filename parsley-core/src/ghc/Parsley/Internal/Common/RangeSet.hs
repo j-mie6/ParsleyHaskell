@@ -1,4 +1,4 @@
-{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingStrategies, MagicHash #-}
 module Parsley.Internal.Common.RangeSet (
     RangeSet(..),
     empty, null, size, sizeRanges,
@@ -13,13 +13,15 @@ module Parsley.Internal.Common.RangeSet (
 import Prelude hiding (null)
 import Control.Applicative (liftA2)
 
+import GHC.Exts (reallyUnsafePtrEquality#, isTrue#)
+
+{-# INLINE ptrEq #-}
+ptrEq :: a -> a -> Bool
+ptrEq x y = isTrue# (reallyUnsafePtrEquality# x y)
+
 {-# INLINE rangeSize #-}
 rangeSize :: (Enum a, Num a) => a -> a -> Int
 rangeSize l u = fromEnum (u - l) + 1
-
-{-# INLINE inRange #-}
-inRange :: Ord a => a -> a -> a -> Bool
-inRange l u x = l <= x && x <= u
 
 {-# INLINE range #-}
 range :: Enum a => a -> a -> [a]
@@ -55,62 +57,60 @@ size = foldRangeSet (\(!l) (!u) szl szr -> szl + szr + rangeSize l u) 0
 sizeRanges :: RangeSet a -> Int
 sizeRanges = foldRangeSet (\_ _ szl szr -> szl + szr + 1) 0
 
-{-member' :: Ord a => a -> RangeSet a -> Bool
-member' !x (Fork _ l u lt rt)
+{-member :: Ord a => a -> RangeSet a -> Bool
+member !x (Fork _ l u lt rt)
   | inRange l u x       = True
-  | x > u               = member' x rt
-  | otherwise {-x < l-} = member' x lt
-member' _ Tip = False-}
-
-{-member :: forall a. Ord a => a -> RangeSet a -> Bool
-member !_ Tip = False
-member x (Fork _ l u lt rt)
-  | x <= u  = goL l lt
-  | otherwise = member x rt
-  where
-    goL :: a -> RangeSet a -> Bool
-    goL !l Tip = l <= x
-    goL l (Fork _ l' u' lt rt)
-      | x <= u'   = goL l' lt
-      | otherwise = goL l rt-}
+  | x > u               = member x rt
+  | otherwise {-x < l-} = member x lt
+member _ Tip = False-}
 
 {-# INLINEABLE member #-}
 member :: forall a. Ord a => a -> RangeSet a -> Bool
 member !x = goR
   where
     goR :: RangeSet a -> Bool
+    -- check the top most level
     goR Tip = False
+    -- we can pick the correct left-hand tree to explore here, passing down the lower bound
     goR (Fork _ l u lt rt)
       | x <= u    = goL l lt
       | otherwise = goR rt
 
     goL :: a -> RangeSet a -> Bool
+    -- if we reach a tip, we check the tightest lower bound above us against x
     goL !l Tip = l <= x
     goL l (Fork _ l' u' lt rt)
+      -- otherwise, if x is less than our upper bound, search in the left, refine the lower bound
       | x <= u'   = goL l' lt
+      -- x is above our range, but known to be less than our parents upper bound
+      -- we should therefore search to our right, preserving the parents lower bound
       | otherwise = goL l rt
 
 {-# INLINEABLE notMember #-}
 notMember :: Ord a => a -> RangeSet a -> Bool
 notMember x = not . member x
 
+{-# INLINE ifeq #-}
+ifeq :: a -> a -> a -> (a -> a) -> a
+ifeq !x !x' y f = if ptrEq x x' then y else f x'
+
 {-# INLINEABLE insert #-}
-insert :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
+insert :: forall a. (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 insert !x Tip = single x x
 insert x t@(Fork _ l u lt rt)
   -- Nothing happens when it's already in range
-  | inRange l u x = t
+  | l <= x, x <= u = t
   -- If it is adjacent to the lower or upper range, it may fuse with adjacent ranges
   | x < l, x == pred l = fuseLeft x u lt rt  -- the equality must be guarded by an existence check
-  | x > u, x == succ u = fuseRight l x lt rt -- the equality must be guarded by an existence check
+  | x == succ u = fuseRight l x lt rt -- we know x > u since x <= l && not x <= u
   -- Otherwise, insert and balance for one of the left or the right
-  | x < l = balance l u (insert x lt) rt     -- cannot be biased, because fusion can shrink a tree
-  | otherwise = balance l u lt (insert x rt) -- cannot be biased, because fusion can shrink a tree
+  | x < l = ifeq lt (insert x lt) t $ \lt' -> balance l u lt' rt -- cannot be biased, because fusion can shrink a tree
+  | otherwise = ifeq rt (insert x rt) t (balance l u lt)         -- cannot be biased, because fusion can shrink a tree
   where
     {-# INLINE fuseLeft #-}
-    fuseLeft !x !u lt rt
-      | not (null lt)
-      , (l, x') <- unsafeMaxRange lt
+    fuseLeft !x !u Tip !rt = fork x u lt rt
+    fuseLeft x u lt rt
+      | (l, x') <- unsafeMaxRange lt
       -- we know there exists an element larger than x'
       -- if x == x' or x == x' + 1, we fuse
       -- x >= x' since it is one less than x''s strict upper bound
@@ -118,9 +118,9 @@ insert x t@(Fork _ l u lt rt)
       , x <= succ x' = balanceR l u (unsafeDeleteRange l x' lt) rt
       | otherwise    = fork x u lt rt
     {-# INLINE fuseRight #-}
-    fuseRight !l !x lt rt
-      | not (null rt)
-      , (x', u) <- unsafeMinRange rt
+    fuseRight !l !x !lt Tip = fork l x lt rt
+    fuseRight l x lt rt
+      | (x', u) <- unsafeMinRange rt
       -- we know there exists an element smaller than x'
       -- if x == x' or x == x' - 1, we fuse
       -- x <= x' since it is one greater than x''s strict lower bound,
@@ -131,17 +131,20 @@ insert x t@(Fork _ l u lt rt)
 {-# INLINEABLE delete #-}
 delete :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 delete !_ Tip = Tip
-delete x (Fork h l u lt rt)
-  -- If its the only part of the range, the node is removed
-  | l == x, x == u = pullup lt rt
-  -- If it's at an extreme, it shrinks the range
-  | l == x = Fork h (succ l) u lt rt
-  | x == u = Fork h l (pred u) lt rt
-  -- Otherwise, if it's still in range, the range undergoes fission
-  | inRange l u x = fission l x u lt rt
-  -- Otherwise delete and balance for one of the left or right
-  | x < l = balance l u (delete x lt) rt     -- cannot be biased, because fisson can grow a tree
-  | otherwise = balance l u lt (delete x rt) -- cannot be biased, because fisson can grow a tree
+delete x t@(Fork h l u lt rt) =
+  case compare l x of
+    -- If its the only part of the range, the node is removed
+    EQ | x == u    -> pullup lt rt
+    -- If it's at an extreme, it shrinks the range
+       | otherwise -> Fork h (succ l) u lt rt
+    LT -> case compare x u of
+    -- If it's at an extreme, it shrinks the range
+       EQ          -> Fork h l (pred u) lt rt
+    -- Otherwise, if it's still in range, the range undergoes fission
+       LT          -> fission l x u lt rt
+    -- Otherwise delete and balance for one of the left or right
+       GT          -> ifeq rt (delete x rt) t (balance l u lt)         -- cannot be biased, because fisson can grow a tree
+    GT             -> ifeq lt (delete x lt) t $ \lt' -> balance l u lt' rt -- cannot be biased, because fisson can grow a tree
   where
     pullup Tip rt = rt
     pullup lt Tip = lt

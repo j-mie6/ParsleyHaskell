@@ -53,7 +53,8 @@ memberTests :: TestTree
 memberTests = testGroup "member should" [
     testCase "work when out of range" $ notMember 5 (fromRanges [(0, 4), (6, 9)]) @?= True,
     testCase "work when in range" $ member 5 (fromRanges [(0, 9)]) @?= True,
-    testCase "work for exact" $ member 5 (fromRanges [(5, 5)]) @?= True
+    testCase "work for exact" $ member 5 (fromRanges [(5, 5)]) @?= True,
+    testProperty "perform like elem on elems" $ uncurry (memberElemProperty @Word)
   ]
 
 -- insert
@@ -97,6 +98,9 @@ findMaxMaximum t = findMax t === safeMaximum (elems t)
 
 nubSortProperty :: (Enum a, Ord a, Show a) => [a] -> Property
 nubSortProperty xs = sort (nub xs) === elems (fromList xs)
+
+memberElemProperty :: (Enum a, Ord a, Show a) => a -> RangeSet a -> Property
+memberElemProperty x t = member x t === elem x (elems t)
 
 unionProperty :: (Ord a, Enum a, Show a) => RangeSet a -> RangeSet a -> Property
 unionProperty t1 t2 = not (null t1 && null t2) ==>

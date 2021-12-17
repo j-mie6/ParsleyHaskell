@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, UnboxedTuples #-}
+{-# LANGUAGE RecordWildCards, UnboxedTuples, PatternSynonyms #-}
 module Parsley.Internal.Backend.Machine.Types.Input.Pos (
     StaPos, DynPos,
     fromDynPos, toDynPos,
@@ -6,7 +6,7 @@ module Parsley.Internal.Backend.Machine.Types.Input.Pos (
   ) where
 
 import Parsley.Internal.Common.Utils (Code)
-import Parsley.Internal.Core.CharPred (CharPred(Specific), andPred)
+import Parsley.Internal.Core.CharPred (CharPred, pattern Specific, andPred)
 
 import qualified Parsley.Internal.Backend.Machine.PosOps as Ops (updatePos)
 import qualified Parsley.Internal.Backend.Machine.Types.Base as Base (Pos)

@@ -18,8 +18,10 @@ import Test.Tasty.QuickCheck
 import Prelude hiding (null)
 
 import Parsley.Internal.Common.RangeSet
-import Data.List (nub, sort)
+import Data.List (nub, sort, intersect)
 import GHC.Generics (Generic)
+
+import Data.Word (Word8)
 
 deriving instance Generic (RangeSet a)
 
@@ -35,6 +37,9 @@ tests = testGroup "RangeSet" [
     insertTests,
     deleteTests,
     fromListTests,
+    testProperty "elems and unelems shoudld be disjoint" $ elemUnelemDisjoint @Word8,
+    testProperty "complement . complement = id" $ complementInverse @Word8,
+    testProperty "unelems == elems . complement" $ complementElemsInverse @Word8,
     testProperty "findMin should find the minimum" $ findMinMinimum @Word,
     testProperty "findMax should find the maximum" $ findMaxMaximum @Int,
     testProperty "union should union" $ uncurry (unionProperty @Int),
@@ -101,6 +106,15 @@ nubSortProperty xs = sort (nub xs) === elems (fromList xs)
 
 memberElemProperty :: (Enum a, Ord a, Show a) => a -> RangeSet a -> Property
 memberElemProperty x t = member x t === elem x (elems t)
+
+elemUnelemDisjoint :: (Enum a, Bounded a, Eq a, Show a) => RangeSet a -> Property
+elemUnelemDisjoint t = intersect (elems t) (unelems t) === []
+
+complementInverse :: (Enum a, Bounded a, Ord a, Show a) => RangeSet a -> Property
+complementInverse t = elems (complement (complement t)) === elems t
+
+complementElemsInverse :: (Enum a, Bounded a, Ord a, Show a) => RangeSet a -> Property
+complementElemsInverse t = unelems t === elems (complement t)
 
 unionProperty :: (Ord a, Enum a, Show a) => RangeSet a -> RangeSet a -> Property
 unionProperty t1 t2 = not (null t1 && null t2) ==>

@@ -1,17 +1,20 @@
 {-# LANGUAGE DerivingStrategies, MagicHash #-}
 module Parsley.Internal.Common.RangeSet (
     RangeSet(..),
-    empty, null, size, sizeRanges,
+    empty, singleton, null, full, isSingle, extractSingle, size, sizeRanges,
     member, notMember, findMin, findMax,
     insert, delete,
-    union, intersection, difference,
-    elems, fromRanges, insertRange, fromList,
+    union, intersection, difference, complement,
+    elems, unelems, fromRanges, insertRange, fromList,
+    fold,
     -- Testing
     valid
   ) where
 
 import Prelude hiding (null)
 import Control.Applicative (liftA2)
+
+import Data.Maybe (isJust)
 
 import GHC.Exts (reallyUnsafePtrEquality#, isTrue#)
 
@@ -35,6 +38,9 @@ data RangeSet a = Fork {-# UNPACK #-} !Int !a !a !(RangeSet a) !(RangeSet a)
 empty :: RangeSet a
 empty = Tip
 
+singleton :: a -> RangeSet a
+singleton x = single x x
+
 fork :: a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 fork !l !u !lt !rt = Fork (max (height lt) (height rt) + 1) l u lt rt
 
@@ -46,26 +52,59 @@ null :: RangeSet a -> Bool
 null Tip = True
 null _ = False
 
+full :: (Eq a, Bounded a) => RangeSet a -> Bool
+full Tip = False
+full (Fork _ l u _ _) = l == minBound && maxBound == u
+
+isSingle :: Eq a => RangeSet a -> Bool
+isSingle = isJust . extractSingle
+
+extractSingle :: Eq a => RangeSet a -> Maybe a
+extractSingle (Fork _ x y Tip Tip) | x == y = Just x
+extractSingle _                             = Nothing
+
 {-# INLINE height #-}
 height :: RangeSet a -> Int
 height Tip = 0
 height (Fork h _ _ _ _) = h
 
 size :: (Num a, Enum a) => RangeSet a -> Int
-size = foldRangeSet (\(!l) (!u) szl szr -> szl + szr + rangeSize l u) 0
+size = fold (\(!l) (!u) szl szr -> szl + szr + rangeSize l u) 0
 
 sizeRanges :: RangeSet a -> Int
-sizeRanges = foldRangeSet (\_ _ szl szr -> szl + szr + 1) 0
-
-{-member :: Ord a => a -> RangeSet a -> Bool
-member !x (Fork _ l u lt rt)
-  | inRange l u x       = True
-  | x > u               = member x rt
-  | otherwise {-x < l-} = member x lt
-member _ Tip = False-}
+sizeRanges = fold (\_ _ szl szr -> szl + szr + 1) 0
 
 {-# INLINEABLE member #-}
+-- One of these is better than the other, I'm just not entirely sure which...
 member :: forall a. Ord a => a -> RangeSet a -> Bool
+{-
+RangeSet/member/Pathological             mean 83.88 μs  ( +- 2.851 μs  )
+RangeSet/member/4 way split              mean 11.94 μs  ( +- 4.297 μs  )
+RangeSet/member/Small                    mean 177.7 ns  ( +- 4.033 ns  )
+RangeSet/member/alphaNum                 mean 1.776 μs  ( +- 17.81 ns  )
+-}{-
+member !x (Fork _ l u lt rt)
+  | l <= x    = x <= u || member x rt
+  | otherwise = member x lt
+member _ Tip = False-}
+{-
+RangeSet/member/Pathological             mean 91.04 μs  ( +- 21.57 μs  )
+RangeSet/member/4 way split              mean 11.03 μs  ( +- 380.2 ns  )
+RangeSet/member/Small                    mean 161.2 ns  ( +- 2.453 ns  )
+RangeSet/member/alphaNum                 mean 1.672 μs  ( +- 18.76 ns  )
+-}--{-
+member !x = go
+  where
+    go (Fork _ l u lt rt)
+      | l <= x    = x <= u || go rt
+      | otherwise = go lt
+    go Tip = False
+{-
+RangeSet/member/Pathological             mean 83.29 μs  ( +- 2.166 μs  )
+RangeSet/member/4 way split              mean 16.11 μs  ( +- 2.771 μs  )
+RangeSet/member/Small                    mean 268.9 ns  ( +- 23.04 ns  )
+RangeSet/member/alphaNum                 mean 1.689 μs  ( +- 40.04 ns  )
+-}{-
 member !x = goR
   where
     goR :: RangeSet a -> Bool
@@ -84,7 +123,7 @@ member !x = goR
       | x <= u'   = goL l' lt
       -- x is above our range, but known to be less than our parents upper bound
       -- we should therefore search to our right, preserving the parents lower bound
-      | otherwise = goL l rt
+      | otherwise = goL l rt-}
 
 {-# INLINEABLE notMember #-}
 notMember :: Ord a => a -> RangeSet a -> Bool
@@ -100,11 +139,13 @@ insert !x Tip = single x x
 insert x t@(Fork _ l u lt rt)
   -- Nothing happens when it's already in range
   | l <= x, x <= u = t
-  -- If it is adjacent to the lower or upper range, it may fuse with adjacent ranges
-  | x < l, x == pred l = fuseLeft x u lt rt  -- the equality must be guarded by an existence check
-  | x == succ u = fuseRight l x lt rt -- we know x > u since x <= l && not x <= u
-  -- Otherwise, insert and balance for one of the left or the right
-  | x < l = ifeq lt (insert x lt) t $ \lt' -> balance l u lt' rt -- cannot be biased, because fusion can shrink a tree
+  -- If it is adjacent to the lower, it may fuse
+  | x < l, x == pred l = fuseLeft x u lt rt                      -- the equality must be guarded by an existence check
+  -- Otherwise, insert and balance for left
+  | x < l = ifeq lt (insert x lt) t $ \lt' -> balance l u lt' rt -- cannot be biased, because fusion can shrink a tree#
+  -- If it is adjacent to the upper range, it may fuse
+  | x == succ u = fuseRight l x lt rt                            -- we know x > u since x <= l && not x <= u
+  -- Otherwise, insert and balance for right
   | otherwise = ifeq rt (insert x rt) t (balance l u lt)         -- cannot be biased, because fusion can shrink a tree
   where
     {-# INLINE fuseLeft #-}
@@ -273,18 +314,34 @@ union t = foldr insert t . elems
 
 -- TODO: This can be /much much/ better
 intersection :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
-intersection t = fromList . filter (flip member t) . elems
+intersection t = fromList . filter (flip member t) . elems -- difference t . complement <- good if difference is optimised
 
 -- TODO: This can be /much much/ better
 difference :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 difference t = foldr delete t . elems
 
+-- TODO: This can be /much much/ better
+complement :: (Bounded a, Enum a, Ord a) => RangeSet a -> RangeSet a
+complement = fromList . unelems
+
 elems :: Enum a => RangeSet a -> [a]
-elems t = foldRangeSet (\l u lt rt -> lt . (range l u ++) . rt) id t []
+elems t = fold (\l u lt rt -> lt . (range l u ++) . rt) id t []
+
+unelems :: (Bounded a, Enum a, Eq a) => RangeSet a -> [a]
+unelems t = fold fork tip t minBound maxBound []
+  where
+    fork l' u' lt rt l u = dxs . dys
+      where
+        dxs | l' == l   = id
+            | otherwise = lt l (pred l')
+        dys | u == u'   = id
+            | otherwise = rt (succ u') u
+    tip l u = (range l u ++)
 
 -- TODO: This can be /much much/ better
 fromRanges :: (Enum a, Ord a) => [(a, a)] -> RangeSet a
-fromRanges = fromList . concatMap (uncurry range)
+fromRanges [(x, y)] = single x y
+fromRanges rs = fromList (concatMap (uncurry range) rs)
 
 insertRange :: (Enum a, Ord a) => (a, a) -> RangeSet a -> RangeSet a
 insertRange = union . fromRanges . pure
@@ -292,9 +349,9 @@ insertRange = union . fromRanges . pure
 fromList :: (Enum a, Ord a) => [a] -> RangeSet a
 fromList = foldr insert empty
 
-foldRangeSet :: (a -> a -> b -> b -> b) -> b -> RangeSet a -> b
-foldRangeSet _ tip Tip = tip
-foldRangeSet fork tip (Fork _ l u lt rt) = fork l u (foldRangeSet fork tip lt) (foldRangeSet fork tip rt)
+fold :: (a -> a -> b -> b -> b) -> b -> RangeSet a -> b
+fold _ tip Tip = tip
+fold fork tip (Fork _ l u lt rt) = fork l u (fold fork tip lt) (fold fork tip rt)
 
 -- Testing Utilities
 valid :: (Ord a, Enum a) => RangeSet a -> Bool

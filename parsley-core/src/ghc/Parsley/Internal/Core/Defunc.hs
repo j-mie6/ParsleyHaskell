@@ -17,11 +17,12 @@ module Parsley.Internal.Core.Defunc (
     lamTerm, charPred
   ) where
 
-import Data.Typeable                  (Typeable, (:~:)(Refl), eqT)
-import Language.Haskell.TH.Syntax     (Lift(..))
-import Parsley.Internal.Common.Utils  (WQ(..), Code, Quapplicative(..))
-import Parsley.Internal.Core.CharPred (CharPred(..))
-import Parsley.Internal.Core.Lam      (normaliseGen, Lam(..))
+import Data.Typeable                    (Typeable, (:~:)(Refl), eqT)
+import Language.Haskell.TH.Syntax       (Lift(..))
+import Parsley.Internal.Common.RangeSet (fromRanges, empty)
+import Parsley.Internal.Common.Utils    (WQ(..), Code, Quapplicative(..))
+import Parsley.Internal.Core.CharPred   (CharPred(..), pattern Item, pattern Specific)
+import Parsley.Internal.Core.Lam        (normaliseGen, Lam(..))
 
 import qualified Parsley.Internal.Core.CharPred as CharPred (lamTerm)
 
@@ -170,11 +171,24 @@ charPred :: Defunc (Char -> Bool) -> CharPred
 charPred (EQ_H (LIFTED c)) = Specific c
 charPred (RANGES False []) = Item
 charPred (RANGES True [(l, u)]) | l == minBound, u == maxBound = Item
-charPred (RANGES True [(c, c')]) | c == c' = Specific c
-charPred (RANGES incl cs) = Ranges incl cs
+charPred (RANGES True cs) = Ranges (fromRanges cs)
+charPred (RANGES False cs) = Ranges (fromRanges (invertRanges cs))
 charPred (APP_H CONST (LIFTED True)) = Item
-charPred (APP_H CONST (LIFTED False)) = Ranges True []
+charPred (APP_H CONST (LIFTED False)) = Ranges empty
 charPred p = UserPred (_val p) (lamTerm p)
+
+invertRanges :: [(Char, Char)] -> [(Char, Char)]
+invertRanges rngs = foldr roll (\l -> [(l, maxBound)]) rngs minBound
+  where
+    roll (u, l') next l
+      -- If the lower and upper bounds are the same, there is no exclusive range
+      | l == u    = rest
+      | otherwise = (l, pred u) : rest
+      where
+        -- If the new lower-bound is the maxBound, this is the end
+        rest
+          | l' == maxBound = []
+          | otherwise      = next (succ l')
 
 adaptLam :: (Defunc a -> Defunc b) -> (Lam a -> Lam b)
 adaptLam f = lamTerm . f . defuncTerm
@@ -205,5 +219,5 @@ instance Show (Defunc a) where
   show CONST = "const"
   show (IF_S c b e) = concat ["(if ", show c, " then ", show b, " else ", show e, ")"]
   show (LAM_S _) = "f"
-  show (RANGES incl rngs) = show (Ranges incl rngs)
+  show p@(RANGES{}) = show (charPred p)
   show _ = "x"

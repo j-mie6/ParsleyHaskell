@@ -1,4 +1,4 @@
-{-# LANGUAGE DerivingStrategies, MagicHash #-}
+{-# LANGUAGE DerivingStrategies, MagicHash, UnboxedTuples #-}
 module Parsley.Internal.Common.RangeSet (
     RangeSet(..),
     empty, singleton, null, full, isSingle, extractSingle, size, sizeRanges,
@@ -151,22 +151,22 @@ insert x t@(Fork _ l u lt rt)
     {-# INLINE fuseLeft #-}
     fuseLeft !x !u Tip !rt = fork x u lt rt
     fuseLeft x u lt rt
-      | (l, x') <- unsafeMaxRange lt
+      | (# !l, !x' #) <- unsafeMaxRange lt
       -- we know there exists an element larger than x'
       -- if x == x' or x == x' + 1, we fuse
       -- x >= x' since it is one less than x''s strict upper bound
       -- x >= x' && (x == x' || x == x' + 1) === x >= x' && x <= x' + 1
-      , x <= succ x' = balanceR l u (unsafeDeleteRange l x' lt) rt
+      , x <= succ x' = balanceR l u (unsafeDeleteR lt) rt
       | otherwise    = fork x u lt rt
     {-# INLINE fuseRight #-}
     fuseRight !l !x !lt Tip = fork l x lt rt
     fuseRight l x lt rt
-      | (x', u) <- unsafeMinRange rt
+      | (# !x', !u #) <- unsafeMinRange rt
       -- we know there exists an element smaller than x'
       -- if x == x' or x == x' - 1, we fuse
       -- x <= x' since it is one greater than x''s strict lower bound,
       -- x <= x' && (x == x' || x == x' - 1) === x <= x' && x >= x' - 1
-      , x >= pred x' = balanceL l u lt (unsafeDeleteRange x' u rt)
+      , x >= pred x' = balanceL l u lt (unsafeDeleteL rt)
       | otherwise    = fork l x lt rt
 
 {-# INLINEABLE delete #-}
@@ -192,8 +192,8 @@ delete x t@(Fork h l u lt rt) =
     -- Both lt and rt are known to be non-empty
     -- We'll pull the new parent element arbitrarily from the right
     pullup lt rt  =
-      let (l, u) = unsafeMinRange rt
-          rt' = unsafeDeleteRange l u rt
+      let (# !l, !u #) = unsafeMinRange rt
+          rt' = unsafeDeleteL rt
       in balanceL l u lt rt'
 
     {- Fission breaks a node into two new ranges
@@ -203,57 +203,70 @@ delete x t@(Fork h l u lt rt) =
     fission !l1 !x !u2 !lt !rt =
       let u1 = pred x
           l2 = succ x
-          rt' = unsafeInsertRange l2 u2 rt
+          rt' = unsafeInsertL l2 u2 rt
       in balanceR l1 u1 lt rt'
 
 {-|
-This inserts a range which does not overlap with any other range within the tree.
+Inserts an range at the left-most position in the tree.
+It *must* not overlap with any other range within the tree.
 It *must* be /known/ not to exist within the tree.
 -}
-{-# INLINEABLE unsafeInsertRange #-}
-unsafeInsertRange :: Ord a => a -> a -> RangeSet a -> RangeSet a
-unsafeInsertRange l u Tip = single l u
-unsafeInsertRange l u (Fork _ l' u' lt rt)
-  | u < l' = balanceL l' u' (unsafeInsertRange l u lt) rt
-  | otherwise = balanceR l' u' lt (unsafeInsertRange l u rt)
+{-# INLINEABLE unsafeInsertL #-}
+unsafeInsertL :: a -> a -> RangeSet a -> RangeSet a
+unsafeInsertL l u Tip = single l u
+unsafeInsertL l u (Fork _ l' u' lt rt) = balanceL l' u' (unsafeInsertL l u lt) rt
 
 {-|
-This deletes a range which occurs /exactly/ as specific at the extremities of the tree.
-It *must not* be used with an empty tree, and it *must not* be used with a range that may
-overlap several elements or be contained within another range. The range to be removed *must* occur
-at a semi-leaf node (with at least one Tip).
+Inserts an range at the right-most position in the tree.
+It *must* not overlap with any other range within the tree.
+It *must* be /known/ not to exist within the tree.
 -}
-{-# INLINEABLE unsafeDeleteRange #-}
-unsafeDeleteRange :: Ord a => a -> a -> RangeSet a -> RangeSet a
-unsafeDeleteRange !l !u (Fork _ l' u' lt Tip) | l == l', u == u' = lt
-unsafeDeleteRange l u (Fork _ l' u' Tip rt) | l == l', u == u' = rt
-unsafeDeleteRange l u t@(Fork _ l' u' lt rt)
- | l < l' = balanceR l' u' (unsafeDeleteRange l u lt) rt
- | u > u' = balanceL l' u' lt (unsafeDeleteRange l u rt)
- | otherwise = t
-unsafeDeleteRange _ _ Tip = error "unsafeDeleteRange called on empty tree"
+{-# INLINEABLE unsafeInsertR #-}
+unsafeInsertR :: a -> a -> RangeSet a -> RangeSet a
+unsafeInsertR l u Tip = single l u
+unsafeInsertR l u (Fork _ l' u' lt rt) = balanceR l' u' lt (unsafeInsertR l u rt)
+
+{-|
+This deletes the left-most range of the tree.
+It *must not* be used with an empty tree.
+-}
+{-# INLINEABLE unsafeDeleteL #-}
+unsafeDeleteL :: RangeSet a -> RangeSet a
+unsafeDeleteL (Fork _ _ _ Tip rt) = rt
+unsafeDeleteL (Fork _ l u lt rt) = balanceR l u (unsafeDeleteL lt) rt
+unsafeDeleteL _ = error "unsafeDeleteL called on empty tree"
+
+{-|
+This deletes the right-most range of the tree.
+It *must not* be used with an empty tree.
+-}
+{-# INLINEABLE unsafeDeleteR #-}
+unsafeDeleteR :: RangeSet a -> RangeSet a
+unsafeDeleteR (Fork _ _ _ lt Tip) = lt
+unsafeDeleteR (Fork _ l u lt rt) = balanceL l u lt (unsafeDeleteR rt)
+unsafeDeleteR _ = error "unsafeDeleteR called on empty tree"
 
 {-# INLINE findMin #-}
-findMin :: Ord a => RangeSet a -> Maybe a
+findMin :: RangeSet a -> Maybe a
 findMin Tip = Nothing
-findMin t = Just (fst (unsafeMinRange t))
+findMin t = let (# !m, !_ #) = unsafeMinRange t in Just m
 
 -- | Should /not/ be called with an empty tree!
 {-# INLINEABLE unsafeMinRange #-}
-unsafeMinRange :: Ord a => RangeSet a -> (a, a)
-unsafeMinRange (Fork _ l u Tip _) = (l, u)
+unsafeMinRange :: RangeSet a -> (# a, a #)
+unsafeMinRange (Fork _ l u Tip _) = (# l, u #)
 unsafeMinRange (Fork _ _ _ lt _) = unsafeMinRange lt
 unsafeMinRange Tip = error "unsafeMinRange called on empty tree"
 
 {-# INLINE findMax #-}
-findMax :: Ord a => RangeSet a -> Maybe a
+findMax :: RangeSet a -> Maybe a
 findMax Tip = Nothing
-findMax t = Just (snd (unsafeMaxRange t))
+findMax t = let (# !_, !m #) = unsafeMaxRange t in Just m
 
 -- | Should /not/ be called with an empty tree!
 {-# INLINEABLE unsafeMaxRange #-}
-unsafeMaxRange :: Ord a => RangeSet a -> (a, a)
-unsafeMaxRange (Fork _ l u _ Tip) = (l, u)
+unsafeMaxRange :: RangeSet a -> (# a, a #)
+unsafeMaxRange (Fork _ l u _ Tip) = (# l, u #)
 unsafeMaxRange (Fork _ _ _ _ rt) = unsafeMaxRange rt
 unsafeMaxRange Tip = error "unsafeMaxRange called on empty tree"
 
@@ -314,15 +327,51 @@ union t = foldr insert t . elems
 
 -- TODO: This can be /much much/ better
 intersection :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
-intersection t = fromList . filter (flip member t) . elems -- difference t . complement <- good if difference is optimised
+intersection t = fromList . filter (flip member t) . elems
+                 -- difference t . complement <- good if difference is optimised
 
 -- TODO: This can be /much much/ better
 difference :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 difference t = foldr delete t . elems
 
--- TODO: This can be /much much/ better
-complement :: (Bounded a, Enum a, Ord a) => RangeSet a -> RangeSet a
-complement = fromList . unelems
+data StrictMaybe a = SJust !a | SNothing
+
+{- INLINEABLE complement #-}
+complement :: forall a. (Bounded a, Enum a, Eq a) => RangeSet a -> RangeSet a
+complement Tip = single minBound maxBound
+complement (Fork _ l u Tip Tip) | l == minBound, u == maxBound = Tip
+complement t@(Fork{}) = t'''
+  where
+    (# !min, !min' #) = unsafeMinRange t
+
+    -- The complement of a tree is at most 1 larger or smaller than the original
+    -- if both min and max are minBound and maxBound, it will shrink
+    -- if neither min or max are minBound or maxBound, it will grow
+    -- otherwise, the tree will not change size
+    -- The insert or shrink will happen at an extremity, and rebalance need only occur along the spine
+    (# !t', !initial #) | min == minBound = (# unsafeDeleteL t, succ min' #) -- this is safe, because we've checked for the maxSet case already
+                        | otherwise       = (# t , minBound #)
+    (# !t'', !final #) = go initial t'
+    t''' | SJust x <- final = unsafeInsertR x maxBound t''
+         | otherwise        = t''
+
+    safeSucc !x
+      | x == maxBound = SNothing
+      | otherwise     = SJust (succ x)
+
+    -- the argument l should not be altered, it /must/ be the correct lower bound
+    -- the return /must/ be the next correct lower bound
+    go :: a -> RangeSet a -> (# RangeSet a, StrictMaybe a #)
+    go !l Tip = (# Tip, SJust l #)
+    go l (Fork h u l'' lt Tip) =
+      let (# !lt', SJust l' #) = go l lt
+          !t' = Fork h l' (pred u) lt' Tip
+      in  (# t', safeSucc l'' #)
+    go l (Fork h u l'' lt rt) =
+      let (# !lt', SJust l' #) = go l lt
+          (# !rt', !l''' #) = go (succ l'') rt -- this is safe, because we know the right-tree is not Tip
+          !t' = Fork h l' (pred u) lt' rt'
+      in  (# t', l''' #)
 
 elems :: Enum a => RangeSet a -> [a]
 elems t = fold (\l u lt rt -> lt . (range l u ++) . rt) id t []

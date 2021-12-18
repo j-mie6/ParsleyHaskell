@@ -3,7 +3,7 @@ module CommonTest.RangeSet where
 import Test.Tasty (testGroup, TestTree)
 import Test.Tasty.HUnit ( testCase, (@?=) )
 import Test.Tasty.QuickCheck
-  ( listOf,
+  ( listOf, chooseEnum,
     (===),
     (==>),
     (.&&.),
@@ -25,9 +25,15 @@ import Data.Word (Word8)
 
 deriving instance Generic (RangeSet a)
 
+data Digit = Zero | One | Two | Three | Four | Five | Six | Seven | Eight | Nine deriving (Ord, Eq, Enum, Bounded, Show, Generic)
+
 instance (Arbitrary a, Enum a, Ord a) => Arbitrary (RangeSet a) where
   arbitrary = fmap fromList (listOf arbitrary)
   shrink = filter valid . genericShrink
+
+instance Arbitrary Digit where
+  arbitrary = chooseEnum (Zero, Nine)
+  shrink n = [Zero .. pred n]
 
 tests :: TestTree
 tests = testGroup "RangeSet" [
@@ -38,8 +44,8 @@ tests = testGroup "RangeSet" [
     deleteTests,
     fromListTests,
     testProperty "elems and unelems shoudld be disjoint" $ elemUnelemDisjoint @Word8,
-    testProperty "complement . complement = id" $ complementInverse @Word8,
-    testProperty "unelems == elems . complement" $ complementElemsInverse @Word8,
+    testProperty "complement . complement = id" $ complementInverse @Digit,
+    testProperty "unelems == elems . complement" $ complementElemsInverse @Digit,
     testProperty "findMin should find the minimum" $ findMinMinimum @Word,
     testProperty "findMax should find the maximum" $ findMaxMaximum @Int,
     testProperty "union should union" $ uncurry (unionProperty @Int),

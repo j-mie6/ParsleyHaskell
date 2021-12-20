@@ -11,7 +11,7 @@ import Data.Void                                      (Void)
 import Control.Monad                                  (forM, liftM2)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc(LAM, SAME), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc(LAM, SAME, INPUT), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..), PosSelector(..))
@@ -122,10 +122,10 @@ evalHandler (Instructions.Same _ yes _ no) =
         Machine (evalChoices [LAM (Abs id)] [Machine (evalPop yes)] no)))))))
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
-evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (FREEVAR (input γ)) (operands γ)})
+evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ) (pos γ)) (operands γ)})
 
 evalSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
-evalSeek (Machine k) = k <&> \mk γ -> let Op input xs = operands γ in mk (γ {operands = xs, input = genDefunc input})
+evalSeek (Machine k) = k <&> \mk γ -> let Op (INPUT input pos) xs = operands γ in mk (γ {operands = xs, input = input, pos = pos})
 
 evalCase :: Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
 evalCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->

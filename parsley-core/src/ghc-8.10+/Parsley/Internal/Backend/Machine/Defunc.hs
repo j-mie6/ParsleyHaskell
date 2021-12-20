@@ -99,9 +99,9 @@ Generate the Haskell code that represents this defunctionalised value.
 @since 1.0.0.0
 -}
 genDefunc :: Defunc a -> Code a
-genDefunc (LAM x)    = normaliseGen x
-genDefunc BOTTOM      = [||undefined||]
-genDefunc (INPUT _)  = error "Cannot materialise an input in the regular way"
+genDefunc (LAM x) = normaliseGen x
+genDefunc BOTTOM  = [||undefined||]
+genDefunc INPUT{} = error "Cannot materialise an input in the regular way"
 
 {-|
 Pattern that normalises a `Lam` before returning it.

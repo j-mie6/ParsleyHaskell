@@ -29,16 +29,18 @@ import GHC.Prim                                    (plusWord#, and#, or#, word2I
 #endif
                                                    )
 
+data CharClass = Tab | Newline | Regular
+
 {-|
 Given a position and a character, returns the representation of the updated position.
 
 @since 1.8.0.0
 -}
-updatePos :: Maybe Char -> Code Pos -> Code Char -> Code Pos
-updatePos Nothing pos c = [||updatePos# $$pos $$c||]
-updatePos (Just '\t') pos _ = tab pos
-updatePos (Just '\n') pos _ = newline pos
-updatePos (Just _)    pos _ = other pos
+updatePos :: Maybe CharClass -> Code Pos -> Code Char -> Code Pos
+updatePos Nothing        pos c = [||updatePos# $$pos $$c||]
+updatePos (Just Tab)     pos _ = tab pos
+updatePos (Just Newline) pos _ = newline pos
+updatePos (Just Regular) pos _ = other pos
 
 {-|
 The initial position used by the parser. This is some representation of (1, 1).

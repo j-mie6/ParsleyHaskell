@@ -1,14 +1,14 @@
 {-# LANGUAGE PatternSynonyms, ViewPatterns #-}
 module Parsley.Internal.Core.CharPred (
     CharPred(..), pattern Item, pattern Specific,
-    apply, andPred, orPred, diffPred,
+    apply, andPred, orPred, diffPred, optimisePredGiven,
     members, nonMembers,
     lamTerm
   ) where
 
 import Prelude hiding (null)
 
-import Parsley.Internal.Common.RangeSet (RangeSet, elems, unelems, fromRanges, full, member, fold, null, union, extractSingle, singleton, intersection, difference)
+import Parsley.Internal.Common.RangeSet (RangeSet, elems, unelems, fromRanges, full, member, fold, null, union, extractSingle, singleton, intersection, difference, isSubsetOf, sizeRanges)
 import Parsley.Internal.Core.Lam        (Lam(Abs, App, Var, T, F, If))
 
 data CharPred where
@@ -30,7 +30,21 @@ apply (Ranges rngs) c = member c rngs
 andPred :: CharPred -> CharPred -> CharPred
 andPred (UserPred f lf) p = UserPred (\c -> f c && apply p c) (Abs $ \c -> andLam (App lf c) (App (lamTerm p) c))
 andPred p (UserPred f lf) = UserPred (\c -> apply p c && f c) (Abs $ \c -> andLam (App (lamTerm p) c) (App lf c))
+-- TODO: These won't be needed when RangeSet implements a cheap intersection
+andPred Item p = p
+andPred p Item = p
 andPred (Ranges rngs1) (Ranges rngs2) = Ranges (rngs1 `intersection` rngs2)
+
+-- If the known given pred on a character is tighter than the pred we want to use it can be optimised
+-- Otherwise, we can return the smaller predicate
+optimisePredGiven :: CharPred -> CharPred -> CharPred
+optimisePredGiven (Ranges pred) (Ranges given)
+  | isSubsetOf given pred = Item
+  | sizeRanges inter <= sizeRanges pred = Ranges inter
+  | otherwise = Ranges pred
+  where
+    inter = intersection given pred
+optimisePredGiven p _ = p
 
 orPred :: CharPred -> CharPred -> CharPred
 orPred (UserPred f lf) p = UserPred (\c -> f c || apply p c) (Abs $ \c -> orLam (App lf c) (App (lamTerm p) c))

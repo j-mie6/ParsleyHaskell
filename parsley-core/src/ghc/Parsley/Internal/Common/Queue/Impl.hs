@@ -68,6 +68,17 @@ dequeue q@(outs -> [])
   | otherwise   = error "dequeue of empty queue"
 
 {-|
+modifies the head of the queue, without removal. Returns the old head
+
+@since 2.1.0.0
+-}
+poke :: (a -> a) -> Queue a -> (a, Queue a)
+poke f q@(outs -> (x:outs')) = (x, q {outs = f x : outs'})
+poke f q@(outs -> [])
+  | insz q /= 0 = poke f (Queue (insz q) (reverse (ins q)) 0 [])
+  | otherwise   = error "poke of empty queue"
+
+{-|
 Is the queue empty?
 
 @since 1.5.0.0

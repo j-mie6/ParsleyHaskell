@@ -1,10 +1,11 @@
-{-# LANGUAGE DerivingStrategies, MagicHash, UnboxedTuples #-}
+{-# LANGUAGE DerivingStrategies, MagicHash, UnboxedTuples, RoleAnnotations #-}
 module Parsley.Internal.Common.RangeSet (
     RangeSet(..),
     empty, singleton, null, full, isSingle, extractSingle, size, sizeRanges,
     member, notMember, findMin, findMax,
     insert, delete,
     union, intersection, difference, complement,
+    isSubsetOf, isProperSubsetOf,
     elems, unelems, fromRanges, insertRange, fromList,
     fold,
     -- Testing
@@ -32,7 +33,8 @@ range l u = [l..u]
 
 data RangeSet a = Fork {-# UNPACK #-} !Int !a !a !(RangeSet a) !(RangeSet a)
                 | Tip
-                deriving stock (Eq, Show)
+                deriving stock Show
+type role RangeSet nominal
 
 {-# INLINE empty #-}
 empty :: RangeSet a
@@ -336,7 +338,7 @@ difference t = foldr delete t . elems
 
 data StrictMaybe a = SJust !a | SNothing
 
-{- INLINEABLE complement #-}
+{-# INLINEABLE complement #-}
 complement :: forall a. (Bounded a, Enum a, Eq a) => RangeSet a -> RangeSet a
 complement Tip = single minBound maxBound
 complement (Fork _ l u Tip Tip) | l == minBound, u == maxBound = Tip
@@ -373,8 +375,18 @@ complement t@(Fork{}) = t'''
           !t' = Fork h l' (pred u) lt' rt'
       in  (# t', l''' #)
 
+isProperSubsetOf :: (Enum a, Ord a, Num a) => RangeSet a -> RangeSet a -> Bool
+isProperSubsetOf t1 t2 = size t1 < size t2 && isSubsetOf t1 t2
+
+-- TODO: This can be done /much much/ better
+isSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
+isSubsetOf t1 t2 = intersection t1 t2 == t1
+
 elems :: Enum a => RangeSet a -> [a]
 elems t = fold (\l u lt rt -> lt . (range l u ++) . rt) id t []
+
+ranges :: RangeSet a -> [(a, a)]
+ranges t = fold (\l u lt rt -> lt . ((l, u) :) . rt) id t []
 
 unelems :: (Bounded a, Enum a, Eq a) => RangeSet a -> [a]
 unelems t = fold fork tip t minBound maxBound []
@@ -401,6 +413,10 @@ fromList = foldr insert empty
 fold :: (a -> a -> b -> b -> b) -> b -> RangeSet a -> b
 fold _ tip Tip = tip
 fold fork tip (Fork _ l u lt rt) = fork l u (fold fork tip lt) (fold fork tip rt)
+
+-- Instances
+instance Eq a => Eq (RangeSet a) where
+  t1 == t2 = {-(size t1 == size t2) && (-}ranges t1 == ranges t2--)
 
 -- Testing Utilities
 valid :: (Ord a, Enum a) => RangeSet a -> Bool

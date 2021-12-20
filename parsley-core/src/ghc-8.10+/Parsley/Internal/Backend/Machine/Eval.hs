@@ -39,7 +39,7 @@ import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
-import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm)
+import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm, optimisePredGiven)
 import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
@@ -129,16 +129,17 @@ evalSat p k@(Machine k') = do
   where
     satFetch :: Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     satFetch mk = reader $ \ctx γ ->
-      sat (ap (LAM (lamTerm p))) (readChar ctx (fetch (input γ)))
-                                 (continue mk γ)
-                                 (raise γ)
+      readChar ctx p (fetch (input γ)) $ \c staOldPred staPosPred input' ctx' ->
+        let staPredC' = optimisePredGiven p staOldPred
+        in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos input' c staPosPred) ctx')
+                                                (raise γ)
 
     emitCheckAndFetch :: Int -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     emitCheckAndFetch n mk = do
       sat <- satFetch mk
       return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (off (input γ))
 
-    continue mk γ c input' = run mk (γ {input = updatePos input' p, operands = Op c (operands γ)})
+    continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
 evalEmpt :: MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -252,6 +253,5 @@ evalMeta (PrefetchChar check) k =
   where
     mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (off (input γ))
     mkCheck False k = k
-    -- TODO: This is annoying, ideally, the position update is delayed until more information is available!
     prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
 evalMeta BlockCoins (Machine k) = k

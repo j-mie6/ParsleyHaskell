@@ -121,11 +121,11 @@ exist or does not match.
 @since 1.8.0.0
 -}
 sat :: (Defunc Char -> Defunc Bool)                        -- ^ Predicate to test the character with.
-    -> ((Code Char -> Input o -> aux -> Code b) -> Code b) -- ^ The source of the character
-    -> (Defunc Char -> Input o -> aux -> Code b)           -- ^ Code to execute on success.
+    -> Code Char                                           -- ^ The character to test against.
+    -> (Defunc Char -> Code b)                             -- ^ Code to execute on success.
     -> Code b                                              -- ^ Code to execute on failure.
     -> Code b
-sat p src good bad = src $ \c input' aux -> let v = FREEVAR c in _if (p v) (good v input' aux) bad
+sat p c good bad = let v = FREEVAR c in _if (p v) (good v) bad
 
 {-|
 Consumes the next character and adjusts the offset to match.
@@ -134,7 +134,7 @@ Consumes the next character and adjusts the offset to match.
 -}
 fetch :: (?ops :: InputOps (Rep o))
       => Input o -> (Code Char -> Input o -> Code b) -> Code b
-fetch input k = next (offset (off input)) $ \c offset' -> k c (consume c offset' input)
+fetch input k = next (offset (off input)) $ \c offset' -> k c (consume offset' input)
 
 {-|
 Emits a length check for a number of characters \(n\) in the most efficient

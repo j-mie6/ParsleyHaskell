@@ -1,4 +1,4 @@
-{-# LANGUAGE UnboxedTuples, MagicHash, RecordWildCards #-}
+{-# LANGUAGE UnboxedTuples, MagicHash, RecordWildCards, DerivingStrategies #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Input
 Description : Packaging of offsets and positions.
@@ -15,7 +15,7 @@ module Parsley.Internal.Backend.Machine.Types.Input (module Parsley.Internal.Bac
 
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset(offset), mkOffset, moveOne, moveN)
-import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPos, toDynPos, fromDynPos, contribute, force, update)
+import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPos, toDynPos, fromDynPos, force, update)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common.Utils                              (Code)
 import Parsley.Internal.Core.CharPred                             (CharPred)
@@ -26,9 +26,10 @@ Packages known static information about offsets (via `Offset`) with static infor
 @since 1.8.0.0
 -}
 data Input o = Input {
-    off  :: Offset o,
-    pos :: StaPos
+    off  :: !(Offset o),
+    pos :: !StaPos
   }
+  deriving stock Show
 
 {-|
 Packages a dynamic offset with a dynamic position.
@@ -36,24 +37,23 @@ Packages a dynamic offset with a dynamic position.
 @since 1.8.0.0
 -}
 data Input# o = Input# {
-    off#  :: Code (Rep o),
-    pos#  :: DynPos
+    off#  :: !(Code (Rep o)),
+    pos#  :: !DynPos
   }
 
 mkInput :: Code (Rep o) -> DynPos -> Input o
 mkInput off = toInput 0 . Input# off
 
-consume :: Code Char -> Code (Rep o) -> Input o -> Input o
-consume c offset' input = input {
-    off = moveOne (off input) offset',
-    pos = contribute (pos input) c
+consume :: Code (Rep o) -> Input o -> Input o
+consume offset' input = input {
+    off = moveOne (off input) offset'
   }
 
 forcePos :: Input o -> (DynPos -> Input o -> Code r) -> Code r
 forcePos input k = force (pos input) (\dp sp -> k dp (input { pos = sp }))
 
-updatePos :: Input o -> CharPred -> Input o
-updatePos input p = input { pos = update (pos input) p }
+updatePos :: Input o -> Code Char -> CharPred -> Input o
+updatePos input c p = input { pos = update (pos input) c p }
 
 -- TODO: Documentation: This function can refine the input passed forward during a call based on the known characteristics about the function.
 chooseInput :: InputCharacteristic -> Word -> Input o -> Input# o -> Input o

@@ -1,4 +1,4 @@
-{-# LANGUAGE StandaloneDeriving, DeriveAnyClass, DeriveGeneric, TypeApplications, BangPatterns, TemplateHaskell #-}
+{-# LANGUAGE StandaloneDeriving, DeriveAnyClass, DeriveGeneric, BangPatterns #-}
 {-# OPTIONS_GHC -ddump-simpl -ddump-to-file #-}
 module Main where
 

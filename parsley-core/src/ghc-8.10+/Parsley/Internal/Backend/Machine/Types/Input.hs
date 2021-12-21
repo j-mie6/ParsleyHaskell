@@ -15,7 +15,7 @@ module Parsley.Internal.Backend.Machine.Types.Input (module Parsley.Internal.Bac
 
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset(offset), mkOffset, moveOne, moveN)
-import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPos, BoxedPos, toDynPos, fromDynPos, fromStaPos, force, update)
+import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPos, toDynPos, fromDynPos, fromStaPos, force, update)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common.Utils                              (Code)
 import Parsley.Internal.Core.CharPred                             (CharPred)
@@ -41,7 +41,7 @@ data Input# o = Input# {
     pos#  :: !DynPos
   }
 
-mkInput :: Code (Rep o) -> BoxedPos -> Input o
+mkInput :: Code (Rep o) -> (Word, Word) -> Input o
 mkInput off = Input (mkOffset off 0) . fromStaPos
 
 consume :: Code (Rep o) -> Input o -> Input o

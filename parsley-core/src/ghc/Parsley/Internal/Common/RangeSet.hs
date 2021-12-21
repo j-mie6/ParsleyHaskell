@@ -70,6 +70,7 @@ height :: RangeSet a -> Int
 height Tip = 0
 height (Fork h _ _ _ _) = h
 
+-- TODO: Size is more important now, make it O(1)!
 size :: (Num a, Enum a) => RangeSet a -> Int
 size = fold (\(!l) (!u) szl szr -> szl + szr + rangeSize l u) 0
 
@@ -329,7 +330,7 @@ union t = foldr insert t . elems
 
 -- TODO: This can be /much much/ better
 intersection :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
-intersection t = fromList . filter (flip member t) . elems
+intersection t = fromList . filter (`member` t) . elems
                  -- difference t . complement <- good if difference is optimised
 
 -- TODO: This can be /much much/ better
@@ -342,7 +343,7 @@ data StrictMaybe a = SJust !a | SNothing
 complement :: forall a. (Bounded a, Enum a, Eq a) => RangeSet a -> RangeSet a
 complement Tip = single minBound maxBound
 complement (Fork _ l u Tip Tip) | l == minBound, u == maxBound = Tip
-complement t@(Fork{}) = t'''
+complement t@Fork{} = t'''
   where
     (# !min, !min' #) = unsafeMinRange t
 
@@ -416,6 +417,7 @@ fold fork tip (Fork _ l u lt rt) = fork l u (fold fork tip lt) (fold fork tip rt
 
 -- Instances
 instance Eq a => Eq (RangeSet a) where
+  -- TODO: When size is faster, add the size check in
   t1 == t2 = {-(size t1 == size t2) && (-}ranges t1 == ranges t2--)
 
 -- Testing Utilities

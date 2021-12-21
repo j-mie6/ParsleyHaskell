@@ -88,9 +88,9 @@ may form part of the generated code.
 data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))              -- ^ Map of subroutine bindings.
                      , φs         :: !(DMap ΦVar (QJoin s o a))                    -- ^ Map of join point bindings.
                      , σs         :: !(DMap ΣVar (Reg s))                          -- ^ Map of available registers.
-                     , debugLevel :: !Int                                          -- ^ Approximate depth of debug combinator.
-                     , coins      :: !Int                                          -- ^ Number of tokens free to consume without length check.
-                     , offsetUniq :: !Word                                         -- ^ Next unique offset identifier.
+                     , debugLevel :: {-# UNPACK #-} !Int                           -- ^ Approximate depth of debug combinator.
+                     , coins      :: {-# UNPACK #-} !Int                           -- ^ Number of tokens free to consume without length check.
+                     , offsetUniq :: {-# UNPACK #-} !Word                          -- ^ Next unique offset identifier.
                      , piggies    :: !(Queue Coins)                                -- ^ Queue of future length check credit.
                      , knownChars :: !(RewindQueue (Code Char, CharPred, Input o)) -- ^ Characters that can be reclaimed on backtrack.
                      }

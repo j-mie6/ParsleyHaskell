@@ -18,9 +18,9 @@ module Parsley.Internal.Backend.Machine.PosOps (module Parsley.Internal.Backend.
 #define FULL_WIDTH_POSITIONS
 #endif
 
-import Parsley.Internal.Backend.Machine.Types.Base (Pos)
+import Parsley.Internal.Backend.Machine.Types.Base (Pos, BoxedPos)
 import Parsley.Internal.Common                     (Code)
-import GHC.Exts                                    (Int(..){-, Word(W#)-})
+import GHC.Exts                                    (Int(..), Word(W#))
 import GHC.Prim                                    (plusWord#, and#, or#, word2Int#,
 #ifdef FULL_WIDTH_POSITIONS
                                                     minusWord#
@@ -47,7 +47,9 @@ The initial position used by the parser. This is some representation of (1, 1).
 
 @since 1.8.0.0
 -}
-initPos :: Code Pos
+initPos :: BoxedPos
+
+unbox :: BoxedPos -> Pos
 
 {-# INLINEABLE updatePos# #-}
 {-|
@@ -78,8 +80,12 @@ Given the opaque representation of a position, extracts the column number out of
 -}
 extractCol :: Code Pos -> Code Int
 
+liftPos :: Pos -> Code Pos
+
 #ifndef FULL_WIDTH_POSITIONS
-initPos = [|| 0x00000001_00000001## ||]
+initPos = 0x00000001_00000001
+
+unbox (W# p) = p
 
 updatePos# pos '\n' = (pos `and#` 0xffffffff_00000000##) `plusWord#` 0x00000001_00000001##
 updatePos# pos '\t' = ((pos `plusWord#` 0x00000000_00000003##) `and#` 0xffffffff_fffffffc##) `or#` 0x00000000_00000001##
@@ -94,8 +100,12 @@ other qpos = [|| $$qpos `plusWord#` 0x00000000_00000001## ||]
 extractLine qpos = [||I# (word2Int# ($$qpos `uncheckedShiftRL#` 32#))||]
 extractCol qpos = [||I# (word2Int# ($$qpos `and#` 0x00000000_ffffffff##))||]
 
+liftPos p = [||p||]
+
 #else
-initPos = [|| (# 1##, 1## #) ||]
+initPos = (1, 1)
+
+unbox (W# line, W# col) = (# line, col #)
 
 updatePos# (# line, _ #)   '\n' = (# line `plusWord#` 1##, 1## #)
 updatePos# (# line, col #) '\t' = (# line, ((col `plusWord#` 3##) `and#` (0## `minusWord#` 4##)) `or#` 1## #) -- nearest tab boundary `c + (4 - (c - 1) % 4)`
@@ -109,4 +119,6 @@ other qpos = [|| case $$qpos of (# line, col #) -> (# line, col `plusWord#` 1## 
 
 extractLine qpos = [|| case $$qpos of (# line, _ #) -> I# (word2Int# line) ||]
 extractCol qpos = [|| case $$qpos of (# _, col #) -> I# (word2Int# col) ||]
+
+liftPos (# line, col #) = [||(# line, col #)||]
 #endif

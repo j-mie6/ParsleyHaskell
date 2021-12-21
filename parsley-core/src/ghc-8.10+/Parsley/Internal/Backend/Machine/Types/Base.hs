@@ -36,8 +36,10 @@ The type of positions within a parser. This may or may not be packed into a sing
 -}
 #ifndef FULL_WIDTH_POSITIONS
 type Pos = Word#
+type BoxedPos = Word
 #else
 type Pos = (# Word#, Word# #)
+type BoxedPos = (Word, Word)
 #endif
 
 {-|

@@ -338,7 +338,7 @@ intersection t = fromList . filter (`member` t) . elems
                  -- difference t . complement <- good if difference is optimised
 
 -- TODO: This can be done better
-disjoint :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
+disjoint :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 disjoint t1 t2 = null (intersection t1 t2)
 
 -- TODO: This can be /much much/ better

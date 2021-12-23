@@ -29,9 +29,9 @@ main = do
   xss <- forM [1..10] $ \n -> generate (vectorOf (n * 10) (chooseInt (0, n * 20)))
   condensedMain [
       rangeFromList,
-      fromListBench xss,
-      rangeMemberBench,
-      setMemberBench
+      rangeMemberDeleteBench,
+      setMemberDeleteBench,
+      fromListBench xss
     ]
 
 rangeFromList :: Benchmark
@@ -72,8 +72,8 @@ ys1 = [0..2048]
 ys2 = [0..27]
 ys3 = ['\x00'..'\xff']
 
-rangeMemberBench :: Benchmark
-rangeMemberBench =
+rangeMemberDeleteBench :: Benchmark
+rangeMemberDeleteBench =
   env (return (RangeSet.fromList xs1,
                RangeSet.fromList xs2,
                RangeSet.fromList xs3,
@@ -96,8 +96,8 @@ rangeMemberBench =
     f ys t = List.foldl' (\ !_ y -> RangeSet.member y t) False ys
     g ys t = List.foldl' (\ !t y -> RangeSet.delete y t) t ys
 
-setMemberBench :: Benchmark
-setMemberBench =
+setMemberDeleteBench :: Benchmark
+setMemberDeleteBench =
   env (return (Set.fromList xs1,
                Set.fromList xs2,
                Set.fromList xs3,

@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeApplications, StandaloneDeriving, DeriveGeneric #-}
+{-# LANGUAGE TypeApplications, StandaloneDeriving, DeriveGeneric, MonoLocalBinds #-}
 module CommonTest.RangeSet where
 import Test.Tasty (testGroup, TestTree)
 import Test.Tasty.HUnit ( testCase, (@?=) )

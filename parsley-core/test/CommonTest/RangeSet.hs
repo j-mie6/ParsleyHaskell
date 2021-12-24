@@ -48,6 +48,8 @@ tests = testGroup "RangeSet" [
     testProperty "unelems == elems . complement" $ complementElemsInverse @Digit,
     testProperty "findMin should find the minimum" $ findMinMinimum @Word,
     testProperty "findMax should find the maximum" $ findMaxMaximum @Int,
+    testProperty "allLess should find everything strictly less than a value" $ allLessMin @Word,
+    testProperty "allMore should find everything strictly more than a value" $ allMoreMax @Word,
     testProperty "union should union" $ uncurry (unionProperty @Int),
     testProperty "intersection should intersect" $ uncurry (intersectionProperty @Char),
     testProperty "difference should differentiate" $ uncurry (differenceProperty @Word)
@@ -139,6 +141,12 @@ differenceProperty t1 t2 = not (null t1 && null t2) ==>
   forAll (elements (elems t1 ++ elems t2)) (\x ->
          (member x t1 && not (member x t2)) === member x (t1 `difference` t2))
   .&&. valid (t1 `difference` t2)
+
+allLessMin :: (Ord a, Enum a, Show a) => RangeSet a -> a -> Property
+allLessMin t x = allLess x t === fromList (filter (< x) (elems t))
+
+allMoreMax :: (Ord a, Enum a, Show a) => RangeSet a -> a -> Property
+allMoreMax t x = allMore x t === fromList (filter (> x) (elems t))
 
 {-
     fromRanges, insertRange

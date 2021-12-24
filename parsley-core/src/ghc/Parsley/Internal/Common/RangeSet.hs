@@ -6,6 +6,7 @@ module Parsley.Internal.Common.RangeSet (
     insert, delete,
     union, intersection, difference, disjoint, complement,
     isSubsetOf, isProperSubsetOf,
+    allLess, allMore,
     elems, unelems, fromRanges, insertRange, fromList,
     fold,
     -- Testing
@@ -14,8 +15,6 @@ module Parsley.Internal.Common.RangeSet (
 
 import Prelude hiding (null)
 import Control.Applicative (liftA2)
-
-import Data.Maybe (isJust)
 
 import GHC.Exts (reallyUnsafePtrEquality#, isTrue#)
 
@@ -43,6 +42,7 @@ empty = Tip
 singleton :: a -> RangeSet a
 singleton x = single 1 x x
 
+{-# INLINE fork #-}
 fork :: Enum a => a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 fork !l !u !lt !rt = forkSz (size lt + size rt + diff l u) l u lt rt
 
@@ -61,8 +61,9 @@ full :: (Eq a, Bounded a) => RangeSet a -> Bool
 full Tip = False
 full (Fork _ _ l u _ _) = l == minBound && maxBound == u
 
-isSingle :: Eq a => RangeSet a -> Bool
-isSingle = isJust . extractSingle
+isSingle :: RangeSet a -> Bool
+isSingle (Fork _ 1 _ _ _ _) = True
+isSingle _ = False
 
 extractSingle :: Eq a => RangeSet a -> Maybe a
 extractSingle (Fork _ _ x y Tip Tip) | x == y = Just x
@@ -328,22 +329,124 @@ rotl :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 rotl !sz !l1 !u1 !p (Fork _ szr l2 u2 q r) = forkSz sz l2 u2 (forkSz (sz - szr + size q) l1 u1 p q) r
 rotl _ _ _ _ _ = error "rotr on Tip"
 
--- TODO: This can be /much much/ better
 union :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
-union t = foldr insert t . elems
+union t Tip = t
+--union t (Fork _ 1 l u _ _) = insertRange l u t
+union Tip t = t
+--union (Fork _ 1 l u _ _) t = insertRange l u t
+union t@(Fork _ _ l u lt rt) t' = case split l u t' of
+  (# lt', rt' #)
+    | ltlt' `ptrEq` lt, rtrt' `ptrEq` rt -> t
+    | otherwise                          -> link l u ltlt' rtrt'
+    where !ltlt' = lt `union` lt'
+          !rtrt' = rt `union` rt'
 
 -- TODO: This can be /much much/ better
+-- Requires link, merge, splitMember
 intersection :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 intersection t = fromList . filter (`member` t) . elems
                  -- difference t . complement <- good if difference is optimised
 
 -- TODO: This can be done better
+-- Requires splitMember
 disjoint :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 disjoint t1 t2 = null (intersection t1 t2)
 
 -- TODO: This can be /much much/ better
+-- Requires split, merge
 difference :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 difference t = foldr delete t . elems
+
+{-# INLINEABLE unsafeInsertLAdj #-}
+unsafeInsertLAdj :: (Enum a, Eq a) => Int -> a -> a -> RangeSet a -> RangeSet a
+unsafeInsertLAdj !newSz !l !u !t = case unsafeMinRange t of
+  (# !l', _ #) | l' == succ u -> unsafeFuseL newSz l t
+               | otherwise    -> unsafeInsertL newSz l u t
+
+{-# INLINEABLE unsafeInsertRAdj #-}
+unsafeInsertRAdj :: (Enum a, Eq a) => Int -> a -> a -> RangeSet a -> RangeSet a
+unsafeInsertRAdj !newSz !l !u !t = case unsafeMaxRange t of
+  (# _, !u' #) | u' == pred l -> unsafeFuseR newSz u t
+               | otherwise    -> unsafeInsertR newSz l u t
+
+{-# INLINEABLE unsafeFuseL #-}
+unsafeFuseL :: Int -> a -> RangeSet a -> RangeSet a
+unsafeFuseL !newSz !l' (Fork h sz l u lt rt) = case lt of
+  Tip -> Fork h (newSz + sz) l' u Tip rt
+  lt  -> Fork h (newSz + sz) l u (unsafeFuseL newSz l' lt) rt
+unsafeFuseL _ _ Tip = error "unsafeFuseL called on Tip"
+
+{-# INLINEABLE unsafeFuseR #-}
+unsafeFuseR :: Int -> a -> RangeSet a -> RangeSet a
+unsafeFuseR !newSz !u' (Fork h sz l u lt rt) = case rt of
+  Tip -> Fork h (newSz + sz) l u' lt Tip
+  rt  -> Fork h (newSz + sz) l u lt (unsafeFuseR newSz u' rt)
+unsafeFuseR _ _ Tip = error "unsafeFuseR called on Tip"
+
+{-# INLINABLE link #-}
+link :: (Enum a, Eq a) => a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+link !l !u Tip Tip = single (diff l u) l u
+link l u Tip rt = unsafeInsertLAdj (diff l u) l u rt
+link l u lt Tip = unsafeInsertRAdj (diff l u) l u lt
+link l u lt rt = go (diff l' u') l' u' lt' rt'
+  where
+    -- we have to check for fusion up front
+    (# !lmaxl, !lmaxu #) = unsafeMaxRange lt
+    (# !rminl, !rminu #) = unsafeMinRange rt
+
+    (# !l', !lt' #) | lmaxu == pred l = (# lmaxl, unsafeDeleteR (diff lmaxl lmaxu) lt #)
+                    | otherwise       = (# l, lt #)
+
+    (# !u', !rt' #) | rminl == succ u = (# rminu, unsafeDeleteL (diff rminl rminu) rt #)
+                    | otherwise       = (# u, rt #)
+
+    {-# INLINEABLE go #-}
+    go :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+    go !newSz !l !u Tip rt = unsafeInsertL newSz l u rt
+    go newSz l u lt Tip = unsafeInsertR newSz l u lt
+    go newSz l u lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
+      | hl < hr + 1 = balanceL (newSz + szl + szr) rl ru (go newSz l u lt rlt) rrt
+      | hr < hl + 1 = balanceR (newSz + szl + szr) ll lu llt (go newSz l u lrt rt)
+      | otherwise   = forkSz (newSz + szl + szr) l u lt rt
+
+{-# INLINEABLE allLess #-}
+allLess :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
+allLess !_ Tip = Tip
+allLess x (Fork _ _ l u lt rt) = unsafeAllLess x l u lt rt
+
+{-# INLINEABLE allMore #-}
+allMore :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
+allMore !_ Tip = Tip
+allMore x (Fork _ _ l u lt rt) = unsafeAllMore x l u lt rt
+
+{-# INLINEABLE unsafeAllLess #-}
+unsafeAllLess :: (Enum a, Ord a) => a -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+unsafeAllLess !x !l !u !lt !rt
+  | x == l    = lt
+  | x < l     = allLess x lt
+  | x <= u    = unsafeInsertR (diff l (pred x)) l (pred x) (allLess x lt)
+  | otherwise = link l u lt (allLess x rt)
+
+{-# INLINEABLE unsafeAllMore #-}
+unsafeAllMore :: (Enum a, Ord a) => a -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+unsafeAllMore !x !l !u !lt !rt
+  | u == x    = rt
+  | u < x     = allMore x rt
+  | l <= x    = unsafeInsertL (diff (succ x) u) (succ x) u (allMore x rt)
+  | otherwise = link l u (allMore x lt) rt
+
+{-# INLINEABLE split #-}
+split :: (Enum a, Ord a) => a -> a -> RangeSet a -> (# RangeSet a, RangeSet a #)
+split !_ !_ Tip = (# Tip, Tip #)
+split l u (Fork _ _ l' u' lt rt)
+  -- TODO: These excessive checks are actually slowing us down, they can be /greatly/ improved
+  | l == l', u == u' = (# lt, rt #)
+  | u < l'           = let (# !llt, !lgt #) = split l u lt in (# llt, link l' u' lgt rt #)
+  | u' < l           = let (# !rlt, !rgt #) = split l u rt in (# link l' u' lt rlt, rgt #)
+  | l == l', u < u'  = (# lt, unsafeInsertL (diff (succ u) u') (succ u) u' rt #)
+  | u == u', l' < l  = (# unsafeInsertR (diff l' (pred l)) l' (pred l) lt, rt #)
+  | l' < l, u < u'   = (# unsafeInsertR (diff l' (pred l)) l' (pred l) lt, unsafeInsertL (diff (succ u) u') (succ u) u' rt #)
+  | otherwise        = (# unsafeAllLess l l' u' lt rt, unsafeAllMore u l' u' lt rt #)
 
 data StrictMaybe a = SJust !a | SNothing
 
@@ -388,11 +491,12 @@ isProperSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 isProperSubsetOf t1 t2 = size t1 < size t2 && isSubsetOf t1 t2
 
 -- TODO: This can be done better
+-- Requires splitMember
 isSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 isSubsetOf t1 t2 =
   --intersection t1 t2 == t1
-  --union t1 t2 == t2
-  null (difference t1 t2)
+  union t1 t2 == t2
+  --null (difference t1 t2)
 
 elems :: Enum a => RangeSet a -> [a]
 elems t = fold (\l u lt rt -> lt . (range l u ++) . rt) id t []
@@ -411,14 +515,16 @@ unelems t = fold fork tip t minBound maxBound []
             | otherwise = rt (succ u') u
     tip l u = (range l u ++)
 
--- TODO: This can be /much much/ better
+-- TODO: This could be better?
 fromRanges :: (Enum a, Ord a) => [(a, a)] -> RangeSet a
 fromRanges [(x, y)] = single (diff x y) x y
-fromRanges rs = fromList (concatMap (uncurry range) rs)
+fromRanges rs = foldr (uncurry insertRange) empty rs
 
-insertRange :: (Enum a, Ord a) => (a, a) -> RangeSet a -> RangeSet a
-insertRange = union . fromRanges . pure
+-- TODO: This can be /much much/ better
+insertRange :: (Enum a, Ord a) => a -> a -> RangeSet a -> RangeSet a
+insertRange l u t = foldr insert t (range l u)
 
+-- TODO: This can be made better if we account for orderedness
 fromList :: (Enum a, Ord a) => [a] -> RangeSet a
 fromList = foldr insert empty
 

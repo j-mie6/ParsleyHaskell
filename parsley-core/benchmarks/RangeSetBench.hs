@@ -28,15 +28,16 @@ main :: IO ()
 main = do
   xss <- forM [1..10] $ \n -> generate (vectorOf (n * 10) (chooseInt (0, n * 20)))
   condensedMain [
-      rangeFromList,
-      rangeMemberDeleteBench,
+      --rangeFromList,
+      --rangeMemberDeleteBench,
+      rangeUnionBench,
       setMemberDeleteBench,
       fromListBench xss
     ]
 
 rangeFromList :: Benchmark
 rangeFromList =
-  env (return (xs1, xs2, xs3, xs4)) $ \xs ->bgroup "RangeSet.fromList" [
+  env (return (xs1, xs2, xs3, xs4)) $ \xs -> bgroup "RangeSet.fromList" [
       bench "Pathological" $ nf RangeSet.fromList (pi4_1 xs),
       bench "4 way split" $ nf RangeSet.fromList (pi4_2 xs),
       bench "Small" $ nf RangeSet.fromList (pi4_3 xs),
@@ -119,6 +120,21 @@ setMemberDeleteBench =
   where
     f ys t = List.foldl' (\ !_ y -> Set.member y t) False ys
     g ys t = List.foldl' (\ !t y -> Set.delete y t) t ys
+
+zs1, zs2, zs3, zs4 :: RangeSet Word
+zs1 = RangeSet.fromRanges [(0, 50), (100, 150), (200, 250), (300, 350), (400, 450), (475, 500)]
+zs2 = RangeSet.fromRanges [(25, 75), (125, 175), (225, 275), (325, 375), (425, 475), (485, 500)]
+zs3 = RangeSet.fromRanges [(51, 99), (151, 199), (251, 299), (351, 399), (451, 474)]
+zs4 = RangeSet.fromRanges [(0, 125), (140, 222), (230, 240), (310, 351), (373, 381), (462, 491)]
+
+rangeUnionBench :: Benchmark
+rangeUnionBench =
+  env (return (zs1, zs2, zs3, zs4)) $ \t -> bgroup "union" [
+      bench "same" $ nf (RangeSet.union (pi4_1 t)) (pi4_1 t),
+      bench "overlaps" $ nf (RangeSet.union (pi4_1 t)) (pi4_2 t),
+      bench "disjoint" $ nf (RangeSet.union (pi4_1 t)) (pi4_3 t),
+      bench "messy" $ nf (RangeSet.union (pi4_1 t)) (pi4_4 t)
+  ]
 
 makeBench :: NFData a => (a -> String) -> [(String, a -> Benchmarkable)] -> a -> Benchmark
 makeBench caseName cases x = env (return x) (\x ->

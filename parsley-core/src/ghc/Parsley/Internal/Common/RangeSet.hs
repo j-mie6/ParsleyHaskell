@@ -421,32 +421,36 @@ allMore x (Fork _ _ l u lt rt) = unsafeAllMore x l u lt rt
 
 {-# INLINEABLE unsafeAllLess #-}
 unsafeAllLess :: (Enum a, Ord a) => a -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
-unsafeAllLess !x !l !u !lt !rt
-  | x == l    = lt
-  | x < l     = allLess x lt
-  | x <= u    = unsafeInsertR (diff l (pred x)) l (pred x) (allLess x lt)
-  | otherwise = link l u lt (allLess x rt)
+unsafeAllLess !x !l !u !lt !rt = case compare x l of
+  EQ          -> lt
+  LT          -> allLess x lt
+  GT | x <= u -> unsafeInsertR (diff l (pred x)) l (pred x) (allLess x lt)
+  GT          -> link l u lt (allLess x rt)
 
 {-# INLINEABLE unsafeAllMore #-}
 unsafeAllMore :: (Enum a, Ord a) => a -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
-unsafeAllMore !x !l !u !lt !rt
-  | u == x    = rt
-  | u < x     = allMore x rt
-  | l <= x    = unsafeInsertL (diff (succ x) u) (succ x) u (allMore x rt)
-  | otherwise = link l u (allMore x lt) rt
+unsafeAllMore !x !l !u !lt !rt = case compare u x of
+  EQ          -> rt
+  LT          -> allMore x rt
+  GT | l <= x -> unsafeInsertL (diff (succ x) u) (succ x) u (allMore x rt)
+  GT          -> link l u (allMore x lt) rt
 
 {-# INLINEABLE split #-}
 split :: (Enum a, Ord a) => a -> a -> RangeSet a -> (# RangeSet a, RangeSet a #)
 split !_ !_ Tip = (# Tip, Tip #)
 split l u (Fork _ _ l' u' lt rt)
-  -- TODO: These excessive checks are actually slowing us down, they can be /greatly/ improved
-  | l == l', u == u' = (# lt, rt #)
   | u < l'           = let (# !llt, !lgt #) = split l u lt in (# llt, link l' u' lgt rt #)
   | u' < l           = let (# !rlt, !rgt #) = split l u rt in (# link l' u' lt rlt, rgt #)
-  | l == l', u < u'  = (# lt, unsafeInsertL (diff (succ u) u') (succ u) u' rt #)
-  | u == u', l' < l  = (# unsafeInsertR (diff l' (pred l)) l' (pred l) lt, rt #)
-  | l' < l, u < u'   = (# unsafeInsertR (diff l' (pred l)) l' (pred l) lt, unsafeInsertL (diff (succ u) u') (succ u) u' rt #)
-  | otherwise        = (# unsafeAllLess l l' u' lt rt, unsafeAllMore u l' u' lt rt #)
+  -- The ranges overlap in some way
+  | otherwise = let !lt' = case compare l' l of
+                      EQ -> lt
+                      LT -> unsafeInsertR (diff l' (pred l)) l' (pred l) lt
+                      GT -> allLess l lt
+                    !rt' = case compare u u' of
+                      EQ -> rt
+                      LT -> unsafeInsertL (diff (succ u) u') (succ u) u' rt
+                      GT -> allMore u rt
+                in (# lt', rt' #)
 
 data StrictMaybe a = SJust !a | SNothing
 

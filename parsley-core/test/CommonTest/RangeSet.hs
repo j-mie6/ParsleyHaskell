@@ -37,7 +37,7 @@ instance Arbitrary Digit where
 
 tests :: TestTree
 tests = testGroup "RangeSet" [
-    testProperty "arbitrary RangeSets should be valid" $ valid @Int,
+    testProperty "arbitrary RangeSets should be valid" $ valid @Word,
     emptyTests,
     memberTests,
     insertTests,
@@ -130,7 +130,7 @@ unionProperty t1 t2 = not (null t1 && null t2) ==>
          member x (t1 `union` t2))
   .&&. valid (t1 `union` t2)
 
-intersectionProperty :: (Ord a, Enum a, Show a) => RangeSet a -> RangeSet a -> Property
+intersectionProperty :: (Ord a, Enum a, Show a, Bounded a) => RangeSet a -> RangeSet a -> Property
 intersectionProperty t1 t2 = not (null t1 && null t2) ==>
   forAll (elements (elems t1 ++ elems t2)) (\x ->
          (member x t1 && member x t2) === member x (t1 `intersection` t2))

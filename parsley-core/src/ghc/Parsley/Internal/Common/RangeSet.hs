@@ -27,10 +27,11 @@ range :: Enum a => a -> a -> [a]
 range l u = [l..u]
 
 {-# INLINE diff #-}
-diff :: Enum a => a -> a -> Int
+diff :: Enum a => a -> a -> Size
 diff !l !u = fromEnum u - fromEnum l + 1
 
-data RangeSet a = Fork {-# UNPACK #-} !Int {-# UNPACK #-} !Int !a !a !(RangeSet a) !(RangeSet a)
+type Size = Int
+data RangeSet a = Fork {-# UNPACK #-} !Int {-# UNPACK #-} !Size !a !a !(RangeSet a) !(RangeSet a)
                 | Tip
                 deriving stock Show
 type role RangeSet nominal
@@ -46,11 +47,11 @@ singleton x = single 1 x x
 fork :: Enum a => a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 fork !l !u !lt !rt = forkSz (size lt + size rt + diff l u) l u lt rt
 
-forkSz :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+forkSz :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 forkSz !sz !l !u !lt !rt = Fork (max (height lt) (height rt) + 1) sz l u lt rt
 
 {-# INLINE single #-}
-single :: Int -> a -> a -> RangeSet a
+single :: Size -> a -> a -> RangeSet a
 single !sz !l !u = Fork 1 sz l u Tip Tip
 
 null :: RangeSet a -> Bool
@@ -75,7 +76,7 @@ height Tip = 0
 height (Fork h _ _ _ _ _) = h
 
 {-# INLINE size #-}
-size :: RangeSet a -> Int
+size :: RangeSet a -> Size
 size Tip = 0
 size (Fork _ sz _ _ _ _) = sz
 
@@ -138,8 +139,8 @@ notMember :: Ord a => a -> RangeSet a -> Bool
 notMember x = not . member x
 
 {-# INLINE ifeq #-}
-ifeq :: a -> a -> a -> (a -> a) -> a
-ifeq !x !x' y f = if ptrEq x x' then y else f x'
+ifeq :: RangeSet a -> RangeSet a -> RangeSet a -> (RangeSet a -> RangeSet a) -> RangeSet a
+ifeq !x !x' y f = if size x == size x' then y else f x'
 
 {-# INLINEABLE insert #-}
 insert :: forall a. (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
@@ -150,7 +151,7 @@ insert x t@(Fork h sz l u lt rt)
   -- If it is adjacent to the lower, it may fuse
   | x < l, x == pred l = fuseLeft h (sz + 1) x u lt rt                    -- the equality must be guarded by an existence check
   -- Otherwise, insert and balance for left
-  | x < l = ifeq lt (insert x lt) t $ \lt' -> balance (sz + 1) l u lt' rt -- cannot be biased, because fusion can shrink a tree#
+  | x < l = ifeq lt (insert x lt) t $ \lt' -> balance (sz + 1) l u lt' rt -- cannot be biased, because fusion can shrink a tree
   -- If it is adjacent to the upper range, it may fuse
   | x == succ u = fuseRight h (sz + 1) l x lt rt                          -- we know x > u since x <= l && not x <= u
   -- Otherwise, insert and balance for right
@@ -159,22 +160,22 @@ insert x t@(Fork h sz l u lt rt)
     {-# INLINE fuseLeft #-}
     fuseLeft !h !sz !x !u Tip !rt = Fork h sz x u lt rt
     fuseLeft h sz x u lt rt
-      | (# !l, !x' #) <- unsafeMaxRange lt
+      | (# !l, !x', lt' #) <- unsafeMaxDelete lt
       -- we know there exists an element larger than x'
       -- if x == x' or x == x' + 1, we fuse
       -- x >= x' since it is one less than x''s strict upper bound
       -- x >= x' && (x == x' || x == x' + 1) === x >= x' && x <= x' + 1
-      , x <= succ x' = balanceR sz l u (unsafeDeleteR (diff l x') lt) rt
+      , x <= succ x' = balanceR sz l u lt' rt
       | otherwise    = Fork h sz x u lt rt
     {-# INLINE fuseRight #-}
     fuseRight !h !sz !l !x !lt Tip = Fork h sz l x lt rt
     fuseRight h sz l x lt rt
-      | (# !x', !u #) <- unsafeMinRange rt
+      | (# !x', !u, rt' #) <- unsafeMinDelete rt
       -- we know there exists an element smaller than x'
       -- if x == x' or x == x' - 1, we fuse
       -- x <= x' since it is one greater than x''s strict lower bound,
       -- x <= x' && (x == x' || x == x' - 1) === x <= x' && x >= x' - 1
-      , x >= pred x' = balanceL sz l u lt (unsafeDeleteL (diff x' u) rt)
+      , x >= pred x' = balanceL sz l u lt rt'
       | otherwise    = Fork h sz l x lt rt
 
 {-# INLINEABLE delete #-}
@@ -183,7 +184,7 @@ delete !_ Tip = Tip
 delete x t@(Fork h sz l u lt rt) =
   case compare l x of
     -- If its the only part of the range, the node is removed
-    EQ | x == u    -> pullup (sz - 1) lt rt
+    EQ | x == u    -> glue (sz - 1) lt rt
     -- If it's at an extreme, it shrinks the range
        | otherwise -> Fork h (sz - 1) (succ l) u lt rt
     LT -> case compare x u of
@@ -195,15 +196,6 @@ delete x t@(Fork h sz l u lt rt) =
        GT          -> ifeq rt (delete x rt) t $ balance (sz - 1) l u lt             -- cannot be biased, because fisson can grow a tree
     GT             -> ifeq lt (delete x lt) t $ \lt' -> balance (sz - 1) l u lt' rt -- cannot be biased, because fisson can grow a tree
   where
-    pullup !_ Tip rt = rt
-    pullup _ lt Tip = lt
-    -- Both lt and rt are known to be non-empty
-    -- We'll pull the new parent element arbitrarily from the right
-    pullup sz lt rt  =
-      let (# !l, !u #) = unsafeMinRange rt
-          rt' = unsafeDeleteL (diff l u) rt
-      in balanceL sz l u lt rt'
-
     {- Fission breaks a node into two new ranges
        we'll push the range down into the right arbitrarily
        To do this, we have to make it a child of the right-tree's left most position. -}
@@ -220,7 +212,7 @@ It *must* not overlap with any other range within the tree.
 It *must* be /known/ not to exist within the tree.
 -}
 {-# INLINEABLE unsafeInsertL #-}
-unsafeInsertL :: Int -> a -> a -> RangeSet a -> RangeSet a
+unsafeInsertL :: Size -> a -> a -> RangeSet a -> RangeSet a
 unsafeInsertL !newSz l u Tip = single newSz l u
 unsafeInsertL newSz l u (Fork _ sz l' u' lt rt) = balanceL (sz + newSz) l' u' (unsafeInsertL newSz l u lt) rt
 
@@ -230,7 +222,7 @@ It *must* not overlap with any other range within the tree.
 It *must* be /known/ not to exist within the tree.
 -}
 {-# INLINEABLE unsafeInsertR #-}
-unsafeInsertR :: Int -> a -> a -> RangeSet a -> RangeSet a
+unsafeInsertR :: Size -> a -> a -> RangeSet a -> RangeSet a
 unsafeInsertR !newSz l u Tip = single newSz l u
 unsafeInsertR newSz l u (Fork _ sz l' u' lt rt) = balanceR (sz + newSz) l' u' lt (unsafeInsertR newSz l u rt)
 
@@ -239,7 +231,7 @@ This deletes the left-most range of the tree.
 It *must not* be used with an empty tree.
 -}
 {-# INLINEABLE unsafeDeleteL #-}
-unsafeDeleteL ::Int -> RangeSet a -> RangeSet a
+unsafeDeleteL :: Size -> RangeSet a -> RangeSet a
 unsafeDeleteL !_ (Fork _ _ _ _ Tip rt) = rt
 unsafeDeleteL szRemoved (Fork _ sz l u lt rt) = balanceR (sz - szRemoved) l u (unsafeDeleteL szRemoved lt) rt
 unsafeDeleteL _ _ = error "unsafeDeleteL called on empty tree"
@@ -248,11 +240,11 @@ unsafeDeleteL _ _ = error "unsafeDeleteL called on empty tree"
 This deletes the right-most range of the tree.
 It *must not* be used with an empty tree.
 -}
-{-# INLINEABLE unsafeDeleteR #-}
+{-{-# INLINEABLE unsafeDeleteR #-}
 unsafeDeleteR :: Int -> RangeSet a -> RangeSet a
 unsafeDeleteR !_ (Fork _ _ _ _ lt Tip) = lt
 unsafeDeleteR szRemoved (Fork _ sz l u lt rt) = balanceL (sz - szRemoved) l u lt (unsafeDeleteR szRemoved rt)
-unsafeDeleteR _ _ = error "unsafeDeleteR called on empty tree"
+unsafeDeleteR _ _ = error "unsafeDeleteR called on empty tree"-}
 
 {-# INLINE findMin #-}
 findMin :: RangeSet a -> Maybe a
@@ -278,17 +270,37 @@ unsafeMaxRange (Fork _ _ l u _ Tip) = (# l, u #)
 unsafeMaxRange (Fork _ _ _ _ _ rt) = unsafeMaxRange rt
 unsafeMaxRange Tip = error "unsafeMaxRange called on empty tree"
 
+{-# INLINE unsafeMinDelete #-}
+unsafeMinDelete :: RangeSet a -> (# a, a, RangeSet a #)
+unsafeMinDelete (Fork _ sz l u lt rt) = let (# !ml, !mu, !_, t' #) = go sz l u lt rt in (# ml, mu, t' #)
+  where
+    go !sz !l !u Tip !rt = (# l, u, sz - size rt, rt #)
+    go sz l u (Fork _ lsz ll lu llt lrt) rt =
+      let (# !ml, !mu, !msz, lt' #) = go lsz ll lu llt lrt
+      in (# ml, mu, msz, balanceR (sz - msz) l u lt' rt #)
+unsafeMinDelete Tip = error "unsafeMinDelete called on empty tree"
+
+{-# INLINE unsafeMaxDelete #-}
+unsafeMaxDelete :: RangeSet a -> (# a, a, RangeSet a #)
+unsafeMaxDelete (Fork _ sz l u lt rt) = let (# !ml, !mu, !_, t' #) = go sz l u lt rt in (# ml, mu, t' #)
+  where
+    go !sz !l !u !lt Tip = (# l, u, sz - size lt, lt #)
+    go sz l u lt (Fork _ rsz rl ru rlt rrt) =
+      let (# !ml, !mu, !msz, rt' #) = go rsz rl ru rlt rrt
+      in (# ml, mu, msz, balanceL (sz - msz) l u lt rt' #)
+unsafeMaxDelete Tip = error "unsafeMaxDelete called on empty tree"
+
 {-# INLINABLE balance #-}
-balance :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+balance :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 balance !sz !l !u lt rt
   | height lt > height rt + 1 = balanceL sz l u lt rt
   | height rt > height lt + 1 = balanceR sz l u lt rt
   | otherwise = forkSz sz l u lt rt
 
 {-# NOINLINE balanceL #-}
-balanceL :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+balanceL :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 -- PRE: left grew or right shrank, difference in height at most 2 biasing to the left
-balanceL !sz !l1 !u1 lt@(Fork !hlt szl l2 u2 llt rlt) !rt
+balanceL !sz !l1 !u1 lt@(Fork !hlt !szl !l2 !u2 !llt !rlt) !rt
   -- both sides are equal height or off by one
   | dltrt <= 1 = forkSz sz l1 u1 lt rt
   -- The bias is 2 (dltrt == 2)
@@ -303,7 +315,7 @@ balanceL sz l u Tip rt | height rt <= 1 = forkSz sz l u Tip rt
 balanceL _ _ _ Tip _ = error "Right should have shrank, but is still 1 taller than a Tip!"
 
 {-# NOINLINE balanceR #-}
-balanceR :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+balanceR :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 -- PRE: left shrank or right grew, difference in height at most 2 biasing to the right
 balanceR !sz !l1 !u1 !lt rt@(Fork !hrt szr l2 u2 lrt rrt)
   -- both sides are equal height or off by one
@@ -320,15 +332,16 @@ balanceR sz l u lt Tip | height lt <= 1 = forkSz sz l u lt Tip
 balanceR _ _ _ _ Tip = error "Left should have shrank, but is still 1 taller than a Tip!"
 
 {-# INLINE rotr #-}
-rotr :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+rotr :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 rotr !sz !l1 !u1 (Fork _ szl l2 u2 p q) !r = forkSz sz l2 u2 p (forkSz (sz - szl + size q) l1 u1 q r)
 rotr _ _ _ _ _ = error "rotr on Tip"
 
 {-# INLINE rotl #-}
-rotl :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+rotl :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 rotl !sz !l1 !u1 !p (Fork _ szr l2 u2 q r) = forkSz sz l2 u2 (forkSz (sz - szr + size q) l1 u1 p q) r
 rotl _ _ _ _ _ = error "rotr on Tip"
 
+{-# INLINABLE union #-}
 union :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 union t Tip = t
 --union t (Fork _ 1 l u _ _) = insertRange l u t
@@ -343,41 +356,51 @@ union t@(Fork _ _ l u lt rt) t' = case split l u t' of
 
 -- TODO: This can be /much much/ better
 -- Requires link, merge, splitMember
-intersection :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
-intersection t = fromList . filter (`member` t) . elems
-                 -- difference t . complement <- good if difference is optimised
+{-# INLINABLE intersection #-}
+intersection :: (Enum a, Ord a, Bounded a) => RangeSet a -> RangeSet a -> RangeSet a
+--intersection t = fromList . filter (`member` t) . elems
+intersection t = difference t . complement
 
 -- TODO: This can be done better
 -- Requires splitMember
-disjoint :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
+{-# INLINE disjoint #-}
+disjoint :: (Enum a, Ord a, Bounded a) => RangeSet a -> RangeSet a -> Bool
 disjoint t1 t2 = null (intersection t1 t2)
 
--- TODO: This can be /much much/ better
--- Requires split, merge
+{-# INLINEABLE difference #-}
 difference :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
-difference t = foldr delete t . elems
+--difference t = foldr delete t . elems
+difference Tip _ = Tip
+difference t Tip = t
+difference t (Fork _ _ l u lt rt) = case split l u t of
+  (# lt', rt' #)
+    | size lt'lt + size rt'rt == size t -> t
+    | otherwise -> unsafeMerge lt'lt rt'rt
+    where
+      !lt'lt = difference lt' lt
+      !rt'rt = difference rt' rt
 
 {-# INLINEABLE unsafeInsertLAdj #-}
-unsafeInsertLAdj :: (Enum a, Eq a) => Int -> a -> a -> RangeSet a -> RangeSet a
+unsafeInsertLAdj :: (Enum a, Eq a) => Size -> a -> a -> RangeSet a -> RangeSet a
 unsafeInsertLAdj !newSz !l !u !t = case unsafeMinRange t of
   (# !l', _ #) | l' == succ u -> unsafeFuseL newSz l t
                | otherwise    -> unsafeInsertL newSz l u t
 
 {-# INLINEABLE unsafeInsertRAdj #-}
-unsafeInsertRAdj :: (Enum a, Eq a) => Int -> a -> a -> RangeSet a -> RangeSet a
+unsafeInsertRAdj :: (Enum a, Eq a) => Size -> a -> a -> RangeSet a -> RangeSet a
 unsafeInsertRAdj !newSz !l !u !t = case unsafeMaxRange t of
   (# _, !u' #) | u' == pred l -> unsafeFuseR newSz u t
                | otherwise    -> unsafeInsertR newSz l u t
 
 {-# INLINEABLE unsafeFuseL #-}
-unsafeFuseL :: Int -> a -> RangeSet a -> RangeSet a
+unsafeFuseL :: Size -> a -> RangeSet a -> RangeSet a
 unsafeFuseL !newSz !l' (Fork h sz l u lt rt) = case lt of
   Tip -> Fork h (newSz + sz) l' u Tip rt
   lt  -> Fork h (newSz + sz) l u (unsafeFuseL newSz l' lt) rt
 unsafeFuseL _ _ Tip = error "unsafeFuseL called on Tip"
 
 {-# INLINEABLE unsafeFuseR #-}
-unsafeFuseR :: Int -> a -> RangeSet a -> RangeSet a
+unsafeFuseR :: Size -> a -> RangeSet a -> RangeSet a
 unsafeFuseR !newSz !u' (Fork h sz l u lt rt) = case rt of
   Tip -> Fork h (newSz + sz) l u' lt Tip
   rt  -> Fork h (newSz + sz) l u lt (unsafeFuseR newSz u' rt)
@@ -388,26 +411,57 @@ link :: (Enum a, Eq a) => a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 link !l !u Tip Tip = single (diff l u) l u
 link l u Tip rt = unsafeInsertLAdj (diff l u) l u rt
 link l u lt Tip = unsafeInsertRAdj (diff l u) l u lt
-link l u lt rt = go (diff l' u') l' u' lt' rt'
+link l u lt rt = go (diff l' u') l' u' lt'' rt''
   where
     -- we have to check for fusion up front
-    (# !lmaxl, !lmaxu #) = unsafeMaxRange lt
-    (# !rminl, !rminu #) = unsafeMinRange rt
+    (# !lmaxl, !lmaxu, lt' #) = unsafeMaxDelete lt
+    (# !rminl, !rminu, rt' #) = unsafeMinDelete rt
 
-    (# !l', !lt' #) | lmaxu == pred l = (# lmaxl, unsafeDeleteR (diff lmaxl lmaxu) lt #)
-                    | otherwise       = (# l, lt #)
+    (# !l', !lt'' #) | lmaxu == pred l = (# lmaxl, lt' #)
+                     | otherwise       = (# l, lt #)
 
-    (# !u', !rt' #) | rminl == succ u = (# rminu, unsafeDeleteL (diff rminl rminu) rt #)
-                    | otherwise       = (# u, rt #)
+    (# !u', !rt'' #) | rminl == succ u = (# rminu, rt' #)
+                     | otherwise       = (# u, rt #)
 
     {-# INLINEABLE go #-}
-    go :: Int -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+    go :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
     go !newSz !l !u Tip rt = unsafeInsertL newSz l u rt
     go newSz l u lt Tip = unsafeInsertR newSz l u lt
     go newSz l u lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
       | hl < hr + 1 = balanceL (newSz + szl + szr) rl ru (go newSz l u lt rlt) rrt
       | hr < hl + 1 = balanceR (newSz + szl + szr) ll lu llt (go newSz l u lrt rt)
       | otherwise   = forkSz (newSz + szl + szr) l u lt rt
+
+-- This version checks for fusion between the two trees to be merged
+{-# INLINEABLE merge #-}
+merge :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
+merge Tip Tip = Tip
+merge t Tip = t
+merge Tip t = t
+merge t1 t2 =
+  let (# !_, !u1 #) = unsafeMaxRange t1
+      (# !l2, !u2, t2' #) = unsafeMinDelete t2
+  in if succ u1 == l2 then unsafeMerge (unsafeFuseR (diff l2 u2) u2 t1) t2'
+     else unsafeMerge t1 t2
+
+-- This assumes that the trees are /totally/ disjoint
+{-# INLINEABLE unsafeMerge #-}
+unsafeMerge :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
+unsafeMerge Tip rt = rt
+unsafeMerge lt Tip = lt
+unsafeMerge lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
+  | hl < hr + 1 = balanceL (szl + szr) rl ru (unsafeMerge lt rlt) rrt
+  | hr < hl + 1 = balanceR (szl + szr) ll lu llt (unsafeMerge lrt rt)
+  | otherwise   = glue (szl + szr) lt rt
+
+-- Trees must be balanced with respect to eachother, since we pull from the tallest, no balancing is required
+{-# INLINEABLE glue #-}
+glue :: Size -> RangeSet a -> RangeSet a -> RangeSet a
+glue !_ Tip rt = rt
+glue _ lt Tip  = lt
+glue sz lt rt
+  | height lt < height rt = let (# !l, !u, !rt' #) = unsafeMinDelete rt in forkSz sz l u lt rt'
+  | otherwise = let (# !l, !u, !lt' #) = unsafeMaxDelete lt in forkSz sz l u lt' rt
 
 {-# INLINEABLE allLess #-}
 allLess :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
@@ -456,7 +510,7 @@ data StrictMaybe a = SJust !a | SNothing
 
 {-# INLINEABLE complement #-}
 complement :: forall a. (Bounded a, Enum a, Eq a) => RangeSet a -> RangeSet a
-complement Tip = single (fromEnum @a maxBound + 1) minBound maxBound
+complement Tip = single (diff @a minBound maxBound) minBound maxBound
 complement t | full t = Tip
 complement t@Fork{} = t'''
   where
@@ -467,7 +521,7 @@ complement t@Fork{} = t'''
     -- if neither min or max are minBound or maxBound, it will grow
     -- otherwise, the tree will not change size
     -- The insert or shrink will happen at an extremity, and rebalance need only occur along the spine
-    (# !t', !initial #) | min == minBound = (# unsafeDeleteL (fromEnum min' + 1) t, succ min' #) -- this is safe, because we've checked for the maxSet case already
+    (# !t', !initial #) | min == minBound = (# unsafeDeleteL (diff minBound min') t, succ min' #) -- this is safe, because we've checked for the maxSet case already
                         | otherwise       = (# t , minBound #)
     (# !t'', !final #) = go initial t'
     t''' | SJust x <- final = unsafeInsertR (diff x maxBound) x maxBound t''
@@ -491,23 +545,28 @@ complement t@Fork{} = t'''
           !t' = fork l' (pred u) lt' rt'
       in  (# t', l''' #)
 
+{-# INLINE isProperSubsetOf #-}
 isProperSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 isProperSubsetOf t1 t2 = size t1 < size t2 && isSubsetOf t1 t2
 
 -- TODO: This can be done better
 -- Requires splitMember
+{-# INLINEABLE isSubsetOf #-}
 isSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 isSubsetOf t1 t2 =
   --intersection t1 t2 == t1
   union t1 t2 == t2
   --null (difference t1 t2)
 
+{-# INLINE elems #-}
 elems :: Enum a => RangeSet a -> [a]
 elems t = fold (\l u lt rt -> lt . (range l u ++) . rt) id t []
 
+{-# INLINE ranges #-}
 ranges :: RangeSet a -> [(a, a)]
 ranges t = fold (\l u lt rt -> lt . ((l, u) :) . rt) id t []
 
+{-# INLINEABLE unelems #-}
 unelems :: (Bounded a, Enum a, Eq a) => RangeSet a -> [a]
 unelems t = fold fork tip t minBound maxBound []
   where
@@ -520,18 +579,22 @@ unelems t = fold fork tip t minBound maxBound []
     tip l u = (range l u ++)
 
 -- TODO: This could be better?
+{-# INLINEABLE fromRanges #-}
 fromRanges :: (Enum a, Ord a) => [(a, a)] -> RangeSet a
 fromRanges [(x, y)] = single (diff x y) x y
 fromRanges rs = foldr (uncurry insertRange) empty rs
 
 -- TODO: This can be /much much/ better
+{-# INLINE insertRange #-}
 insertRange :: (Enum a, Ord a) => a -> a -> RangeSet a -> RangeSet a
 insertRange l u t = foldr insert t (range l u)
 
 -- TODO: This can be made better if we account for orderedness
+{-# INLINE fromList #-}
 fromList :: (Enum a, Ord a) => [a] -> RangeSet a
 fromList = foldr insert empty
 
+{-# INLINEABLE fold #-}
 fold :: (a -> a -> b -> b -> b) -> b -> RangeSet a -> b
 fold _ tip Tip = tip
 fold fork tip (Fork _ _ l u lt rt) = fork l u (fold fork tip lt) (fold fork tip rt)

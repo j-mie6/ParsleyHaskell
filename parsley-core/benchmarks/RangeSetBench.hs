@@ -14,6 +14,8 @@ import Control.DeepSeq
 
 import GHC.Generics (Generic)
 
+import GHC.Word (Word32(..))
+
 import qualified Parsley.Internal.Common.RangeSet as RangeSet
 import qualified Data.Set as Set
 import qualified Data.List as List
@@ -23,6 +25,7 @@ deriving instance Generic a => Generic (RangeSet a)
 deriving instance Generic Int
 deriving instance Generic Word
 deriving instance Generic Char
+deriving instance Generic Word32
 
 main :: IO ()
 main = do
@@ -30,7 +33,9 @@ main = do
   condensedMain [
       --rangeFromList,
       --rangeMemberDeleteBench,
-      rangeUnionBench,
+      --rangeUnionBench,
+      rangeDiffBench,
+      rangeIntersectBench,
       setMemberDeleteBench,
       fromListBench xss
     ]
@@ -121,7 +126,7 @@ setMemberDeleteBench =
     f ys t = List.foldl' (\ !_ y -> Set.member y t) False ys
     g ys t = List.foldl' (\ !t y -> Set.delete y t) t ys
 
-zs1, zs2, zs3, zs4 :: RangeSet Word
+zs1, zs2, zs3, zs4 :: RangeSet Word32
 zs1 = RangeSet.fromRanges [(0, 50), (100, 150), (200, 250), (300, 350), (400, 450), (475, 500)]
 zs2 = RangeSet.fromRanges [(25, 75), (125, 175), (225, 275), (325, 375), (425, 475), (485, 500)]
 zs3 = RangeSet.fromRanges [(51, 99), (151, 199), (251, 299), (351, 399), (451, 474)]
@@ -134,6 +139,24 @@ rangeUnionBench =
       bench "overlaps" $ nf (RangeSet.union (pi4_1 t)) (pi4_2 t),
       bench "disjoint" $ nf (RangeSet.union (pi4_1 t)) (pi4_3 t),
       bench "messy" $ nf (RangeSet.union (pi4_1 t)) (pi4_4 t)
+  ]
+
+rangeDiffBench :: Benchmark
+rangeDiffBench =
+  env (return (zs1, zs2, zs3, zs4)) $ \t -> bgroup "difference" [
+      bench "same" $ nf (RangeSet.difference (pi4_1 t)) (pi4_1 t),
+      bench "overlaps" $ nf (RangeSet.difference (pi4_1 t)) (pi4_2 t),
+      bench "disjoint" $ nf (RangeSet.difference (pi4_1 t)) (pi4_3 t),
+      bench "messy" $ nf (RangeSet.difference (pi4_1 t)) (pi4_4 t)
+  ]
+
+rangeIntersectBench :: Benchmark
+rangeIntersectBench =
+  env (return (zs1, zs2, zs3, zs4)) $ \t -> bgroup "intersection" [
+      bench "same" $ nf (RangeSet.intersection (pi4_1 t)) (pi4_1 t),
+      bench "overlaps" $ nf (RangeSet.intersection (pi4_1 t)) (pi4_2 t),
+      bench "disjoint" $ nf (RangeSet.intersection (pi4_1 t)) (pi4_3 t),
+      bench "messy" $ nf (RangeSet.intersection (pi4_1 t)) (pi4_4 t)
   ]
 
 makeBench :: NFData a => (a -> String) -> [(String, a -> Benchmarkable)] -> a -> Benchmark

@@ -33,6 +33,7 @@ instance (Arbitrary a, Enum a, Ord a) => Arbitrary (RangeSet a) where
 
 instance Arbitrary Digit where
   arbitrary = chooseEnum (Zero, Nine)
+  shrink Zero = []
   shrink n = [Zero .. pred n]
 
 tests :: TestTree
@@ -51,7 +52,7 @@ tests = testGroup "RangeSet" [
     testProperty "allLess should find everything strictly less than a value" $ allLessMin @Word,
     testProperty "allMore should find everything strictly more than a value" $ allMoreMax @Word,
     testProperty "union should union" $ uncurry (unionProperty @Int),
-    testProperty "intersection should intersect" $ uncurry (intersectionProperty @Char),
+    testProperty "intersection should intersect" $ uncurry (intersectionProperty @Digit),
     testProperty "difference should differentiate" $ uncurry (differenceProperty @Word)
   ]
 
@@ -130,7 +131,7 @@ unionProperty t1 t2 = not (null t1 && null t2) ==>
          member x (t1 `union` t2))
   .&&. valid (t1 `union` t2)
 
-intersectionProperty :: (Ord a, Enum a, Show a, Bounded a) => RangeSet a -> RangeSet a -> Property
+intersectionProperty :: (Ord a, Enum a, Show a) => RangeSet a -> RangeSet a -> Property
 intersectionProperty t1 t2 = not (null t1 && null t2) ==>
   forAll (elements (elems t1 ++ elems t2)) (\x ->
          (member x t1 && member x t2) === member x (t1 `intersection` t2))

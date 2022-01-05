@@ -84,55 +84,13 @@ sizeRanges :: RangeSet a -> Int
 sizeRanges = fold (\_ _ szl szr -> szl + szr + 1) 0
 
 {-# INLINEABLE member #-}
--- One of these is better than the other, I'm just not entirely sure which...
 member :: forall a. Ord a => a -> RangeSet a -> Bool
-{-
-RangeSet/member/Pathological             mean 83.88 μs  ( +- 2.851 μs  )
-RangeSet/member/4 way split              mean 11.94 μs  ( +- 4.297 μs  )
-RangeSet/member/Small                    mean 177.7 ns  ( +- 4.033 ns  )
-RangeSet/member/alphaNum                 mean 1.776 μs  ( +- 17.81 ns  )
--}{-
-member !x (Fork _ l u lt rt)
-  | l <= x    = x <= u || member x rt
-  | otherwise = member x lt
-member _ Tip = False-}
-{-
-RangeSet/member/Pathological             mean 91.04 μs  ( +- 21.57 μs  )
-RangeSet/member/4 way split              mean 11.03 μs  ( +- 380.2 ns  )
-RangeSet/member/Small                    mean 161.2 ns  ( +- 2.453 ns  )
-RangeSet/member/alphaNum                 mean 1.672 μs  ( +- 18.76 ns  )
--}--{-
 member !x = go
   where
     go (Fork _ _ l u lt rt)
       | l <= x    = x <= u || go rt
       | otherwise = go lt
     go Tip = False
-{-
-RangeSet/member/Pathological             mean 83.29 μs  ( +- 2.166 μs  )
-RangeSet/member/4 way split              mean 16.11 μs  ( +- 2.771 μs  )
-RangeSet/member/Small                    mean 268.9 ns  ( +- 23.04 ns  )
-RangeSet/member/alphaNum                 mean 1.689 μs  ( +- 40.04 ns  )
--}{-
-member !x = goR
-  where
-    goR :: RangeSet a -> Bool
-    -- check the top most level
-    goR Tip = False
-    -- we can pick the correct left-hand tree to explore here, passing down the lower bound
-    goR (Fork _ l u lt rt)
-      | x <= u    = goL l lt
-      | otherwise = goR rt
-
-    goL :: a -> RangeSet a -> Bool
-    -- if we reach a tip, we check the tightest lower bound above us against x
-    goL !l Tip = l <= x
-    goL l (Fork _ l' u' lt rt)
-      -- otherwise, if x is less than our upper bound, search in the left, refine the lower bound
-      | x <= u'   = goL l' lt
-      -- x is above our range, but known to be less than our parents upper bound
-      -- we should therefore search to our right, preserving the parents lower bound
-      | otherwise = goL l rt-}
 
 {-# INLINEABLE notMember #-}
 notMember :: Ord a => a -> RangeSet a -> Bool
@@ -344,9 +302,7 @@ rotl _ _ _ _ _ = error "rotr on Tip"
 {-# INLINABLE union #-}
 union :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 union t Tip = t
---union t (Fork _ 1 l u _ _) = insertRange l u t
 union Tip t = t
---union (Fork _ 1 l u _ _) t = insertRange l u t
 union t@(Fork _ _ l u lt rt) t' = case split l u t' of
   (# lt', rt' #)
     | ltlt' `ptrEq` lt, rtrt' `ptrEq` rt -> t
@@ -354,22 +310,33 @@ union t@(Fork _ _ l u lt rt) t' = case split l u t' of
     where !ltlt' = lt `union` lt'
           !rtrt' = rt `union` rt'
 
--- TODO: This can be /much much/ better
--- Requires link, merge, splitMember
 {-# INLINABLE intersection #-}
-intersection :: (Enum a, Ord a, Bounded a) => RangeSet a -> RangeSet a -> RangeSet a
---intersection t = fromList . filter (`member` t) . elems
-intersection t = difference t . complement
+intersection :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
+intersection Tip _ = Tip
+intersection _ Tip = Tip
+intersection t1@(Fork _ _ l1 u1 lt1 rt1) t2 =
+  case overlap of
+    Tip -> unsafeMerge lt1lt2 rt1rt2
+    Fork 1 sz x y _ _
+      | x == l1, y == u1
+      , lt1lt2 `ptrEq` lt1, rt1rt2 `ptrEq` rt2 -> t1
+      | otherwise -> unsafeLink sz x y lt1lt2 rt1rt2
+    Fork _ sz x y lt' rt' -> unsafeLink (sz - size lt' - size rt') x y (unsafeMerge lt1lt2 lt') (unsafeMerge rt' rt1rt2)
+  where
+    (# !lt2, !overlap, !rt2 #) = splitOverlap l1 u1 t2
+    !lt1lt2 = intersection lt1 lt2
+    !rt1rt2 = intersection rt1 rt2
 
--- TODO: This can be done better
--- Requires splitMember
 {-# INLINE disjoint #-}
-disjoint :: (Enum a, Ord a, Bounded a) => RangeSet a -> RangeSet a -> Bool
-disjoint t1 t2 = null (intersection t1 t2)
+disjoint :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
+disjoint Tip _ = True
+disjoint _ Tip = True
+disjoint (Fork _ _ l u lt rt) t = case splitOverlap l u t of
+  (# lt', Tip, rt' #) -> disjoint lt lt' && disjoint rt rt'
+  _                   -> False
 
 {-# INLINEABLE difference #-}
 difference :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
---difference t = foldr delete t . elems
 difference Tip _ = Tip
 difference t Tip = t
 difference t (Fork _ _ l u lt rt) = case split l u t of
@@ -411,7 +378,7 @@ link :: (Enum a, Eq a) => a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 link !l !u Tip Tip = single (diff l u) l u
 link l u Tip rt = unsafeInsertLAdj (diff l u) l u rt
 link l u lt Tip = unsafeInsertRAdj (diff l u) l u lt
-link l u lt rt = go (diff l' u') l' u' lt'' rt''
+link l u lt rt = unsafeLink (diff l' u') l' u' lt'' rt''
   where
     -- we have to check for fusion up front
     (# !lmaxl, !lmaxu, lt' #) = unsafeMaxDelete lt
@@ -423,17 +390,17 @@ link l u lt rt = go (diff l' u') l' u' lt'' rt''
     (# !u', !rt'' #) | rminl == succ u = (# rminu, rt' #)
                      | otherwise       = (# u, rt #)
 
-    {-# INLINEABLE go #-}
-    go :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
-    go !newSz !l !u Tip rt = unsafeInsertL newSz l u rt
-    go newSz l u lt Tip = unsafeInsertR newSz l u lt
-    go newSz l u lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
-      | hl < hr + 1 = balanceL (newSz + szl + szr) rl ru (go newSz l u lt rlt) rrt
-      | hr < hl + 1 = balanceR (newSz + szl + szr) ll lu llt (go newSz l u lrt rt)
-      | otherwise   = forkSz (newSz + szl + szr) l u lt rt
+{-# INLINEABLE unsafeLink #-}
+unsafeLink :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+unsafeLink !newSz !l !u Tip rt = unsafeInsertL newSz l u rt
+unsafeLink newSz l u lt Tip = unsafeInsertR newSz l u lt
+unsafeLink newSz l u lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
+  | hl < hr + 1 = balanceL (newSz + szl + szr) rl ru (unsafeLink newSz l u lt rlt) rrt
+  | hr < hl + 1 = balanceR (newSz + szl + szr) ll lu llt (unsafeLink newSz l u lrt rt)
+  | otherwise   = forkSz (newSz + szl + szr) l u lt rt
 
 -- This version checks for fusion between the two trees to be merged
-{-# INLINEABLE merge #-}
+{-{-# INLINEABLE merge #-}
 merge :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 merge Tip Tip = Tip
 merge t Tip = t
@@ -442,7 +409,7 @@ merge t1 t2 =
   let (# !_, !u1 #) = unsafeMaxRange t1
       (# !l2, !u2, t2' #) = unsafeMinDelete t2
   in if succ u1 == l2 then unsafeMerge (unsafeFuseR (diff l2 u2) u2 t1) t2'
-     else unsafeMerge t1 t2
+     else unsafeMerge t1 t2-}
 
 -- This assumes that the trees are /totally/ disjoint
 {-# INLINEABLE unsafeMerge #-}
@@ -493,8 +460,8 @@ unsafeAllMore !x !l !u !lt !rt = case compare u x of
 split :: (Enum a, Ord a) => a -> a -> RangeSet a -> (# RangeSet a, RangeSet a #)
 split !_ !_ Tip = (# Tip, Tip #)
 split l u (Fork _ _ l' u' lt rt)
-  | u < l'           = let (# !llt, !lgt #) = split l u lt in (# llt, link l' u' lgt rt #)
-  | u' < l           = let (# !rlt, !rgt #) = split l u rt in (# link l' u' lt rlt, rgt #)
+  | u < l' = let (# !llt, !lgt #) = split l u lt in (# llt, link l' u' lgt rt #)
+  | u' < l = let (# !rlt, !rgt #) = split l u rt in (# link l' u' lt rlt, rgt #)
   -- The ranges overlap in some way
   | otherwise = let !lt' = case compare l' l of
                       EQ -> lt
@@ -505,6 +472,41 @@ split l u (Fork _ _ l' u' lt rt)
                       LT -> unsafeInsertL (diff (succ u) u') (succ u) u' rt
                       GT -> allMore u rt
                 in (# lt', rt' #)
+
+{-# INLINE splitOverlap #-}
+splitOverlap :: (Enum a, Ord a) => a -> a -> RangeSet a -> (# RangeSet a, RangeSet a, RangeSet a #)
+splitOverlap !l !u !t = let (# lt', rt' #) = split l u t in (# lt', overlapping l u t, rt' #)
+
+{-# INLINABLE overlapping #-}
+overlapping :: (Ord a, Enum a) => a -> a -> RangeSet a -> RangeSet a
+overlapping !_ !_ Tip = Tip
+overlapping x y (Fork _ sz l u lt rt) =
+  case compare l x of
+    -- range is outside to the left
+    GT -> let !lt' = overlapping x (min (pred l) y) lt
+          in case cmpY of
+               -- range is totally outside
+               GT -> unsafeLink nodeSz l u lt' rt'
+               EQ -> unsafeInsertR nodeSz l u lt'
+               LT | y >= l -> unsafeInsertR (diff l y) l y lt'
+               LT          -> lt'
+    -- range is inside on the left
+    EQ -> case cmpY of
+      -- range is outside on the right
+      GT -> unsafeInsertL nodeSz l u rt'
+      LT -> t'
+      EQ -> single nodeSz l u
+    LT -> case cmpY of
+      -- range is outside on the right
+      GT | x <= u -> unsafeInsertL (diff x u) x u rt'
+      GT          -> rt'
+      _           -> t'
+  where
+    !cmpY = compare y u
+    !nodeSz = sz - size lt - size rt
+    -- leave lazy!
+    rt' = overlapping (max (succ u) x) y rt
+    t' = single (diff x y) x y
 
 data StrictMaybe a = SJust !a | SNothing
 
@@ -547,16 +549,22 @@ complement t@Fork{} = t'''
 
 {-# INLINE isProperSubsetOf #-}
 isProperSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
-isProperSubsetOf t1 t2 = size t1 < size t2 && isSubsetOf t1 t2
+isProperSubsetOf t1 t2 = size t1 < size t2 && uncheckedSubsetOf t1 t2
 
--- TODO: This can be done better
--- Requires splitMember
 {-# INLINEABLE isSubsetOf #-}
 isSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
-isSubsetOf t1 t2 =
-  --intersection t1 t2 == t1
-  union t1 t2 == t2
-  --null (difference t1 t2)
+isSubsetOf t1 t2 = size t1 <= size t2 && uncheckedSubsetOf t1 t2
+
+uncheckedSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
+uncheckedSubsetOf Tip _ = True
+uncheckedSubsetOf _ Tip = False
+--uncheckedSubsetOf t1 t2 = null (difference t1 t2)
+uncheckedSubsetOf (Fork _ _ l u lt rt) t = case splitOverlap l u t of
+  (# lt', Fork 1 _ x y _ _, rt' #) ->
+       x == l && y == u
+    && size lt <= size lt' && size rt <= size rt'
+    && uncheckedSubsetOf lt lt' && uncheckedSubsetOf rt rt'
+  _                              -> False
 
 {-# INLINE elems #-}
 elems :: Enum a => RangeSet a -> [a]
@@ -584,10 +592,10 @@ fromRanges :: (Enum a, Ord a) => [(a, a)] -> RangeSet a
 fromRanges [(x, y)] = single (diff x y) x y
 fromRanges rs = foldr (uncurry insertRange) empty rs
 
--- TODO: This can be /much much/ better
+-- This could be improved, but is OK
 {-# INLINE insertRange #-}
 insertRange :: (Enum a, Ord a) => a -> a -> RangeSet a -> RangeSet a
-insertRange l u t = foldr insert t (range l u)
+insertRange l u t = let (# lt, rt #) = split l u t in link l u lt rt
 
 -- TODO: This can be made better if we account for orderedness
 {-# INLINE fromList #-}

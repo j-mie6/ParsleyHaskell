@@ -14,8 +14,6 @@ import Control.DeepSeq
 
 import GHC.Generics (Generic)
 
-import GHC.Word (Word32(..))
-
 import qualified Parsley.Internal.Common.RangeSet as RangeSet
 import qualified Data.Set as Set
 import qualified Data.List as List
@@ -25,15 +23,14 @@ deriving instance Generic a => Generic (RangeSet a)
 deriving instance Generic Int
 deriving instance Generic Word
 deriving instance Generic Char
-deriving instance Generic Word32
 
 main :: IO ()
 main = do
   xss <- forM [1..10] $ \n -> generate (vectorOf (n * 10) (chooseInt (0, n * 20)))
   condensedMain [
-      --rangeFromList,
-      --rangeMemberDeleteBench,
-      --rangeUnionBench,
+      rangeFromList,
+      rangeMemberDeleteBench,
+      rangeUnionBench,
       rangeDiffBench,
       rangeIntersectBench,
       setMemberDeleteBench,
@@ -126,7 +123,7 @@ setMemberDeleteBench =
     f ys t = List.foldl' (\ !_ y -> Set.member y t) False ys
     g ys t = List.foldl' (\ !t y -> Set.delete y t) t ys
 
-zs1, zs2, zs3, zs4 :: RangeSet Word32
+zs1, zs2, zs3, zs4 :: RangeSet Word
 zs1 = RangeSet.fromRanges [(0, 50), (100, 150), (200, 250), (300, 350), (400, 450), (475, 500)]
 zs2 = RangeSet.fromRanges [(25, 75), (125, 175), (225, 275), (325, 375), (425, 475), (485, 500)]
 zs3 = RangeSet.fromRanges [(51, 99), (151, 199), (251, 299), (351, 399), (451, 474)]

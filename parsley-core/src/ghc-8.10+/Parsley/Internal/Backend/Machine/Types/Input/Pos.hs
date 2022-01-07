@@ -22,11 +22,7 @@ data StaPos = StaPos {
     contributing :: ![StaChar]
   }
 
-isStatic :: StaPos -> Bool
-isStatic (StaPos Static{} _ _) = True
-isStatic _ = False
-
-data Alignment = Unknown | Unaligned Int | Aligned deriving stock Show
+data Alignment = Unknown | Unaligned Word | Aligned deriving stock Show
 
 data StaChar = StaChar {
     char :: !(Code Char),
@@ -37,7 +33,11 @@ mkStaPos :: Pos -> StaPos
 mkStaPos pos = StaPos { dynPos = pos, alignment = alignment pos, contributing = [] }
   where
     alignment Dynamic{} = Unknown
-    alignment (Static _) = Unknown
+    alignment (Static (_, col))
+      | trailingBehindBoundary == 0 = Aligned
+      | otherwise                   = Unaligned trailingBehindBoundary
+      where
+        trailingBehindBoundary = col - 1 `mod` Ops.tabWidth
 
 fromDynPos :: DynPos -> StaPos
 fromDynPos = mkStaPos . Dynamic
@@ -52,39 +52,47 @@ fromPos (Dynamic p) = p
 force :: StaPos -> (DynPos -> StaPos -> Code r) -> Code r
 force p k
   | null (contributing p) = k (fromPos (dynPos p)) p
-  | isStatic p = k (toDynPos p) p
-  | otherwise = [||
-        let pos = $$(toDynPos p)
-        in $$(k [||pos||] (StaPos {
-            dynPos = Dynamic [||pos||],
-            alignment = alignment p,
-            contributing = []
-          }))
+  | otherwise = case toPos p of
+    p'@Static{} -> k (fromPos p') (newPos p')
+    Dynamic qpos -> [||
+        let pos = $$qpos
+        in $$(k [||pos||] (newPos (Dynamic [||pos||])))
       ||]
+  where
+    newPos pos = StaPos {
+      dynPos = pos,
+      alignment = updateAlignment (contributing p) (alignment p),
+      contributing = []
+    }
 
 update :: StaPos -> Code Char -> CharPred -> StaPos
-update pos c p = pos { contributing = StaChar c p : contributing pos
-                     ,  alignment = updateAlignment (knownChar p) (alignment pos)
-                     }
+update pos c p = pos { contributing = StaChar c p : contributing pos }
+
+updateAlignment :: [StaChar] -> Alignment -> Alignment
+updateAlignment cs a = foldr (updateAlignment' . knownChar . predicate) a cs
   where
-    updateAlignment Nothing        _             = Unknown
-    updateAlignment (Just Regular) Aligned       = Unaligned 1
-    updateAlignment (Just Regular) (Unaligned n)
-      | n == Ops.tabWidth - 1                    = Aligned
-      | otherwise                                = Unaligned (n + 1)
-    updateAlignment (Just Regular) Unknown       = Unknown
-    updateAlignment _              _             = Aligned
+    updateAlignment' :: Maybe CharClass -> Alignment -> Alignment
+    updateAlignment' Nothing        _             = Unknown
+    updateAlignment' (Just Regular) Aligned       = Unaligned 1
+    updateAlignment' (Just Regular) (Unaligned n)
+      | n == Ops.tabWidth - 1                     = Aligned
+      | otherwise                                 = Unaligned (n + 1)
+    updateAlignment' (Just Regular) Unknown       = Unknown
+    updateAlignment' _              _             = Aligned
 
 -- TODO: we want to collapse into a single update statically!
 -- TODO: take into account initial alignment
-toDynPos :: StaPos -> DynPos
-toDynPos StaPos{..} = fromPos $ foldr f dynPos contributing
+toPos :: StaPos -> Pos
+toPos StaPos{..} = foldr f dynPos contributing
   where
     f StaChar{..} = let charClass = knownChar predicate in throughEither (Ops.updatePos charClass char) (Ops.updatePosQ charClass char)
 
     throughEither :: ((Word, Word) -> Either DynPos (Word, Word)) -> (DynPos -> DynPos) -> Pos -> Pos
     throughEither sta _ (Static p)  = either Dynamic Static (sta p)
     throughEither _ dyn (Dynamic p) = Dynamic (dyn p)
+
+toDynPos :: StaPos -> DynPos
+toDynPos = fromPos . toPos
 
 knownChar :: CharPred -> Maybe CharClass
 knownChar (Specific '\t')         = Just Tab

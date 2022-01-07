@@ -52,7 +52,7 @@ fromPos (Dynamic p) = p
 force :: StaPos -> (DynPos -> StaPos -> Code r) -> Code r
 force p k
   | null (contributing p) = k (fromPos (dynPos p)) p
-  | otherwise = case toPos p of
+  | otherwise = case collapse p of
     p'@Static{} -> k (fromPos p') (newPos p')
     Dynamic qpos -> [||
         let pos = $$qpos
@@ -82,8 +82,8 @@ updateAlignment cs a = foldr (updateAlignment' . knownChar . predicate) a cs
 
 -- TODO: we want to collapse into a single update statically!
 -- TODO: take into account initial alignment
-toPos :: StaPos -> Pos
-toPos StaPos{..} = foldr f dynPos contributing
+collapse :: StaPos -> Pos
+collapse StaPos{..} = foldr f dynPos contributing
   where
     f StaChar{..} = let charClass = knownChar predicate in throughEither (Ops.updatePos charClass char) (Ops.updatePosQ charClass char)
 
@@ -92,7 +92,7 @@ toPos StaPos{..} = foldr f dynPos contributing
     throughEither _ dyn (Dynamic p) = Dynamic (dyn p)
 
 toDynPos :: StaPos -> DynPos
-toDynPos = fromPos . toPos
+toDynPos = fromPos . collapse
 
 knownChar :: CharPred -> Maybe CharClass
 knownChar (Specific '\t')         = Just Tab

@@ -22,6 +22,10 @@ data StaPos = StaPos {
     contributing :: ![StaChar]
   }
 
+isStatic :: StaPos -> Bool
+isStatic (StaPos Static{} _ _) = True
+isStatic _ = False
+
 data Alignment = Unknown | Unaligned Int | Aligned deriving stock Show
 
 data StaChar = StaChar {
@@ -45,10 +49,10 @@ fromPos :: Pos -> DynPos
 fromPos (Static p) = liftPos p
 fromPos (Dynamic p) = p
 
--- TODO: static positions should be forwarded on, because they remain cheaper without a binding!
 force :: StaPos -> (DynPos -> StaPos -> Code r) -> Code r
 force p k
   | null (contributing p) = k (fromPos (dynPos p)) p
+  | isStatic p = k (toDynPos p) p
   | otherwise = [||
         let pos = $$(toDynPos p)
         in $$(k [||pos||] (StaPos {

@@ -319,7 +319,7 @@ intersection t1@(Fork _ _ l1 u1 lt1 rt1) t2 =
     Tip -> unsafeMerge lt1lt2 rt1rt2
     Fork 1 sz x y _ _
       | x == l1, y == u1
-      , lt1lt2 `ptrEq` lt1, rt1rt2 `ptrEq` rt2 -> t1
+      , lt1lt2 `ptrEq` lt1, rt1rt2 `ptrEq` rt1 -> t1
       | otherwise -> unsafeLink sz x y lt1lt2 rt1rt2
     Fork _ sz x y lt' rt' -> unsafeLink (sz - size lt' - size rt') x y (unsafeMerge lt1lt2 lt') (unsafeMerge rt' rt1rt2)
   where

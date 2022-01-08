@@ -239,6 +239,8 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 
 @since 1.4.0.0
 -}
+--TODO: Degrading `Input` to `Input#` here is losing us information when binding handlers.
+--      This should return `Input -> Code (ST s (Maybe a))
 buildYesHandler :: Γ s o xs n r a
                 -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
                 -> Word

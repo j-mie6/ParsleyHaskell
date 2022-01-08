@@ -34,7 +34,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- *** Basic handlers and operations
     fatal, raise,
     -- *** Handler preparation
-    buildHandler, buildYesHandler,
+    buildHandler, buildYesHandler, buildIterYesHandler,
     -- *** Handler binding
     bindAlwaysHandler, bindSameHandler,
     -- ** Continuation Operations
@@ -239,13 +239,16 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 
 @since 1.4.0.0
 -}
---TODO: Degrading `Input` to `Input#` here is losing us information when binding handlers.
---      This should return `Input -> Code (ST s (Maybe a))
 buildYesHandler :: Γ s o xs n r a
                 -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
-                -> Word
-                -> StaHandler s o a
-buildYesHandler γ h u = fromStaHandler# $ \inp -> h (γ {input = toInput u inp})
+                -> StaYesHandler s o a
+buildYesHandler γ h inp = h (γ {input = inp})
+
+buildIterYesHandler :: Γ s o xs n r a
+                    -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
+                    -> Word
+                    -> StaHandler s o a
+buildIterYesHandler γ h u = fromStaHandler# (buildYesHandler γ h . toInput u)
 
 -- Handler binding
 {-|
@@ -275,13 +278,13 @@ where they are unknown (which is defined in terms of the previous two).
 bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (Rep o))
                 => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
                 -> Bool                              -- ^ Is a binding required for the matching handler?
-                -> StaHandler s o a                  -- ^ The handler that handles matching input.
+                -> StaYesHandler s o a               -- ^ The handler that handles matching input.
                 -> Bool                              -- ^ Is a binding required for the mismatched handler?
                 -> StaHandlerBuilder s o a           -- ^ The handler that handles mismatched input.
                 -> (Γ s o xs (Succ n) r a -> Code b) -- ^ The parser to receive the composite handler.
                 -> Code b
 bindSameHandler γ yesNeeded yes noNeeded no k =
-  bindYesInline# yesNeeded (staHandler# yes (fromInput (input γ))) $ \qyes ->
+  bindYesInline# yesNeeded (yes (input γ)) $ \qyes ->
     bindHandlerInline# noNeeded (staHandler# (no (input γ))) $ \qno ->
       let handler inp = [||if $$(same (offset (off (input γ))) (off# inp)) then $$qyes else $$(staHandler# qno inp)||]
       in bindHandlerInline# @o True handler $ \qhandler ->
@@ -418,10 +421,10 @@ bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
              -> MVar Void                  -- ^ The name of the binding.
              -> Machine s o '[] One Void a -- ^ The loop body.
              -> Bool                       -- ^ Is a binding required for the matching handler?
-             -> StaHandler s o a           -- ^ The handler when input is the same.
+             -> StaHandler s o a        -- ^ The handler when input is the same.
              -> Bool                       -- ^ Is a binding required for the differing handler?
              -> StaHandlerBuilder s o a    -- ^ The handler when input differs.
-             -> Input o                   -- ^ The initial offset of the loop.
+             -> Input o                    -- ^ The initial offset of the loop.
              -> Word                       -- ^ The unique name of the captured offsets /and/ the iteration offset.
              -> Code (ST s (Maybe a))
 bindIterSame ctx μ l neededYes yes neededNo no inp u =
@@ -570,3 +573,8 @@ A `StaHandler` that has not yet captured its offset.
 @since 1.2.0.0
 -}
 type StaHandlerBuilder s o a = Input o -> StaHandler s o a
+
+{-|
+A "yes-handler" that has not yet captured its offset
+-}
+type StaYesHandler s o a = Input o -> Code (ST s (Maybe a))

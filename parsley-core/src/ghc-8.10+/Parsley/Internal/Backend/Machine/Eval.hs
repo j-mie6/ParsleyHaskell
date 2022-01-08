@@ -152,7 +152,7 @@ evalCatch (Machine k) h = freshUnique $ \u -> case h of
   Always gh (Machine h) ->
     liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
   Same gyes (Machine yes) gno (Machine no) ->
-    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes u) gno (buildHandler γ mno u) mk) k yes no
+    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes{- u-}) gno (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ)) (operands γ)})
@@ -185,7 +185,7 @@ evalIter μ l h =
         Always gh (Machine h) ->
           liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
         Same gyes (Machine yes) gno (Machine no) ->
-          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
+          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
 
 evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume

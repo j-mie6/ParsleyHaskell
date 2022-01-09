@@ -44,6 +44,9 @@ mkStaPos pos = StaPos { dynPos = pos, alignment = alignment pos, contributing = 
 fromDynPos :: DynPos -> StaPos
 fromDynPos = mkStaPos . Dynamic
 
+toDynPos :: StaPos -> DynPos
+toDynPos = fromPos . collapse
+
 fromStaPos :: (Word, Word) -> StaPos
 fromStaPos = mkStaPos . uncurry Static
 
@@ -72,15 +75,15 @@ update pos c p = pos { contributing = StaChar c p : contributing pos }
 
 updateAlignment :: [StaChar] -> Alignment -> Alignment
 updateAlignment cs a = foldr (updateAlignment' . knownChar . predicate) a cs
-
-updateAlignment' :: Maybe CharClass -> Alignment -> Alignment
-updateAlignment' Nothing        _             = Unknown
-updateAlignment' (Just Regular) Aligned       = Unaligned 1
-updateAlignment' (Just Regular) (Unaligned n)
-  | n == Ops.tabWidth - 1                     = Aligned
-  | otherwise                                 = Unaligned (n + 1)
-updateAlignment' (Just Regular) Unknown       = Unknown
-updateAlignment' _              _             = Aligned
+  where
+    updateAlignment' Nothing           _             = Unknown
+    updateAlignment' (Just Regular)    Aligned       = Unaligned 1
+    updateAlignment' (Just Regular)    (Unaligned n)
+      | n == Ops.tabWidth - 1                        = Aligned
+      | otherwise                                    = Unaligned (n + 1)
+    updateAlignment' (Just Regular)    Unknown       = Unknown
+    updateAlignment' (Just NonNewline) _             = Unknown
+    updateAlignment' _                 _             = Aligned
 
 collapse :: StaPos -> Pos
 collapse StaPos{..} = applyUpdaters dynPos (buildUpdaters alignment contributing)
@@ -165,23 +168,18 @@ buildUpdaters alignment = applyAlignment alignment . removeDeadUpdates . uncurry
 
 applyUpdaters :: Pos -> [Either (Code Char) Updater] -> Pos
 applyUpdaters = foldl' applyUpdater
+  where
+    applyUpdater pos (Left c) = throughEither (Ops.updatePos Nothing c) (Ops.updatePosQ Nothing c) pos
+    applyUpdater pos (Right updater) = applyUpdaterSta pos updater
 
-applyUpdater :: Pos -> Either (Code Char) Updater -> Pos
-applyUpdater pos (Left c) = throughEither (Ops.updatePos Nothing c) (Ops.updatePosQ Nothing c) pos
-applyUpdater pos (Right updater) = applyUpdaterSta pos updater
-
--- TODO: Illegal states should be unrepresentable
-applyUpdaterSta :: Pos -> Updater -> Pos
-applyUpdaterSta (Static line _)   (Updater n (Set m))                            = Static (line + n) m
-applyUpdaterSta (Static line col) (Updater 0 (Offset n))                         = Static line (col + n)
-applyUpdaterSta (Static line col) (Updater 0 (OffsetAlignOffset firstBy thenBy)) = Static line (Ops.toNextTab (col + firstBy) + thenBy)
-applyUpdaterSta (Dynamic pos)     (Updater n (Set m))                            = Dynamic (Ops.shiftLineAndSetColQ n m pos)
-applyUpdaterSta (Dynamic pos)     (Updater 0 (Offset n))                         = Dynamic (Ops.shiftColQ n pos)
-applyUpdaterSta (Dynamic pos)     (Updater 0 (OffsetAlignOffset firstBy thenBy)) = Dynamic (Ops.shiftAlignAndShiftColQ firstBy thenBy pos)
-applyUpdaterSta _ _ = error "Illegal updater state, lines increased but without a Set"
-
-toDynPos :: StaPos -> DynPos
-toDynPos = fromPos . collapse
+    -- TODO: Illegal states should be unrepresentable
+    applyUpdaterSta (Static line _)   (Updater n (Set m))                            = Static (line + n) m
+    applyUpdaterSta (Static line col) (Updater 0 (Offset n))                         = Static line (col + n)
+    applyUpdaterSta (Static line col) (Updater 0 (OffsetAlignOffset firstBy thenBy)) = Static line (Ops.toNextTab (col + firstBy) + thenBy)
+    applyUpdaterSta (Dynamic pos)     (Updater n (Set m))                            = Dynamic (Ops.shiftLineAndSetColQ n m pos)
+    applyUpdaterSta (Dynamic pos)     (Updater 0 (Offset n))                         = Dynamic (Ops.shiftColQ n pos)
+    applyUpdaterSta (Dynamic pos)     (Updater 0 (OffsetAlignOffset firstBy thenBy)) = Dynamic (Ops.shiftAlignAndShiftColQ firstBy thenBy pos)
+    applyUpdaterSta _ _ = error "Illegal updater state, lines increased but without a Set"
 
 knownChar :: CharPred -> Maybe CharClass
 knownChar (Specific '\t')         = Just Tab

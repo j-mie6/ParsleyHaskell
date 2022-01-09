@@ -19,9 +19,9 @@ module Parsley.Internal.Backend.Machine.PosOps (CharClass(..), initPos, updatePo
 #define FULL_WIDTH_POSITIONS
 #endif
 
-import Data.Bits                                   ( (.&.)
+import Data.Bits                                   ( (.&.), (.|.)
 #ifndef FULL_WIDTH_POSITIONS
-                                                   , unsafeShiftL, (.|.)
+                                                   , unsafeShiftL
 #endif
                                                    )
 import Parsley.Internal.Backend.Machine.Types.Base (Pos)

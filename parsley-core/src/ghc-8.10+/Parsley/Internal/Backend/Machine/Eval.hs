@@ -215,6 +215,7 @@ evalPut σ a k = reader $ \ctx γ ->
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
 -- TODO: FREEVAR is the wrong abstraction really...
+-- TODO: We could leverage the static information to make this require 0 computation!
 evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
 evalSelectPos Line (Machine k) = k <&> \m γ -> forcePos (input γ) $ \pos input' -> m (γ {operands = Op (FREEVAR (extractLine pos)) (operands γ), input = input'})
 evalSelectPos Col (Machine k) = k <&> \m γ -> forcePos (input γ) $ \pos input' -> m (γ {operands = Op (FREEVAR (extractCol pos)) (operands γ), input = input'})

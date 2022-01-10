@@ -13,11 +13,11 @@ import Parsley.Internal.Core.CombinatorAST (PosSelector(..))
 import Parsley.Internal.Backend.Machine.PosOps (liftPos)
 
 import qualified Parsley.Internal.Backend.Machine.PosOps as Ops (
-  updatePosQ, updatePos,
+  updatePos, updatePosQ, updatePosNewlineOnly, updatePosNewlineOnlyQ,
   extractCol, extractLine,
   shiftLineAndSetColQ, shiftColQ, shiftAlignAndShiftColQ,
   shiftLineAndSetCol, shiftCol, shiftAlignAndShiftCol,
-  toNextTab, tabWidth, shiftLineAndSetCol, shiftAlignAndShiftCol)
+  toNextTab, tabWidth)
 import qualified Parsley.Internal.Backend.Machine.Types.Base as Base (Pos)
 
 type DynPos = Code Base.Pos
@@ -100,95 +100,99 @@ updateAlignment cs a = foldr (updateAlignment' . knownChar . predicate) a cs
 collapse :: StaPos -> Pos
 collapse StaPos{..} = applyUpdaters dynPos (buildUpdaters alignment contributing)
 
-data ColUpdater = Set {-# UNPACK #-} !Word
-                | Offset {-# UNPACK #-} !Word
-                | OffsetAlignOffset {-# UNPACK #-} !Word {-# UNPACK #-} !Word
-                deriving stock Show
+data Updater = DynUpdater !DynUpdater !(Code Char)
+             | StaUpdater !StaUpdater
 
-updateTab :: ColUpdater -> ColUpdater
-updateTab (Set n) = Set (Ops.toNextTab n)
-updateTab (Offset n) = OffsetAlignOffset n 0
-updateTab (OffsetAlignOffset firstBy thenBy) = OffsetAlignOffset firstBy (toNextTabFromKnownAlignment thenBy)
+data StaUpdater = OffsetLineAndSetCol {-# UNPACK #-} !Word {-# UNPACK #-} !Word
+                | OffsetCol {-# UNPACK #-} !Word
+                | OffsetAlignOffsetCol {-# UNPACK #-} !Word {-# UNPACK #-} !Word
+
+data DynUpdater = FullUpdate
+                | NoNewlineUpdate
+                | NoColUpdate
+
+updateTab :: Maybe StaUpdater -> StaUpdater
+updateTab Nothing = OffsetAlignOffsetCol 0 0
+updateTab (Just (OffsetLineAndSetCol n m)) = OffsetLineAndSetCol n (Ops.toNextTab m)
+updateTab (Just (OffsetCol n)) = OffsetAlignOffsetCol n 0
+updateTab (Just (OffsetAlignOffsetCol firstBy thenBy)) = OffsetAlignOffsetCol firstBy (toNextTabFromKnownAlignment thenBy)
+
+updateRegular :: Maybe StaUpdater -> StaUpdater
+updateRegular Nothing = OffsetCol 1
+updateRegular (Just (OffsetLineAndSetCol n m)) = OffsetLineAndSetCol n (m + 1)
+updateRegular (Just (OffsetCol n)) = OffsetCol (n + 1)
+updateRegular (Just (OffsetAlignOffsetCol firstBy thenBy)) = OffsetAlignOffsetCol firstBy (thenBy + 1)
+
+updateNewline :: Maybe StaUpdater -> StaUpdater
+updateNewline (Just (OffsetLineAndSetCol n _)) = OffsetLineAndSetCol (n + 1) 1
+updateNewline _ = OffsetLineAndSetCol 1 1
 
 toNextTabFromKnownAlignment :: Word -> Word
 toNextTabFromKnownAlignment x = (x .|. Ops.tabWidth - 1) + 1
 
-updateRegular :: ColUpdater -> ColUpdater
-updateRegular (Set n) = Set (n + 1)
-updateRegular (Offset n) = Offset (n + 1)
-updateRegular (OffsetAlignOffset firstBy thenBy) = OffsetAlignOffset firstBy (thenBy + 1)
-
-data Updater = Updater {
-    lineUpdate :: {-# UNPACK #-} !Word,
-    colUpdate :: !ColUpdater
-  } deriving stock Show
-
-pattern NoUpdate :: Updater
-pattern NoUpdate = Updater { lineUpdate = 0, colUpdate = Offset 0 }
-
-pattern ColOnly :: ColUpdater -> Updater
-pattern ColOnly colUpdate = Updater 0 colUpdate
-
 {-| Takes the initial alignment and contributing characters and
     return the list of updaters (in order from left-to-right)
     that must be applied to update the position properly -}
--- TODO: A line-update removes all previous static updaters: dynamic ones need to remain, in case
---       they update the line. But these can actually be converted to a no-op in the non-line case!
-buildUpdaters :: Alignment -> [StaChar] -> [Either (Code Char) Updater]
-buildUpdaters alignment = applyAlignment alignment . removeDeadUpdates . uncurry combine . foldr f (NoUpdate, [])
+buildUpdaters :: Alignment -> [StaChar] -> [Updater]
+buildUpdaters alignment = applyAlignment alignment . removeDeadUpdates . uncurry combine . foldr f (Nothing, [])
   where
     -- The known initial alignment can affect the /first/ updater
-    applyAlignment :: Alignment -> [Either (Code Char) Updater] -> [Either (Code Char) Updater]
-    applyAlignment (Unaligned n) (Right (ColOnly (OffsetAlignOffset firstBy thenBy)) : updaters) =
+    applyAlignment :: Alignment -> [Updater] -> [Updater]
+    applyAlignment (Unaligned n) (StaUpdater (OffsetAlignOffsetCol firstBy thenBy) : updaters) =
       -- We know what the current alignment boundary is, so can eliminate the Align
       let pre = n + firstBy
           nextTabIn = toNextTabFromKnownAlignment pre
-      in Right (ColOnly (Offset (nextTabIn + thenBy))) : updaters
+      in StaUpdater (OffsetCol (nextTabIn + thenBy)) : updaters
     applyAlignment _ updaters = updaters
 
-    combine :: Updater -> [Either (Code Char) Updater] -> [Either (Code Char) Updater]
-    combine NoUpdate updaters = updaters
-    combine updater updaters = Right updater : updaters
+    combine :: Maybe StaUpdater -> [Updater] -> [Updater]
+    combine Nothing updaters = updaters
+    combine (Just updater) updaters = StaUpdater updater : updaters
 
-    f :: StaChar -> (Updater, [Either (Code Char) Updater]) -> (Updater, [Either (Code Char) Updater])
+    f :: StaChar -> (Maybe StaUpdater, [Updater]) -> (Maybe StaUpdater, [Updater])
     f StaChar{..} (updater, updaters) =
       let charClass = knownChar predicate
       in case charClass of
-        Just Tab -> (updater { colUpdate = updateTab (colUpdate updater) }, updaters)
-        Just Newline -> (updater { lineUpdate = lineUpdate updater + 1, colUpdate = Set 1 }, updaters)
-        Just Regular -> (updater { colUpdate = updateRegular (colUpdate updater) }, updaters)
-        -- TODO: This should be refined to account for non-newline updates, which can be dropped below
-        _ -> (NoUpdate, Left char : combine updater updaters)
+        Just Tab        -> (Just (updateTab updater), updaters)
+        Just Newline    -> (Just (updateNewline updater), updaters)
+        Just Regular    -> (Just (updateRegular updater), updaters)
+        Just NonNewline -> (Nothing, DynUpdater NoNewlineUpdate char : combine updater updaters)
+        _               -> (Nothing, DynUpdater FullUpdate char : combine updater updaters)
 
     -- This function should reverse the list, and also remove any redundant updaters:
     -- when a newline is known, any updater before it is only useful for the newlines.
-    removeDeadUpdates :: [Either (Code Char) Updater] -> [Either (Code Char) Updater]
+    removeDeadUpdates :: [Updater] -> [Updater]
     removeDeadUpdates = fst . foldl' g ([], True)
       where
-        g :: ([Either (Code Char) Updater], Bool) -> Either (Code Char) Updater -> ([Either (Code Char) Updater], Bool)
-        -- TODO: This should be refined from Left to a specialised line-only updater
-        g (updaters, keep) updater@Left{} = (updater : updaters, keep)
-        g res@(updaters, keep) updater@(Right (Updater 0 _))
+        g :: ([Updater], Bool) -> Updater -> ([Updater], Bool)
+        g res@(updaters, keep) updater@(DynUpdater kind c)
+          | keep                              = (updater : updaters, True)
+          -- If we're dropping because of lines, then a dynamic update known not to affect lines isn't needed
+          | not keep, NoNewlineUpdate <- kind = res
+          -- If we're dropping because of lines, then we don't need column updates
+          | otherwise                         = (DynUpdater NoColUpdate c : updaters, False)
+        -- This is a line updater, no tab or regular updaters matter anymore
+        g (updaters, _) updater@(StaUpdater OffsetLineAndSetCol{}) = (updater : updaters, False)
+        -- This a static non-line related update, we can drop it if needed
+        g res@(updaters, keep) updater@StaUpdater{}
           | keep      = (updater : updaters, True)
           | otherwise = res
-        -- This is a line updater, no tab or regular updaters matter anymore
-        g (updaters, _) updater = (updater : updaters, False)
 
-applyUpdaters :: Pos -> [Either (Code Char) Updater] -> Pos
+applyUpdaters :: Pos -> [Updater] -> Pos
 applyUpdaters = foldl' applyUpdater
   where
-    applyUpdater (Static line col) (Left c) = Dynamic (Ops.updatePos c line col)
-    applyUpdater (Dynamic pos) (Left c)     = Dynamic (Ops.updatePosQ c pos)
-    applyUpdater pos (Right updater)        = applyUpdaterSta pos updater
+    applyUpdater (Static line _) (DynUpdater NoColUpdate c) = Dynamic (Ops.updatePosNewlineOnly c line)
+    applyUpdater (Dynamic pos) (DynUpdater NoColUpdate c)   = Dynamic (Ops.updatePosNewlineOnlyQ c pos)
+    applyUpdater (Static line col) (DynUpdater _ c)         = Dynamic (Ops.updatePos c line col)
+    applyUpdater (Dynamic pos) (DynUpdater _ c)             = Dynamic (Ops.updatePosQ c pos)
+    applyUpdater pos (StaUpdater updater)                   = applyStaUpdater pos updater
 
-    -- TODO: Illegal states should be unrepresentable
-    applyUpdaterSta (Static line _)   (Updater n (Set m))                            = uncurry Static $ Ops.shiftLineAndSetCol n m line
-    applyUpdaterSta (Static line col) (Updater 0 (Offset n))                         = uncurry Static $ Ops.shiftCol n line col
-    applyUpdaterSta (Static line col) (Updater 0 (OffsetAlignOffset firstBy thenBy)) = uncurry Static $ Ops.shiftAlignAndShiftCol firstBy thenBy line col
-    applyUpdaterSta (Dynamic pos)     (Updater n (Set m))                            = Dynamic $ Ops.shiftLineAndSetColQ n m pos
-    applyUpdaterSta (Dynamic pos)     (Updater 0 (Offset n))                         = Dynamic $ Ops.shiftColQ n pos
-    applyUpdaterSta (Dynamic pos)     (Updater 0 (OffsetAlignOffset firstBy thenBy)) = Dynamic $ Ops.shiftAlignAndShiftColQ firstBy thenBy pos
-    applyUpdaterSta _ _ = error "Illegal updater state, lines increased but without a Set"
+    applyStaUpdater (Static line _)   (OffsetLineAndSetCol n m)             = uncurry Static $ Ops.shiftLineAndSetCol n m line
+    applyStaUpdater (Static line col) (OffsetCol n)                         = uncurry Static $ Ops.shiftCol n line col
+    applyStaUpdater (Static line col) (OffsetAlignOffsetCol firstBy thenBy) = uncurry Static $ Ops.shiftAlignAndShiftCol firstBy thenBy line col
+    applyStaUpdater (Dynamic pos)     (OffsetLineAndSetCol n m)             = Dynamic $ Ops.shiftLineAndSetColQ n m pos
+    applyStaUpdater (Dynamic pos)     (OffsetCol n)                         = Dynamic $ Ops.shiftColQ n pos
+    applyStaUpdater (Dynamic pos)     (OffsetAlignOffsetCol firstBy thenBy) = Dynamic $ Ops.shiftAlignAndShiftColQ firstBy thenBy pos
 
 knownChar :: CharPred -> Maybe CharClass
 knownChar (Specific '\t')         = Just Tab

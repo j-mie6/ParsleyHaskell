@@ -33,7 +33,7 @@ import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
 import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
-import Parsley.Internal.Backend.Machine.PosOps             (initPos, extractCol, extractLine)
+import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
@@ -214,11 +214,9 @@ evalPut σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
--- TODO: FREEVAR is the wrong abstraction really...
--- TODO: We could leverage the static information to make this require 0 computation!
 evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
-evalSelectPos Line (Machine k) = k <&> \m γ -> forcePos (input γ) $ \pos input' -> m (γ {operands = Op (FREEVAR (extractLine pos)) (operands γ), input = input'})
-evalSelectPos Col (Machine k) = k <&> \m γ -> forcePos (input γ) $ \pos input' -> m (γ {operands = Op (FREEVAR (extractCol pos)) (operands γ), input = input'})
+evalSelectPos sel (Machine k) = k <&> \m γ -> forcePos (input γ) sel $ \component input' ->
+  m (γ {operands = Op (FREEVAR component) (operands γ), input = input'})
 
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a

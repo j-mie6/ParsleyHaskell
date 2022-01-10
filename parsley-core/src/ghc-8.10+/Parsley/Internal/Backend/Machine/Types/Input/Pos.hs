@@ -9,12 +9,20 @@ import Data.Bits ((.|.))
 import Data.List (foldl')
 import Parsley.Internal.Common.Utils (Code)
 import Parsley.Internal.Core.CharPred (CharPred, pattern Specific, apply)
-import Parsley.Internal.Backend.Machine.PosOps (CharClass(..), liftPos)
+import Parsley.Internal.Core.CombinatorAST (PosSelector(..))
+import Parsley.Internal.Backend.Machine.PosOps (liftPos)
 
-import qualified Parsley.Internal.Backend.Machine.PosOps as Ops (updatePosQ, updatePos, shiftLineAndSetColQ, shiftColQ, shiftAlignAndShiftColQ, toNextTab, tabWidth)
+import qualified Parsley.Internal.Backend.Machine.PosOps as Ops (
+  updatePosQ, updatePos,
+  extractCol, extractLine,
+  shiftLineAndSetColQ, shiftColQ, shiftAlignAndShiftColQ,
+  shiftLineAndSetCol, shiftCol, shiftAlignAndShiftCol,
+  toNextTab, tabWidth, shiftLineAndSetCol, shiftAlignAndShiftCol)
 import qualified Parsley.Internal.Backend.Machine.Types.Base as Base (Pos)
 
 type DynPos = Code Base.Pos
+
+data CharClass = Tab | Newline | Regular | NonNewline
 
 -- TODO: This could be more fine-grained, for instance a partially static position.
 data Pos = Static {-# UNPACK #-} !Word {-# UNPACK #-} !Word | Dynamic DynPos
@@ -54,14 +62,14 @@ fromPos :: Pos -> DynPos
 fromPos (Static l c) = liftPos l c
 fromPos (Dynamic p) = p
 
-force :: StaPos -> (DynPos -> StaPos -> Code r) -> Code r
-force p k
-  | null (contributing p) = k (fromPos (dynPos p)) p
+force :: StaPos -> PosSelector -> (Code Int -> StaPos -> Code r) -> Code r
+force p sel k
+  | null (contributing p) = k (extract sel (dynPos p)) p
   | otherwise = case collapse p of
-    p'@Static{} -> k (fromPos p') (newPos p')
+    p'@Static{} -> k (extract sel p') (newPos p')
     Dynamic qpos -> [||
         let pos = $$qpos
-        in $$(k [||pos||] (newPos (Dynamic [||pos||])))
+        in $$(k (extract sel (Dynamic [||pos||])) (newPos (Dynamic [||pos||])))
       ||]
   where
     newPos pos = StaPos {
@@ -69,6 +77,10 @@ force p k
       alignment = updateAlignment (contributing p) (alignment p),
       contributing = []
     }
+    extract Line (Dynamic pos) = Ops.extractLine pos
+    extract Line (Static line _) = let line' = fromEnum line in [||line'||]
+    extract Col (Dynamic pos) = Ops.extractCol pos
+    extract Col (Static _ col) = let col' = fromEnum col in [||col'||]
 
 update :: StaPos -> Code Char -> CharPred -> StaPos
 update pos c p = pos { contributing = StaChar c p : contributing pos }
@@ -87,10 +99,6 @@ updateAlignment cs a = foldr (updateAlignment' . knownChar . predicate) a cs
 
 collapse :: StaPos -> Pos
 collapse StaPos{..} = applyUpdaters dynPos (buildUpdaters alignment contributing)
-
-throughEither :: (Word -> Word -> Either DynPos (Word, Word)) -> (DynPos -> DynPos) -> Pos -> Pos
-throughEither sta _ (Static l c)  = either Dynamic (uncurry Static) (sta l c)
-throughEither _ dyn (Dynamic p) = Dynamic (dyn p)
 
 data ColUpdater = Set {-# UNPACK #-} !Word
                 | Offset {-# UNPACK #-} !Word
@@ -169,16 +177,17 @@ buildUpdaters alignment = applyAlignment alignment . removeDeadUpdates . uncurry
 applyUpdaters :: Pos -> [Either (Code Char) Updater] -> Pos
 applyUpdaters = foldl' applyUpdater
   where
-    applyUpdater pos (Left c) = throughEither (Ops.updatePos Nothing c) (Ops.updatePosQ Nothing c) pos
-    applyUpdater pos (Right updater) = applyUpdaterSta pos updater
+    applyUpdater (Static line col) (Left c) = Dynamic (Ops.updatePos c line col)
+    applyUpdater (Dynamic pos) (Left c)     = Dynamic (Ops.updatePosQ c pos)
+    applyUpdater pos (Right updater)        = applyUpdaterSta pos updater
 
     -- TODO: Illegal states should be unrepresentable
-    applyUpdaterSta (Static line _)   (Updater n (Set m))                            = Static (line + n) m
-    applyUpdaterSta (Static line col) (Updater 0 (Offset n))                         = Static line (col + n)
-    applyUpdaterSta (Static line col) (Updater 0 (OffsetAlignOffset firstBy thenBy)) = Static line (Ops.toNextTab (col + firstBy) + thenBy)
-    applyUpdaterSta (Dynamic pos)     (Updater n (Set m))                            = Dynamic (Ops.shiftLineAndSetColQ n m pos)
-    applyUpdaterSta (Dynamic pos)     (Updater 0 (Offset n))                         = Dynamic (Ops.shiftColQ n pos)
-    applyUpdaterSta (Dynamic pos)     (Updater 0 (OffsetAlignOffset firstBy thenBy)) = Dynamic (Ops.shiftAlignAndShiftColQ firstBy thenBy pos)
+    applyUpdaterSta (Static line _)   (Updater n (Set m))                            = uncurry Static $ Ops.shiftLineAndSetCol n m line
+    applyUpdaterSta (Static line col) (Updater 0 (Offset n))                         = uncurry Static $ Ops.shiftCol n line col
+    applyUpdaterSta (Static line col) (Updater 0 (OffsetAlignOffset firstBy thenBy)) = uncurry Static $ Ops.shiftAlignAndShiftCol firstBy thenBy line col
+    applyUpdaterSta (Dynamic pos)     (Updater n (Set m))                            = Dynamic $ Ops.shiftLineAndSetColQ n m pos
+    applyUpdaterSta (Dynamic pos)     (Updater 0 (Offset n))                         = Dynamic $ Ops.shiftColQ n pos
+    applyUpdaterSta (Dynamic pos)     (Updater 0 (OffsetAlignOffset firstBy thenBy)) = Dynamic $ Ops.shiftAlignAndShiftColQ firstBy thenBy pos
     applyUpdaterSta _ _ = error "Illegal updater state, lines increased but without a Set"
 
 knownChar :: CharPred -> Maybe CharClass

@@ -19,6 +19,8 @@ import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPo
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common.Utils                              (Code)
 import Parsley.Internal.Core.CharPred                             (CharPred)
+import Parsley.Internal.Core.CombinatorAST                        (PosSelector)
+
 {-|
 Packages known static information about offsets (via `Offset`) with static information about positions
 (currently unavailable).
@@ -49,8 +51,8 @@ consume offset' input = input {
     off = moveOne (off input) offset'
   }
 
-forcePos :: Input o -> (DynPos -> Input o -> Code r) -> Code r
-forcePos input k = force (pos input) (\dp sp -> k dp (input { pos = sp }))
+forcePos :: Input o -> PosSelector -> (Code Int -> Input o -> Code r) -> Code r
+forcePos input sel k = force (pos input) sel (\dp sp -> k dp (input { pos = sp }))
 
 updatePos :: Input o -> Code Char -> CharPred -> Input o
 updatePos input c p = input { pos = update (pos input) c p }

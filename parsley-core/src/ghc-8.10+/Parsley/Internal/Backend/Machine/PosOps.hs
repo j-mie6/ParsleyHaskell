@@ -12,7 +12,16 @@ bits in a word, or if the @full-width-positions@ flag was set on the @parsley-co
 
 @since 1.8.0.0
 -}
-module Parsley.Internal.Backend.Machine.PosOps (CharClass(..), initPos, updatePos, toNextTab, updatePosQ, shiftLineAndSetColQ, shiftColQ, shiftAlignAndShiftColQ, tabWidth, liftPos, extractLine, extractCol) where
+module Parsley.Internal.Backend.Machine.PosOps (
+    initPos, tabWidth,
+    extractLine, extractCol,
+    liftPos,
+    updatePos, updatePosQ,
+    updatePosNewlineOnly, updatePosNewlineOnlyQ,
+    shiftLineAndSetCol, shiftCol, shiftAlignAndShiftCol,
+    shiftLineAndSetColQ, shiftColQ, shiftAlignAndShiftColQ,
+    toNextTab
+  ) where
 
 #include "MachDeps.h"
 #if WORD_SIZE_IN_BITS < 64
@@ -35,29 +44,34 @@ import GHC.Prim                                    ( plusWord#, and#, or#, word2
 #endif
                                                    )
 
-data CharClass = Tab | Newline | Regular | NonNewline
-
 toNextTab :: Word -> Word
 toNextTab x = (x + tabWidth - 1) .&. negate tabWidth .|. 1
 
-updatePos :: Maybe CharClass -> Code Char -> Word -> Word -> Either (Code Pos) (Word, Word)
-updatePos Nothing           c line col = Left [||updatePos# $$(liftPos line col) $$c||]
-updatePos (Just Tab)        _ line col = Right (line, toNextTab col)
-updatePos (Just Newline)    _ line _   = Right (line + 1, 1)
-updatePos (Just Regular)    _ line col = Right (line, col + 1)
-updatePos (Just NonNewline) c line col = Left [||updatePosNonNewline# $$(liftPos line col) $$c||]
+updatePos :: Code Char -> Word -> Word -> Code Pos
+updatePos c line col = [||updatePos# $$(liftPos line col) $$c||]
+
+updatePosNewlineOnly :: Code Char -> Word -> Code Pos
+updatePosNewlineOnly c line = [||updatePos0ColNewlineOnly# $$(liftPos line 0) $$c||]
 
 {-|
 Given a position and a character, returns the representation of the updated position.
 
 @since 2.1.0.0
 -}
-updatePosQ :: Maybe CharClass -> Code Char -> Code Pos -> Code Pos
-updatePosQ Nothing           c pos = [||updatePos# $$pos $$c||]
-updatePosQ (Just Tab)        _ pos = shiftAlignAndShiftColQ 0 0 pos
-updatePosQ (Just Newline)    _ pos = shiftLineAndSetColQ 1 1 pos
-updatePosQ (Just Regular)    _ pos = shiftColQ 1 pos
-updatePosQ (Just NonNewline) c pos = [||updatePosNonNewline# $$pos $$c ||]
+updatePosQ :: Code Char -> Code Pos -> Code Pos
+updatePosQ c pos = [||updatePos# $$pos $$c||]
+
+updatePosNewlineOnlyQ :: Code Char -> Code Pos -> Code Pos
+updatePosNewlineOnlyQ c pos = [||updatePosNewlineOnly# $$pos $$c||]
+
+shiftCol :: Word -> Word -> Word -> (Word, Word)
+shiftCol n line col = (line, col + n)
+
+shiftLineAndSetCol :: Word -> Word -> Word -> (Word, Word)
+shiftLineAndSetCol n col line = (line + n, col)
+
+shiftAlignAndShiftCol :: Word -> Word -> Word -> Word -> (Word, Word)
+shiftAlignAndShiftCol firstBy thenBy line col = (line, toNextTab (col + firstBy) + thenBy)
 
 {-|
 The initial position used by the parser. This is some representation of (1, 1).
@@ -79,8 +93,10 @@ nearest 4th space boundary.
 -}
 updatePos# :: Pos -> Char -> Pos
 
-{-# INLINEABLE updatePosNonNewline# #-}
-updatePosNonNewline# :: Pos -> Char -> Pos
+{-# INLINE updatePosNewlineOnly# #-}
+updatePosNewlineOnly# :: Pos -> Char -> Pos
+{-# INLINEABLE updatePos0ColNewlineOnly# #-}
+updatePos0ColNewlineOnly# :: Pos -> Char -> Pos
 
 shiftColQ :: Word -> Code Pos -> Code Pos
 shiftLineAndSetColQ :: Word -> Word -> Code Pos -> Code Pos
@@ -111,8 +127,12 @@ updatePos# pos '\n' = (pos `and#` 0xffffffff_00000000##) `plusWord#` 0x00000001_
 updatePos# pos '\t' = ((pos `plusWord#` 0x00000000_00000003##) `and#` 0xffffffff_fffffffc##) `or#` 0x00000000_00000001##
 updatePos# pos _    = pos `plusWord#` 0x00000000_00000001##
 
-updatePosNonNewline# pos '\t' = ((pos `plusWord#` 0x00000000_00000003##) `and#` 0xffffffff_fffffffc##) `or#` 0x00000000_00000001##
-updatePosNonNewline# pos _    = pos `plusWord#` 0x00000000_00000001##
+-- This is refered to directly in generated code, leave optimised primitives
+updatePosNewlineOnly# pos = updatePos0ColNewlineOnly# (pos `and#` 0xffffffff_00000000##)
+
+-- This is refered to directly in generated code, leave optimised primitives
+updatePos0ColNewlineOnly# pos0Col '\n' = pos0Col `plusWord#` 0x00000001_00000000##
+updatePos0ColNewlineOnly# pos0Col _ = pos0Col
 
 shiftLineAndSetColQ n col qpos = [|| ($$qpos `and#` 0xffffffff_00000000##) `plusWord#` $$(liftPos n col) ||]
 shiftColQ (W# n) qpos = [|| $$qpos `plusWord#` n ||]
@@ -134,8 +154,12 @@ updatePos# (# line, _ #)   '\n' = (# line `plusWord#` 1##, 1## #)
 updatePos# (# line, col #) '\t' = (# line, ((col `plusWord#` 3##) `and#` (0## `minusWord#` 4##)) `or#` 1## #) -- nearest tab boundary `c + (4 - (c - 1) % 4)`
 updatePos# (# line, col #) _    = (# line, col `plusWord#` 1## #)
 
-updatePosNonNewline# (# line, col #) '\t' = (# line, ((col `plusWord#` 3##) `and#` (0## `minusWord#` 4##)) `or#` 1## #) -- nearest tab boundary `c + (4 - (c - 1) % 4)`
-updatePosNonNewline# (# line, col #) _    = (# line, col `plusWord#` 1## #)
+-- This is refered to directly in generated code, leave optimised primitives
+updatePosNewlineOnly# = updatePos0ColNewlineOnly#
+
+-- This is refered to directly in generated code, leave optimised primitives
+updatePos0ColNewlineOnly# (# line, _ #) '\n' = (# line `plusWord#` 1##, 0## #)
+updatePos0ColNewlineOnly# pos           _    = pos
 
 shiftLineAndSetColQ (W# n) (W# col) qpos = [|| case $$qpos of (# line, _ #) -> (# line `plusWord#` n, col #) ||]
 shiftColQ (W# n) qpos = [|| case $$qpos of (# line, col #) -> (# line, col `plusWord#` n #) ||]

@@ -156,8 +156,12 @@ lamTerm (Ranges rngs) =
     conv c l u lb rb
     --  | l == u = eq c (Var True [||l||]) `or` (lb `or` rb)
     --  | otherwise = (lte (Var True [||l||]) c `and` lte c (Var True [||u||])) `or` (lb `or` rb)
-      | l == u = eq c (Var True [||l||]) `or` if' (lt c (Var True [||l||])) lb rb
-      | otherwise = if' (lte (Var True [||l||]) c) (lte c (Var True [||u||]) `or` rb) lb
+      | l == u        = eq c (Var True [||l||]) `or` if' (lt c (Var True [||l||])) lb rb
+      -- the left can be omitted here
+      | l == minBound = lte c (Var True [||u||]) `or` rb
+      -- the right can be omitted here
+      | u == maxBound = lte (Var True [||l||]) c `or` lb
+      | otherwise     = if' (lte (Var True [||l||]) c) (lte c (Var True [||u||]) `or` rb) lb
 
     or = orLam
     and = andLam

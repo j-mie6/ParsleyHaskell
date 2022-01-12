@@ -7,8 +7,8 @@ module BrainfuckBench.Parsley.Parser where
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import BrainfuckBench.Shared
 import Parsley
-import Parsley.Combinator (eof)
-import Parsley.Char(noneOf)
+import Parsley.Combinator (eof, more)
+import Parsley.Char(noneOf, token)
 import Parsley.Fold (skipMany)
 --import Parsley.Garnish
 import Language.Haskell.TH.Syntax (Lift(..))
@@ -21,23 +21,28 @@ deriving instance Lift BrainFuckOp
 brainfuck :: Parser [BrainFuckOp]
 brainfuck = whitespace *> bf <* eof
   where
+    leqdot = RANGES True [('\NUL', '.')]
+    leqgreat = RANGES True [('\NUL', '>')]
+    leqcomma = RANGES True [('\NUL', ',')]
+
     whitespace = skipMany (noneOf "<>+-[],.")
     lexeme p = p <* whitespace
-    {-bf = many ( lexeme ((token ">" $> code RightPointer)
-                    <|> (token "<" $> code LeftPointer)
-                    <|> (token "+" $> code Increment)
-                    <|> (token "-" $> code Decrement)
-                    <|> (token "." $> code Output)
-                    <|> (token "," $> code Input)
-                    <|> (between (lexeme (token "[")) (token "]") (code Loop <$> bf))))-}
-    bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
+    -- This implementation is back on top: the `more` can help eliminate the shared character read!
+    bf = many ( more *> lexeme ((token ">" $> [|RightPointer|])
+                            <|> (token "<" $> [|LeftPointer|])
+                            <|> (token "+" $> [|Increment|])
+                            <|> (token "-" $> [|Decrement|])
+                            <|> (token "." $> [|Output|])
+                            <|> (token "," $> [|Input|])
+                            <|> between (lexeme (token "[")) (token "]") ([|Loop|] <$> bf)))
+    {-bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
     op '>' = item $> [|RightPointer|]
     op '<' = item $> [|LeftPointer|]
     op '+' = item $> [|Increment|]
     op '-' = item $> [|Decrement|]
     op '.' = item $> [|Output|]
     op ',' = item $> [|Input|]
-    op '[' = between (lexeme item) (try (char ']')) ([|Loop|] <$> bf)
+    op '[' = between (lexeme item) (try (char ']')) ([|Loop|] <$> bf)-}
 
 -- This is as closed to the handrolled version as it's possible to get: it's /very/ fast
 -- If register elimination can be performed, this would be equivalent to the handrolled I think

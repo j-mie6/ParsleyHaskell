@@ -133,6 +133,7 @@ enumerated and tried in turn.
 
 @since 0.1.0.0
 -}
+--TODO: This /could/ be improved by generating a neat switch for Characters, and forwarding the input.
 match :: (Eq a, Lift a)
       => [a]             -- ^ The domain of the function given as the third argument
       -> Parser a        -- ^ The parser whose result will be given to the function

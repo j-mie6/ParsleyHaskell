@@ -66,6 +66,8 @@ pattern p :$>: x <- (_ :< p) :*>: (_ :< Pure x)
 pattern TryOrElse ::  k a -> k a -> Combinator (Cofree Combinator k) a
 pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 
+-- it would be nice to generate `yesSame` handler bindings for Try, perhaps a special flag?
+-- relevancy analysis might help too I guess, for a more general one?
 rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
 rollbackHandler = Always False (In4 (Seek (In4 Empt)))
 

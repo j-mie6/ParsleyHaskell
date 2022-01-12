@@ -19,7 +19,7 @@ module Parsley.Internal.Core.Defunc (
 
 import Data.Typeable                    (Typeable, (:~:)(Refl), eqT)
 import Language.Haskell.TH.Syntax       (Lift(..))
-import Parsley.Internal.Common.RangeSet (fromRanges, empty)
+import Parsley.Internal.Common.RangeSet (fromRanges, empty, complement)
 import Parsley.Internal.Common.Utils    (WQ(..), Code, Quapplicative(..))
 import Parsley.Internal.Core.CharPred   (CharPred(..), pattern Item, pattern Specific)
 import Parsley.Internal.Core.Lam        (normaliseGen, Lam(..))
@@ -167,28 +167,20 @@ lamTerm (LAM_S f) = Abs (adaptLam f)
 lamTerm (IF_S c t e) = If (lamTerm c) (lamTerm t) (lamTerm e)
 lamTerm (LET_S x f) = Let (lamTerm x) (adaptLam f)
 
+{-|
+Converts a `Defunc` value into an equivalent `CharPred` value.
+
+@since 2.1.0.0
+-}
 charPred :: Defunc (Char -> Bool) -> CharPred
 charPred (EQ_H (LIFTED c)) = Specific c
 charPred (RANGES False []) = Item
 charPred (RANGES True [(l, u)]) | l == minBound, u == maxBound = Item
 charPred (RANGES True cs) = Ranges (fromRanges cs)
-charPred (RANGES False cs) = Ranges (fromRanges (invertRanges cs))
+charPred (RANGES False cs) = Ranges (complement (fromRanges cs))
 charPred (APP_H CONST (LIFTED True)) = Item
 charPred (APP_H CONST (LIFTED False)) = Ranges empty
 charPred p = UserPred (_val p) (lamTerm p)
-
-invertRanges :: [(Char, Char)] -> [(Char, Char)]
-invertRanges rngs = foldr roll (\l -> [(l, maxBound)]) rngs minBound
-  where
-    roll (u, l') next l
-      -- If the lower and upper bounds are the same, there is no exclusive range
-      | l == u    = rest
-      | otherwise = (l, pred u) : rest
-      where
-        -- If the new lower-bound is the maxBound, this is the end
-        rest
-          | l' == maxBound = []
-          | otherwise      = next (succ l')
 
 adaptLam :: (Defunc a -> Defunc b) -> (Lam a -> Lam b)
 adaptLam f = lamTerm . f . defuncTerm

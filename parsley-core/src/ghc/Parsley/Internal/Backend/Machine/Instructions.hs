@@ -74,7 +74,7 @@ data Instr (o :: Type)                                  -- The FIXED input type
             -> Instr o k (y : x : xs) n r a
   {-| Reads a character so long as it matches a given predicate. If it does not, or no input is available, this instruction fails.
 
-  @since 1.0.0.0 -}
+  @since 2.1.0.0 -}
   Sat       :: CharPred                   {- ^ Predicate to apply. -}
             -> k (Char : xs) (Succ n) r a {- ^ Machine requiring read character. -}
             -> Instr o k xs (Succ n) r a

@@ -1,4 +1,16 @@
 {-# LANGUAGE PatternSynonyms, ViewPatterns #-}
+{-|
+Module      : Parsley.Internal.Core.CharPred
+Description : Packaging of offsets and positions.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains `CharPred`, a specialised defunctionalising for @Char -> Bool@ functions.
+This can be used to efficiently query for character class membership.
+
+@since 2.1.0.0
+-}
 module Parsley.Internal.Core.CharPred (
     CharPred(..), pattern Item, pattern Specific,
     apply, andPred, orPred, diffPred, optimisePredGiven,
@@ -11,33 +23,74 @@ import Prelude hiding (null)
 import Parsley.Internal.Common.RangeSet (RangeSet, elems, unelems, fromRanges, full, member, fold, null, union, extractSingle, singleton, intersection, difference, isSubsetOf, sizeRanges)
 import Parsley.Internal.Core.Lam        (Lam(Abs, App, Var, T, F, If))
 
+{-|
+Represents @Char -> Bool@ functions, potentially in a more inspectable way.
+
+@since 2.1.0.0
+-}
 data CharPred where
+  -- | This is a raw user-defined predicate, with little inspectability other than membership.
   UserPred :: (Char -> Bool) -> Lam (Char -> Bool) -> CharPred
+  -- | This accounts for a character-class, implemented using a `RangeSet` for efficient querying and space.
   Ranges :: RangeSet Char -> CharPred
 
+{-|
+Represents @const True@.
+
+@since 2.1.0.0
+-}
 pattern Item :: CharPred
 pattern Item <- Ranges (full -> True)
   where Item = Ranges (fromRanges [(minBound, maxBound)])
 
+{-|
+Represents @(== c)@ for some specific @c@.
+
+@since 2.1.0.0
+-}
 pattern Specific :: Char -> CharPred
 pattern Specific c <- Ranges (extractSingle -> Just c)
   where Specific c = Ranges (singleton c)
 
+{-|
+Tests whether a given character falls within the predicate.
+
+@since 2.1.0.0
+-}
 apply :: CharPred -> Char -> Bool
 apply (UserPred f _) c = f c
 apply (Ranges rngs) c = member c rngs
 
+{-|
+Merges two predicates by creating one which only returns true when a character
+is in both original predicates.
+
+@since 2.1.0.0
+-}
 andPred :: CharPred -> CharPred -> CharPred
 andPred (UserPred f lf) p = UserPred (\c -> f c && apply p c) (Abs $ \c -> andLam (App lf c) (App (lamTerm p) c))
 andPred p (UserPred f lf) = UserPred (\c -> apply p c && f c) (Abs $ \c -> andLam (App (lamTerm p) c) (App lf c))
--- TODO: These won't be needed when RangeSet implements a cheap intersection
-andPred Item p = p
-andPred p Item = p
 andPred (Ranges rngs1) (Ranges rngs2) = Ranges (rngs1 `intersection` rngs2)
 
--- If the known given pred on a character is tighter than the pred we want to use it can be optimised
--- Otherwise, we can return the smaller predicate
-optimisePredGiven :: CharPred -> CharPred -> CharPred
+{-|
+Occasionally, characters can pass through a predicate only to pass through another at a later point.
+This given information can be used to optimise the new predicate the character is fed through.
+
+This works as follows:
+  * If the given knowledge is a subset of the new predicate, then we /know/ that any character check
+    will have passed, because it already passed a stricter check. The predicate can, therefore, be
+    optimised to `Item`.
+  * Otherwise, the character can only pass through both predicates if it can pass through their
+    intersection. If the intersection is smaller (in terms of the number of checks required to
+    establish membership), then it should be used as it generates smaller code.
+  * If neither of the above conditions are true, then the original predicate remains the most
+    efficient for future tests.
+
+@since 2.1.0.0
+-}
+optimisePredGiven :: CharPred -- ^ A predicate to be optimised with previous given knowledge.
+                  -> CharPred -- ^ A predicate that is known to already be true.
+                  -> CharPred
 optimisePredGiven (Ranges pred) (Ranges given)
   | isSubsetOf given pred = Item
   | sizeRanges inter <= sizeRanges pred = Ranges inter
@@ -46,43 +99,52 @@ optimisePredGiven (Ranges pred) (Ranges given)
     inter = intersection given pred
 optimisePredGiven p _ = p
 
+{-|
+Merges two predicates by creating one which only returns true when a character
+is in either of the original predicates.
+
+@since 2.1.0.0
+-}
 orPred :: CharPred -> CharPred -> CharPred
 orPred (UserPred f lf) p = UserPred (\c -> f c || apply p c) (Abs $ \c -> orLam (App lf c) (App (lamTerm p) c))
 orPred p (UserPred f lf) = UserPred (\c -> apply p c || f c) (Abs $ \c -> orLam (App (lamTerm p) c) (App lf c))
 orPred (Ranges rngs1) (Ranges rngs2) = Ranges (rngs1 `union` rngs2)
 
+{-|
+Merges two predicates by creating one which only returns true when a character
+is in the first but not the second predicate.
+
+@since 2.1.0.0
+-}
 diffPred :: CharPred -> CharPred -> CharPred
 diffPred (UserPred f lf) p = UserPred (\c -> f c && not (apply p c)) (Abs $ \c -> andLam (App lf c) (notLam (App (lamTerm p) c)))
 diffPred p (UserPred f lf) = UserPred (\c -> apply p c && not (f c)) (Abs $ \c -> andLam (App (lamTerm p) c) (notLam (App lf c)))
 diffPred (Ranges rngs1) (Ranges rngs2) = Ranges (rngs1 `difference` rngs2)
 
-andLam :: Lam Bool -> Lam Bool -> Lam Bool
-andLam T y = y
-andLam x T = x
-andLam F _ = F
-andLam _ F = F
-andLam x y = App (App (Var True [||(&&)||]) x) y
+{-|
+Given a predicate, returns the full range of characters it returns @True@ for.
 
-orLam :: Lam Bool -> Lam Bool -> Lam Bool
-orLam T _ = T
-orLam _ T = T
-orLam F y = y
-orLam y F = y
-orLam x y = App (App (Var True [||(||)||]) x) y
-
-notLam :: Lam Bool -> Lam Bool
-notLam T = F
-notLam F = T
-notLam x = App (Var True [||not||]) x
-
+@since 2.1.0.0
+-}
 members :: CharPred -> [Char]
 members (UserPred f _) = filter f [minBound..maxBound]
 members (Ranges rngs)  = elems rngs
 
+{-|
+Given a predicate, returns the full range of characters it returns @False@ for.
+
+@since 2.1.0.0
+-}
 nonMembers :: CharPred -> [Char]
 nonMembers (UserPred f _)      = filter (not . f) [minBound..maxBound]
 nonMembers (Ranges rngs)       = unelems rngs
 
+{-|
+Converts this predicate into a `Lam` term represention. This representation can
+be optimised.
+
+@since 2.1.0.0
+-}
 lamTerm :: CharPred -> Lam (Char -> Bool)
 lamTerm (UserPred _ t) = t
 lamTerm Item = Abs (const T)
@@ -113,3 +175,23 @@ instance Show CharPred where
   show Item = "const True"
   show (Specific c) = concat ["(== ", show c, ")"]
   show (Ranges rngs) = "elem " ++ show rngs
+
+
+andLam :: Lam Bool -> Lam Bool -> Lam Bool
+andLam T y = y
+andLam x T = x
+andLam F _ = F
+andLam _ F = F
+andLam x y = App (App (Var True [||(&&)||]) x) y
+
+orLam :: Lam Bool -> Lam Bool -> Lam Bool
+orLam T _ = T
+orLam _ T = T
+orLam F y = y
+orLam y F = y
+orLam x y = App (App (Var True [||(||)||]) x) y
+
+notLam :: Lam Bool -> Lam Bool
+notLam T = F
+notLam F = T
+notLam x = App (Var True [||not||]) x

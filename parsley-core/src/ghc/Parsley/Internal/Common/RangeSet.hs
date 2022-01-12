@@ -1,4 +1,17 @@
 {-# LANGUAGE DerivingStrategies, MagicHash, UnboxedTuples, RoleAnnotations, TypeApplications #-}
+{-# OPTIONS_HADDOCK prune #-}
+{-|
+Module      : Parsley.Internal.Common.RangeSet
+Description : Packaging of offsets and positions.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains the implementation of an efficient set for contiguous data. It has a much
+smaller memory footprint than a @Set@, and can result in asymptotically faster operations.
+
+@since 2.1.0.0
+-}
 module Parsley.Internal.Common.RangeSet (
     RangeSet(..),
     empty, singleton, null, full, isSingle, extractSingle, size, sizeRanges,
@@ -31,15 +44,32 @@ diff :: Enum a => a -> a -> Size
 diff !l !u = fromEnum u - fromEnum l + 1
 
 type Size = Int
+{-|
+A @Set@ type designed for types that are `Enum` as well as `Ord`. This allows the `RangeSet` to
+compress the data when it is contiguous, reducing memory-footprint and enabling otherwise impractical
+operations like `complement` for `Bounded` types.
+
+@since 2.1.0.0
+-}
 data RangeSet a = Fork {-# UNPACK #-} !Int {-# UNPACK #-} !Size !a !a !(RangeSet a) !(RangeSet a)
                 | Tip
                 deriving stock Show
 type role RangeSet nominal
 
+{-|
+The empty `RangeSet`.
+
+@since 2.1.0.0
+-}
 {-# INLINE empty #-}
 empty :: RangeSet a
 empty = Tip
 
+{-|
+A `RangeSet` containing a single value.
+
+@since 2.1.0.0
+-}
 singleton :: a -> RangeSet a
 singleton x = single 1 x x
 
@@ -54,18 +84,38 @@ forkSz !sz !l !u !lt !rt = Fork (max (height lt) (height rt) + 1) sz l u lt rt
 single :: Size -> a -> a -> RangeSet a
 single !sz !l !u = Fork 1 sz l u Tip Tip
 
+{-|
+Is this set empty?
+
+@since 2.1.0.0
+-}
 null :: RangeSet a -> Bool
 null Tip = True
 null _ = False
 
+{-|
+Is this set full?
+
+@since 2.1.0.0
+-}
 full :: (Eq a, Bounded a) => RangeSet a -> Bool
 full Tip = False
 full (Fork _ _ l u _ _) = l == minBound && maxBound == u
 
+{-|
+Does this set contain a single element?
+
+@since 2.1.0.0
+-}
 isSingle :: RangeSet a -> Bool
 isSingle (Fork _ 1 _ _ _ _) = True
 isSingle _ = False
 
+{-|
+Possibly extract the element contained in the set if it is a singleton set.
+
+@since 2.1.0.0
+-}
 extractSingle :: Eq a => RangeSet a -> Maybe a
 extractSingle (Fork _ _ x y Tip Tip) | x == y = Just x
 extractSingle _                               = Nothing
@@ -75,14 +125,29 @@ height :: RangeSet a -> Int
 height Tip = 0
 height (Fork h _ _ _ _ _) = h
 
+{-|
+Return the number of /elements/ in the set.
+
+@since 2.1.0.0
+-}
 {-# INLINE size #-}
-size :: RangeSet a -> Size
+size :: RangeSet a -> Int
 size Tip = 0
 size (Fork _ sz _ _ _ _) = sz
 
+{-|
+Return the number of /contiguous ranges/ that populate the set.
+
+@since 2.1.0.0
+-}
 sizeRanges :: RangeSet a -> Int
 sizeRanges = fold (\_ _ szl szr -> szl + szr + 1) 0
 
+{-|
+Test whether or not a given value is found within the set.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE member #-}
 member :: forall a. Ord a => a -> RangeSet a -> Bool
 member !x = go
@@ -92,6 +157,11 @@ member !x = go
       | otherwise = go lt
     go Tip = False
 
+{-|
+Test whether or not a given value is not found within the set.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE notMember #-}
 notMember :: Ord a => a -> RangeSet a -> Bool
 notMember x = not . member x
@@ -100,6 +170,11 @@ notMember x = not . member x
 ifeq :: RangeSet a -> RangeSet a -> RangeSet a -> (RangeSet a -> RangeSet a) -> RangeSet a
 ifeq !x !x' y f = if size x == size x' then y else f x'
 
+{-|
+Insert a new element into the set.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE insert #-}
 insert :: forall a. (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 insert !x Tip = single 1 x x
@@ -136,6 +211,11 @@ insert x t@(Fork h sz l u lt rt)
       , x >= pred x' = balanceL sz l u lt rt'
       | otherwise    = Fork h sz l x lt rt
 
+{-|
+Remove an element from the set, if it appears.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE delete #-}
 delete :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 delete !_ Tip = Tip
@@ -204,6 +284,11 @@ unsafeDeleteR !_ (Fork _ _ _ _ lt Tip) = lt
 unsafeDeleteR szRemoved (Fork _ sz l u lt rt) = balanceL (sz - szRemoved) l u lt (unsafeDeleteR szRemoved rt)
 unsafeDeleteR _ _ = error "unsafeDeleteR called on empty tree"-}
 
+{-|
+Find the minimum value within the set, if one exists.
+
+@since 2.1.0.0
+-}
 {-# INLINE findMin #-}
 findMin :: RangeSet a -> Maybe a
 findMin Tip = Nothing
@@ -216,6 +301,11 @@ unsafeMinRange (Fork _ _ l u Tip _) = (# l, u #)
 unsafeMinRange (Fork _ _ _ _ lt _) = unsafeMinRange lt
 unsafeMinRange Tip = error "unsafeMinRange called on empty tree"
 
+{-|
+Find the maximum value within the set, if one exists.
+
+@since 2.1.0.0
+-}
 {-# INLINE findMax #-}
 findMax :: RangeSet a -> Maybe a
 findMax Tip = Nothing
@@ -299,6 +389,12 @@ rotl :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 rotl !sz !l1 !u1 !p (Fork _ szr l2 u2 q r) = forkSz sz l2 u2 (forkSz (sz - szr + size q) l1 u1 p q) r
 rotl _ _ _ _ _ = error "rotr on Tip"
 
+{-|
+Unions two sets together such that if and only if an element appears in either one of the sets, it
+will appear in the result set.
+
+@since 2.1.0.0
+-}
 {-# INLINABLE union #-}
 union :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 union t Tip = t
@@ -310,6 +406,12 @@ union t@(Fork _ _ l u lt rt) t' = case split l u t' of
     where !ltlt' = lt `union` lt'
           !rtrt' = rt `union` rt'
 
+{-|
+Intersects two sets such that an element appears in the result if and only if it is present in both
+of the provided sets.
+
+@since 2.1.0.0
+-}
 {-# INLINABLE intersection #-}
 intersection :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 intersection Tip _ = Tip
@@ -327,6 +429,11 @@ intersection t1@(Fork _ _ l1 u1 lt1 rt1) t2 =
     !lt1lt2 = intersection lt1 lt2
     !rt1rt2 = intersection rt1 rt2
 
+{-|
+Do two sets have no elements in common?
+
+@since 2.1.0.0
+-}
 {-# INLINE disjoint #-}
 disjoint :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 disjoint Tip _ = True
@@ -335,6 +442,11 @@ disjoint (Fork _ _ l u lt rt) t = case splitOverlap l u t of
   (# lt', Tip, rt' #) -> disjoint lt lt' && disjoint rt rt'
   _                   -> False
 
+{-|
+Removes all elements from the first set that are found in the second set.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE difference #-}
 difference :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
 difference Tip _ = Tip
@@ -430,11 +542,21 @@ glue sz lt rt
   | height lt < height rt = let (# !l, !u, !rt' #) = unsafeMinDelete rt in forkSz sz l u lt rt'
   | otherwise = let (# !l, !u, !lt' #) = unsafeMaxDelete lt in forkSz sz l u lt' rt
 
+{-|
+Filters a set by removing all values greater than or equal to the given value.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE allLess #-}
 allLess :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 allLess !_ Tip = Tip
 allLess x (Fork _ _ l u lt rt) = unsafeAllLess x l u lt rt
 
+{-|
+Filters a set by removing all values less than or equal to the given value.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE allMore #-}
 allMore :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 allMore !_ Tip = Tip
@@ -510,6 +632,12 @@ overlapping x y (Fork _ sz l u lt rt) =
 
 data StrictMaybe a = SJust !a | SNothing
 
+{-|
+Inverts a set: every value which was an element is no longer an element, and every value that
+was not an element now is. This is only possible on `Bounded` types.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE complement #-}
 complement :: forall a. (Bounded a, Enum a, Eq a) => RangeSet a -> RangeSet a
 complement Tip = single (diff @a minBound maxBound) minBound maxBound
@@ -547,10 +675,21 @@ complement t@Fork{} = t'''
           !t' = fork l' (pred u) lt' rt'
       in  (# t', l''' #)
 
+{-|
+Tests if all the element of the first set appear in the second, but also that the first and second
+sets are not equal.
+
+@since 2.1.0.0
+-}
 {-# INLINE isProperSubsetOf #-}
 isProperSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 isProperSubsetOf t1 t2 = size t1 < size t2 && uncheckedSubsetOf t1 t2
 
+{-|
+Tests if all the elements of the first set appear in the second.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE isSubsetOf #-}
 isSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 isSubsetOf t1 t2 = size t1 <= size t2 && uncheckedSubsetOf t1 t2
@@ -558,7 +697,6 @@ isSubsetOf t1 t2 = size t1 <= size t2 && uncheckedSubsetOf t1 t2
 uncheckedSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
 uncheckedSubsetOf Tip _ = True
 uncheckedSubsetOf _ Tip = False
---uncheckedSubsetOf t1 t2 = null (difference t1 t2)
 uncheckedSubsetOf (Fork _ _ l u lt rt) t = case splitOverlap l u t of
   (# lt', Fork 1 _ x y _ _, rt' #) ->
        x == l && y == u
@@ -566,14 +704,20 @@ uncheckedSubsetOf (Fork _ _ l u lt rt) t = case splitOverlap l u t of
     && uncheckedSubsetOf lt lt' && uncheckedSubsetOf rt rt'
   _                              -> False
 
+{-|
+Returns all the elements found within the set.
+
+@since 2.1.0.0
+-}
 {-# INLINE elems #-}
 elems :: Enum a => RangeSet a -> [a]
 elems t = fold (\l u lt rt -> lt . (range l u ++) . rt) id t []
 
-{-# INLINE ranges #-}
-ranges :: RangeSet a -> [(a, a)]
-ranges t = fold (\l u lt rt -> lt . ((l, u) :) . rt) id t []
+{-|
+Returns all the values that are not found within the set.
 
+@since 2.1.0.0
+-}
 {-# INLINEABLE unelems #-}
 unelems :: (Bounded a, Enum a, Eq a) => RangeSet a -> [a]
 unelems t = fold fork tip t minBound maxBound []
@@ -586,30 +730,57 @@ unelems t = fold fork tip t minBound maxBound []
             | otherwise = rt (succ u') u
     tip l u = (range l u ++)
 
+{-|
+Constructs a `RangeSet` given a list of ranges.
+
+@since 2.1.0.0
+-}
 -- TODO: This could be better?
 {-# INLINEABLE fromRanges #-}
 fromRanges :: (Enum a, Ord a) => [(a, a)] -> RangeSet a
 fromRanges [(x, y)] = single (diff x y) x y
 fromRanges rs = foldr (uncurry insertRange) empty rs
 
+{-|
+Inserts a range into a `RangeSet`.
+
+@since 2.1.0.0
+-}
 -- This could be improved, but is OK
 {-# INLINE insertRange #-}
 insertRange :: (Enum a, Ord a) => a -> a -> RangeSet a -> RangeSet a
 insertRange l u t = let (# lt, rt #) = split l u t in link l u lt rt
 
+{-|
+Builds a `RangeSet` from a given list of elements.
+
+@since 2.1.0.0
+-}
 -- TODO: This can be made better if we account for orderedness
 {-# INLINE fromList #-}
 fromList :: (Enum a, Ord a) => [a] -> RangeSet a
 fromList = foldr insert empty
 
+{-|
+Folds a range set.
+
+@since 2.1.0.0
+-}
 {-# INLINEABLE fold #-}
-fold :: (a -> a -> b -> b -> b) -> b -> RangeSet a -> b
+fold :: (a -> a -> b -> b -> b) -- | Function that combines the lower and upper values (inclusive) for a range with the folded left- and right-subtrees.
+     -> b                       -- | Value to be substituted at the leaves.
+     -> RangeSet a
+     -> b
 fold _ tip Tip = tip
 fold fork tip (Fork _ _ l u lt rt) = fork l u (fold fork tip lt) (fold fork tip rt)
 
 -- Instances
 instance Eq a => Eq (RangeSet a) where
   t1 == t2 = size t1 == size t2 && ranges t1 == ranges t2
+    where
+      {-# INLINE ranges #-}
+      ranges :: RangeSet a -> [(a, a)]
+      ranges t = fold (\l u lt rt -> lt . ((l, u) :) . rt) id t []
 
 -- Testing Utilities
 valid :: (Ord a, Enum a) => RangeSet a -> Bool

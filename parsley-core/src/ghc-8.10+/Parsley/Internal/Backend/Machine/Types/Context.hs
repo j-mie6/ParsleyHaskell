@@ -434,7 +434,7 @@ Reads a character from the context's retrieval queue if one exists.
 If not, reads a character from another given source (and adds it to the
 rewind buffer).
 
-@since 1.5.0.0
+@since 2.1.0.0
 -}
 readChar :: Ctx s o a                                                             -- ^ The original context.
          -> CharPred                                                              -- ^ The predicate that this character will be tested against

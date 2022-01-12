@@ -44,33 +44,80 @@ import GHC.Prim                                    ( plusWord#, and#, or#, word2
 #endif
                                                    )
 
+{-|
+Advances a column to the next tab column.
+
+@since 2.1.0.0
+-}
 toNextTab :: Word -> Word
 toNextTab x = (x + tabWidth - 1) .&. negate tabWidth .|. 1
 
+{-|
+Given a dynamic character and a static position, produces a new dynamic position.
+
+@since 2.1.0.0
+-}
 updatePos :: Code Char -> Word -> Word -> Code Pos
 updatePos c line col = [||updatePos# $$(liftPos line col) $$c||]
 
+{-|
+Given a dynamic character and a static position, produces a new dynamic position.
+For this variant, newlines are the only character than can affect the update.
+
+@since 2.1.0.0
+-}
 updatePosNewlineOnly :: Code Char -> Word -> Code Pos
 updatePosNewlineOnly c line = [||updatePos0ColNewlineOnly# $$(liftPos line 0) $$c||]
 
 {-|
-Given a position and a character, returns the representation of the updated position.
+Given a dynamic character and a dynamic position, returns the representation of the updated position.
 
 @since 2.1.0.0
 -}
 updatePosQ :: Code Char -> Code Pos -> Code Pos
 updatePosQ c pos = [||updatePos# $$pos $$c||]
 
+{-|
+Given a dynamic character and a dynamic position, returns the representation of the updated position.
+For this variant, newlines are the only character than can affect the update.
+
+@since 2.1.0.0
+-}
 updatePosNewlineOnlyQ :: Code Char -> Code Pos -> Code Pos
 updatePosNewlineOnlyQ c pos = [||updatePosNewlineOnly# $$pos $$c||]
 
-shiftCol :: Word -> Word -> Word -> (Word, Word)
+{-|
+Shift a static postion's column by a given amount
+
+@since 2.1.0.0
+-}
+shiftCol :: Word -- ^ The amount to shift the column by
+         -> Word -- ^ The line
+         -> Word -- ^ The column
+         -> (Word, Word)
 shiftCol n line col = (line, col + n)
 
-shiftLineAndSetCol :: Word -> Word -> Word -> (Word, Word)
+{-|
+Shift a static line by a given amount and then set the column
+
+@since 2.1.0.0
+-}
+shiftLineAndSetCol :: Word -- ^ The amount to shift the line by
+                   -> Word -- ^ The new column
+                   -> Word -- ^ The line
+                   -> (Word, Word)
 shiftLineAndSetCol n col line = (line + n, col)
 
-shiftAlignAndShiftCol :: Word -> Word -> Word -> Word -> (Word, Word)
+{-|
+Shift a static position by first adjusting the column, then aligning to a tab, then shifting further
+
+@since 2.1.0.0
+-}
+shiftAlignAndShiftCol :: Word -- ^ Amount to shift column by before the tab shift
+                      -> Word -- ^ Amount to shift column by after the tab shift
+                      -> Word -- ^ The line
+                      -> Word -- ^ The new column
+                      -> (Word, Word)
 shiftAlignAndShiftCol firstBy thenBy line col = (line, toNextTab (col + firstBy) + thenBy)
 
 {-|
@@ -81,28 +128,47 @@ The initial position used by the parser. This is some representation of (1, 1).
 initPos :: (Word, Word)
 initPos = (1, 1)
 
+{-|
+The size of a tab.
+
+@since 2.1.0.0
+-}
 tabWidth :: Num a => a
 tabWidth = 4
 
 {-# INLINEABLE updatePos# #-}
-{-|
-Updates a given position assuming the given character was read. Tab characters are aligned to the
-nearest 4th space boundary.
-
-@since 1.8.0.0
--}
 updatePos# :: Pos -> Char -> Pos
-
 {-# INLINE updatePosNewlineOnly# #-}
 updatePosNewlineOnly# :: Pos -> Char -> Pos
 {-# INLINEABLE updatePos0ColNewlineOnly# #-}
 updatePos0ColNewlineOnly# :: Pos -> Char -> Pos
 
-shiftColQ :: Word -> Code Pos -> Code Pos
-shiftLineAndSetColQ :: Word -> Word -> Code Pos -> Code Pos
-shiftAlignAndShiftColQ :: Word -> Word -> Code Pos -> Code Pos
+{-|
+Shift a dynamic postion's column by a given amount
 
---updatePosCode :: Code Pos -> Word -> Word -> Word -> Code Pos
+@since 2.1.0.0
+-}
+shiftColQ :: Word -- ^ The amount to shift the column by
+          -> Code Pos
+          -> Code Pos
+{-|
+Shift a dynamic line by a given amount and then set the column
+
+@since 2.1.0.0
+-}
+shiftLineAndSetColQ :: Word -- ^ The amount to shift the line by
+                    -> Word -- ^ The new column
+                    -> Code Pos
+                    -> Code Pos
+{-|
+Shift a dynamic position by first adjusting the column, then aligning to a tab, then shifting further
+
+@since 2.1.0.0
+-}
+shiftAlignAndShiftColQ :: Word -- ^ Amount to shift column by before the tab shift
+                       -> Word -- ^ Amount to shift column by after the tab shift
+                       -> Code Pos
+                       -> Code Pos
 
 {-|
 Given the opaque representation of a position, extracts the line number out of it.
@@ -118,19 +184,24 @@ Given the opaque representation of a position, extracts the column number out of
 -}
 extractCol :: Code Pos -> Code Int
 
+{-|
+Converts a static position into a dynamic one.
+
+@since 2.1.0.0
+-}
 liftPos :: Word -> Word -> Code Pos
 
 #ifndef FULL_WIDTH_POSITIONS
 
--- This is refered to directly in generated code, leave optimised primitives
+-- This is referred to directly in generated code, leave optimised primitives
 updatePos# pos '\n' = (pos `and#` 0xffffffff_00000000##) `plusWord#` 0x00000001_00000001##
 updatePos# pos '\t' = ((pos `plusWord#` 0x00000000_00000003##) `and#` 0xffffffff_fffffffc##) `or#` 0x00000000_00000001##
 updatePos# pos _    = pos `plusWord#` 0x00000000_00000001##
 
--- This is refered to directly in generated code, leave optimised primitives
+-- This is referred to directly in generated code, leave optimised primitives
 updatePosNewlineOnly# pos = updatePos0ColNewlineOnly# (pos `and#` 0xffffffff_00000000##)
 
--- This is refered to directly in generated code, leave optimised primitives
+-- This is referred to directly in generated code, leave optimised primitives
 updatePos0ColNewlineOnly# pos0Col '\n' = pos0Col `plusWord#` 0x00000001_00000000##
 updatePos0ColNewlineOnly# pos0Col _ = pos0Col
 
@@ -149,15 +220,15 @@ extractCol qpos = [||I# (word2Int# ($$qpos `and#` 0x00000000_ffffffff##))||]
 liftPos line col = let !(W# p) = (line `unsafeShiftL` 32) .|. col in [||p||]
 
 #else
--- This is refered to directly in generated code, leave optimised primitives
+-- This is referred to directly in generated code, leave optimised primitives
 updatePos# (# line, _ #)   '\n' = (# line `plusWord#` 1##, 1## #)
 updatePos# (# line, col #) '\t' = (# line, ((col `plusWord#` 3##) `and#` (0## `minusWord#` 4##)) `or#` 1## #) -- nearest tab boundary `c + (4 - (c - 1) % 4)`
 updatePos# (# line, col #) _    = (# line, col `plusWord#` 1## #)
 
--- This is refered to directly in generated code, leave optimised primitives
+-- This is referred to directly in generated code, leave optimised primitives
 updatePosNewlineOnly# = updatePos0ColNewlineOnly#
 
--- This is refered to directly in generated code, leave optimised primitives
+-- This is referred to directly in generated code, leave optimised primitives
 updatePos0ColNewlineOnly# (# line, _ #) '\n' = (# line `plusWord#` 1##, 0## #)
 updatePos0ColNewlineOnly# pos           _    = pos
 

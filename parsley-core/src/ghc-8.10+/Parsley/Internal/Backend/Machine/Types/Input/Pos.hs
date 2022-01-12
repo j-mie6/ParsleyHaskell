@@ -1,67 +1,81 @@
-{-# LANGUAGE RecordWildCards, UnboxedTuples, PatternSynonyms, DerivingStrategies #-}
+{-# LANGUAGE RecordWildCards, UnboxedTuples, PatternSynonyms #-}
+{-|
+Module      : Parsley.Internal.Backend.Machine.Types.Input.Pos
+Description : Packaging of offsets and positions.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains the machinery for manipulating position information, both in static and dynamic
+forms.
+
+@since 2.1.0.0
+-}
 module Parsley.Internal.Backend.Machine.Types.Input.Pos (
     StaPos, DynPos,
     fromDynPos, toDynPos, fromStaPos,
     force, update
   ) where
 
-import Data.Bits ((.|.))
-import Data.List (foldl')
-import Parsley.Internal.Common.Utils (Code)
-import Parsley.Internal.Core.CharPred (CharPred, pattern Specific, apply)
-import Parsley.Internal.Core.CombinatorAST (PosSelector(..))
+import Data.Bits                               ((.|.))
+import Data.List                               (foldl')
+import Parsley.Internal.Common.Utils           (Code)
+import Parsley.Internal.Core.CharPred          (CharPred, pattern Specific, apply)
+import Parsley.Internal.Core.CombinatorAST     (PosSelector(..))
 import Parsley.Internal.Backend.Machine.PosOps (liftPos)
 
-import qualified Parsley.Internal.Backend.Machine.PosOps as Ops (
-  updatePos, updatePosQ, updatePosNewlineOnly, updatePosNewlineOnlyQ,
-  extractCol, extractLine,
-  shiftLineAndSetColQ, shiftColQ, shiftAlignAndShiftColQ,
-  shiftLineAndSetCol, shiftCol, shiftAlignAndShiftCol,
-  toNextTab, tabWidth)
+import qualified Parsley.Internal.Backend.Machine.PosOps as Ops
 import qualified Parsley.Internal.Backend.Machine.Types.Base as Base (Pos)
 
+{-|
+The type-alias for dynamic positions.
+
+@since 2.1.0.0
+-}
 type DynPos = Code Base.Pos
 
-data CharClass = Tab | Newline | Regular | NonNewline
+{-|
+Type that represents static positions and their associated data.
 
--- TODO: This could be more fine-grained, for instance a partially static position.
-data Pos = Static {-# UNPACK #-} !Word {-# UNPACK #-} !Word | Dynamic DynPos
-
+@since 2.1.0.0
+-}
 data StaPos = StaPos {
     dynPos :: !Pos,
     alignment :: !Alignment,
     contributing :: ![StaChar]
   }
 
-data Alignment = Unknown | Unaligned {-# UNPACK #-} !Word deriving stock Show
+{-|
+Converts a dynamic position into an unannotated static one.
 
-pattern Aligned :: Alignment
-pattern Aligned = Unaligned 0
-
-data StaChar = StaChar {
-    char :: !(Code Char),
-    predicate :: !CharPred
-  }
-
-mkStaPos :: Pos -> StaPos
-mkStaPos pos = StaPos { dynPos = pos, alignment = alignment pos, contributing = [] }
-  where
-    alignment Dynamic{} = Unknown
-    alignment (Static _ col) = Unaligned (col - 1 `mod` Ops.tabWidth)
-
+@since 2.1.0.0
+-}
 fromDynPos :: DynPos -> StaPos
 fromDynPos = mkStaPos . Dynamic
 
+{-|
+Forgets the static information found in a position and converts it into a dynamic one.
+
+@since 2.1.0.0
+-}
 toDynPos :: StaPos -> DynPos
 toDynPos = fromPos . collapse
 
+{-|
+Produce a static position from a given line and column pair.
+
+@since 2.1.0.0
+-}
 fromStaPos :: (Word, Word) -> StaPos
 fromStaPos = mkStaPos . uncurry Static
 
-fromPos :: Pos -> DynPos
-fromPos (Static l c) = liftPos l c
-fromPos (Dynamic p) = p
+{-|
+Given a static position, and a component to select, collapse the position down to its smallest form
+(binding this to a let if necessary) and extract the desired component. The new, potentially rebound,
+position is provided to the continuation too.
 
+@since 2.1.0.0
+-}
 force :: StaPos -> PosSelector -> (Code Int -> StaPos -> Code r) -> Code r
 force p sel k
   | null (contributing p) = k (extract sel (dynPos p)) p
@@ -82,23 +96,35 @@ force p sel k
     extract Col (Dynamic pos) = Ops.extractCol pos
     extract Col (Static _ col) = let col' = fromEnum col in [||col'||]
 
+{-|
+Advance a static position accounting for the dynamic character that was last read and the
+static predicate that guarded that read.
+
+@since 2.1.0.0
+-}
 update :: StaPos -> Code Char -> CharPred -> StaPos
 update pos c p = pos { contributing = StaChar c p : contributing pos }
 
-updateAlignment :: [StaChar] -> Alignment -> Alignment
-updateAlignment cs a = foldr (updateAlignment' . knownChar . predicate) a cs
-  where
-    updateAlignment' Nothing           _             = Unknown
-    updateAlignment' (Just Regular)    Aligned       = Unaligned 1
-    updateAlignment' (Just Regular)    (Unaligned n)
-      | n == Ops.tabWidth - 1                        = Aligned
-      | otherwise                                    = Unaligned (n + 1)
-    updateAlignment' (Just Regular)    Unknown       = Unknown
-    updateAlignment' (Just NonNewline) _             = Unknown
-    updateAlignment' _                 _             = Aligned
+{-----------------}
+{-   INTERNALS   -}
+{-----------------}
 
-collapse :: StaPos -> Pos
-collapse StaPos{..} = applyUpdaters dynPos (buildUpdaters alignment contributing)
+-- Data
+
+-- TODO: This could be more fine-grained, for instance a partially static position.
+data Pos = Static {-# UNPACK #-} !Word {-# UNPACK #-} !Word | Dynamic DynPos
+
+data Alignment = Unknown | Unaligned {-# UNPACK #-} !Word
+
+pattern Aligned :: Alignment
+pattern Aligned = Unaligned 0
+
+data StaChar = StaChar {
+    char :: !(Code Char),
+    predicate :: !CharPred
+  }
+
+data CharClass = Tab | Newline | Regular | NonNewline
 
 data Updater = DynUpdater !DynUpdater !(Code Char)
              | StaUpdater !StaUpdater
@@ -110,6 +136,30 @@ data StaUpdater = OffsetLineAndSetCol {-# UNPACK #-} !Word {-# UNPACK #-} !Word
 data DynUpdater = FullUpdate
                 | NoNewlineUpdate
                 | NoColUpdate
+
+-- Functions
+
+mkStaPos :: Pos -> StaPos
+mkStaPos pos = StaPos { dynPos = pos, alignment = alignment pos, contributing = [] }
+  where
+    alignment Dynamic{} = Unknown
+    alignment (Static _ col) = Unaligned (col - 1 `mod` Ops.tabWidth)
+
+fromPos :: Pos -> DynPos
+fromPos (Static l c) = liftPos l c
+fromPos (Dynamic p) = p
+
+updateAlignment :: [StaChar] -> Alignment -> Alignment
+updateAlignment cs a = foldr (updateAlignment' . knownChar . predicate) a cs
+  where
+    updateAlignment' Nothing           _             = Unknown
+    updateAlignment' (Just Regular)    (Unaligned n) = Unaligned (n + 1 `mod` Ops.tabWidth)
+    updateAlignment' (Just Regular)    Unknown       = Unknown
+    updateAlignment' (Just NonNewline) _             = Unknown
+    updateAlignment' _                 _             = Aligned
+
+collapse :: StaPos -> Pos
+collapse StaPos{..} = applyUpdaters dynPos (buildUpdaters alignment contributing)
 
 updateTab :: Maybe StaUpdater -> StaUpdater
 updateTab Nothing = OffsetAlignOffsetCol 0 0
@@ -199,9 +249,3 @@ knownChar (Specific '\t')         = Just Tab
 knownChar (Specific '\n')         = Just Newline
 knownChar p | not (apply p '\n')  = Just $ if not (apply p '\t') then Regular else NonNewline
 knownChar _                       = Nothing
-
-instance Show StaPos where
-  show StaPos{..} = "StaPos { dynPos = ?, alignment = " ++ show alignment ++ ", contributing = " ++ show contributing ++ "}"
-
-instance Show StaChar where
-  show StaChar{..} = "StaChar { char = ?, predicate = " ++ show predicate ++ "}"

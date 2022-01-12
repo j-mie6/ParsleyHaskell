@@ -55,7 +55,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Log Operations
     logHandler, preludeString,
     -- ** Convenience Types
-    Ops, LogHandler, StaHandlerBuilder,
+    Ops, LogHandler, StaHandlerBuilder, StaYesHandler,
     -- * Re-exports from "Parsley.Internal.Backend.Machine.InputOps"
     HandlerOps, JoinBuilder, RecBuilder, PositionOps, MarshalOps, LogOps
   ) where
@@ -118,7 +118,7 @@ code to execute on failure, and a state @γ@, tries to read a character
 from the input within @γ@, executing the failure code if it does not
 exist or does not match.
 
-@since 1.8.0.0
+@since 2.1.0.0
 -}
 sat :: (Defunc Char -> Defunc Bool)                        -- ^ Predicate to test the character with.
     -> Code Char                                           -- ^ The character to test against.
@@ -237,13 +237,20 @@ Converts a partially evaluated parser into a "yes" handler: this means that
 the handler /always/ knows that the inputs are equal, so does not require
 both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 
-@since 1.4.0.0
+@since 2.1.0.0
 -}
 buildYesHandler :: Γ s o xs n r a
                 -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
                 -> StaYesHandler s o a
 buildYesHandler γ h inp = h (γ {input = inp})
 
+{-|
+Converts a partially evaluated parser into a "yes" handler: this means that
+the handler /always/ knows that the inputs are equal, so does not require
+both a captured and a current offset. Otherwise, is similar to `buildHandler`.
+
+@since 2.1.0.0
+-}
 buildIterYesHandler :: Γ s o xs n r a
                     -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
                     -> Word
@@ -273,7 +280,7 @@ differently depending on whether inputs match or not. The three bindings are
 for the case where they are the same, the case where they differ, and the case
 where they are unknown (which is defined in terms of the previous two).
 
-@since 1.4.0.0
+@since 2.1.0.0
 -}
 bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (Rep o))
                 => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
@@ -414,14 +421,14 @@ bindIterAlways ctx μ l needed h inp u =
 Similar to `bindIterAlways`, but builds a handler that performs in
 the same way as `bindSameHandler`.
 
-@since 1.8.0.0
+@since 2.1.0.0
 -}
 bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
              => Ctx s o a                  -- ^ The context to store the binding in.
              -> MVar Void                  -- ^ The name of the binding.
              -> Machine s o '[] One Void a -- ^ The loop body.
              -> Bool                       -- ^ Is a binding required for the matching handler?
-             -> StaHandler s o a        -- ^ The handler when input is the same.
+             -> StaHandler s o a           -- ^ The handler when input is the same.
              -> Bool                       -- ^ Is a binding required for the differing handler?
              -> StaHandlerBuilder s o a    -- ^ The handler when input differs.
              -> Input o                    -- ^ The initial offset of the loop.
@@ -576,5 +583,7 @@ type StaHandlerBuilder s o a = Input o -> StaHandler s o a
 
 {-|
 A "yes-handler" that has not yet captured its offset
+
+@since 2.1.0.0
 -}
 type StaYesHandler s o a = Input o -> Code (ST s (Maybe a))

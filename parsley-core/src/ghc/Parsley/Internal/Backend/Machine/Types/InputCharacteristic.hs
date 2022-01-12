@@ -1,3 +1,14 @@
+{-|
+Module      : Parsley.Internal.Backend.Machine.Types.InputCharacteristic
+Description : Packaging of offsets and positions.
+License     : BSD-3-Clause
+Maintainer  : Jamie Willis
+Stability   : experimental
+
+This module contains the `InputCharacteristic` datatype, that describes how bindings consume input.
+
+@since 2.1.0.0
+-}
 module Parsley.Internal.Backend.Machine.Types.InputCharacteristic (
     module Parsley.Internal.Backend.Machine.Types.InputCharacteristic
   ) where
@@ -10,7 +21,7 @@ Provides a way to describe how input is consumed in certain circumstances:
 * The input may never be consumed in any path
 * It may be inconsistent
 
-@since 1.5.0.0
+@since 2.1.0.0
 -}
 data InputCharacteristic = AlwaysConsumes (Maybe Word)
                          -- ^ On all paths, input must be consumed: `Nothing` when the extact

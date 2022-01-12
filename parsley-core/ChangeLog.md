@@ -139,3 +139,25 @@ Fix for issue #27
 * Added `Typeable` constraint to `LIFTED`.
 * Removed `lamTermBool` and `userBool` from the API: `Typeable` subsumes them.
 * Added `RANGES` to the `Defunc` API.
+
+## 2.1.0.0 -- 2022-01-12
+
+* Added `RangeSet` datastructure.
+* Added `Pos` module for static manipulation of position information.
+* Added `CharPred` as a specialised defunctionalisation of `Char -> Bool` functions.
+* Moved `InputCharacteristic` to its own module.
+* Use `CharPred` for `Sat` and `Satisfy`.
+* Simplified the interface for `Ops.sat`.
+* Simplified `buildYesHandler` and allowed it to capture a statically annotated offset.
+* Introduced `buildIterYesHandler` which can capture static offet.
+* Changed types of `bindSameHandler` and `bindIterSame`.
+* Added `StaYesHandler` type to `Ops`.
+* Renamed `updatePos` to `updatePosQ`.
+* Added many methods for manipulating positions to `PosOps`.
+* Made `initPos` fully static.
+* Changed the type of `readChar`.
+* Hid some internals of `Input`.
+* Exposed some new methods for `Input`.
+* Added `INPUT` to 8.6+ backend for `Defunc`.
+* Added a `poke` method to `QueueLike`.
+* Added a `charPred` converter to `Defunc`.

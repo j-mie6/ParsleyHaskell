@@ -767,8 +767,8 @@ Folds a range set.
 @since 2.1.0.0
 -}
 {-# INLINEABLE fold #-}
-fold :: (a -> a -> b -> b -> b) -- | Function that combines the lower and upper values (inclusive) for a range with the folded left- and right-subtrees.
-     -> b                       -- | Value to be substituted at the leaves.
+fold :: (a -> a -> b -> b -> b) -- ^ Function that combines the lower and upper values (inclusive) for a range with the folded left- and right-subtrees.
+     -> b                       -- ^ Value to be substituted at the leaves.
      -> RangeSet a
      -> b
 fold _ tip Tip = tip

@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, TypeApplications #-}
-{-# OPTIONS_GHC -ddump-splices #-}
+-- {-# OPTIONS_GHC -ddump-splices #-}
 module Main where
 import Test.Tasty
 import Test.Tasty.HUnit

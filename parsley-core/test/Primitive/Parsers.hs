@@ -3,13 +3,14 @@ module Primitive.Parsers where
 
 import Prelude hiding (pure, (<*>), (*>), (<*))
 import Data.Char (isDigit)
-import Parsley.Internal (Parser, Defunc(EMPTY, LIFTED, EQ_H, CONS, LAM_S), makeQ, pure, satisfy, (*>), (<*), (<|>), (<*>), satisfy, lookAhead, line, col)
+import Parsley.Internal (Parser, Defunc(EMPTY, LIFTED, RANGES, CONS), makeQ, pure, satisfy, (*>), (<*), (<|>), (<*>), satisfy, lookAhead, notFollowedBy, line, col)
+import Text.ParserCombinators.ReadP (look)
 
 char :: Char -> Parser Char
-char c = satisfy (EQ_H (LIFTED c))
+char c = satisfy (RANGES True [(c, c)])
 
 item :: Parser Char
-item = satisfy (LAM_S (const (LIFTED True)))
+item = satisfy (RANGES False [])
 
 pure7 :: Parser Int
 pure7 = pure (LIFTED 7)
@@ -48,3 +49,9 @@ posAfterNewline = (char 'a' *> char '\n' *> pos) <~> (char '\n' *> pos)
 
 posAfterTab :: Parser ((Int, Int), (Int, Int))
 posAfterTab = (char '\t' *> pos) <~> (char 'a' *> char '\t' *> pos)
+
+posAfterLookahead :: Parser ((Int, Int), (Int, Int))
+posAfterLookahead = lookAhead (char '\t') *> pos <~> (item *> pos)
+
+posAfterNotFollowedBy :: Parser ((Int, Int), (Int, Int))
+posAfterNotFollowedBy = notFollowedBy (char '\t') *> pos <~> (item *> pos)

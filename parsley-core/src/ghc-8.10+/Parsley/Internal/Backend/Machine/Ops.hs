@@ -34,7 +34,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- *** Basic handlers and operations
     fatal, raise,
     -- *** Handler preparation
-    buildHandler, buildYesHandler,
+    buildHandler, buildYesHandler, buildIterYesHandler,
     -- *** Handler binding
     bindAlwaysHandler, bindSameHandler,
     -- ** Continuation Operations
@@ -55,38 +55,38 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Log Operations
     logHandler, preludeString,
     -- ** Convenience Types
-    Ops, LogHandler, StaHandlerBuilder,
+    Ops, LogHandler, StaHandlerBuilder, StaYesHandler,
     -- * Re-exports from "Parsley.Internal.Backend.Machine.InputOps"
     HandlerOps, JoinBuilder, RecBuilder, PositionOps, MarshalOps, LogOps
   ) where
 
-import Control.Monad                                   (liftM2)
-import Control.Monad.Reader                            (ask, local)
-import Control.Monad.ST                                (ST)
-import Data.STRef                                      (writeSTRef, readSTRef, newSTRef)
-import Data.Void                                       (Void)
-import Debug.Trace                                     (trace)
-import GHC.Exts                                        (Int(..), (-#))
-import Language.Haskell.TH.Syntax                      (liftTyped)
+import Control.Monad                                              (liftM2)
+import Control.Monad.Reader                                       (ask, local)
+import Control.Monad.ST                                           (ST)
+import Data.STRef                                                 (writeSTRef, readSTRef, newSTRef)
+import Data.Void                                                  (Void)
+import Debug.Trace                                                (trace)
+import GHC.Exts                                                   (Int(..), (-#))
+import Language.Haskell.TH.Syntax                                 (liftTyped)
 import Parsley.Internal.Backend.Machine.BindingOps
-import Parsley.Internal.Backend.Machine.Defunc         (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
-import Parsley.Internal.Backend.Machine.Identifiers    (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps       (PositionOps(..), LogOps(..), InputOps, next, more)
-import Parsley.Internal.Backend.Machine.InputRep       (Rep)
-import Parsley.Internal.Backend.Machine.Instructions   (Access(..))
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic), InputCharacteristic(..))
-import Parsley.Internal.Backend.Machine.PosOps         (updatePos)
-import Parsley.Internal.Backend.Machine.THUtils        (eta)
-import Parsley.Internal.Backend.Machine.Types          (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
+import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
+import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
+import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
+import Parsley.Internal.Backend.Machine.THUtils                   (eta)
+import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Input    (Input(..), Input#(..), toInput, fromInput)
-import Parsley.Internal.Backend.Machine.Types.State    (Γ(..), OpStack(..))
+import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
+import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, consume, chooseInput)
+import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
+import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
-import Parsley.Internal.Common                         (One, Code, Vec(..), Nat(..))
-import System.Console.Pretty                           (color, Color(Green, White, Red, Blue))
+import Parsley.Internal.Common                                    (One, Code, Vec(..), Nat(..))
+import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
-import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), moveOne, moveN)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..))
 
 {- General Operations -}
 {-|
@@ -118,14 +118,14 @@ code to execute on failure, and a state @γ@, tries to read a character
 from the input within @γ@, executing the failure code if it does not
 exist or does not match.
 
-@since 1.8.0.0
+@since 2.1.0.0
 -}
 sat :: (Defunc Char -> Defunc Bool)                        -- ^ Predicate to test the character with.
-    -> ((Code Char -> Input o -> aux -> Code b) -> Code b) -- ^ The source of the character
-    -> (Defunc Char -> Input o -> aux -> Code b)           -- ^ Code to execute on success.
+    -> Code Char                                           -- ^ The character to test against.
+    -> (Defunc Char -> Code b)                             -- ^ Code to execute on success.
     -> Code b                                              -- ^ Code to execute on failure.
     -> Code b
-sat p src good bad = src $ \c input' aux -> let v = FREEVAR c in _if (p v) (good v input' aux) bad
+sat p c good bad = let v = FREEVAR c in _if (p v) (good v) bad
 
 {-|
 Consumes the next character and adjusts the offset to match.
@@ -134,9 +134,8 @@ Consumes the next character and adjusts the offset to match.
 -}
 fetch :: (?ops :: InputOps (Rep o))
       => Input o -> (Code Char -> Input o -> Code b) -> Code b
-fetch input k = next (offset (off input)) $ \c offset' ->
-  k c (input {off = moveOne (off input) offset',
-              pos = updatePos (pos input) c})
+fetch input k = next (offset (off input)) $ \c offset' -> k c (consume offset' input)
+
 {-|
 Emits a length check for a number of characters \(n\) in the most efficient
 way it can. It takes two continuations a @good@ and a @bad@: the @good@ is used
@@ -238,13 +237,25 @@ Converts a partially evaluated parser into a "yes" handler: this means that
 the handler /always/ knows that the inputs are equal, so does not require
 both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 
-@since 1.4.0.0
+@since 2.1.0.0
 -}
 buildYesHandler :: Γ s o xs n r a
                 -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
-                -> Word
-                -> StaHandler s o a
-buildYesHandler γ h u = fromStaHandler# $ \inp -> h (γ {input = toInput u inp})
+                -> StaYesHandler s o a
+buildYesHandler γ h inp = h (γ {input = inp})
+
+{-|
+Converts a partially evaluated parser into a "yes" handler: this means that
+the handler /always/ knows that the inputs are equal, so does not require
+both a captured and a current offset. Otherwise, is similar to `buildHandler`.
+
+@since 2.1.0.0
+-}
+buildIterYesHandler :: Γ s o xs n r a
+                    -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
+                    -> Word
+                    -> StaHandler s o a
+buildIterYesHandler γ h u = fromStaHandler# (buildYesHandler γ h . toInput u)
 
 -- Handler binding
 {-|
@@ -269,18 +280,18 @@ differently depending on whether inputs match or not. The three bindings are
 for the case where they are the same, the case where they differ, and the case
 where they are unknown (which is defined in terms of the previous two).
 
-@since 1.4.0.0
+@since 2.1.0.0
 -}
 bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (Rep o))
                 => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
                 -> Bool                              -- ^ Is a binding required for the matching handler?
-                -> StaHandler s o a                  -- ^ The handler that handles matching input.
+                -> StaYesHandler s o a               -- ^ The handler that handles matching input.
                 -> Bool                              -- ^ Is a binding required for the mismatched handler?
                 -> StaHandlerBuilder s o a           -- ^ The handler that handles mismatched input.
                 -> (Γ s o xs (Succ n) r a -> Code b) -- ^ The parser to receive the composite handler.
                 -> Code b
 bindSameHandler γ yesNeeded yes noNeeded no k =
-  bindYesInline# yesNeeded (staHandler# yes (fromInput (input γ))) $ \qyes ->
+  bindYesInline# yesNeeded (yes (input γ)) $ \qyes ->
     bindHandlerInline# noNeeded (staHandler# (no (input γ))) $ \qno ->
       let handler inp = [||if $$(same (offset (off (input γ))) (off# inp)) then $$qyes else $$(staHandler# qno inp)||]
       in bindHandlerInline# @o True handler $ \qhandler ->
@@ -357,18 +368,10 @@ callCC :: forall s o xs n r a x. MarshalOps o
        -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
        -> Γ s o xs (Succ n) r a                                  --
        -> Code (ST s (Maybe a))
-callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseOffset (successInputCharacteristic (meta sub)))) inp (handlers γ)
+callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseInput (successInputCharacteristic (meta sub)) u inp)) inp (handlers γ)
   where
     inp :: Input o
     inp = input γ
-
-    -- TODO: move to Offset module (along with Input#?)
-    chooseOffset :: InputCharacteristic -> Input# o -> Input o
-    chooseOffset (AlwaysConsumes n) inp#  = inp { off = moveN n (off inp) (off# inp#), pos = pos# inp# }
-    -- Technically, in this case, we know the whole input is unchanged. This essentially ignores the continuation arguments
-    -- hopefully GHC could optimise this better?
-    chooseOffset NeverConsumes      _inp# = inp -- { off = (off inp) {offset = off# inp# }, pos = pos# inp# }
-    chooseOffset MayConsume         inp#  = toInput u inp#
 
 {- Join Point Operations -}
 {-|
@@ -418,7 +421,7 @@ bindIterAlways ctx μ l needed h inp u =
 Similar to `bindIterAlways`, but builds a handler that performs in
 the same way as `bindSameHandler`.
 
-@since 1.8.0.0
+@since 2.1.0.0
 -}
 bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
              => Ctx s o a                  -- ^ The context to store the binding in.
@@ -428,7 +431,7 @@ bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
              -> StaHandler s o a           -- ^ The handler when input is the same.
              -> Bool                       -- ^ Is a binding required for the differing handler?
              -> StaHandlerBuilder s o a    -- ^ The handler when input differs.
-             -> Input o                   -- ^ The initial offset of the loop.
+             -> Input o                    -- ^ The initial offset of the loop.
              -> Word                       -- ^ The unique name of the captured offsets /and/ the iteration offset.
              -> Code (ST s (Maybe a))
 bindIterSame ctx μ l neededYes yes neededNo no inp u =
@@ -577,3 +580,10 @@ A `StaHandler` that has not yet captured its offset.
 @since 1.2.0.0
 -}
 type StaHandlerBuilder s o a = Input o -> StaHandler s o a
+
+{-|
+A "yes-handler" that has not yet captured its offset
+
+@since 2.1.0.0
+-}
+type StaYesHandler s o a = Input o -> Code (ST s (Maybe a))

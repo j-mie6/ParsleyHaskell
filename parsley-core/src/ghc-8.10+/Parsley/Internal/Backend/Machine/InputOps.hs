@@ -157,7 +157,7 @@ instance InputPrep [Char] where
 
 instance InputPrep (UArray Int Char) where
   prepare qinput = [||
-      let UArray _ _ (I# size#) input# = $$qinput
+      let !(UArray _ _ (I# size#) input#) = $$qinput
           next i# = (# C# (indexWideCharArray# input# i#), i# +# 1# #)
       in (# next, \qi -> $$(intLess [||qi||] [||size#||]), 0# #)
     ||]

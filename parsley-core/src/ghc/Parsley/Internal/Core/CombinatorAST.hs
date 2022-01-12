@@ -4,6 +4,7 @@ module Parsley.Internal.Core.CombinatorAST (module Parsley.Internal.Core.Combina
 import Data.Kind                         (Type)
 import Parsley.Internal.Common           (IFunctor(..), Fix, Const1(..), cata, intercalateDiff, (:+:))
 import Parsley.Internal.Core.Identifiers (MVar, ΣVar)
+import Parsley.Internal.Core.CharPred    (CharPred)
 import Parsley.Internal.Core.Defunc      (Defunc)
 
 {-|
@@ -16,7 +17,7 @@ newtype Parser a = Parser {unParser :: Fix (Combinator :+: ScopeRegister) a}
 -- Core datatype
 data Combinator (k :: Type -> Type) (a :: Type) where
   Pure           :: Defunc a -> Combinator k a
-  Satisfy        :: Defunc (Char -> Bool) -> Combinator k Char
+  Satisfy        :: CharPred -> Combinator k Char
   (:<*>:)        :: k (a -> b) -> k a -> Combinator k b
   (:*>:)         :: k a -> k b -> Combinator k b
   (:<*:)         :: k a -> k b -> Combinator k a

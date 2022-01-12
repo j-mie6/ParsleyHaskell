@@ -18,7 +18,7 @@ import Data.List (foldl')
 import Parsley.Internal.Common.Queue.Impl as Queue (Queue(..), toList)
 
 import qualified Parsley.Internal.Common.Queue.Impl as Queue (
-    empty, enqueue, enqueueAll, dequeue, null, size, foldr
+    empty, enqueue, enqueueAll, dequeue, null, size, foldr, poke
   )
 
 {-|
@@ -68,6 +68,14 @@ dequeue :: RewindQueue a -> (a, RewindQueue a)
 dequeue RewindQueue{..} =
   let (x, queue') = Queue.dequeue queue
   in (x, RewindQueue { queue = queue', undo = x : undo, undosz = undosz + 1 })
+
+{-|
+modifies the head of the queue, without removal. Returns the old head
+
+@since 2.1.0.0
+-}
+poke :: (a -> a) -> RewindQueue a -> (a, RewindQueue a)
+poke f q = let (x, queue') = Queue.poke f (queue q) in (x, q { queue = queue' })
 
 {-|
 Undoes the last \(n\) `dequeue` operations but /only/ if there are that many

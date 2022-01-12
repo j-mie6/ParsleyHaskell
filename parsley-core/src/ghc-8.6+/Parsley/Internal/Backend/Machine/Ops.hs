@@ -19,7 +19,7 @@ import Data.STRef                                    (writeSTRef, readSTRef, new
 import Data.Text                                     (Text)
 import Data.Void                                     (Void)
 import Debug.Trace                                   (trace)
-import Parsley.Internal.Backend.Machine.Defunc       (Defunc, pattern FREEVAR, genDefunc, _if)
+import Parsley.Internal.Backend.Machine.Defunc       (Defunc(LAM, INPUT), pattern FREEVAR, genDefunc, ap, _if)
 import Parsley.Internal.Backend.Machine.Identifiers  (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps     (PositionOps(..), BoxOps(..), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep     (Unboxed, OffWith, UnpackedLazyByteString, Stream{-, representationTypes-})
@@ -28,6 +28,7 @@ import Parsley.Internal.Backend.Machine.LetBindings  (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.State  (Γ(..), Ctx, Handler, Machine(..), MachineMonad, Cont, Subroutine, OpStack(..), Func,
                                                       run, voidCoins, insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, cachedΣ, concreteΣ, debugLevel)
 import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Core.CharPred                (CharPred, lamTerm)
 import System.Console.Pretty                         (color, Color(Green, White, Red, Blue))
 
 #define inputInstances(derivation) \
@@ -48,10 +49,10 @@ updatePos :: (Code Int, Code Int) -> Code Char -> ((Code Int, Code Int) -> Code 
 updatePos (qline, qcol) qc k = [|| case updatePos# $$qline $$qcol $$qc of (# line', col' #) -> $$(k ([||line'||], [||col'||])) ||]
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o) => (Defunc Char -> Defunc Bool) -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps o) => CharPred -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 sat p k bad γ@Γ{..} = next input $ \c input' -> let v = FREEVAR c in
                         updatePos pos c $ \pos' ->
-                          _if (p v)
+                          _if (ap (LAM (lamTerm p)) v)
                               (k (γ {operands = Op v operands, input = input', pos = pos'}))
                               bad
 
@@ -65,6 +66,7 @@ emitLengthCheck n good bad γ = [||
 {- General Operations -}
 dup :: Defunc x -> (Defunc x -> Code r) -> Code r
 dup (FREEVAR x) k = k (FREEVAR x)
+dup (INPUT o pos) k = k (INPUT o pos)
 dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
 
 {-# INLINE returnST #-}
@@ -98,23 +100,23 @@ class HandlerOps o where
   buildHandler :: BoxOps o
                => Γ s o xs n r a
                -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a)))
-               -> Code o -> Code (Handler s o a)
+               -> Code o -> (Code Int, Code Int) -> Code (Handler s o a)
   fatal :: Code (Handler s o a)
   raise :: BoxOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
 
 setupHandler :: Γ s o xs n r a
-             -> (Code o -> Code (Handler s o a))
+             -> (Code o -> (Code Int, Code Int) -> Code (Handler s o a))
              -> (Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a))
 setupHandler γ h k = [||
-    let handler = $$(h (input γ))
+    let handler = $$(h (input γ) (pos γ))
     in $$(k (γ {handlers = VCons [||handler||] (handlers γ)}))
   ||]
 
 #define deriveHandlerOps(_o)                         \
 instance HandlerOps _o where                         \
 {                                                    \
-  buildHandler γ h c = [||\(o# :: Unboxed _o) !(line :: Int) !(col :: Int) ->     \
-    $$(h (γ {operands = Op (FREEVAR c) (operands γ), \
+  buildHandler γ h c pos = [||\(o# :: Unboxed _o) !(line :: Int) !(col :: Int) ->     \
+    $$(h (γ {operands = Op (INPUT c pos) (operands γ), \
              input = [||$$box o#||], pos = ([||line||], [||col||])}))||];           \
   fatal = [||\(!_) !_ !_ -> returnST Nothing ||];          \
   raise γ = let VCons h _ = handlers γ               \
@@ -157,7 +159,7 @@ class BoxOps o => JoinBuilder o where
 class BoxOps o => RecBuilder o where
   buildIter :: ReturnOps o
             => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
-            -> (Code o -> Code (Handler s o a)) -> Code o -> (Code Int, Code Int) -> Code (ST s (Maybe a))
+            -> (Code o -> (Code Int, Code Int) -> Code (Handler s o a)) -> Code o -> (Code Int, Code Int) -> Code (ST s (Maybe a))
   buildRec  :: MVar r
             -> Regs rs
             -> Ctx s o a
@@ -180,10 +182,10 @@ inputInstances(deriveJoinBuilder)
 instance RecBuilder _o where                                                     \
 {                                                                                \
   buildIter ctx μ l h o (line, col) = let bx = box in [||                                    \
-      let handler !o# !line !col = $$(h [||$$bx o#||]) line col;                                     \
+      let handler !o# !line !col = $$(h [||$$bx o#||] ([||line||], [||col||]));           \
           loop !o# !line !col =                                                             \
         $$(run l                                                                 \
-            (Γ Empty (noreturn @_o) [||$$bx o#||] ([||line||], [||col||]) (VCons [||handler o#||] VNil)) \
+            (Γ Empty (noreturn @_o) [||$$bx o#||] ([||line||], [||col||]) (VCons [||handler o# line col||] VNil)) \
             (voidCoins (insertSub μ [||\_ (!o#) !line !col _ -> loop o# line col||] ctx)))           \
       in loop ($$unbox $$o) $$line $$col                                                      \
     ||];                                                                         \
@@ -199,7 +201,7 @@ takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters
 
 {- Debugger Operations -}
 class (BoxOps o, PositionOps o, LogOps o) => LogHandler o where
-  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> Code (Handler s o a)
+  logHandler :: (?ops :: InputOps o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Code o -> (Code Int, Code Int) -> Code (Handler s o a)
 
 preludeString :: (?ops :: InputOps o, PositionOps o, LogOps o) => String -> Char -> Γ s o xs n r a -> Ctx s o a -> String -> Code String
 preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
@@ -222,7 +224,7 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
 #define deriveLogHandler(_o)                                                                         \
 instance LogHandler _o where                                                                         \
 {                                                                                                    \
-  logHandler name ctx γ _ = let VCons h _ = handlers γ in [||\(!o#) ->                               \
+  logHandler name ctx γ _ _ = let VCons h _ = handlers γ in [||\(!o#) ->                             \
       trace $$(preludeString name '<' (γ {input = [||$$box o#||]}) ctx (color Red " Fail")) ($$h o#) \
     ||];                                                                                             \
 };

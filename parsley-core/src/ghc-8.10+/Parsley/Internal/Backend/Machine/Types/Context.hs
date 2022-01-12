@@ -1,7 +1,8 @@
 {-# LANGUAGE DeriveAnyClass,
              MagicHash,
              DerivingStrategies,
-             UnboxedTuples #-}
+             UnboxedTuples,
+             PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Context
 Description : Fully static context required to generate a parser
@@ -69,7 +70,8 @@ import Parsley.Internal.Backend.Machine.Types.Coins    (Coins, willConsume, canR
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input    (Input)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
+import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
 import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.QueueLike            as Queue (empty, null)
@@ -83,14 +85,14 @@ may form part of the generated code.
 
 @since 1.0.0.0
 -}
-data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a)     -- ^ Map of subroutine bindings.
-                     , φs         :: DMap ΦVar (QJoin s o a)           -- ^ Map of join point bindings.
-                     , σs         :: DMap ΣVar (Reg s)                 -- ^ Map of available registers.
-                     , debugLevel :: Int                               -- ^ Approximate depth of debug combinator.
-                     , coins      :: Int                               -- ^ Number of tokens free to consume without length check.
-                     , offsetUniq :: Word                              -- ^ Next unique offset identifier.
-                     , piggies    :: Queue Coins                       -- ^ Queue of future length check credit.
-                     , knownChars :: RewindQueue (Code Char, Input o) -- ^ Characters that can be reclaimed on backtrack.
+data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))              -- ^ Map of subroutine bindings.
+                     , φs         :: !(DMap ΦVar (QJoin s o a))                    -- ^ Map of join point bindings.
+                     , σs         :: !(DMap ΣVar (Reg s))                          -- ^ Map of available registers.
+                     , debugLevel :: {-# UNPACK #-} !Int                           -- ^ Approximate depth of debug combinator.
+                     , coins      :: {-# UNPACK #-} !Int                           -- ^ Number of tokens free to consume without length check.
+                     , offsetUniq :: {-# UNPACK #-} !Word                          -- ^ Next unique offset identifier.
+                     , piggies    :: !(Queue Coins)                                -- ^ Queue of future length check credit.
+                     , knownChars :: !(RewindQueue (Code Char, CharPred, Input o)) -- ^ Characters that can be reclaimed on backtrack.
                      }
 
 {-|
@@ -425,25 +427,32 @@ can be retrieved later.
 @since 1.5.0.0
 -}
 addChar :: Code Char -> Input o -> Ctx s o a -> Ctx s o a
-addChar c o ctx = ctx { knownChars = enqueue (c, o) (knownChars ctx) }
+addChar c o ctx = ctx { knownChars = enqueue (c, Item, o) (knownChars ctx) }
 
 {-|
 Reads a character from the context's retrieval queue if one exists.
 If not, reads a character from another given source (and adds it to the
 rewind buffer).
 
-@since 1.5.0.0
+@since 2.1.0.0
 -}
-readChar :: Ctx s o a                                     -- ^ The original context.
-         -> ((Code Char -> Input o -> Code b) -> Code b)  -- ^ The fallback source of input.
-         -> (Code Char -> Input o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
+readChar :: Ctx s o a                                                             -- ^ The original context.
+         -> CharPred                                                              -- ^ The predicate that this character will be tested against
+         -> ((Code Char -> Input o -> Code b) -> Code b)                          -- ^ The fallback source of input.
+         -> (Code Char -> CharPred -> CharPred -> Input o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
          -> Code b
-readChar ctx fallback k
+readChar ctx pred fallback k
   | reclaimable = unsafeReadChar ctx k
   | otherwise   = fallback $ \c o -> unsafeReadChar (addChar c o ctx) k
   where
     reclaimable = not (Queue.null (knownChars ctx))
-    unsafeReadChar ctx k = let ((c, o), q) = dequeue (knownChars ctx) in k c o (ctx { knownChars = q })
+    unsafeReadChar ctx k = let -- combine the old information with the new information, refining the predicate
+                               -- This works for notFollowedBy at the /moment/ because the predicate does not cross the handler boundary...
+                               -- Perhaps any that cross handler boundaries should be complemented if that ever happens.
+                               updateChar (c, p, o) = (c, andPred p pred, o)
+                               ((_, pOld, _), q) = poke updateChar (knownChars ctx)
+                               ((c, p, o), q') = dequeue q
+                           in k c pOld p o (ctx { knownChars = q' })
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

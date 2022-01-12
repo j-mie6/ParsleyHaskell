@@ -11,7 +11,7 @@ import Data.Void                                      (Void)
 import Control.Monad                                  (forM, liftM2)
 import Control.Monad.Reader                           (ask, asks, local)
 import Control.Monad.ST                               (runST)
-import Parsley.Internal.Backend.Machine.Defunc        (Defunc(LAM, SAME), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Defunc        (Defunc(LAM, SAME, INPUT), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers   (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps      (InputDependant(..), PositionOps, BoxOps, LogOps, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..), Access(..), PosSelector(..))
@@ -21,6 +21,7 @@ import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume)
 import Parsley.Internal.Backend.Machine.Types.State
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Core                          (CharPred)
 import Parsley.Internal.Trace                         (Trace(trace))
 import System.Console.Pretty                          (color, Color(Green))
 
@@ -91,7 +92,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o, Trace) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o, Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p (Machine k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -99,9 +100,9 @@ evalSat p (Machine k) = do
      | hasChange -> maybeEmitCheck Nothing <$> local spendCoin k
      | otherwise -> trace "I have a piggy :)" $ local breakPiggy (asks ((maybeEmitCheck . Just) . coins) <*> local spendCoin k)
   where
-    maybeEmitCheck Nothing mk γ = sat (ap p) mk (raise γ) γ
+    maybeEmitCheck Nothing mk γ = sat p mk (raise γ) γ
     maybeEmitCheck (Just n) mk γ =
-      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat (ap p) mk [||bad||]) [||bad||] γ)||]
+      [|| let bad = $$(raise γ) in $$(emitLengthCheck n (sat p mk [||bad||]) [||bad||] γ)||]
 
 evalEmpt :: (BoxOps o, HandlerOps o) => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -121,10 +122,10 @@ evalHandler (Instructions.Same _ yes _ no) =
         Machine (evalChoices [LAM (Abs id)] [Machine (evalPop yes)] no)))))))
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
-evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (FREEVAR (input γ)) (operands γ)})
+evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ) (pos γ)) (operands γ)})
 
 evalSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
-evalSeek (Machine k) = k <&> \mk γ -> let Op input xs = operands γ in mk (γ {operands = xs, input = genDefunc input})
+evalSeek (Machine k) = k <&> \mk γ -> let Op (INPUT input pos) xs = operands γ in mk (γ {operands = xs, input = input, pos = pos})
 
 evalCase :: Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
 evalCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->

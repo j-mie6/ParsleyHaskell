@@ -41,8 +41,8 @@ of a parser in their variously statically augmented forms.
 
 @since 1.4.0.0
 -}
-data Γ s o xs n r a = Γ { operands :: OpStack xs                        -- ^ The current values available for applicative application.
-                        , retCont  :: StaCont s o a r                   -- ^ The current return continuation when this parser is finished.
-                        , input    :: Input o                           -- ^ The current offset into the input of the parser.
-                        , handlers :: Vec n (AugmentedStaHandler s o a) -- ^ The failure handlers that are used to process failure during a parser.
+data Γ s o xs n r a = Γ { operands :: !(OpStack xs)                        -- ^ The current values available for applicative application.
+                        , retCont  :: !(StaCont s o a r)                   -- ^ The current return continuation when this parser is finished.
+                        , input    :: !(Input o)                           -- ^ The current offset into the input of the parser.
+                        , handlers :: !(Vec n (AugmentedStaHandler s o a)) -- ^ The failure handlers that are used to process failure during a parser.
                         }

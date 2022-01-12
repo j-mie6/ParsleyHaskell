@@ -7,7 +7,7 @@ module Parsley.Internal.Core.Primitives (
 
 import Prelude hiding                      (pure, (<*>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..), PosSelector(..))
-import Parsley.Internal.Core.Defunc        (Defunc)
+import Parsley.Internal.Core.Defunc        (Defunc, charPred)
 
 import Parsley.Internal.Common.Indexed     (Fix(In), (:+:)(..))
 
@@ -18,7 +18,7 @@ pure = Parser . In . L . Pure
 
 {-# INLINE satisfy #-}
 satisfy :: Defunc (Char -> Bool) -> Parser Char
-satisfy = Parser . In . L . Satisfy
+satisfy = Parser . In . L . Satisfy . charPred
 
 {-# INLINE conditional #-}
 conditional :: [(Defunc (a -> Bool), Parser b)] -> Parser a -> Parser b -> Parser b

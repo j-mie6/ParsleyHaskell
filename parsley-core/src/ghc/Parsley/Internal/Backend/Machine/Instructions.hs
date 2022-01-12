@@ -35,6 +35,7 @@ import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.Types.Coins (Coins(Coins))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))
+import Parsley.Internal.Core.CharPred               (CharPred)
 
 import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
 import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
@@ -73,9 +74,9 @@ data Instr (o :: Type)                                  -- The FIXED input type
             -> Instr o k (y : x : xs) n r a
   {-| Reads a character so long as it matches a given predicate. If it does not, or no input is available, this instruction fails.
 
-  @since 1.0.0.0 -}
-  Sat       :: Machine.Defunc (Char -> Bool) {- ^ Predicate to apply. -}
-            -> k (Char : xs) (Succ n) r a    {- ^ Machine requiring read character. -}
+  @since 2.1.0.0 -}
+  Sat       :: CharPred                   {- ^ Predicate to apply. -}
+            -> k (Char : xs) (Succ n) r a {- ^ Machine requiring read character. -}
             -> Instr o k xs (Succ n) r a
   {-| Calls another let-bound parser.
 

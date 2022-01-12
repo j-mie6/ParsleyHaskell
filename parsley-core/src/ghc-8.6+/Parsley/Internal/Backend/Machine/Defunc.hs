@@ -11,6 +11,7 @@ import qualified Parsley.Internal.Core.Lam    as Lam  (Lam(..))
 data Defunc a where
   LAM     :: Lam a -> Defunc a
   BOTTOM  :: Defunc a
+  INPUT   :: Code o -> (Code Int, Code Int) -> Defunc o
   SAME    :: PositionOps o => Defunc (o -> o -> Bool)
 
 user :: Core.Defunc a -> Defunc a
@@ -20,7 +21,8 @@ ap :: Defunc (a -> b) -> Defunc a -> Defunc b
 ap f x = LAM (Lam.App (unliftDefunc f) (unliftDefunc x))
 
 ap2 :: Defunc (a -> b -> c) -> Defunc a -> Defunc b -> Defunc c
-ap2 f x = ap (ap f x)
+ap2 SAME (INPUT o1 _) (INPUT o2 _) = LAM (Lam.Var False [|| $$same $$o1 $$o2 ||])
+ap2 f x y = ap (ap f x) y
 
 _if :: Defunc Bool -> Code a -> Code a -> Code a
 _if c t e = normaliseGen (Lam.If (unliftDefunc c) (Lam.Var False t) (Lam.Var False e))
@@ -32,6 +34,7 @@ unliftDefunc x       = Lam.Var False (genDefunc x)
 genDefunc :: Defunc a -> Code a
 genDefunc (LAM x) = normaliseGen x
 genDefunc BOTTOM  = [||undefined||]
+genDefunc INPUT{} = error "Cannot materialise an input in the regular way"
 genDefunc SAME    = same
 
 pattern NormLam :: Lam a -> Defunc a
@@ -45,4 +48,5 @@ pattern FREEVAR v <- NormLam (Lam.Var True v)
 instance Show (Defunc a) where
   show (LAM x) = show x
   show SAME = "same"
+  show INPUT{} = "input"
   show BOTTOM = "[[irrelevant]]"

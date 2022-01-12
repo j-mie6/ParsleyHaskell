@@ -13,9 +13,9 @@ Exposes the instance of `QueueLike` for `RewindQueue`.
 module Parsley.Internal.Common.RewindQueue (module RewindQueue) where
 
 import Parsley.Internal.Common.RewindQueue.Impl as RewindQueue (
-    RewindQueue, empty, enqueue, dequeue, rewind, null, size, foldr, enqueueAll
+    RewindQueue, empty, enqueue, dequeue, rewind, null, size, foldr, enqueueAll, poke
   )
-import Parsley.Internal.Common.QueueLike  (QueueLike(empty, null, size, enqueue, dequeue, enqueueAll))
+import Parsley.Internal.Common.QueueLike  (QueueLike(empty, null, size, enqueue, dequeue, enqueueAll, poke))
 
 instance QueueLike RewindQueue where
   empty      = RewindQueue.empty
@@ -24,3 +24,4 @@ instance QueueLike RewindQueue where
   enqueue    = RewindQueue.enqueue
   dequeue    = RewindQueue.dequeue
   enqueueAll = RewindQueue.enqueueAll
+  poke       = RewindQueue.poke

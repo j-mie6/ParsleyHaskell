@@ -14,14 +14,17 @@ terms that can be used by the user and the frontend.
 module Parsley.Internal.Core.Defunc (
     Defunc(..),
     pattern COMPOSE_H, pattern FLIP_H, pattern FLIP_CONST, pattern UNIT,
-    lamTerm
+    lamTerm, charPred
   ) where
 
-import Data.List                     (intercalate)
-import Data.Typeable                 (Typeable, (:~:)(Refl), eqT)
-import Language.Haskell.TH.Syntax    (Lift(..))
-import Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..))
-import Parsley.Internal.Core.Lam     (normaliseGen, Lam(..))
+import Data.Typeable                    (Typeable, (:~:)(Refl), eqT)
+import Language.Haskell.TH.Syntax       (Lift(..))
+import Parsley.Internal.Common.RangeSet (fromRanges, empty, complement)
+import Parsley.Internal.Common.Utils    (WQ(..), Code, Quapplicative(..))
+import Parsley.Internal.Core.CharPred   (CharPred(..), pattern Item, pattern Specific)
+import Parsley.Internal.Core.Lam        (normaliseGen, Lam(..))
+
+import qualified Parsley.Internal.Core.CharPred as CharPred (lamTerm)
 
 {-|
 This datatype is useful for providing an /inspectable/ representation of common Haskell functions.
@@ -159,21 +162,25 @@ lamTerm CONS = Var True [||(:)||]
 lamTerm EMPTY = Var True [||[]||]
 lamTerm CONST = Abs (Abs . const)
 lamTerm (BLACK x) = Var False (_code x)
-lamTerm (RANGES incl []) = Abs (const (if incl then F else T))
-lamTerm (RANGES incl [(l, u)]) | l == minBound, u == maxBound = Abs (const (if incl then T else F))
-lamTerm (RANGES incl rngs) =
-  Abs $ \c ->
-    App (if incl then Abs id else Var True [||not||])
-        (foldr1 (App . App (Var True [||(||)||]))
-          (map (\(l, u) ->
-            if l == u then App (App (Var True [||(==)||]) c) (Var True [||l||])
-                      else App (App (Var True [||(&&)||])
-                               (App (App (Var True [||(<=)||]) (Var True [||l||])) c))
-                               (App (App (Var True [||(<=)||]) c) (Var True [||u||])))
-           rngs))
+lamTerm rngs@(RANGES _ _) = CharPred.lamTerm (charPred rngs)
 lamTerm (LAM_S f) = Abs (adaptLam f)
 lamTerm (IF_S c t e) = If (lamTerm c) (lamTerm t) (lamTerm e)
 lamTerm (LET_S x f) = Let (lamTerm x) (adaptLam f)
+
+{-|
+Converts a `Defunc` value into an equivalent `CharPred` value.
+
+@since 2.1.0.0
+-}
+charPred :: Defunc (Char -> Bool) -> CharPred
+charPred (EQ_H (LIFTED c)) = Specific c
+charPred (RANGES False []) = Item
+charPred (RANGES True [(l, u)]) | l == minBound, u == maxBound = Item
+charPred (RANGES True cs) = Ranges (fromRanges cs)
+charPred (RANGES False cs) = Ranges (complement (fromRanges cs))
+charPred (APP_H CONST (LIFTED True)) = Item
+charPred (APP_H CONST (LIFTED False)) = Ranges empty
+charPred p = UserPred (_val p) (lamTerm p)
 
 adaptLam :: (Defunc a -> Defunc b) -> (Lam a -> Lam b)
 adaptLam f = lamTerm . f . defuncTerm
@@ -204,5 +211,5 @@ instance Show (Defunc a) where
   show CONST = "const"
   show (IF_S c b e) = concat ["(if ", show c, " then ", show b, " else ", show e, ")"]
   show (LAM_S _) = "f"
-  show (RANGES incl rngs) = concat [if incl then "not " else "", "elem (", intercalate " ++ " (map (\(l, u) -> concat ["[", show l, "..", show u, "]"]) rngs), ")"]
+  show p@(RANGES{}) = show (charPred p)
   show _ = "x"

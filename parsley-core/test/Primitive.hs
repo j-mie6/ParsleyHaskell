@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, TypeApplications #-}
+{-# OPTIONS_GHC -ddump-splices #-}
 module Main where
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -132,6 +133,12 @@ posAfterNewline = $$(parseMocked Parsers.posAfterNewline  [||Parsers.posAfterNew
 posAfterTab :: String -> Maybe ((Int, Int), (Int, Int))
 posAfterTab = $$(parseMocked Parsers.posAfterTab  [||Parsers.posAfterTab||])
 
+posAfterLookahead :: String -> Maybe ((Int, Int), (Int, Int))
+posAfterLookahead = $$(parseMocked Parsers.posAfterLookahead [||Parsers.posAfterLookahead||])
+
+posAfterNotFollowedBy :: String -> Maybe ((Int, Int), (Int, Int))
+posAfterNotFollowedBy = $$(parseMocked Parsers.posAfterNotFollowedBy [||Parsers.posAfterNotFollowedBy||])
+
 positionTests :: TestTree
 positionTests = testGroup "position combinators should"
   [ testCase "start at line 1" $ lineStarts1 "" @?= Just 1
@@ -139,4 +146,6 @@ positionTests = testGroup "position combinators should"
   , testCase "advance by 1 column only after regular character" $ posAfterA "a" @?= Just (1, 2)
   , testCase "advance by 1 line and reset column after newline" $ posAfterNewline "a\n\n" @?= Just ((2, 1), (3, 1))
   , testCase "advance to nearest tab boundary on tab" $ posAfterTab "\ta\t" @?= Just ((1, 5), (1, 9))
+  , testCase "work with lookahead" $ posAfterLookahead "\t" @?= Just ((1, 1), (1, 5))
+  , testCase "work with notFollowedBy" $ posAfterNotFollowedBy "\n" @?= Just ((1, 1), (2, 1))
   ]

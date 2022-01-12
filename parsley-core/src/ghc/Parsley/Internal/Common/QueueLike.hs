@@ -49,6 +49,12 @@ class QueueLike q where
   -}
   dequeue    :: q a -> (a, q a)
   {-|
+  modifies the head of the queue, without removal. Returns the old head
+
+  @since 2.1.0.0
+  -}
+  poke :: (a -> a) -> q a -> (a, q a)
+  {-|
   Adds each of the elements onto the queue, from left-to-right.
 
   @since 1.5.0.0

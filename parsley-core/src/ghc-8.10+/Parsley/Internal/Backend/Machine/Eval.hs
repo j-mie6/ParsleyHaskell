@@ -24,7 +24,7 @@ import Data.Void                                           (Void)
 import Control.Monad                                       (forM, liftM2, liftM3, when)
 import Control.Monad.Reader                                (ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
-import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps))
 import Parsley.Internal.Backend.Machine.InputRep           (Rep)
@@ -33,13 +33,13 @@ import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
 import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
-import Parsley.Internal.Backend.Machine.PosOps             (initPos, extractCol, extractLine)
+import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Input        (Input(Input, off, pos))
-import Parsley.Internal.Backend.Machine.Types.Input.Offset (mkOffset)
+import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm, optimisePredGiven)
 import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
@@ -61,7 +61,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty halt (Input (mkOffset [||offset||] 0) initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -116,7 +116,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => Defunc (Char -> Bool) -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p k@(Machine k') = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -127,23 +127,19 @@ evalSat p k@(Machine k') = do
           do check <- asks (emitCheckAndFetch . coins)
              check (Machine (local spendCoin k'))
   where
-    satFetch :: (?ops :: InputOps (Rep o))
-             => Machine s o (Char : xs) (Succ n) r a
-             -> MachineMonad s o xs (Succ n) r a
+    satFetch :: Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     satFetch mk = reader $ \ctx γ ->
-      sat (ap p) (readChar ctx (fetch (input γ)))
-                 (continue mk γ)
-                 (raise γ)
+      readChar ctx p (fetch (input γ)) $ \c staOldPred staPosPred input' ctx' ->
+        let staPredC' = optimisePredGiven p staOldPred
+        in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos input' c staPosPred) ctx')
+                                                (raise γ)
 
-    emitCheckAndFetch :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
-                      => Int
-                      -> Machine s o (Char : xs) (Succ n) r a
-                      -> MachineMonad s o xs (Succ n) r a
+    emitCheckAndFetch :: Int -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     emitCheckAndFetch n mk = do
       sat <- satFetch mk
       return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (off (input γ))
 
-    continue mk γ c input' = run mk (γ {input = input', operands = Op c (operands γ)})
+    continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
 evalEmpt :: MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
@@ -156,7 +152,7 @@ evalCatch (Machine k) h = freshUnique $ \u -> case h of
   Always gh (Machine h) ->
     liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
   Same gyes (Machine yes) gno (Machine no) ->
-    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes u) gno (buildHandler γ mno u) mk) k yes no
+    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes{- u-}) gno (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ)) (operands γ)})
@@ -189,7 +185,7 @@ evalIter μ l h =
         Always gh (Machine h) ->
           liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
         Same gyes (Machine yes) gno (Machine no) ->
-          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
+          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
 
 evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume
@@ -218,10 +214,9 @@ evalPut σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
--- TODO: FREEVAR is the wrong abstraction really...
 evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
-evalSelectPos Line (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (extractLine (pos (input γ)))) (operands γ)})
-evalSelectPos Col (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (extractCol (pos (input γ)))) (operands γ)})
+evalSelectPos sel (Machine k) = k <&> \m γ -> forcePos (input γ) sel $ \component input' ->
+  m (γ {operands = Op (FREEVAR component) (operands γ), input = input'})
 
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a

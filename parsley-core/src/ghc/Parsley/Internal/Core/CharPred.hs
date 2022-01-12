@@ -77,6 +77,7 @@ Occasionally, characters can pass through a predicate only to pass through anoth
 This given information can be used to optimise the new predicate the character is fed through.
 
 This works as follows:
+
   * If the given knowledge is a subset of the new predicate, then we /know/ that any character check
     will have passed, because it already passed a stricter check. The predicate can, therefore, be
     optimised to `Item`.

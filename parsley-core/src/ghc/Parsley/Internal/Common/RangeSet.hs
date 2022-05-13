@@ -192,16 +192,16 @@ insert x t@(Fork h sz l u lt rt)
   where
     {-# INLINE fuseLeft #-}
     fuseLeft !h !sz !x !u Tip !rt = Fork h sz x u lt rt
-    fuseLeft h sz x u lt rt
-      | (# !l, !x', lt' #) <- unsafeMaxDelete lt
+    fuseLeft h sz x u (Fork _ lsz ll lu llt lrt) rt
+      | (# !l, !x', lt' #) <- maxDelete lsz ll lu llt lrt
       -- we know there exists an element larger than x'
       -- if x == x' + 1, we fuse (x != x' since that breaks disjointness, x == pred l)
       , x == succ x' = balanceR sz l u lt' rt
       | otherwise    = Fork h sz x u lt rt
     {-# INLINE fuseRight #-}
     fuseRight !h !sz !l !x !lt Tip = Fork h sz l x lt rt
-    fuseRight h sz l x lt rt
-      | (# !x', !u, rt' #) <- unsafeMinDelete rt
+    fuseRight h sz l x lt (Fork _ rsz rl ru rlt rrt)
+      | (# !x', !u, rt' #) <- minDelete rsz rl ru rlt rrt
       -- we know there exists an element smaller than x'
       -- if x == x' - 1, we fuse (x != x' since that breaks disjointness, as x == succ u)
       , x == pred x' = balanceL sz l u lt rt'
@@ -262,13 +262,12 @@ unsafeInsertR newSz l u (Fork _ sz l' u' lt rt) = balanceR (sz + newSz) l' u' lt
 
 {-|
 This deletes the left-most range of the tree.
-It *must not* be used with an empty tree.
 -}
-{-# INLINEABLE unsafeDeleteL #-}
-unsafeDeleteL :: Size -> RangeSet a -> RangeSet a
-unsafeDeleteL !_ (Fork _ _ _ _ Tip rt) = rt
-unsafeDeleteL szRemoved (Fork _ sz l u lt rt) = balanceR (sz - szRemoved) l u (unsafeDeleteL szRemoved lt) rt
-unsafeDeleteL _ _ = error "unsafeDeleteL called on empty tree"
+{-# INLINEABLE deleteLeftmost #-}
+deleteLeftmost :: Size -> Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+deleteLeftmost !_ !_ !_ !_ Tip rt = rt
+deleteLeftmost szRemoved sz l u (Fork _ szl ll lu llt lrt) rt =
+  balanceR (sz - szRemoved) l u (deleteLeftmost szRemoved szl ll lu llt lrt) rt
 
 {-|
 This deletes the right-most range of the tree.
@@ -288,14 +287,12 @@ Find the minimum value within the set, if one exists.
 {-# INLINE findMin #-}
 findMin :: RangeSet a -> Maybe a
 findMin Tip = Nothing
-findMin t = let (# !m, !_ #) = unsafeMinRange t in Just m
+findMin (Fork _ _ l u lt _) = let (# !m, !_ #) = minRange l u lt in Just m
 
--- | Should /not/ be called with an empty tree!
-{-# INLINEABLE unsafeMinRange #-}
-unsafeMinRange :: RangeSet a -> (# a, a #)
-unsafeMinRange (Fork _ _ l u Tip _) = (# l, u #)
-unsafeMinRange (Fork _ _ _ _ lt _) = unsafeMinRange lt
-unsafeMinRange Tip = error "unsafeMinRange called on empty tree"
+{-# INLINEABLE minRange #-}
+minRange :: a -> a -> RangeSet a -> (# a, a #)
+minRange !l !u Tip                 = (# l, u #)
+minRange _  _  (Fork _ _ l u lt _) = minRange l u lt
 
 {-|
 Find the maximum value within the set, if one exists.
@@ -305,34 +302,30 @@ Find the maximum value within the set, if one exists.
 {-# INLINE findMax #-}
 findMax :: RangeSet a -> Maybe a
 findMax Tip = Nothing
-findMax t = let (# !_, !m #) = unsafeMaxRange t in Just m
+findMax (Fork _ _ l u _ rt) = let (# !_, !m #) = maxRange l u rt in Just m
 
--- | Should /not/ be called with an empty tree!
-{-# INLINEABLE unsafeMaxRange #-}
-unsafeMaxRange :: RangeSet a -> (# a, a #)
-unsafeMaxRange (Fork _ _ l u _ Tip) = (# l, u #)
-unsafeMaxRange (Fork _ _ _ _ _ rt) = unsafeMaxRange rt
-unsafeMaxRange Tip = error "unsafeMaxRange called on empty tree"
+{-# INLINEABLE maxRange #-}
+maxRange :: a -> a -> RangeSet a -> (# a, a #)
+maxRange !l !u Tip                 = (# l, u #)
+maxRange _  _  (Fork _ _ l u _ rt) = maxRange l u rt
 
-{-# INLINE unsafeMinDelete #-}
-unsafeMinDelete :: RangeSet a -> (# a, a, RangeSet a #)
-unsafeMinDelete (Fork _ sz l u lt rt) = let (# !ml, !mu, !_, t' #) = go sz l u lt rt in (# ml, mu, t' #)
+{-# INLINE minDelete #-}
+minDelete :: Size -> a -> a -> RangeSet a -> RangeSet a -> (# a, a, RangeSet a #)
+minDelete !sz !l !u !lt !rt = let (# !ml, !mu, !_, t' #) = go sz l u lt rt in (# ml, mu, t' #)
   where
     go !sz !l !u Tip !rt = (# l, u, sz - size rt, rt #)
     go sz l u (Fork _ lsz ll lu llt lrt) rt =
       let (# !ml, !mu, !msz, lt' #) = go lsz ll lu llt lrt
       in (# ml, mu, msz, balanceR (sz - msz) l u lt' rt #)
-unsafeMinDelete Tip = error "unsafeMinDelete called on empty tree"
 
-{-# INLINE unsafeMaxDelete #-}
-unsafeMaxDelete :: RangeSet a -> (# a, a, RangeSet a #)
-unsafeMaxDelete (Fork _ sz l u lt rt) = let (# !ml, !mu, !_, t' #) = go sz l u lt rt in (# ml, mu, t' #)
+{-# INLINE maxDelete #-}
+maxDelete :: Size -> a -> a -> RangeSet a -> RangeSet a -> (# a, a, RangeSet a #)
+maxDelete !sz !l !u !lt !rt = let (# !ml, !mu, !_, t' #) = go sz l u lt rt in (# ml, mu, t' #)
   where
     go !sz !l !u !lt Tip = (# l, u, sz - size lt, lt #)
     go sz l u lt (Fork _ rsz rl ru rlt rrt) =
       let (# !ml, !mu, !msz, rt' #) = go rsz rl ru rlt rrt
       in (# ml, mu, msz, balanceL (sz - msz) l u lt rt' #)
-unsafeMaxDelete Tip = error "unsafeMaxDelete called on empty tree"
 
 {-# INLINABLE balance #-}
 balance :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
@@ -457,40 +450,43 @@ difference t (Fork _ _ l u lt rt) = case split l u t of
 
 {-# INLINEABLE unsafeInsertLAdj #-}
 unsafeInsertLAdj :: (Enum a, Eq a) => Size -> a -> a -> RangeSet a -> RangeSet a
-unsafeInsertLAdj !newSz !l !u !t = case unsafeMinRange t of
+unsafeInsertLAdj !newSz !l !u t@(Fork _ _ tl tu tlt _) = case minRange tl tu tlt of
   (# !l', _ #) | l' == succ u -> unsafeFuseL newSz l t
                | otherwise    -> unsafeInsertL newSz l u t
+  where
+    {-# INLINEABLE unsafeFuseL #-}
+    unsafeFuseL :: Size -> a -> RangeSet a -> RangeSet a
+    unsafeFuseL !newSz !l' (Fork h sz l u lt rt) = case lt of
+      Tip -> Fork h (newSz + sz) l' u Tip rt
+      lt  -> Fork h (newSz + sz) l u (unsafeFuseL newSz l' lt) rt
+    unsafeFuseL _ _ Tip = error "unsafeFuseL called on Tip"
+unsafeInsertLAdj _ _ _ Tip = error "unsafeInsertLAdj called on Tip"
 
 {-# INLINEABLE unsafeInsertRAdj #-}
 unsafeInsertRAdj :: (Enum a, Eq a) => Size -> a -> a -> RangeSet a -> RangeSet a
-unsafeInsertRAdj !newSz !l !u !t = case unsafeMaxRange t of
+unsafeInsertRAdj !newSz !l !u t@(Fork _ _ tl tu _ trt) = case maxRange tl tu trt of
   (# _, !u' #) | u' == pred l -> unsafeFuseR newSz u t
                | otherwise    -> unsafeInsertR newSz l u t
-
-{-# INLINEABLE unsafeFuseL #-}
-unsafeFuseL :: Size -> a -> RangeSet a -> RangeSet a
-unsafeFuseL !newSz !l' (Fork h sz l u lt rt) = case lt of
-  Tip -> Fork h (newSz + sz) l' u Tip rt
-  lt  -> Fork h (newSz + sz) l u (unsafeFuseL newSz l' lt) rt
-unsafeFuseL _ _ Tip = error "unsafeFuseL called on Tip"
-
-{-# INLINEABLE unsafeFuseR #-}
-unsafeFuseR :: Size -> a -> RangeSet a -> RangeSet a
-unsafeFuseR !newSz !u' (Fork h sz l u lt rt) = case rt of
-  Tip -> Fork h (newSz + sz) l u' lt Tip
-  rt  -> Fork h (newSz + sz) l u lt (unsafeFuseR newSz u' rt)
-unsafeFuseR _ _ Tip = error "unsafeFuseR called on Tip"
+  where
+    {-# INLINEABLE unsafeFuseR #-}
+    unsafeFuseR :: Size -> a -> RangeSet a -> RangeSet a
+    unsafeFuseR !newSz !u' (Fork h sz l u lt rt) = case rt of
+      Tip -> Fork h (newSz + sz) l u' lt Tip
+      rt  -> Fork h (newSz + sz) l u lt (unsafeFuseR newSz u' rt)
+    unsafeFuseR _ _ Tip = error "unsafeFuseR called on Tip"
+unsafeInsertRAdj _ _ _ Tip = error "unsafeInsertRAdj called on Tip"
 
 {-# INLINABLE link #-}
 link :: (Enum a, Eq a) => a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 link !l !u Tip Tip = single (diff l u) l u
 link l u Tip rt = unsafeInsertLAdj (diff l u) l u rt
 link l u lt Tip = unsafeInsertRAdj (diff l u) l u lt
-link l u lt rt = unsafeLink (diff l' u') l' u' lt'' rt''
+link l u lt@(Fork _ lsz ll lu llt lrt) rt@(Fork _ rsz rl ru rlt rrt) =
+  unsafeLink (diff l' u') l' u' lt'' rt''
   where
     -- we have to check for fusion up front
-    (# !lmaxl, !lmaxu, lt' #) = unsafeMaxDelete lt
-    (# !rminl, !rminu, rt' #) = unsafeMinDelete rt
+    (# !lmaxl, !lmaxu, lt' #) = maxDelete lsz ll lu llt lrt
+    (# !rminl, !rminu, rt' #) = minDelete rsz rl ru rlt rrt
 
     (# !l', !lt'' #) | lmaxu == pred l = (# lmaxl, lt' #)
                      | otherwise       = (# l, lt #)
@@ -534,9 +530,9 @@ unsafeMerge lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
 glue :: Size -> RangeSet a -> RangeSet a -> RangeSet a
 glue !_ Tip rt = rt
 glue _ lt Tip  = lt
-glue sz lt rt
-  | height lt < height rt = let (# !l, !u, !rt' #) = unsafeMinDelete rt in forkSz sz l u lt rt'
-  | otherwise = let (# !l, !u, !lt' #) = unsafeMaxDelete lt in forkSz sz l u lt' rt
+glue sz lt@(Fork lh lsz ll lu llt lrt) rt@(Fork rh rsz rl ru rlt rrt)
+  | lh < rh = let (# !l, !u, !rt' #) = minDelete rsz rl ru rlt rrt in forkSz sz l u lt rt'
+  | otherwise = let (# !l, !u, !lt' #) = maxDelete lsz ll lu llt lrt in forkSz sz l u lt' rt
 
 {-|
 Filters a set by removing all values greater than or equal to the given value.
@@ -546,7 +542,11 @@ Filters a set by removing all values greater than or equal to the given value.
 {-# INLINEABLE allLess #-}
 allLess :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 allLess !_ Tip = Tip
-allLess x (Fork _ _ l u lt rt) = unsafeAllLess x l u lt rt
+allLess x (Fork _ _ l u lt rt) = case compare x l of
+  EQ          -> lt
+  LT          -> allLess x lt
+  GT | x <= u -> unsafeInsertR (diff l (pred x)) l (pred x) (allLess x lt)
+  GT          -> link l u lt (allLess x rt)
 
 {-|
 Filters a set by removing all values less than or equal to the given value.
@@ -556,23 +556,27 @@ Filters a set by removing all values less than or equal to the given value.
 {-# INLINEABLE allMore #-}
 allMore :: (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 allMore !_ Tip = Tip
-allMore x (Fork _ _ l u lt rt) = unsafeAllMore x l u lt rt
+allMore x (Fork _ _ l u lt rt) = case compare u x of
+  EQ          -> rt
+  LT          -> allMore x rt
+  GT | l <= x -> unsafeInsertL (diff (succ x) u) (succ x) u (allMore x rt)
+  GT          -> link l u (allMore x lt) rt
 
-{-# INLINEABLE unsafeAllLess #-}
+{-{-# INLINEABLE unsafeAllLess #-}
 unsafeAllLess :: (Enum a, Ord a) => a -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 unsafeAllLess !x !l !u !lt !rt = case compare x l of
   EQ          -> lt
   LT          -> allLess x lt
   GT | x <= u -> unsafeInsertR (diff l (pred x)) l (pred x) (allLess x lt)
-  GT          -> link l u lt (allLess x rt)
+  GT          -> link l u lt (allLess x rt)-}
 
-{-# INLINEABLE unsafeAllMore #-}
+{-{-# INLINEABLE unsafeAllMore #-}
 unsafeAllMore :: (Enum a, Ord a) => a -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 unsafeAllMore !x !l !u !lt !rt = case compare u x of
   EQ          -> rt
   LT          -> allMore x rt
   GT | l <= x -> unsafeInsertL (diff (succ x) u) (succ x) u (allMore x rt)
-  GT          -> link l u (allMore x lt) rt
+  GT          -> link l u (allMore x lt) rt-}
 
 {-# INLINEABLE split #-}
 split :: (Enum a, Ord a) => a -> a -> RangeSet a -> (# RangeSet a, RangeSet a #)
@@ -638,16 +642,16 @@ was not an element now is. This is only possible on `Bounded` types.
 complement :: forall a. (Bounded a, Enum a, Eq a) => RangeSet a -> RangeSet a
 complement Tip = single (diff @a minBound maxBound) minBound maxBound
 complement t | full t = Tip
-complement t@Fork{} = t'''
+complement t@(Fork _ sz l u lt rt) = t'''
   where
-    (# !min, !min' #) = unsafeMinRange t
+    (# !min, !min' #) = minRange l u lt
 
     -- The complement of a tree is at most 1 larger or smaller than the original
     -- if both min and max are minBound and maxBound, it will shrink
     -- if neither min or max are minBound or maxBound, it will grow
     -- otherwise, the tree will not change size
     -- The insert or shrink will happen at an extremity, and rebalance need only occur along the spine
-    (# !t', !initial #) | min == minBound = (# unsafeDeleteL (diff minBound min') t, succ min' #) -- this is safe, because we've checked for the maxSet case already
+    (# !t', !initial #) | min == minBound = (# deleteLeftmost (diff minBound min') sz l u lt rt, succ min' #) -- this is safe, because we've checked for the maxSet case already
                         | otherwise       = (# t , minBound #)
     (# !t'', !final #) = go initial t'
     t''' | SJust x <- final = unsafeInsertR (diff x maxBound) x maxBound t''

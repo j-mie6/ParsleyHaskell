@@ -153,7 +153,7 @@ Test whether or not a given value is found within the set.
 member :: forall a. Enum a => a -> RangeSet a -> Bool
 member !x = go
   where
-    x' = fromEnum x
+    !x' = fromEnum x
     go (Fork _ _ l u lt rt)
       | l <= x'   = x' <= u || go rt
       | otherwise = go lt
@@ -397,7 +397,7 @@ will appear in the result set.
 @since 2.1.0.0
 -}
 {-# INLINABLE union #-}
-union :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
+union :: Enum a => RangeSet a -> RangeSet a -> RangeSet a
 union t Tip = t
 union Tip t = t
 union t@(Fork _ _ l u lt rt) t' = case split l u t' of
@@ -414,7 +414,7 @@ of the provided sets.
 @since 2.1.0.0
 -}
 {-# INLINABLE intersection #-}
-intersection :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
+intersection :: Enum a => RangeSet a -> RangeSet a -> RangeSet a
 intersection Tip _ = Tip
 intersection _ Tip = Tip
 intersection t1@(Fork _ _ l1 u1 lt1 rt1) t2 =
@@ -436,7 +436,7 @@ Do two sets have no elements in common?
 @since 2.1.0.0
 -}
 {-# INLINE disjoint #-}
-disjoint :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
+disjoint :: Enum a => RangeSet a -> RangeSet a -> Bool
 disjoint Tip _ = True
 disjoint _ Tip = True
 disjoint (Fork _ _ l u lt rt) t = case splitOverlap l u t of
@@ -449,7 +449,7 @@ Removes all elements from the first set that are found in the second set.
 @since 2.1.0.0
 -}
 {-# INLINEABLE difference #-}
-difference :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
+difference :: Enum a => RangeSet a -> RangeSet a -> RangeSet a
 difference Tip _ = Tip
 difference t Tip = t
 difference t (Fork _ _ l u lt rt) = case split l u t of
@@ -525,7 +525,7 @@ merge t1 t2 =
 
 -- This assumes that the trees are /totally/ disjoint
 {-# INLINEABLE unsafeMerge #-}
-unsafeMerge :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> RangeSet a
+unsafeMerge :: RangeSet a -> RangeSet a -> RangeSet a
 unsafeMerge Tip rt = rt
 unsafeMerge lt Tip = lt
 unsafeMerge lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
@@ -578,25 +578,8 @@ allMoreE x (Fork _ _ l u lt rt) = case compare u x of
   GT | l <= x -> unsafeInsertL (diffE (succ x) u) (succ x) u (allMoreE x rt)
   GT          -> link l u (allMoreE x lt) rt
 
-
-{-{-# INLINEABLE unsafeAllLess #-}
-unsafeAllLess :: (Enum a, Ord a) => a -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
-unsafeAllLess !x !l !u !lt !rt = case compare x l of
-  EQ          -> lt
-  LT          -> allLess x lt
-  GT | x <= u -> unsafeInsertR (diffE l (pred x)) l (pred x) (allLess x lt)
-  GT          -> link l u lt (allLess x rt)-}
-
-{-{-# INLINEABLE unsafeAllMore #-}
-unsafeAllMore :: (Enum a, Ord a) => a -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
-unsafeAllMore !x !l !u !lt !rt = case compare u x of
-  EQ          -> rt
-  LT          -> allMore x rt
-  GT | l <= x -> unsafeInsertL (diffE (succ x) u) (succ x) u (allMore x rt)
-  GT          -> link l u (allMore x lt) rt-}
-
 {-# INLINEABLE split #-}
-split :: (Enum a, Ord a) => E -> E -> RangeSet a -> (# RangeSet a, RangeSet a #)
+split :: E -> E -> RangeSet a -> (# RangeSet a, RangeSet a #)
 split !_ !_ Tip = (# Tip, Tip #)
 split l u (Fork _ _ l' u' lt rt)
   | u < l' = let (# !llt, !lgt #) = split l u lt in (# llt, link l' u' lgt rt #)
@@ -613,11 +596,11 @@ split l u (Fork _ _ l' u' lt rt)
                 in (# lt', rt' #)
 
 {-# INLINE splitOverlap #-}
-splitOverlap :: (Enum a, Ord a) => E -> E -> RangeSet a -> (# RangeSet a, RangeSet a, RangeSet a #)
+splitOverlap :: E -> E -> RangeSet a -> (# RangeSet a, RangeSet a, RangeSet a #)
 splitOverlap !l !u !t = let (# lt', rt' #) = split l u t in (# lt', overlapping l u t, rt' #)
 
 {-# INLINABLE overlapping #-}
-overlapping :: (Ord a, Enum a) => E -> E -> RangeSet a -> RangeSet a
+overlapping :: E -> E -> RangeSet a -> RangeSet a
 overlapping !_ !_ Tip = Tip
 overlapping x y (Fork _ sz l u lt rt) =
   case compare l x of
@@ -704,7 +687,7 @@ sets are not equal.
 @since 2.1.0.0
 -}
 {-# INLINE isProperSubsetOf #-}
-isProperSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
+isProperSubsetOf :: RangeSet a -> RangeSet a -> Bool
 isProperSubsetOf t1 t2 = size t1 < size t2 && uncheckedSubsetOf t1 t2
 
 {-|
@@ -713,10 +696,10 @@ Tests if all the elements of the first set appear in the second.
 @since 2.1.0.0
 -}
 {-# INLINEABLE isSubsetOf #-}
-isSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
+isSubsetOf :: RangeSet a -> RangeSet a -> Bool
 isSubsetOf t1 t2 = size t1 <= size t2 && uncheckedSubsetOf t1 t2
 
-uncheckedSubsetOf :: (Enum a, Ord a) => RangeSet a -> RangeSet a -> Bool
+uncheckedSubsetOf :: RangeSet a -> RangeSet a -> Bool
 uncheckedSubsetOf Tip _ = True
 uncheckedSubsetOf _ Tip = False
 uncheckedSubsetOf (Fork _ _ l u lt rt) t = case splitOverlap l u t of
@@ -741,16 +724,18 @@ Returns all the values that are not found within the set.
 @since 2.1.0.0
 -}
 {-# INLINEABLE unelems #-}
-unelems :: (Bounded a, Enum a, Eq a) => RangeSet a -> [a]
-unelems t = fold fork tip t minBound maxBound []
+unelems :: forall a. (Bounded a, Enum a) => RangeSet a -> [a]
+unelems t = foldE fork tip t (fromEnum @a minBound) (fromEnum @a maxBound) []
   where
+    fork :: E -> E -> (E -> E -> [a] -> [a]) -> (E -> E -> [a] -> [a]) -> E -> E -> ([a] -> [a])
     fork l' u' lt rt l u = dxs . dys
       where
         dxs | l' == l   = id
             | otherwise = lt l (pred l')
         dys | u == u'   = id
             | otherwise = rt (succ u') u
-    tip l u = (range l u ++)
+    tip :: E -> E -> [a] -> [a]
+    tip l u = (range (toEnum l) (toEnum u) ++)
 
 {-|
 Constructs a `RangeSet` given a list of ranges.
@@ -759,7 +744,7 @@ Constructs a `RangeSet` given a list of ranges.
 -}
 -- TODO: This could be better?
 {-# INLINEABLE fromRanges #-}
-fromRanges :: (Enum a, Ord a) => [(a, a)] -> RangeSet a
+fromRanges :: Enum a => [(a, a)] -> RangeSet a
 fromRanges [(x, y)] = single (diffE xe ye) xe ye
   where
     !xe = fromEnum x
@@ -773,7 +758,7 @@ Inserts a range into a `RangeSet`.
 -}
 -- This could be improved, but is OK
 {-# INLINE insertRange #-}
-insertRange :: (Enum a, Ord a) => a -> a -> RangeSet a -> RangeSet a
+insertRange :: Enum a => a -> a -> RangeSet a -> RangeSet a
 insertRange l u t =
   let !le = fromEnum l
       !ue = fromEnum u
@@ -801,16 +786,23 @@ fold :: Enum a
      -> b                       -- ^ Value to be substituted at the leaves.
      -> RangeSet a
      -> b
-fold _ tip Tip = tip
-fold fork tip (Fork _ _ l u lt rt) = fork (toEnum l) (toEnum u) (fold fork tip lt) (fold fork tip rt)
+fold fork = foldE (\l u -> fork (toEnum l) (toEnum u))
+
+{-# INLINEABLE foldE #-}
+foldE :: (E -> E -> b -> b -> b) -- ^ Function that combines the lower and upper values (inclusive) for a range with the folded left- and right-subtrees.
+      -> b                       -- ^ Value to be substituted at the leaves.
+      -> RangeSet a
+      -> b
+foldE _ tip Tip = tip
+foldE fork tip (Fork _ _ l u lt rt) = fork l u (foldE fork tip lt) (foldE fork tip rt)
 
 -- Instances
-instance (Enum a, Eq a) => Eq (RangeSet a) where
+instance Eq (RangeSet a) where
   t1 == t2 = size t1 == size t2 && ranges t1 == ranges t2
     where
       {-# INLINE ranges #-}
-      ranges :: RangeSet a -> [(a, a)]
-      ranges t = fold (\l u lt rt -> lt . ((l, u) :) . rt) id t []
+      ranges :: RangeSet a -> [(E, E)]
+      ranges t = foldE (\l u lt rt -> lt . ((l, u) :) . rt) id t []
 
 -- Testing Utilities
 valid :: RangeSet a -> Bool

@@ -271,6 +271,5 @@ Returns a list of values returned by @p@.
 -}
 sepEndBy1 :: Parser a -> Parser b -> Parser [a]
 sepEndBy1 p sep =
-  let seb1 = p <**> (sep *> (FLIP_H CONS <$> option EMPTY seb1)
-                 <|> pure (APP_H (FLIP_H CONS) EMPTY))
+  let seb1 = p <:> option EMPTY (sep *> option EMPTY seb1)
   in seb1

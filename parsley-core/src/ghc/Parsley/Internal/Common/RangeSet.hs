@@ -1,4 +1,4 @@
-{-# LANGUAGE DerivingStrategies, MagicHash, UnboxedTuples, RoleAnnotations, TypeApplications #-}
+{-# LANGUAGE DerivingStrategies, MagicHash, UnboxedTuples, RoleAnnotations, TypeApplications, MultiWayIf #-}
 {-# OPTIONS_HADDOCK prune #-}
 {-|
 Module      : Parsley.Internal.Common.RangeSet
@@ -176,7 +176,7 @@ Insert a new element into the set.
 @since 2.1.0.0
 -}
 {-# INLINEABLE insert #-}
-insert :: forall a. (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
+{-insert :: forall a. (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
 insert !x Tip = single 1 x x
 insert x t@(Fork h sz l u lt rt)
   -- Nothing happens when it's already in range
@@ -189,6 +189,39 @@ insert x t@(Fork h sz l u lt rt)
   | x == succ u = fuseRight h (sz + 1) l x lt rt                          -- we know x > u since x <= l && not x <= u
   -- Otherwise, insert and balance for right
   | otherwise = ifeq rt (insert x rt) t (balance (sz + 1) l u lt)         -- cannot be biased, because fusion can shrink a tree
+  where
+    {-# INLINE fuseLeft #-}
+    fuseLeft !h !sz !x !u Tip !rt = Fork h sz x u lt rt
+    fuseLeft h sz x u (Fork _ lsz ll lu llt lrt) rt
+      | (# !l, !x', lt' #) <- maxDelete lsz ll lu llt lrt
+      -- we know there exists an element larger than x'
+      -- if x == x' + 1, we fuse (x != x' since that breaks disjointness, x == pred l)
+      , x == succ x' = balanceR sz l u lt' rt
+      | otherwise    = Fork h sz x u lt rt
+    {-# INLINE fuseRight #-}
+    fuseRight !h !sz !l !x !lt Tip = Fork h sz l x lt rt
+    fuseRight h sz l x lt (Fork _ rsz rl ru rlt rrt)
+      | (# !x', !u, rt' #) <- minDelete rsz rl ru rlt rrt
+      -- we know there exists an element smaller than x'
+      -- if x == x' - 1, we fuse (x != x' since that breaks disjointness, as x == succ u)
+      , x == pred x' = balanceL sz l u lt rt'
+      | otherwise    = Fork h sz l x lt rt-}
+
+insert :: forall a. (Enum a, Ord a) => a -> RangeSet a -> RangeSet a
+insert !x Tip = single 1 x x
+insert x t@(Fork h sz l u lt rt)
+  -- Nothing happens when it's already in range
+  | l <= x = if
+    | x <= u -> t
+  -- If it is adjacent to the upper range, it may fuse
+    | x == succ u -> fuseRight h (sz + 1) l x lt rt                              -- we know x > u since x <= l && not x <= u
+  -- Otherwise, insert and balance for right
+    | otherwise -> ifeq rt (insert x rt) t (balance (sz + 1) l u lt)             -- cannot be biased, because fusion can shrink a tree
+  | {- x < l -} otherwise = if
+  -- If it is adjacent to the lower, it may fuse
+    | x == pred l -> fuseLeft h (sz + 1) x u lt rt                               -- the equality must be guarded by an existence check
+  -- Otherwise, insert and balance for left
+    | otherwise -> ifeq lt (insert x lt) t $ \lt' -> balance (sz + 1) l u lt' rt -- cannot be biased, because fusion can shrink a tree
   where
     {-# INLINE fuseLeft #-}
     fuseLeft !h !sz !x !u Tip !rt = Fork h sz x u lt rt

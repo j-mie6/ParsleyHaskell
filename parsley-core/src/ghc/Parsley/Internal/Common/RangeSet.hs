@@ -448,37 +448,35 @@ difference t (Fork _ _ l u lt rt) = case split l u t of
       !lt'lt = difference lt' lt
       !rt'rt = difference rt' rt
 
-{-# INLINEABLE unsafeInsertLAdj #-}
-unsafeInsertLAdj :: (Enum a, Eq a) => Size -> a -> a -> RangeSet a -> RangeSet a
-unsafeInsertLAdj !newSz !l !u t@(Fork th tsz tl tu tlt trt) = case minRange tl tu tlt of
+{-# INLINEABLE insertLAdj #-}
+insertLAdj :: (Enum a, Eq a) => Size -> a -> a -> Int -> Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+insertLAdj !newSz !l !u !th !tsz !tl !tu !tlt !trt = case minRange tl tu tlt of
   (# !l', _ #) | l' == succ u -> fuseL newSz l th tsz tl tu tlt trt
-               | otherwise    -> unsafeInsertL newSz l u t
+               | otherwise    -> balanceL (tsz + newSz) tl tu (unsafeInsertL newSz l u tlt) trt --unsafeInsertL newSz l u t
   where
     {-# INLINEABLE fuseL #-}
     fuseL :: Size -> a -> Int -> Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
     fuseL !newSz !l' !h !sz !l !u lt rt = case lt of
       Tip -> Fork h (newSz + sz) l' u Tip rt
       Fork lh lsz ll lu llt lrt  -> Fork h (newSz + sz) l u (fuseL newSz l' lh lsz ll lu llt lrt) rt
-unsafeInsertLAdj _ _ _ Tip = error "unsafeInsertLAdj called on Tip"
 
-{-# INLINEABLE unsafeInsertRAdj #-}
-unsafeInsertRAdj :: (Enum a, Eq a) => Size -> a -> a -> RangeSet a -> RangeSet a
-unsafeInsertRAdj !newSz !l !u t@(Fork th tsz tl tu tlt trt) = case maxRange tl tu trt of
+{-# INLINEABLE insertRAdj #-}
+insertRAdj :: (Enum a, Eq a) => Size -> a -> a -> Int -> Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
+insertRAdj !newSz !l !u !th !tsz !tl !tu !tlt !trt = case maxRange tl tu trt of
   (# _, !u' #) | u' == pred l -> fuseR newSz u th tsz tl tu tlt trt
-               | otherwise    -> unsafeInsertR newSz l u t
+               | otherwise    -> balanceR (tsz + newSz) tl tu tlt (unsafeInsertR newSz l u trt) --unsafeInsertR newSz l u t
   where
     {-# INLINEABLE fuseR #-}
     fuseR :: Size -> a -> Int -> Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
     fuseR !newSz !u' !h !sz !l !u lt rt = case rt of
       Tip -> Fork h (newSz + sz) l u' lt Tip
       Fork rh rsz rl ru rlt rrt  -> Fork h (newSz + sz) l u lt (fuseR newSz u' rh rsz rl ru rlt rrt)
-unsafeInsertRAdj _ _ _ Tip = error "unsafeInsertRAdj called on Tip"
 
 {-# INLINABLE link #-}
 link :: (Enum a, Eq a) => a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 link !l !u Tip Tip = single (diff l u) l u
-link l u Tip rt = unsafeInsertLAdj (diff l u) l u rt
-link l u lt Tip = unsafeInsertRAdj (diff l u) l u lt
+link l u Tip (Fork rh rsz rl ru rlt rrt) = insertLAdj (diff l u) l u rh rsz rl ru rlt rrt
+link l u (Fork lh lsz ll lu llt lrt) Tip = insertRAdj (diff l u) l u lh lsz ll lu llt lrt
 link l u lt@(Fork _ lsz ll lu llt lrt) rt@(Fork _ rsz rl ru rlt rrt) =
   unsafeLink (diff l' u') l' u' lt'' rt''
   where

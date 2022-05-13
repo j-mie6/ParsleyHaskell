@@ -2,7 +2,7 @@
 {-# OPTIONS_HADDOCK prune #-}
 {-|
 Module      : Parsley.Internal.Common.RangeSet
-Description : Packaging of offsets and positions.
+Description : Efficient set for contiguous data.
 License     : BSD-3-Clause
 Maintainer  : Jamie Willis
 Stability   : experimental
@@ -195,20 +195,16 @@ insert x t@(Fork h sz l u lt rt)
     fuseLeft h sz x u lt rt
       | (# !l, !x', lt' #) <- unsafeMaxDelete lt
       -- we know there exists an element larger than x'
-      -- if x == x' or x == x' + 1, we fuse
-      -- x >= x' since it is one less than x''s strict upper bound
-      -- x >= x' && (x == x' || x == x' + 1) === x >= x' && x <= x' + 1
-      , x <= succ x' = balanceR sz l u lt' rt
+      -- if x == x' + 1, we fuse (x != x' since that breaks disjointness, x == pred l)
+      , x == succ x' = balanceR sz l u lt' rt
       | otherwise    = Fork h sz x u lt rt
     {-# INLINE fuseRight #-}
     fuseRight !h !sz !l !x !lt Tip = Fork h sz l x lt rt
     fuseRight h sz l x lt rt
       | (# !x', !u, rt' #) <- unsafeMinDelete rt
       -- we know there exists an element smaller than x'
-      -- if x == x' or x == x' - 1, we fuse
-      -- x <= x' since it is one greater than x''s strict lower bound,
-      -- x <= x' && (x == x' || x == x' - 1) === x <= x' && x >= x' - 1
-      , x >= pred x' = balanceL sz l u lt rt'
+      -- if x == x' - 1, we fuse (x != x' since that breaks disjointness, as x == succ u)
+      , x == pred x' = balanceL sz l u lt rt'
       | otherwise    = Fork h sz l x lt rt
 
 {-|

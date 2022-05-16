@@ -199,7 +199,7 @@ insertE x t@(Fork h sz l u lt rt)
                 else ifeq lt (insertE x lt) t $ \lt' -> balance (sz + 1) l u lt' rt -- cannot be biased, because fusion can shrink a tree
   where
     {-# INLINE fuseLeft #-}
-    fuseLeft !h !sz !x !u Tip !rt = Fork h sz x u lt rt
+    fuseLeft !h !sz !x !u Tip !rt = Fork h sz x u Tip rt
     fuseLeft h sz x u (Fork _ lsz ll lu llt lrt) rt
       | (# !l, !x', lt' #) <- maxDelete lsz ll lu llt lrt
       -- we know there exists an element larger than x'
@@ -207,7 +207,7 @@ insertE x t@(Fork h sz l u lt rt)
       , x == succ x' = balanceR sz l u lt' rt
       | otherwise    = Fork h sz x u lt rt
     {-# INLINE fuseRight #-}
-    fuseRight !h !sz !l !x !lt Tip = Fork h sz l x lt rt
+    fuseRight !h !sz !l !x !lt Tip = Fork h sz l x lt Tip
     fuseRight h sz l x lt (Fork _ rsz rl ru rlt rrt)
       | (# !x', !u, rt' #) <- minDelete rsz rl ru rlt rrt
       -- we know there exists an element smaller than x'
@@ -247,8 +247,8 @@ deleteE x t@(Fork h sz l u lt rt) =
        To do this, we have to make it a child of the right-tree's left most position. -}
     {-# INLINE fission #-}
     fission !sz !l1 !x !u2 !lt !rt =
-      let u1 = pred x
-          l2 = succ x
+      let !u1 = pred x
+          !l2 = succ x
           rt' = unsafeInsertL (diffE l2 u2) l2 u2 rt
       in balanceR sz l1 u1 lt rt'
 
@@ -360,8 +360,7 @@ balanceL !sz !l1 !u1 lt@(Fork !lh !lsz !l2 !u2 !llt !lrt) !rt
   where
     !dltrt = lh - height rt
 -- If the right shrank (or nothing changed), we have to be prepared to handle the Tip case for lt
-balanceL sz l u Tip rt | height rt <= 1 = forkSz sz l u Tip rt
-balanceL _ _ _ Tip _ = error "Right should have shrank, but is still 1 taller than a Tip!"
+balanceL sz l u Tip rt = forkSz sz l u Tip rt
 
 {-# INLINEABLE balanceR #-}
 balanceR :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
@@ -373,8 +372,7 @@ balanceR !sz !l1 !u1 !lt rt@(Fork !rh rsz l2 u2 rlt rrt)
   where
     !dltrt = rh - height lt
 -- If the left shrank (or nothing changed), we have to be prepared to handle the Tip case for rt
-balanceR sz l u lt Tip | height lt <= 1 = forkSz sz l u lt Tip
-balanceR _ _ _ _ Tip = error "Left should have shrank, but is still 1 taller than a Tip!"
+balanceR sz l u lt Tip = forkSz sz l u lt Tip
 
 {-# NOINLINE uncheckedBalanceL #-}
 -- PRE: left grew or right shrank, difference in height at most 2 biasing to the left

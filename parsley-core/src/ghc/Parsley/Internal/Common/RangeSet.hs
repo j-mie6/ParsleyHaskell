@@ -246,11 +246,14 @@ deleteE x t@(Fork h sz l u lt rt) =
        we'll push the range down into the right arbitrarily
        To do this, we have to make it a child of the right-tree's left most position. -}
     {-# INLINE fission #-}
-    fission !sz !l1 !x !u2 !lt !rt =
-      let !u1 = pred x
-          !l2 = succ x
-          rt' = unsafeInsertL (diffE l2 u2) l2 u2 rt
-      in balanceR sz l1 u1 lt rt'
+    fission !sz !l1 !x !u2 !lt !rt
+      | height lt > height rt = let rt' = unsafeInsertL sz' l2 u2 rt in forkSz sz l1 u1 lt rt'
+      | otherwise = let lt' = unsafeInsertR sz' l2 u2 rt in forkSz sz l1 u1 lt' rt
+      where
+        !u1 = pred x
+        !l2 = succ x
+        !sz' = diffE l2 u2
+
 
 {-|
 Inserts an range at the left-most position in the tree.

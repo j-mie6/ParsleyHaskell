@@ -247,8 +247,8 @@ deleteE x t@(Fork h sz l u lt rt) =
        To do this, we have to make it a child of the right-tree's left most position. -}
     {-# INLINE fission #-}
     fission !sz !l1 !x !u2 !lt !rt
-      | height lt > height rt = let rt' = unsafeInsertL sz' l2 u2 rt in forkSz sz l1 u1 lt rt'
-      | otherwise = let lt' = unsafeInsertR sz' l2 u2 rt in forkSz sz l1 u1 lt' rt
+      | height lt > height rt = forkSz sz l1 u1 lt (unsafeInsertL sz' l2 u2 rt)
+      | otherwise = forkSz sz l1 u1 (unsafeInsertR sz' l2 u2 lt) rt
       where
         !u1 = pred x
         !l2 = succ x

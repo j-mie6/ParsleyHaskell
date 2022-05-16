@@ -243,8 +243,7 @@ deleteE x t@(Fork h sz l u lt rt) =
     GT             -> ifeq lt (deleteE x lt) t $ \lt' -> balance (sz - 1) l u lt' rt -- cannot be biased, because fisson can grow a tree
   where
     {- Fission breaks a node into two new ranges
-       we'll push the range down into the right arbitrarily
-       To do this, we have to make it a child of the right-tree's left most position. -}
+       we'll push the range down into the smallest child, ensuring it's balanced -}
     {-# INLINE fission #-}
     fission !sz !l1 !x !u2 !lt !rt
       | height lt > height rt = forkSz sz l1 u1 lt (unsafeInsertL sz' l2 u2 rt)
@@ -254,7 +253,6 @@ deleteE x t@(Fork h sz l u lt rt) =
         !l2 = succ x
         !sz' = diffE l2 u2
 
-
 {-|
 Inserts an range at the left-most position in the tree.
 It *must* not overlap with any other range within the tree.
@@ -262,8 +260,15 @@ It *must* be /known/ not to exist within the tree.
 -}
 {-# INLINEABLE unsafeInsertL #-}
 unsafeInsertL :: Size -> E -> E -> RangeSet a -> RangeSet a
-unsafeInsertL !newSz l u Tip = single newSz l u
-unsafeInsertL newSz l u (Fork _ sz l' u' lt rt) = balanceL (sz + newSz) l' u' (unsafeInsertL newSz l u lt) rt
+unsafeInsertL !newSz !l !u = go
+  where
+    go Tip = single newSz l u
+    go (Fork _ sz l' u' lt rt) = balanceL (sz + newSz) l' u' (go lt) rt
+
+{-unsafeInsertL' :: Size -> E -> E -> RangeSet a -> RangeSet a
+unsafeInsertL' !newSz l u = go
+  where-}
+
 
 {-|
 Inserts an range at the right-most position in the tree.
@@ -272,8 +277,10 @@ It *must* be /known/ not to exist within the tree.
 -}
 {-# INLINEABLE unsafeInsertR #-}
 unsafeInsertR :: Size -> E -> E -> RangeSet a -> RangeSet a
-unsafeInsertR !newSz l u Tip = single newSz l u
-unsafeInsertR newSz l u (Fork _ sz l' u' lt rt) = balanceR (sz + newSz) l' u' lt (unsafeInsertR newSz l u rt)
+unsafeInsertR !newSz !l !u = go
+  where
+    go Tip = single newSz l u
+    go (Fork _ sz l' u' lt rt) = balanceR (sz + newSz) l' u' lt (go rt)
 
 {-|
 This deletes the left-most range of the tree.

@@ -265,11 +265,6 @@ unsafeInsertL !newSz !l !u = go
     go Tip = single newSz l u
     go (Fork _ sz l' u' lt rt) = balanceL (sz + newSz) l' u' (go lt) rt
 
-{-unsafeInsertL' :: Size -> E -> E -> RangeSet a -> RangeSet a
-unsafeInsertL' !newSz l u = go
-  where-}
-
-
 {-|
 Inserts an range at the right-most position in the tree.
 It *must* not overlap with any other range within the tree.

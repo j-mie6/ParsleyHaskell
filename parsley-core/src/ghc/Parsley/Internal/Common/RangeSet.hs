@@ -448,12 +448,12 @@ intersection Tip _ = Tip
 intersection _ Tip = Tip
 intersection t1@(Fork _ _ l1 u1 lt1 rt1) t2 =
   case overlap of
-    Tip -> unsafeMerge lt1lt2 rt1rt2
+    Tip -> disjointMerge lt1lt2 rt1rt2
     Fork 1 sz x y _ _
       | x == l1, y == u1
       , lt1lt2 `ptrEq` lt1, rt1rt2 `ptrEq` rt1 -> t1
-      | otherwise -> unsafeLink sz x y lt1lt2 rt1rt2
-    Fork _ sz x y lt' rt' -> unsafeLink (sz - size lt' - size rt') x y (unsafeMerge lt1lt2 lt') (unsafeMerge rt' rt1rt2)
+      | otherwise -> disjointLink sz x y lt1lt2 rt1rt2
+    Fork _ sz x y lt' rt' -> disjointLink (sz - size lt' - size rt') x y (disjointMerge lt1lt2 lt') (disjointMerge rt' rt1rt2)
   where
     (# !lt2, !overlap, !rt2 #) = splitOverlap l1 u1 t2
     !lt1lt2 = intersection lt1 lt2
@@ -484,7 +484,7 @@ difference t Tip = t
 difference t (Fork _ _ l u lt rt) = case split l u t of
   (# lt', rt' #)
     | size lt'lt + size rt'rt == size t -> t
-    | otherwise -> unsafeMerge lt'lt rt'rt
+    | otherwise -> disjointMerge lt'lt rt'rt
     where
       !lt'lt = difference lt' lt
       !rt'rt = difference rt' rt
@@ -519,7 +519,7 @@ link !l !u Tip Tip = single (diffE l u) l u
 link l u Tip (Fork rh rsz rl ru rlt rrt) = insertLAdj (diffE l u) l u rh rsz rl ru rlt rrt
 link l u (Fork lh lsz ll lu llt lrt) Tip = insertRAdj (diffE l u) l u lh lsz ll lu llt lrt
 link l u lt@(Fork _ lsz ll lu llt lrt) rt@(Fork _ rsz rl ru rlt rrt) =
-  unsafeLink (diffE l' u') l' u' lt'' rt''
+  disjointLink (diffE l' u') l' u' lt'' rt''
   where
     -- we have to check for fusion up front
     (# !lmaxl, !lmaxu, lt' #) = maxDelete lsz ll lu llt lrt
@@ -531,13 +531,13 @@ link l u lt@(Fork _ lsz ll lu llt lrt) rt@(Fork _ rsz rl ru rlt rrt) =
     (# !u', !rt'' #) | rminl == succ u = (# rminu, rt' #)
                      | otherwise       = (# u, rt #)
 
-{-# INLINEABLE unsafeLink #-}
-unsafeLink :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
-unsafeLink !newSz !l !u Tip rt = unsafeInsertL newSz l u rt
-unsafeLink newSz l u lt Tip = unsafeInsertR newSz l u lt
-unsafeLink newSz l u lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
-  | hl < hr + 1 = balanceL (newSz + szl + szr) rl ru (unsafeLink newSz l u lt rlt) rrt
-  | hr < hl + 1 = balanceR (newSz + szl + szr) ll lu llt (unsafeLink newSz l u lrt rt)
+{-# INLINEABLE disjointLink #-}
+disjointLink :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
+disjointLink !newSz !l !u Tip rt = unsafeInsertL newSz l u rt
+disjointLink newSz l u lt Tip = unsafeInsertR newSz l u lt
+disjointLink newSz l u lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
+  | hl < hr + 1 = balanceL (newSz + szl + szr) rl ru (disjointLink newSz l u lt rlt) rrt
+  | hr < hl + 1 = balanceR (newSz + szl + szr) ll lu llt (disjointLink newSz l u lrt rt)
   | otherwise   = forkSz (newSz + szl + szr) l u lt rt
 
 -- This version checks for fusion between the two trees to be merged
@@ -553,13 +553,13 @@ merge t1 t2 =
      else unsafeMerge t1 t2-}
 
 -- This assumes that the trees are /totally/ disjoint
-{-# INLINEABLE unsafeMerge #-}
-unsafeMerge :: RangeSet a -> RangeSet a -> RangeSet a
-unsafeMerge Tip rt = rt
-unsafeMerge lt Tip = lt
-unsafeMerge lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
-  | hl < hr + 1 = balanceL (szl + szr) rl ru (unsafeMerge lt rlt) rrt
-  | hr < hl + 1 = balanceR (szl + szr) ll lu llt (unsafeMerge lrt rt)
+{-# INLINEABLE disjointMerge #-}
+disjointMerge :: RangeSet a -> RangeSet a -> RangeSet a
+disjointMerge Tip rt = rt
+disjointMerge lt Tip = lt
+disjointMerge lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
+  | hl < hr + 1 = balanceL (szl + szr) rl ru (disjointMerge lt rlt) rrt
+  | hr < hl + 1 = balanceR (szl + szr) ll lu llt (disjointMerge lrt rt)
   | otherwise   = glue (szl + szr) lt rt
 
 -- Trees must be balanced with respect to eachother, since we pull from the tallest, no balancing is required
@@ -637,7 +637,7 @@ overlapping x y (Fork _ sz l u lt rt) =
     GT -> let !lt' = overlapping x (min (pred l) y) lt
           in case cmpY of
                -- range is totally outside
-               GT -> unsafeLink nodeSz l u lt' rt'
+               GT -> disjointLink nodeSz l u lt' rt'
                EQ -> unsafeInsertR nodeSz l u lt'
                LT | y >= l -> unsafeInsertR (diffE l y) l y lt'
                LT          -> lt'

@@ -14,3 +14,4 @@ hie.*
 *.c
 *.h
 cabal.project.local
+EnumSet.hs

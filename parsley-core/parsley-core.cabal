@@ -216,6 +216,7 @@ benchmark rangeset-bench
                        array,
                        selective
   main-is:             RangeSetBench.hs
+  --other-modules:       Data.EnumSet
 
 source-repository head
   type:                git

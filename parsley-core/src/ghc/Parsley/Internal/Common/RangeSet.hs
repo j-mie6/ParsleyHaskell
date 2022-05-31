@@ -474,7 +474,7 @@ difference t (Fork _ _ l u lt rt) = case split l u t of
 insertLAdj :: Size -> E -> E -> Int -> Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
 insertLAdj !newSz !l !u !th !tsz !tl !tu !tlt !trt = case minRange tl tu tlt of
   (# !l', _ #) | l' == succ u -> fuseL newSz l th tsz tl tu tlt trt
-               | otherwise    -> balanceL (tsz + newSz) tl tu (unsafeInsertL newSz l u tlt) trt --unsafeInsertL newSz l u t
+               | otherwise    -> balanceL (tsz + newSz) tl tu (unsafeInsertL newSz l u tlt) trt
   where
     {-# INLINEABLE fuseL #-}
     fuseL :: Size -> E -> Int -> Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
@@ -486,7 +486,7 @@ insertLAdj !newSz !l !u !th !tsz !tl !tu !tlt !trt = case minRange tl tu tlt of
 insertRAdj :: Size -> E -> E -> Int -> Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
 insertRAdj !newSz !l !u !th !tsz !tl !tu !tlt !trt = case maxRange tl tu trt of
   (# _, !u' #) | u' == pred l -> fuseR newSz u th tsz tl tu tlt trt
-               | otherwise    -> balanceR (tsz + newSz) tl tu tlt (unsafeInsertR newSz l u trt) --unsafeInsertR newSz l u t
+               | otherwise    -> balanceR (tsz + newSz) tl tu tlt (unsafeInsertR newSz l u trt)
   where
     {-# INLINEABLE fuseR #-}
     fuseR :: Size -> E -> Int -> Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a

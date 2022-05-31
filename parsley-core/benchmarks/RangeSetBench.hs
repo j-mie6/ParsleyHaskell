@@ -1,12 +1,18 @@
-{-# LANGUAGE StandaloneDeriving, DeriveAnyClass, DeriveGeneric, BangPatterns, TypeApplications, ScopedTypeVariables, BlockArguments, AllowAmbiguousTypes #-}
+{-# LANGUAGE StandaloneDeriving, DeriveAnyClass, DeriveGeneric, BangPatterns, TypeApplications, ScopedTypeVariables, BlockArguments, AllowAmbiguousTypes, CPP #-}
 {-# OPTIONS_GHC -ddump-simpl -ddump-to-file #-}
 module Main where
+
+-- #define USE_ENUM
 
 import Gauge
 import BenchmarkUtils
 
 import Parsley.Internal.Common.RangeSet (RangeSet)
+#ifdef USE_ENUM
+import Data.EnumSet (Set)
+#else
 import Data.Set (Set)
+#endif
 import Test.QuickCheck
 
 import Control.Monad
@@ -24,7 +30,11 @@ import Control.Selective (whileS)
 import GHC.Generics (Generic)
 
 import qualified Parsley.Internal.Common.RangeSet as RangeSet
+#ifdef USE_ENUM
+import qualified Data.EnumSet as Set
+#else
 import qualified Data.Set as Set
+#endif
 import qualified Data.List as List
 import GHC.Real (Fractional, (%))
 
@@ -41,12 +51,12 @@ main = do
   --print bins
 
   condensedMain [
-      contiguityBench ratios bins,
       rangeFromList,
       rangeMemberDeleteBench,
       rangeUnionBench,
       rangeDiffBench,
       rangeIntersectBench,
+      contiguityBench ratios bins,
       setMemberDeleteBench,
       fromListBench xss
     ]
@@ -265,7 +275,7 @@ contiguityBench ratios bins = es `deepseq` env (return (map unzip bins)) $ \dat 
     overheadRangeSetAllMember !elems rs = [False | r <- rs, x <- elems]
 
     overheadSetAllMember :: [a] -> [Set a] -> [Bool]
-    overheadSetAllMember !elems rs = [False | s <- ss, x <- elems]
+    overheadSetAllMember !elems ss = [False | s <- ss, x <- elems]
 
     rangeSetAllMember :: [a] -> [RangeSet a] -> [Bool]
     rangeSetAllMember !elems rs = [RangeSet.member x r | r <- rs, x <- elems]

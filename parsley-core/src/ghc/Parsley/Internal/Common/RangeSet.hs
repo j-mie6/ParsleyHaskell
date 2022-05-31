@@ -278,25 +278,6 @@ unsafeInsertR !newSz !l !u = go
     go (Fork _ sz l' u' lt rt) = balanceR (sz + newSz) l' u' lt (go rt)
 
 {-|
-This deletes the left-most range of the tree.
--}
-{-# INLINEABLE deleteLeftmost #-}
-deleteLeftmost :: Size -> Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
-deleteLeftmost !_ !_ !_ !_ Tip rt = rt
-deleteLeftmost szRemoved sz l u (Fork _ szl ll lu llt lrt) rt =
-  balanceR (sz - szRemoved) l u (deleteLeftmost szRemoved szl ll lu llt lrt) rt
-
-{-|
-This deletes the right-most range of the tree.
-It *must not* be used with an empty tree.
--}
-{-{-# INLINEABLE unsafeDeleteR #-}
-unsafeDeleteR :: Int -> RangeSet a -> RangeSet a
-unsafeDeleteR !_ (Fork _ _ _ _ lt Tip) = lt
-unsafeDeleteR szRemoved (Fork _ sz l u lt rt) = balanceL (sz - szRemoved) l u lt (unsafeDeleteR szRemoved rt)
-unsafeDeleteR _ _ = error "unsafeDeleteR called on empty tree"-}
-
-{-|
 Find the minimum value within the set, if one exists.
 
 @since 2.1.0.0
@@ -634,13 +615,13 @@ overlapping !_ !_ Tip = Tip
 overlapping x y (Fork _ sz l u lt rt) =
   case compare l x of
     -- range is outside to the left
-    GT -> let !lt' = overlapping x (min (pred l) y) lt
+    GT -> let !lt' = {-allMoreEqX-} overlapping x y lt
           in case cmpY of
                -- range is totally outside
                GT -> disjointLink nodeSz l u lt' rt'
                EQ -> unsafeInsertR nodeSz l u lt'
                LT | y >= l -> unsafeInsertR (diffE l y) l y lt'
-               LT          -> lt'
+               LT          -> lt' {-overlapping x y lt-}
     -- range is inside on the left
     EQ -> case cmpY of
       -- range is outside on the right
@@ -650,14 +631,28 @@ overlapping x y (Fork _ sz l u lt rt) =
     LT -> case cmpY of
       -- range is outside on the right
       GT | x <= u -> unsafeInsertL (diffE x u) x u rt'
-      GT          -> rt'
+      GT          -> rt' {-overlapping x y rt-}
       _           -> t'
   where
     !cmpY = compare y u
     !nodeSz = sz - size lt - size rt
     -- leave lazy!
-    rt' = overlapping (max (succ u) x) y rt
+    rt' = {-allLessEqY-} overlapping x y rt
     t' = single (diffE x y) x y
+
+    {-allLessEqY Tip = Tip
+    allLessEqY (Fork _ sz l u lt rt) = case compare y l of
+      EQ         -> unsafeInsertR 1 y y lt
+      LT         -> allLessEqY lt
+      GT | y < u -> unsafeInsertR (diffE l y) l y (allLessEqY lt)
+      GT         -> disjointLink (sz - size lt - size rt) l u lt (allLessEqY rt)
+
+    allMoreEqX Tip = Tip
+    allMoreEqX (Fork _ sz l u lt rt) = case compare u x of
+      EQ         -> unsafeInsertL 1 x x rt
+      LT         -> allMoreEqX rt
+      GT | l < x -> unsafeInsertL (diffE x u) x u (allMoreEqX rt)
+      GT         -> disjointLink (sz - size lt - size rt) l u (allMoreEqX lt) rt-}
 
 data StrictMaybe a = SJust !a | SNothing
 
@@ -674,22 +669,22 @@ complement Tip = single (diffE minBoundE maxBoundE) minBoundE maxBoundE
     !minBoundE = fromEnum @a minBound
     !maxBoundE = fromEnum @a maxBound
 complement t | full t = Tip
-complement t@(Fork _ sz l u lt rt) = t'''
+complement t@(Fork _ sz l u lt rt) = case maxl of
+  SJust x -> unsafeInsertR (diffE x maxBoundE) x maxBoundE t'
+  SNothing -> t'
   where
     !minBoundE = fromEnum @a minBound
     !maxBoundE = fromEnum @a maxBound
-    (# !min, !min' #) = minRange l u lt
+    (# !minl, !minu, !rest #) = minDelete sz l u lt rt
 
     -- The complement of a tree is at most 1 larger or smaller than the original
     -- if both min and max are minBound and maxBound, it will shrink
     -- if neither min or max are minBound or maxBound, it will grow
     -- otherwise, the tree will not change size
     -- The insert or shrink will happen at an extremity, and rebalance need only occur along the spine
-    (# !t', !initial #) | min == minBoundE = (# deleteLeftmost (diffE minBoundE min') sz l u lt rt, succ min' #) -- this is safe, because we've checked for the maxSet case already
-                        | otherwise        = (# t , minBoundE #)
-    (# !t'', !final #) = go initial t'
-    t''' | SJust x <- final = unsafeInsertR (diffE x maxBoundE) x maxBoundE t''
-         | otherwise        = t''
+                       -- this is safe, because we've checked for the maxSet case already
+    (# !t', !maxl #) | minl == minBoundE = push (succ minu) rest
+                     | otherwise         = push minBoundE t
 
     safeSucc !x
       | x == maxBoundE = SNothing
@@ -697,17 +692,16 @@ complement t@(Fork _ sz l u lt rt) = t'''
 
     -- the argument l should not be altered, it /must/ be the correct lower bound
     -- the return /must/ be the next correct lower bound
-    go :: E -> RangeSet a -> (# RangeSet a, StrictMaybe E #)
-    go !l Tip = (# Tip, SJust l #)
-    go l (Fork _ _ u l'' lt Tip) =
-      let (# !lt', SJust l' #) = go l lt
-          !t' = fork l' (pred u) lt' Tip
-      in  (# t', safeSucc l'' #)
-    go l (Fork _ _ u l'' lt rt) =
-      let (# !lt', SJust l' #) = go l lt
-          (# !rt', !l''' #) = go (succ l'') rt -- this is safe, because we know the right-tree is not Tip
-          !t' = fork l' (pred u) lt' rt'
-      in  (# t', l''' #)
+    push :: E -> RangeSet a -> (# RangeSet a, StrictMaybe E #)
+    push !maxl Tip = (# Tip, SJust maxl #)
+    push min (Fork _ _ u max lt Tip) =
+      let (# !lt', SJust l #) = push min lt
+      in  (# fork l (pred u) lt' Tip, safeSucc max #)
+    push min (Fork _ _ u l' lt rt@Fork{}) =
+      let (# !lt', SJust l #) = push min lt
+          -- this is safe, because we know the right-tree contains elements larger than l'
+          (# !rt', !max #) = push (succ l') rt
+      in  (# fork l (pred u) lt' rt', max #)
 
 {-|
 Tests if all the element of the first set appear in the second, but also that the first and second

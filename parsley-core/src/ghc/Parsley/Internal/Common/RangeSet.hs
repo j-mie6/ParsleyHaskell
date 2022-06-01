@@ -74,12 +74,21 @@ A `RangeSet` containing a single value.
 singleton :: Enum a => a -> RangeSet a
 singleton x = single 1 (fromEnum x) (fromEnum x)
 
+{-# INLINE heightOfFork #-}
+heightOfFork :: Int -> Int -> Int
+heightOfFork lh rh = max lh rh + 1
+
 {-# INLINE fork #-}
 fork :: E -> E -> RangeSet a -> RangeSet a -> RangeSet a
 fork !l !u !lt !rt = forkSz (size lt + size rt + diffE l u) l u lt rt
 
+--{-# INLINE forkSz #-} -- this does bad things
 forkSz :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
-forkSz !sz !l !u !lt !rt = Fork (max (height lt) (height rt) + 1) sz l u lt rt
+forkSz !sz !l !u !lt !rt = forkH sz l u (height lt) lt (height rt) rt
+
+{-# INLINE forkH #-}
+forkH :: Size -> E -> E -> Int -> RangeSet a -> Int -> RangeSet a -> RangeSet a
+forkH !sz !l !u !lh !lt !rh !rt =  Fork (heightOfFork lh rh) sz l u lt rt
 
 {-# INLINE single #-}
 single :: Size -> E -> E -> RangeSet a
@@ -325,40 +334,46 @@ maxDelete !sz !l !u !lt !rt = let (# !ml, !mu, !_, t' #) = go sz l u lt rt in (#
       let (# !ml, !mu, !msz, rt' #) = go rsz rl ru rlt rrt
       in (# ml, mu, msz, balanceL (sz - msz) l u lt rt' #)
 
-{-# INLINABLE balance #-}
+{-# NOINLINE balance #-}
 balance :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
-balance !sz !l !u lt rt
+balance !sz !l !u Tip Tip = single sz l u
+balance sz l u lt@(Fork lh lsz ll lu llt lrt) Tip
+  | lh == 1   = Fork (lh + 1) sz l u lt Tip
+  | otherwise = uncheckedBalanceL sz l u lsz ll lu llt lrt Tip
+balance sz l u Tip rt@(Fork rh rsz rl ru rlt rrt)
+  | rh == 1   = Fork (rh + 1) sz l u Tip rt
+  | otherwise = uncheckedBalanceR sz l u Tip rsz rl ru rlt rrt
+balance sz l u lt@(Fork lh lsz ll lu llt lrt) rt@(Fork rh rsz rl ru rlt rrt)
   | height lt > height rt + 1 = uncheckedBalanceL sz l u lsz ll lu llt lrt rt
   | height rt > height lt + 1 = uncheckedBalanceR sz l u lt rsz rl ru rlt rrt
-  | otherwise = forkSz sz l u lt rt
-  where
-    Fork _ lsz ll lu llt lrt = lt
-    Fork _ rsz rl ru rlt rrt = rt
+  | otherwise = forkH sz l u lh lt rh rt
 
 {-# INLINEABLE balanceL #-}
 balanceL :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
 -- PRE: left grew or right shrank, difference in height at most 2 biasing to the left
 balanceL !sz !l1 !u1 lt@(Fork !lh !lsz !l2 !u2 !llt !lrt) !rt
   -- both sides are equal height or off by one
-  | dltrt <= 1 = forkSz sz l1 u1 lt rt
+  | dltrt <= 1 = forkH sz l1 u1 lh lt rh rt
   -- The bias is 2 (dltrt == 2)
   | otherwise  = uncheckedBalanceL sz l1 u1 lsz l2 u2 llt lrt rt
   where
-    !dltrt = lh - height rt
+    !rh = height rt
+    !dltrt = lh - rh
 -- If the right shrank (or nothing changed), we have to be prepared to handle the Tip case for lt
-balanceL sz l u Tip rt = forkSz sz l u Tip rt
+balanceL sz l u Tip rt = Fork (height rt + 1) sz l u Tip rt
 
 {-# INLINEABLE balanceR #-}
 balanceR :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
 -- PRE: left shrank or right grew, difference in height at most 2 biasing to the right
 balanceR !sz !l1 !u1 !lt rt@(Fork !rh !rsz !l2 !u2 !rlt !rrt)
   -- both sides are equal height or off by one
-  | dltrt <= 1 = forkSz sz l1 u1 lt rt
+  | dltrt <= 1 = forkH sz l1 u1 lh lt rh rt
   | otherwise  = uncheckedBalanceR sz l1 u1 lt rsz l2 u2 rlt rrt
   where
-    !dltrt = rh - height lt
+    !lh = height lt
+    !dltrt = rh - lh
 -- If the left shrank (or nothing changed), we have to be prepared to handle the Tip case for rt
-balanceR sz l u lt Tip = forkSz sz l u lt Tip
+balanceR sz l u lt Tip = Fork (height lt + 1) sz l u lt Tip
 
 {-# NOINLINE uncheckedBalanceL #-}
 -- PRE: left grew or right shrank, difference in height at most 2 biasing to the left
@@ -519,7 +534,7 @@ disjointLink newSz l u lt Tip = unsafeInsertR newSz l u lt
 disjointLink newSz l u lt@(Fork hl szl ll lu llt lrt) rt@(Fork hr szr rl ru rlt rrt)
   | hl < hr + 1 = balanceL (newSz + szl + szr) rl ru (disjointLink newSz l u lt rlt) rrt
   | hr < hl + 1 = balanceR (newSz + szl + szr) ll lu llt (disjointLink newSz l u lrt rt)
-  | otherwise   = forkSz (newSz + szl + szr) l u lt rt
+  | otherwise   = forkH (newSz + szl + szr) l u hl lt hr rt
 
 -- This version checks for fusion between the two trees to be merged
 {-{-# INLINEABLE merge #-}

@@ -47,16 +47,16 @@ deriving instance Generic Char
 main :: IO ()
 main = do
   xss <- forM [1..10] $ \n -> generate (vectorOf (n * 10) (chooseInt (0, n * 20)))
-  (ratios, bins) <- unzip <$> fillBins' @Word
+  (ratios, bins) <- unzip <$> fillBins @Word
   --print bins
 
   condensedMain [
+      contiguityBench ratios bins,
       rangeFromList,
       rangeMemberDeleteBench,
       rangeUnionBench,
       rangeDiffBench,
       rangeIntersectBench,
-      contiguityBench ratios bins,
       setMemberDeleteBench,
       fromListBench xss
     ]
@@ -207,12 +207,9 @@ minElem = toEnum 0
 elems :: forall a. Enum a => [a]
 elems = [minElem @a .. maxElem @a]
 
-(/\) :: (a -> b) -> (a -> c) -> a -> (b, c)
-(f /\ g) x = (f x, g x)
-
-fillBins' :: forall a. (Ord a, Enum a) => IO [(Rational, [(RangeSet a, Set a)])]
-fillBins' = do
-  bins <- newArray (0, numContBins-1) [] :: IO (IOArray Int [RangeSet a])
+fillBins :: forall a. (Ord a, Enum a) => IO [(Rational, [(RangeSet a, Set a, [a])])]
+fillBins = do
+  bins <- newArray (0, numContBins-1) [] :: IO (IOArray Int [(RangeSet a, [a])])
   let granulation = 1 % fromIntegral numContBins
   let toRatio = (* granulation) . fromIntegral
   let idxs = map toRatio [0..numContBins-1]
@@ -220,9 +217,9 @@ fillBins' = do
 
   whileS do
     shuffled <- generate (shuffle (elems @a))
-    let sets = scanr RangeSet.insert RangeSet.empty shuffled
+    let sets = scanr (\x -> bimap (RangeSet.insert x) (x:)) (RangeSet.empty, []) shuffled
     forM_ (init sets) $ \set -> do
-      let c = contiguity set
+      let c = contiguity (fst set)
       let idx = fromMaybe 0 (findIndex (>= c) idxs)
       binC <- readArray bins idx
       writeArray bins idx (set : binC)
@@ -230,45 +227,27 @@ fillBins' = do
     print szs
     return (any (< binSize) szs)
 
-  map (bimap toRatio (map (id /\ (Set.fromList . RangeSet.elems)))) <$> getAssocs bins
+  map (bimap toRatio (map (\(r, xs) -> (r, Set.fromList xs, xs)))) <$> getAssocs bins
 
-fillBins :: forall a. (Ord a, Enum a) => IO [(Rational, [(RangeSet a, Set a)])]
-fillBins = do
-  bins <- newArray (0, numContBins-1) [] :: IO (IOArray Int [RangeSet a])
-  let granulation = 1 % fromIntegral numContBins
-  let toRatio = (* granulation) . fromIntegral
-  let idxs = map toRatio [0..numContBins-1]
-  print idxs
-
-  whileS do
-    set <- generate setGen
-    let c = contiguity set
-    let idx = fromMaybe 0 (findIndex (>= c) idxs)
-    binC <- readArray bins idx
-    when (length binC < binSize) do
-      -- need more elements
-      writeArray bins idx (set : binC)
-    szs <- map length <$> getElems bins
-    print szs
-    return (any (< binSize) szs)
-
-  map (bimap toRatio (map (id /\ (Set.fromList . RangeSet.elems)))) <$> getAssocs bins
-
-  where
-    setGen :: Gen (RangeSet a)
-    setGen = RangeSet.fromList <$> vectorOf approxSetSize (chooseEnum (minElem @a, maxElem @a))
-
-contiguityBench :: forall a. (NFData a, Ord a, Enum a, Generic a) => [Rational] -> [[(RangeSet a, Set a)]] -> Benchmark
-contiguityBench ratios bins = es `deepseq` env (return (map unzip bins)) $ \dat ->
+contiguityBench :: forall a. (NFData a, Ord a, Enum a, Generic a) => [Rational] -> [[(RangeSet a, Set a, [a])]] -> Benchmark
+contiguityBench ratios bins = es `deepseq` env (return (map unzip3 bins)) $ \dat ->
     bgroup "contiguity" (concatMap (mkBench dat) (zip ratios [0..]))
 
   where
     es = elems @a
-    mkBench dat (ratio, i) = let ~(rs, ss) = dat !! i in [
-        bench ("overhead rangeset (" ++ show ratio ++ ")") $ nf (overheadRangeSetAllMember es) rs,
-        bench ("rangeset (" ++ show ratio ++ ")") $ nf (rangeSetAllMember es) rs,
-        bench ("overhead set (" ++ show ratio ++ ")") $ nf (overheadSetAllMember es) ss,
-        bench ("set (" ++ show ratio ++ ")") $ nf (setAllMember es) ss
+    mkBench dat (ratio, i) = let ~(rs, ss, xss) = dat !! i in [
+        bench ("overhead rangeset-all (" ++ show ratio ++ ")") $ nf (overheadRangeSetAllMember es) rs,
+        bench ("overhead set-all (" ++ show ratio ++ ")") $ nf (overheadSetAllMember es) ss,
+        bench ("rangeset-all (" ++ show ratio ++ ")") $ nf (rangeSetAllMember es) rs,
+        bench ("set-all (" ++ show ratio ++ ")") $ nf (setAllMember es) ss,
+        bench ("overhead rangeset-mem (" ++ show ratio ++ ")") $ nf (uncurry overheadRangeSetMember) (xss, rs),
+        bench ("overhead set-mem (" ++ show ratio ++ ")") $ nf (uncurry overheadSetMember) (xss, ss),
+        bench ("rangeset-mem (" ++ show ratio ++ ")") $ nf (uncurry rangeSetMember) (xss, rs),
+        bench ("set-mem (" ++ show ratio ++ ")") $ nf (uncurry setMember) (xss, ss),
+        bench ("overhead rangeset-ins (" ++ show ratio ++ ")") $ nf overheadRangeSetInsert xss,
+        bench ("overhead set-ins (" ++ show ratio ++ ")") $ nf overheadSetInsert xss,
+        bench ("rangeset-ins (" ++ show ratio ++ ")") $ nf rangeSetInsert xss,
+        bench ("set-ins (" ++ show ratio ++ ")") $ nf setInsert xss
       ]
 
     overheadRangeSetAllMember :: [a] -> [RangeSet a] -> [Bool]
@@ -282,6 +261,30 @@ contiguityBench ratios bins = es `deepseq` env (return (map unzip bins)) $ \dat 
 
     setAllMember :: [a] -> [Set a] -> [Bool]
     setAllMember !elems ss = [Set.member x s | s <- ss, x <- elems]
+
+    overheadRangeSetMember :: [[a]] -> [RangeSet a] -> [Bool]
+    overheadRangeSetMember xss rs = [False | (r, xs) <- zip rs xss, x <- xs]
+
+    overheadSetMember :: [[a]] -> [Set a] -> [Bool]
+    overheadSetMember xss ss = [False | (s, xs) <- zip ss xss, x <- xs]
+
+    rangeSetMember :: [[a]] -> [RangeSet a] -> [Bool]
+    rangeSetMember xss rs = [RangeSet.member x r | (r, xs) <- zip rs xss, x <- xs]
+
+    setMember :: [[a]] -> [Set a] -> [Bool]
+    setMember xss ss = [Set.member x s | (s, xs) <- zip ss xss, x <- xs]
+
+    overheadRangeSetInsert :: [[a]] -> [RangeSet a]
+    overheadRangeSetInsert = map (foldr (flip const) RangeSet.empty)
+
+    overheadSetInsert :: [[a]] -> [Set a]
+    overheadSetInsert = map (foldr (flip const) Set.empty)
+
+    rangeSetInsert :: [[a]] -> [RangeSet a]
+    rangeSetInsert = map (foldr RangeSet.insert RangeSet.empty)
+
+    setInsert :: [[a]] -> [Set a]
+    setInsert = map (foldr Set.insert Set.empty)
 
 makeBench :: NFData a => (a -> String) -> [(String, a -> Benchmarkable)] -> a -> Benchmark
 makeBench caseName cases x = env (return x) (\x ->

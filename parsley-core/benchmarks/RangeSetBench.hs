@@ -227,7 +227,7 @@ fillBins = do
     print szs
     return (any (< binSize) szs)
 
-  map (bimap toRatio (map (\(r, xs) -> (r, Set.fromList xs, xs)))) <$> getAssocs bins
+  map (bimap toRatio (map (\(r, xs) -> (r, Set.fromList xs, sort xs)))) <$> getAssocs bins
 
 contiguityBench :: forall a. (NFData a, Ord a, Enum a, Generic a) => [Rational] -> [[(RangeSet a, Set a, [a])]] -> Benchmark
 contiguityBench ratios bins = es `deepseq` env (return (map unzip3 bins)) $ \dat ->

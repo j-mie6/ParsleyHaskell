@@ -24,7 +24,7 @@ module Parsley.Fold (
 import Prelude hiding           (pure, (<*>), (<$>), (*>), (<*))
 import Parsley.Alternative      ((<|>), option)
 import Parsley.Applicative      (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), void)
-import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST, APP_H), pattern FLIP_H, pattern UNIT)
+import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), pattern FLIP_H, pattern UNIT)
 import Parsley.Internal         (Parser)
 import Parsley.ParserOps        (ParserOps)
 import Parsley.Register         (get, modify, newRegister, newRegister_)

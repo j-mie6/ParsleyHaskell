@@ -58,6 +58,9 @@ normalise x = if normal x then x else reduce x
       T -> x
       F -> y
       c -> If c x y
+    reduce (Let v@(Var True _) f) = case f v of
+      x | normal x -> x
+      x            -> reduce x
     reduce x = x
 
     normal :: Lam a -> Bool
@@ -66,6 +69,7 @@ normalise x = if normal x then x else reduce x
     normal (If T _ _) = False
     normal (If F _ _) = False
     normal (If x _ _) = normal x
+    normal (Let (Var True _) _) = False
     normal _ = True
 
 generate :: Lam a -> Code a

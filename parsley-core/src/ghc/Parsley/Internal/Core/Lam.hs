@@ -58,6 +58,7 @@ normalise x = if normal x then x else reduce x
       T -> x
       F -> y
       c -> If c x y
+    -- Reduction rule found courtesy of David Davies, forever immortalised
     reduce (Let v@(Var True _) f) = case f v of
       x | normal x -> x
       x            -> reduce x

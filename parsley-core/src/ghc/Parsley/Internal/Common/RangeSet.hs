@@ -20,7 +20,7 @@ module Parsley.Internal.Common.RangeSet (
     union, intersection, difference, disjoint, complement,
     isSubsetOf, isProperSubsetOf,
     allLess, allMore,
-    elems, unelems, fromRanges, insertRange, fromList,
+    elems, unelems, fromRanges, fromDistinctAscRanges, insertRange, fromList, fromDistinctAscList,
     fold,
     -- Testing
     valid
@@ -780,38 +780,112 @@ Constructs a `RangeSet` given a list of ranges.
 
 @since 2.1.0.0
 -}
--- TODO: This could be better?
-{-# INLINEABLE fromRanges #-}
-fromRanges :: Enum a => [(a, a)] -> RangeSet a
-fromRanges [(x, y)] = single (diffE xe ye) xe ye
+fromRanges :: forall a. Enum a => [(a, a)] -> RangeSet a
+fromRanges [] = empty
+fromRanges ((x, y):rs) = go rs ey (SRange ex ey :) 1
+  where
+    !ex = fromEnum x
+    !ey = fromEnum y
+    go :: [(a, a)] -> E -> ([SRange] -> [SRange]) -> Int -> RangeSet a
+    go [] !_ k !n = fromDistinctAscRangesSz (k []) n
+    go ((x, y):rs) z k n
+      -- ordering and disjointness of the ranges broken
+      | ex <= z || ey <= z = insertRangeE ex ey (foldr (uncurry insertRange) (fromDistinctAscRangesSz (k []) n) rs)
+      | otherwise          = go rs ey (k . (SRange ex ey :)) (n + 1)
+      where
+        !ex = fromEnum x
+        !ey = fromEnum y
+
+{-fromRanges [(x, y)] = single (diffE xe ye) xe ye
   where
     !xe = fromEnum x
     !ye = fromEnum y
-fromRanges rs = foldr (uncurry insertRange) empty rs
+fromRanges rs = foldr (uncurry insertRange) empty rs-}
+
+{-|
+Constructs a `RangeSet` given a list of ranges that are in ascending order and do not overlap (this is unchecked).
+
+@since 2.2.0.0
+-}
+fromDistinctAscRanges :: forall a. Enum a => [(a, a)] -> RangeSet a
+fromDistinctAscRanges rs = go rs id 0
+  where
+    go :: [(a, a)] -> ([SRange] -> [SRange]) -> Int -> RangeSet a
+    go [] k !n = fromDistinctAscRangesSz (k []) n
+    go ((x, y):rs) k n = go rs (k . (SRange (fromEnum x) (fromEnum y) :)) (n + 1)
+
+
+data SRange = SRange {-# UNPACK #-} !E {-# UNPACK #-} !E
+
+fromDistinctAscRangesSz :: [SRange] -> Int -> RangeSet a
+fromDistinctAscRangesSz rs !n = let (# t, _ #) = go rs 0 (n - 1) in t
+  where
+    go :: [SRange] -> Int -> Int -> (# RangeSet a, [SRange] #)
+    go rs !i !j
+      | i > j     = (# Tip, rs #)
+      | otherwise =
+        let !mid = (i + j) `div` 2
+            (# lt, rs' #) = go rs i (mid - 1)
+            SRange !l !u : rs'' = rs'
+            (# rt, rs''' #) = go rs'' (mid + 1) j
+        in (# fork l u lt rt, rs''' #)
 
 {-|
 Inserts a range into a `RangeSet`.
 
 @since 2.1.0.0
 -}
--- This could be improved, but is OK
 {-# INLINE insertRange #-}
 insertRange :: Enum a => a -> a -> RangeSet a -> RangeSet a
 insertRange l u t =
   let !le = fromEnum l
       !ue = fromEnum u
-      (# lt, rt #) = split le ue t
-  in link le ue lt rt
+  in insertRangeE le ue t
+
+{-# INLINE insertRangeE #-}
+-- This could be improved, but is OK
+insertRangeE :: E -> E -> RangeSet a -> RangeSet a
+insertRangeE !l !u t = let (# lt, rt #) = split l u t in link l u lt rt
 
 {-|
 Builds a `RangeSet` from a given list of elements.
 
 @since 2.1.0.0
 -}
--- TODO: This can be made better if we account for orderedness
-{-# INLINE fromList #-}
-fromList :: Enum a => [a] -> RangeSet a
-fromList = foldr insert empty
+fromList :: forall a. Enum a => [a] -> RangeSet a
+fromList [] = empty
+fromList (x:xs) = go xs (fromEnum x) (fromEnum x) id 1
+  where
+    go :: [a] -> E -> E -> ([SRange] -> [SRange]) -> Int -> RangeSet a
+    go [] !l !u k !n = fromDistinctAscRangesSz (k [SRange l u]) n
+    go (!x:xs) l u k n
+      -- ordering or uniqueness is broken
+      | ex <= u      = insertE ex (foldr insert (fromDistinctAscRangesSz (k [SRange l u]) n) xs)
+      -- the current range is expanded
+      | ex == succ u = go xs l ex k n
+      -- a new range begins
+      | otherwise    = go xs ex ex (k . (SRange l u :)) (n + 1)
+      where !ex = fromEnum x
+
+
+-- not sure if this one is any use, it avoids one comparison per element...
+{-|
+Builds a `RangeSet` from a given list of elements that are in ascending order with no duplicates (this is unchecked).
+
+@since 2.1.0.0
+-}
+fromDistinctAscList :: forall a. Enum a => [a] -> RangeSet a
+fromDistinctAscList [] = empty
+fromDistinctAscList (x:xs) = go xs (fromEnum x) (fromEnum x) id 1
+  where
+    go :: [a] -> E -> E -> ([SRange] -> [SRange]) -> Int -> RangeSet a
+    go [] !l !u k !n = fromDistinctAscRangesSz (k [SRange l u]) n
+    go (!x:xs) l u k n
+      -- the current range is expanded
+      | ex == succ u = go xs l ex k n
+      -- a new range begins
+      | otherwise    = go xs ex ex (k . (SRange l u :)) (n + 1)
+      where !ex = fromEnum x
 
 {-|
 Folds a range set.

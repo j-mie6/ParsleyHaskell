@@ -51,7 +51,7 @@ main = do
   --print bins
 
   condensedMain [
-      contiguityBench ratios bins,
+      --contiguityBench ratios bins,
       rangeFromList,
       rangeMemberDeleteBench,
       rangeUnionBench,

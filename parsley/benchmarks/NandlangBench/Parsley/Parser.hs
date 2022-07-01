@@ -1,7 +1,9 @@
-{-# OPTIONS_GHC -fplugin=Parsley.OverloadedQuotesPlugin #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Redundant bracket" #-}
 module NandlangBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -9,9 +11,10 @@ import Parsley
 import Parsley.Combinator (eof)
 import Parsley.Char (token, oneOf)
 import Parsley.Fold (skipMany, skipSome)
---import Parsley.Garnish
 import NandlangBench.Parsley.Functions
 import Data.Char (isSpace)
+
+#define QQ(x) (makeQ (x) [|| x ||])
 
 nandlang :: Parser ()
 nandlang = whitespace *> skipMany funcdef <* eof
@@ -29,8 +32,8 @@ nandlang = whitespace *> skipMany funcdef <* eof
     keyword :: String -> Parser ()
     keyword s = try (string s *> notIdentLetter) *> whitespace
 
-    identStart = satisfy [|nandIdentStart|]
-    identLetter = satisfy [|nandIdentLetter|]
+    identStart = satisfy QQ(nandIdentStart)
+    identLetter = satisfy QQ(nandIdentLetter)
     notIdentLetter = notFollowedBy identLetter
 
     bit :: Parser ()
@@ -43,7 +46,7 @@ nandlang = whitespace *> skipMany funcdef <* eof
     charLit = between (char '\'') (symbol '\'') charChar
 
     charChar :: Parser ()
-    charChar = void (satisfy [|nandStringLetter|]) <|> esc
+    charChar = void (satisfy QQ(nandStringLetter)) <|> esc
 
     esc :: Parser ()
     esc = char '\\' *> void (oneOf "0tnvfr")
@@ -95,10 +98,10 @@ nandlang = whitespace *> skipMany funcdef <* eof
     commaSep1 p = p *> skipMany (comma *> p)
 
     space :: Parser ()
-    space = void (satisfy [|isSpace|])
+    space = void (satisfy QQ(isSpace))
     whitespace :: Parser ()
     whitespace = skipMany (spaces <|> oneLineComment)
     spaces :: Parser ()
     spaces = skipSome space
     oneLineComment :: Parser ()
-    oneLineComment = void (token "//" *> skipMany (satisfy [|(/= '\n')|]))
+    oneLineComment = void (token "//" *> skipMany (satisfy QQ((/= '\n'))))

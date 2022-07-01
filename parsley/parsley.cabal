@@ -61,7 +61,7 @@ library
 
                        NoStarIsType
 
---                     ghc                  >= 8.6     && < 9.2,
+--                     ghc                  >= 8.6     && < 9.4,
   build-depends:       base                 >= 4.10    && < 4.17,
                        parsley-core         >= 2       && < 3,
                        template-haskell     >= 2.14    && < 3,
@@ -98,14 +98,12 @@ common test-common
   build-depends:       base >=4.10 && <5,
                        parsley,
                        parsley-core,
-                       --parsley-garnish,
                        tasty,
                        template-haskell
   build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   other-extensions:    TemplateHaskellQuotes, TemplateHaskell
   hs-source-dirs:      test
   default-language:    Haskell2010
---  ghc-options:         -fplugin=Parsley.OverloadedQuotesPlugin
   ghc-options:         -pgmP cpphs -optP --cpp
   other-modules:       TestUtils
 
@@ -130,7 +128,6 @@ common benchmark-common
   build-tool-depends:  happy:happy
   build-depends:       base >=4.10 && <5,
                        parsley,
-                       parsley-garnish,
                        gauge,
                        deepseq,
                        template-haskell,
@@ -142,11 +139,12 @@ common benchmark-common
                        mtl,
                        array,
                        containers
+  build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   hs-source-dirs:      benchmarks
   other-extensions:    TemplateHaskellQuotes, TemplateHaskell
   other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
   default-language:    Haskell2010
-  ghc-options:         -rtsopts
+  ghc-options:         -rtsopts -pgmP cpphs -optP --cpp
   if false && impl(ghc < 9)
     build-depends:     dump-core
     ghc-options:       -fplugin=DumpCore

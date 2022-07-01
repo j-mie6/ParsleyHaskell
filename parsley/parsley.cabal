@@ -101,10 +101,12 @@ common test-common
                        --parsley-garnish,
                        tasty,
                        template-haskell
+  build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   other-extensions:    TemplateHaskellQuotes, TemplateHaskell
   hs-source-dirs:      test
   default-language:    Haskell2010
 --  ghc-options:         -fplugin=Parsley.OverloadedQuotesPlugin
+  ghc-options:         -pgmP cpphs -optP --cpp
   other-modules:       TestUtils
 
 test-suite parsley-test

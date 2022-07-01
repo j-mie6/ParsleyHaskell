@@ -20,7 +20,7 @@ module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), LogOps(..),
     InputOps(..), more, next,
 #if __GLASGOW_HASKELL__ <= 900
-    word8ToWord#, word16ToWord#
+    word8ToWord#, word16ToWord#,
 #endif
     InputDependant
   ) where

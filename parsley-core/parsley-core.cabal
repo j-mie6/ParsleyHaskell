@@ -29,7 +29,8 @@ extra-doc-files:     ChangeLog.md
 tested-with:         GHC == 8.6.1,  GHC == 8.6.2,  GHC == 8.6.3,  GHC == 8.6.4,  GHC == 8.6.5,
                      GHC == 8.8.1,  GHC == 8.8.2,  GHC == 8.8.3,  GHC == 8.8.4,
                      GHC == 8.10.4, GHC == 8.10.5, GHC == 8.10.7,
-                     GHC == 9.0.1
+                     GHC == 9.0.1, GHC == 9.0.2,
+                     GHC == 9.2.3
 
 flag full-width-positions
   description: Make line and column numbers 64-bit (on 64-bit platforms): normally they are 32-bits each for line and column.
@@ -129,7 +130,7 @@ library
                        NoStarIsType
 
 --                     ghc                  >= 8.6     && < 9.2,
-  build-depends:       base                 >= 4.10    && < 4.16,
+  build-depends:       base                 >= 4.10    && < 4.17,
                        mtl                  >= 2.2.1   && < 2.3,
                        hashable             >= 1.2.7.0 && < 1.4,
                        unordered-containers >= 0.2.13  && < 0.3,
@@ -168,6 +169,9 @@ library
     ghc-options:       -Wno-missing-safe-haskell-mode
                        -Wno-prepositive-qualified-module
                        -Wno-unused-packages
+  if impl(ghc >= 9.2)
+    ghc-options:       -Wno-missing-kind-signatures
+                       -Wno-implicit-lift
   if flag(full-width-positions)
     cpp-options:       -DFULL_WIDTH_POSITIONS
 

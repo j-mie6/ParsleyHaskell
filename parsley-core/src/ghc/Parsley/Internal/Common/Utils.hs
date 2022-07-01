@@ -6,11 +6,11 @@
 #endif
 module Parsley.Internal.Common.Utils (WQ(..), Code, Quapplicative(..), intercalate, intercalateDiff) where
 
-import Data.List (intersperse)
+import Data.List   (intersperse)
 import Data.String (IsString(..))
 
 #if __GLASGOW_HASKELL__ >= 810
-import Data.Kind    (Type)
+import Data.Kind   (Type)
 import GHC.Exts    (TYPE, RuntimeRep)
 #endif
 

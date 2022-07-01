@@ -1,7 +1,9 @@
-{-# OPTIONS_GHC -fplugin=Parsley.OverloadedQuotesPlugin #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE DeriveLift #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas -Wno-incomplete-patterns #-}
+{-# HLINT ignore "Redundant bracket" #-}
 module BrainfuckBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
@@ -10,11 +12,12 @@ import Parsley
 import Parsley.Combinator (eof, more)
 import Parsley.Char(noneOf, token)
 import Parsley.Fold (skipMany)
---import Parsley.Garnish
 import Language.Haskell.TH.Syntax (Lift(..))
 
 import Parsley.Register
 import Parsley.Defunctionalized
+
+#define QQ(x) (makeQ (x) [|| x ||])
 
 deriving instance Lift BrainFuckOp
 
@@ -28,21 +31,21 @@ brainfuck = whitespace *> bf <* eof
     whitespace = skipMany (noneOf "<>+-[],.")
     lexeme p = p <* whitespace
     -- This implementation is back on top: the `more` can help eliminate the shared character read!
-    bf = many ( more *> lexeme ((token ">" $> [|RightPointer|])
-                            <|> (token "<" $> [|LeftPointer|])
-                            <|> (token "+" $> [|Increment|])
-                            <|> (token "-" $> [|Decrement|])
-                            <|> (token "." $> [|Output|])
-                            <|> (token "," $> [|Input|])
-                            <|> between (lexeme (token "[")) (token "]") ([|Loop|] <$> bf)))
+    bf = many ( more *> lexeme ((token ">" $> QQ(RightPointer))
+                            <|> (token "<" $> QQ(LeftPointer))
+                            <|> (token "+" $> QQ(Increment))
+                            <|> (token "-" $> QQ(Decrement))
+                            <|> (token "." $> QQ(Output))
+                            <|> (token "," $> QQ(Input))
+                            <|> between (lexeme (token "[")) (token "]") (QQ(Loop) <$> bf)))
     {-bf = many (lexeme (match "><+-.,[" (lookAhead item) op empty))
-    op '>' = item $> [|RightPointer|]
-    op '<' = item $> [|LeftPointer|]
-    op '+' = item $> [|Increment|]
-    op '-' = item $> [|Decrement|]
-    op '.' = item $> [|Output|]
-    op ',' = item $> [|Input|]
-    op '[' = between (lexeme item) (try (char ']')) ([|Loop|] <$> bf)-}
+    op '>' = item $> QQ(RightPointer)
+    op '<' = item $> QQ(LeftPointer)
+    op '+' = item $> QQ(Increment)
+    op '-' = item $> QQ(Decrement)
+    op '.' = item $> QQ(Output)
+    op ',' = item $> QQ(Input)
+    op '[' = between (lexeme item) (try (char ']')) (QQ(Loop) <$> bf)-}
 
 -- This is as closed to the handrolled version as it's possible to get: it's /very/ fast
 -- If register elimination can be performed, this would be equivalent to the handrolled I think
@@ -57,10 +60,10 @@ brainfuck' = newRegister_ EMPTY $ \acc ->
       -- the cases too, and so failing there generates a length check etc. Interestingly, the fix
       -- here is to add a `try` (!!!), which improves performance considerably (but GHC then decides
       -- not to inline something to make them otherwise identical). That's wild.
-      walk = eof *> gets_ acc [|reverse|]
-         <|> lookAhead (char ']') *> gets_ acc [|reverse|]
+      walk = eof *> gets_ acc QQ(reverse)
+         <|> lookAhead (char ']') *> gets_ acc QQ(reverse)
          <|> {- try ( -}match "><+-.,[" item op walk -- )
-         -- <|> gets_ acc [|reverse|]
+         -- <|> gets_ acc QQ(reverse)
       op :: Char -> Parser [BrainFuckOp]
       op '>' = modify_ acc (APP_H CONS (LIFTED RightPointer)) *> walk
       op '<' = modify_ acc (APP_H CONS (LIFTED LeftPointer)) *> walk
@@ -68,5 +71,5 @@ brainfuck' = newRegister_ EMPTY $ \acc ->
       op '-' = modify_ acc (APP_H CONS (LIFTED Decrement)) *> walk
       op '.' = modify_ acc (APP_H CONS (LIFTED Output)) *> walk
       op ',' = modify_ acc (APP_H CONS (LIFTED Input)) *> walk
-      op '[' = modify acc (CONS <$> ([|Loop|] <$> local acc (pure EMPTY) (walk <* char ']'))) *> walk
+      op '[' = modify acc (CONS <$> (QQ(Loop) <$> local acc (pure EMPTY) (walk <* char ']'))) *> walk
   in walk <* eof

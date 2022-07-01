@@ -348,7 +348,7 @@ balance !sz !l !u lt rt
 {-# NOINLINE balanceL #-}
 balanceL :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 -- PRE: left grew or right shrank, difference in height at most 2 biasing to the left
-balanceL !sz !l1 !u1 lt@(Fork !hlt !szl !l2 !u2 !llt !rlt) !rt
+balanceL !sz !l1 !u1 lt@(Fork hlt szl l2 u2 llt rlt) !rt
   -- both sides are equal height or off by one
   | dltrt <= 1 = forkSz sz l1 u1 lt rt
   -- The bias is 2 (dltrt == 2)
@@ -365,7 +365,7 @@ balanceL _ _ _ Tip _ = error "Right should have shrank, but is still 1 taller th
 {-# NOINLINE balanceR #-}
 balanceR :: Size -> a -> a -> RangeSet a -> RangeSet a -> RangeSet a
 -- PRE: left shrank or right grew, difference in height at most 2 biasing to the right
-balanceR !sz !l1 !u1 !lt rt@(Fork !hrt szr l2 u2 lrt rrt)
+balanceR !sz !l1 !u1 !lt rt@(Fork hrt szr l2 u2 lrt rrt)
   -- both sides are equal height or off by one
   | drtlt <= 1 = forkSz sz l1 u1 lt rt
   -- The bias is 2 (drtlt == 2)

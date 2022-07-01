@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies
-           , ScopedTypeVariables #-}
+           , ScopedTypeVariables
+           , FlexibleContexts #-}
 
 module JavascriptBench.Megaparsec.Parser where
 import JavascriptBench.Shared

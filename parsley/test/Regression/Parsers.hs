@@ -7,7 +7,6 @@ import Parsley
 import Parsley.Char (token)
 import Parsley.Register (newRegister_, put_, get)
 import Parsley.Defunctionalized (Defunc(LIFTED))
---import Parsley.Garnish
 
 issue26_ex1 :: Parser ()
 issue26_ex1 = (token "123" <|> token "") *> void (token "abc")

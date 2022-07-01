@@ -1,5 +1,6 @@
 {-# OPTIONS_HADDOCK show-extensions #-}
-{-# LANGUAGE ImplicitParams,
+{-# LANGUAGE CPP,
+             ImplicitParams,
              MagicHash,
              TypeApplications,
              UnboxedTuples #-}
@@ -18,6 +19,9 @@ parsing machinery to work with input.
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), LogOps(..),
     InputOps(..), more, next,
+#if __GLASGOW_HASKELL__ <= 900
+    word8ToWord#, word16ToWord#,
+#endif
     InputDependant
   ) where
 
@@ -29,6 +33,11 @@ import Data.Text.Unsafe                            (iter, Iter(..){-, iter_, rev
 import GHC.Exts                                    (Int(..), Char(..), TYPE, Int#)
 import GHC.ForeignPtr                              (ForeignPtr(..))
 import GHC.Prim                                    (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
+#if __GLASGOW_HASKELL__ > 900
+import GHC.Prim                                    (word16ToWord#, word8ToWord#)
+#else
+import GHC.Prim                                    (Word#)
+#endif
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
@@ -38,6 +47,17 @@ import Parsley.Internal.Common.Utils               (Code)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
+
+
+#if __GLASGOW_HASKELL__ <= 900
+{-# INLINE word8ToWord# #-}
+word8ToWord# :: Word# -> Word#
+word8ToWord# x = x
+
+{-# INLINE word16ToWord# #-}
+word16ToWord# :: Word# -> Word#
+word16ToWord# x = x
+#endif
 
 {- Auxillary Representation -}
 {-|
@@ -166,7 +186,7 @@ instance InputPrep Text16 where
   prepare qinput = [||
       let Text16 (Text arr (I# off#) (I# size#)) = $$qinput
           arr# = aBA arr
-          next i# = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), i# +# 1# #)
+          next i# = (# C# (chr# (word2Int# (word16ToWord# (indexWord16Array# arr# i#)))), i# +# 1# #)
       in (# next, \qi -> $$(intLess [||qi||] [||size#||]), off# #)
     ||]
 
@@ -176,7 +196,7 @@ instance InputPrep ByteString where
           next i# =
             case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# x)), i# +# 1# #)
+                _ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
       in  (# next, \qi -> $$(intLess [||qi||] [||size#||]), off# #)
     ||]
 
@@ -193,7 +213,7 @@ instance InputPrep CharList where
 
 instance InputPrep Text where
   prepare qinput = [||
-      let next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off+d) (unconsumed-d) #)
+      let next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off + d) (unconsumed - d) #)
           more (Text _ _ unconsumed) = unconsumed > 0
       in (# next, more, $$qinput #)
     ||]
@@ -203,7 +223,7 @@ instance InputPrep Lazy.ByteString where
       let next (# i#, addr#, final, off#, size#, cs #) =
             case readWord8OffAddr# addr# off# realWorld# of
               (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# x)),
+                _ -> (# C# (chr# (word2Int# (word8ToWord# x))),
                     if I# size# /= 1 then (# i# +# 1#, addr#, final, off# +# 1#, size# -# 1#, cs #)
                     else case cs of
                       Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->

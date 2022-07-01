@@ -211,5 +211,5 @@ instance Show (Defunc a) where
   show CONST = "const"
   show (IF_S c b e) = concat ["(if ", show c, " then ", show b, " else ", show e, ")"]
   show (LAM_S _) = "f"
-  show p@(RANGES{}) = show (charPred p)
+  show p@RANGES{} = show (charPred p)
   show _ = "x"

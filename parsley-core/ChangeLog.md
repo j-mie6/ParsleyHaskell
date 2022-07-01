@@ -161,3 +161,8 @@ Fix for issue #27
 * Added `INPUT` to 8.6+ backend for `Defunc`.
 * Added a `poke` method to `QueueLike`.
 * Added a `charPred` converter to `Defunc`.
+
+## 2.1.0.1 -- 2022-06-01
+
+* Added normalisation rule for lets in `Lam`.
+* Added GHC 9.2 support

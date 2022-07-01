@@ -52,7 +52,7 @@ funcdef : FUNCTION IDENTIFIER '(' funcparam ')' block
 void set_input_string(const char* in);
 void end_lexical_scan(void);
 
-bool parse(const char* in) 
+bool parse(const char* in)
 {
   set_input_string(in);
   int rv = yyparse();
@@ -60,7 +60,7 @@ bool parse(const char* in)
   return !rv;
 }
 
-void yyerror(const char* msg) 
+void yyerror(const char* msg)
 {
     return;
 }

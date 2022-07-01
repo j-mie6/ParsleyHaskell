@@ -35,7 +35,9 @@ Code is provided to the combinators by way of the datatype `WQ` (or `Defunc` if 
 which pairs a normal value with its Haskell code representation:
 
 ```hs
-data WQ a = WQ a (Code a)
+data WQ a
+
+makeQ :: a -> Code a -> WQ a -- or Defunc a
 ```
 
 This gives us combinators like:
@@ -45,13 +47,28 @@ pure :: WQ a -> Parser a
 satisfy :: WQ a -> Parser a
 
 char :: Char -> Parser a
-char c = satisfy (WQ (== c) [||(== c)||])
+char c = satisfy (makeQ (== c) [||(== c)||])
 ```
 
 Using `WQ` explicitly like this can get annoying, which is what the `parsley-garnish` package is for!
 Currently, the garnish provides one plugin called `OverloadedQuotes`, which replaces the behaviour of
 the default _Untyped_ Template Haskell quotes in a file so that they produce one of `WQ` or `Defunc`.
 See the `Parsley.OverloadedQuotesPlugin` module in the [`parsley-garnish`](https://hackage.haskell.org/package/parsley-garnish) package for more information.
+
+### How to avoid manual `WQ` on GHC 9.2
+Currently, `parsley-garnish` is not ready for GHC 9.2. Instead of using `[|` and `|]` as the builder
+for `Defunc` values, you can make use of the following `CPP` macro instead:
+
+```hs
+{-# LANGUAGE CPP #-}
+
+#define QQ(x) (makeQ (x) [||(x)||])
+
+char :: Char -> Parser a
+char c = satisfy QQ(== c)
+```
+
+This may require the use of the `cpphs` buildtool.
 
 ## How does it work?
 In short, Parsley represents all parsers as Abstract Syntax Trees (ASTs). The representation of the

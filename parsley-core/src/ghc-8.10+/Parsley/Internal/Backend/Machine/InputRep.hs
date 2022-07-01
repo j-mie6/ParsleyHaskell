@@ -1,5 +1,6 @@
 {-# OPTIONS_HADDOCK show-extensions #-}
-{-# LANGUAGE MagicHash,
+{-# LANGUAGE CPP,
+             MagicHash,
              TypeFamilies,
              UnboxedTuples,
              StandaloneKindSignatures #-}
@@ -49,6 +50,9 @@ import Data.Kind                         (Type)
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
 import GHC.Exts                          (Int(..), TYPE, RuntimeRep(..), (==#), (<#), (+#), (-#), isTrue#)
+#if __GLASGOW_HASKELL__ > 900
+import GHC.Exts                          (LiftedRep)
+#endif
 import GHC.ForeignPtr                    (ForeignPtr(..), ForeignPtrContents)
 import GHC.Prim                          (Int#, Addr#, nullAddr#)
 import Parsley.Internal.Common.Utils     (Code)
@@ -218,7 +222,7 @@ textShiftRight (Text arr off unconsumed) i = go i off unconsumed
     go 0 off' unconsumed' = Text arr off' unconsumed'
     go n off' unconsumed'
       | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0
-                          in go (n-1) (off'+d) (unconsumed'-d)
+                          in go (n - 1) (off' + d) (unconsumed' - d)
       | otherwise = Text arr off' unconsumed'
 
 {-|
@@ -231,7 +235,7 @@ textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
   where
     go 0 off' unconsumed' = Text arr off' unconsumed'
     go n off' unconsumed'
-      | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
+      | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n - 1) (off' + d) (unconsumed' - d)
       | otherwise = Text arr off' unconsumed'
 
 {-# INLINE emptyUnpackedLazyByteString' #-}

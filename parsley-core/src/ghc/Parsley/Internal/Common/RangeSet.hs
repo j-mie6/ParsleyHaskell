@@ -351,7 +351,7 @@ balance sz l u lt@(Fork lh lsz ll lu llt lrt) rt@(Fork rh rsz rl ru rlt rrt)
 {-# INLINEABLE balanceL #-}
 balanceL :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
 -- PRE: left grew or right shrank, difference in height at most 2 biasing to the left
-balanceL !sz !l1 !u1 lt@(Fork !lh !lsz !l2 !u2 !llt !lrt) !rt
+balanceL !sz !l1 !u1 lt@(Fork lh lsz l2 u2 llt lrt) !rt
   -- both sides are equal height or off by one
   | dltrt <= 1 = forkH sz l1 u1 lh lt rh rt
   -- The bias is 2 (dltrt == 2)
@@ -365,7 +365,7 @@ balanceL sz l u Tip rt = Fork (height rt + 1) sz l u Tip rt
 {-# INLINEABLE balanceR #-}
 balanceR :: Size -> E -> E -> RangeSet a -> RangeSet a -> RangeSet a
 -- PRE: left shrank or right grew, difference in height at most 2 biasing to the right
-balanceR !sz !l1 !u1 !lt rt@(Fork !rh !rsz !l2 !u2 !rlt !rrt)
+balanceR !sz !l1 !u1 !lt rt@(Fork rh rsz l2 u2 rlt rrt)
   -- both sides are equal height or off by one
   | dltrt <= 1 = forkH sz l1 u1 lh lt rh rt
   | otherwise  = uncheckedBalanceR sz l1 u1 lt rsz l2 u2 rlt rrt

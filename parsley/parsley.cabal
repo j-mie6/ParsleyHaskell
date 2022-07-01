@@ -98,13 +98,13 @@ common test-common
   build-depends:       base >=4.10 && <5,
                        parsley,
                        parsley-core,
-                       parsley-garnish,
+                       --parsley-garnish,
                        tasty,
                        template-haskell
   other-extensions:    TemplateHaskellQuotes, TemplateHaskell
   hs-source-dirs:      test
   default-language:    Haskell2010
-  ghc-options:         -fplugin=Parsley.OverloadedQuotesPlugin
+--  ghc-options:         -fplugin=Parsley.OverloadedQuotesPlugin
   other-modules:       TestUtils
 
 test-suite parsley-test

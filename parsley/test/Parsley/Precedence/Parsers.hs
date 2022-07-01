@@ -7,17 +7,18 @@ import Parsley.Precedence
 import Parsley.Fold (somel)
 import Parsley.Char (oneOf)
 import Data.Char (digitToInt)
+import Parsley.Defunctionalized
 
 data Expr = Add Expr Expr | Mul Expr Expr | Negate Expr | Num Int deriving (Eq, Show)
 
 number :: Parser Int
-number = somel [| \x d -> x * 10 + digitToInt d |] [|0|] (oneOf ['0'..'9'])
+number = somel (makeQ (\x d -> x * 10 + digitToInt d) [|| \x d -> x * 10 + digitToInt d ||]) (LIFTED 0) (oneOf ['0'..'9'])
 
 expr :: Parser Expr
-expr = precHomo ([|Num|] <$> number)
-                [ ops Prefix [string "negate" $> [|Negate|]]
-                , ops InfixL [char '*' $> [|Mul|]]
-                , ops InfixR [char '+' $> [|Add|]]
+expr = precHomo (makeQ Num [||Num||] <$> number)
+                [ ops Prefix [string "negate" $> makeQ Negate [||Negate||]]
+                , ops InfixL [char '*' $> makeQ Mul [||Mul||]]
+                , ops InfixR [char '+' $> makeQ Add [||Add||]]
                 ]
 
 data Pred = Or Term Pred | OfTerm Term deriving (Eq, Show)
@@ -36,7 +37,7 @@ instance Subtype Not Term where
   downcast _         = Nothing
 
 pred = precedence $
-  gops InfixR [char '|' $> [|Or|]] [|OfTerm|] +<
-  sops InfixR [char '&' $> [|And|]]           +<
-  sops Prefix [char '!' $> [|Not|]]           +<
-  Atom (char 'T' $> [|T|] <|> char 'F' $> [|F|] <|> char '(' *> ([|Parens|] <$> pred) <* char ')')
+  gops InfixR [char '|' $> makeQ Or [||Or||]] (makeQ OfTerm [||OfTerm||]) +<
+  sops InfixR [char '&' $> makeQ And [||And||]]          +<
+  sops Prefix [char '!' $> makeQ Not [||Not||]]          +<
+  Atom (char 'T' $> makeQ T [||T||] <|> char 'F' $> makeQ F [||F||] <|> char '(' *> (makeQ Parens [||Parens||] <$> pred) <* char ')')

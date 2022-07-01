@@ -35,6 +35,8 @@ import GHC.ForeignPtr                              (ForeignPtr(..))
 import GHC.Prim                                    (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
 #if __GLASGOW_HASKELL__ > 900
 import GHC.Prim                                    (word16ToWord#, word8ToWord#)
+#else
+import GHC.Prim                                    (Word#)
 #endif
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess,

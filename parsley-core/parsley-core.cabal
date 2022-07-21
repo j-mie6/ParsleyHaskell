@@ -216,8 +216,11 @@ benchmark rangeset-bench
   import:              benchmark-common
   type:                exitcode-stdio-1.0
   build-depends:       containers,
-                       QuickCheck
+                       QuickCheck,
+                       array,
+                       selective
   main-is:             RangeSetBench.hs
+  --other-modules:       Data.EnumSet
 
 source-repository head
   type:                git

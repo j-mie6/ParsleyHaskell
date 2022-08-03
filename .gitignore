@@ -14,7 +14,3 @@ hie.*
 *.c
 *.h
 cabal.project.local
-<<<<<<< HEAD
-EnumSet.hs
-=======
->>>>>>> master

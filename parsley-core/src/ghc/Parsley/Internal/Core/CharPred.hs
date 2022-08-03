@@ -20,8 +20,8 @@ module Parsley.Internal.Core.CharPred (
 
 import Prelude hiding (null)
 
-import Parsley.Internal.Common.RangeSet (RangeSet, elems, unelems, fromRanges, full, member, fold, null, union, extractSingle, singleton, intersection, difference, isSubsetOf, sizeRanges)
-import Parsley.Internal.Core.Lam        (Lam(Abs, App, Var, T, F, If))
+import Data.RangeSet             (RangeSet, elems, unelems, fromRanges, full, member, fold, null, union, extractSingle, singleton, intersection, difference, isSubsetOf, sizeRanges)
+import Parsley.Internal.Core.Lam (Lam(Abs, App, Var, T, F, If))
 
 {-|
 Represents @Char -> Bool@ functions, potentially in a more inspectable way.

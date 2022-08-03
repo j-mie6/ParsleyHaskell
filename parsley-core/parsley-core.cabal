@@ -46,7 +46,6 @@ library
                        Parsley.Internal.Common.Fresh,
                        Parsley.Internal.Common.Indexed,
                        Parsley.Internal.Common.QueueLike,
-                       Parsley.Internal.Common.RangeSet,
                        Parsley.Internal.Common.State,
                        Parsley.Internal.Common.Utils,
                        Parsley.Internal.Common.Vec,
@@ -143,7 +142,8 @@ library
                        pretty-terminal      >= 0.1.0   && < 0.2,
                        text                 >= 1.2.3   && < 1.3,
                        -- Not sure about this one, 0.11.0.0 introduced a type synonym for PS, so it _should_ work
-                       bytestring           >= 0.10.8  && < 0.12
+                       bytestring           >= 0.10.8  && < 0.12,
+                       rangeset             >= 0.0.1   && < 0.1
   build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   hs-source-dirs:      src/ghc
   if impl(ghc >= 8.10)
@@ -194,7 +194,7 @@ test-suite common-test
   type:                exitcode-stdio-1.0
   build-depends:       tasty-hunit, tasty-quickcheck
   main-is:             CommonTest.hs
-  other-modules:       CommonTest.Queue, CommonTest.RewindQueue, CommonTest.RangeSet
+  other-modules:       CommonTest.Queue, CommonTest.RewindQueue
 
 test-suite regression-test
   import:              test-common
@@ -211,16 +211,6 @@ common benchmark-common
   hs-source-dirs:      benchmarks
   other-modules:       BenchmarkUtils
   default-language:    Haskell2010
-
-benchmark rangeset-bench
-  import:              benchmark-common
-  type:                exitcode-stdio-1.0
-  build-depends:       containers,
-                       QuickCheck,
-                       array,
-                       selective
-  main-is:             RangeSetBench.hs
-  --other-modules:       Data.EnumSet
 
 source-repository head
   type:                git

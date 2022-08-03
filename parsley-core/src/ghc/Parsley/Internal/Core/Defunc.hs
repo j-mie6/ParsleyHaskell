@@ -19,7 +19,7 @@ module Parsley.Internal.Core.Defunc (
 
 import Data.Typeable                    (Typeable, (:~:)(Refl), eqT)
 import Language.Haskell.TH.Syntax       (Lift(..))
-import Parsley.Internal.Common.RangeSet (fromRanges, empty, complement)
+import Data.RangeSet                    (fromRanges, empty, complement)
 import Parsley.Internal.Common.Utils    (WQ(..), Code, Quapplicative(..))
 import Parsley.Internal.Core.CharPred   (CharPred(..), pattern Item, pattern Specific)
 import Parsley.Internal.Core.Lam        (normaliseGen, Lam(..))

@@ -165,4 +165,8 @@ Fix for issue #27
 ## 2.1.0.1 -- 2022-06-01
 
 * Added normalisation rule for lets in `Lam`.
-* Added GHC 9.2 support
+* Added GHC 9.2 support.
+
+## 2.2.0.0 -- 2022-08-03
+
+* Removed `RangeSet`, as this now resides in `rangeset`.

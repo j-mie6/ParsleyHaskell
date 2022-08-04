@@ -14,7 +14,7 @@ module Parsley.Internal.Backend.Analysis.Inliner (shouldInline) where
 
 import Data.Ratio                       ((%))
 import Parsley.Internal.Backend.Machine (Instr(..), Handler(..), Access(Hard, Soft))
-import Parsley.Internal.Common.Indexed  (cata4, Fix4, Nat)
+import Parsley.Internal.Common.Indexed  (cata3, Fix3, Nat)
 
 inlineThreshold :: Rational
 inlineThreshold = 13 % 10
@@ -25,12 +25,12 @@ entry to a machine are actually used in the computation.
 
 @since 1.7.0.0
 -}
-shouldInline :: Fix4 (Instr o) xs n r a -> Bool
-shouldInline = (< inlineThreshold) . getWeight . cata4 (InlineWeight . alg)
+shouldInline :: Fix3 (Instr o) xs n r -> Bool
+shouldInline = (< inlineThreshold) . getWeight . cata3 (InlineWeight . alg)
 
-newtype InlineWeight xs (n :: Nat) r a = InlineWeight { getWeight :: Rational }
+newtype InlineWeight xs (n :: Nat) r = InlineWeight { getWeight :: Rational }
 
-alg :: Instr o InlineWeight xs n r a -> Rational
+alg :: Instr o InlineWeight xs n r -> Rational
 alg Ret                = 0
 alg (Push _ k)         = 0 + getWeight k
 alg (Pop k)            = 0 + getWeight k
@@ -61,10 +61,10 @@ alg (LogEnter _ k)     = 1 % 4 + getWeight k
 alg (LogExit _ k)      = 1 % 4 + getWeight k
 alg (MetaInstr _ k)    = 0 + getWeight k
 
-algHandler :: Handler o InlineWeight xs n r a -> Rational
+algHandler :: Handler o InlineWeight xs n r -> Rational
 algHandler (Always _ h) = getWeight h
 algHandler (Same _ y _ n) = getWeight y + getWeight n
 
-handlerInlined :: Handler o k xs n r a -> Bool
+handlerInlined :: Handler o k xs n r -> Bool
 handlerInlined (Always True _) = True
 handlerInlined _               = False

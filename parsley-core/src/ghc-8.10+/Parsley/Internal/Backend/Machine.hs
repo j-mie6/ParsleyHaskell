@@ -40,7 +40,7 @@ for a parser.
 
 @since 0.1.0.0
 -}
-eval :: forall input a. (Input input, Trace) => Code input -> (LetBinding input a a, DMap MVar (LetBinding input a)) -> Code (Maybe a)
+eval :: (Input input, Trace) => Code input -> (LetBinding input a, DMap MVar (LetBinding input)) -> Code (Maybe a)
 eval input (toplevel, bindings) = Eval.eval (prepare input) toplevel bindings
 
 {-|

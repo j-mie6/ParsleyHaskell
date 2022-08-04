@@ -8,7 +8,7 @@ import Test.Tasty.HUnit
 
 import Parsley.Internal
 import Parsley.Internal.Core.CombinatorAST (Parser(unParser), Combinator)
-import Parsley.Internal.Common (Fix(In), Fix4(In4), cata, (\/))
+import Parsley.Internal.Common (Fix(In), Fix3(In3), cata, (\/))
 import Parsley.Internal.Backend.CodeGenerator (codeGen)
 import Parsley.Internal.Backend.Machine.LetBindings (Binding, body)
 import Parsley.Internal.Backend.Machine.Types.Coins (willConsume)
@@ -28,7 +28,7 @@ string str = foldr (\c p -> satisfy (EQ_H (LIFTED c)) *> p) (pure (LIFTED str)) 
 toAST :: Parser a -> Fix Combinator a
 toAST = cata (In \/ undefined) . unParser
 
-codeGen' :: Fix Combinator a -> Binding o a a
+codeGen' :: Fix Combinator a -> Binding o a
 codeGen' p = body (codeGen Nothing p Set.empty 0)
 
 ex1_p :: Fix Combinator String
@@ -55,12 +55,12 @@ ex7_p = toAST $ (string "abc" <|> string "123") *> string "..." <|> string "def"
 ex8_p :: Fix Combinator String
 ex8_p = toAST $ (try (string "abc") <|> string "ade") *> string "..." <|> string "def"
 
-leadingCoinsUnderCatch :: Fix4 (Instr o) xs n r a -> Maybe Int
-leadingCoinsUnderCatch (In4 (Catch (In4 (MetaInstr (AddCoins c) _)) _)) = Just (willConsume c)
+leadingCoinsUnderCatch :: Fix3 (Instr o) xs n r -> Maybe Int
+leadingCoinsUnderCatch (In3 (Catch (In3 (MetaInstr (AddCoins c) _)) _)) = Just (willConsume c)
 leadingCoinsUnderCatch _ = Nothing
 
-leadingCoins :: Fix4 (Instr o) xs n r a -> Maybe Int
-leadingCoins (In4 (MetaInstr (AddCoins c) _)) = Just (willConsume c)
+leadingCoins :: Fix3 (Instr o) xs n r -> Maybe Int
+leadingCoins (In3 (MetaInstr (AddCoins c) _)) = Just (willConsume c)
 leadingCoins _ = Nothing
 
 test1 :: Assertion

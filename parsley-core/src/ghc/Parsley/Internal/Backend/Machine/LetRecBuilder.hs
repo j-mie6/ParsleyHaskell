@@ -33,9 +33,9 @@ refer to every other. These are then in scope for the top-level parser.
 @since 1.5.0.0
 -}
 letRec :: GCompare key
-       => {-bindings-}  DMap key (LetBinding o a)   -- ^ The bindings that should form part of the recursive group
+       => {-bindings-}  DMap key (LetBinding o)   -- ^ The bindings that should form part of the recursive group
       -> {-nameof-}     (forall x. key x -> String) -- ^ A function which can give a name to a key in the map
-      -> {-genBinding-} (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (QSubroutine s o a) -> Metadata -> Code (Func rs s o a x))
+      -> {-genBinding-} (forall x rs. key x -> Binding o x -> Regs rs -> DMap key (QSubroutine s o a) -> Metadata -> Code (Func rs s o a x))
       -- ^ How a binding - and their free registers - should be converted into code
       -> {-expr-}       (DMap key (QSubroutine s o a) -> Code b)
       -- ^ How to produce the top-level binding given the compiled bindings, i.e. the @in@ for the @let@

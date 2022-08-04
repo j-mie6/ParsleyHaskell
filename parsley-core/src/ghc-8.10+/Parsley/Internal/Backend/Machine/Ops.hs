@@ -227,7 +227,7 @@ which takes the captured offset as the first argument.
 @since 1.2.0.0
 -}
 buildHandler :: Γ s o xs n r a                                  -- ^ State to execute the handler with.
-             -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a))) -- ^ Partial parser accepting the modified state.
+             -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a))) -- ^ Partial parserccepting the modified state.
              -> Word                                            -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o a
 buildHandler γ h u c = fromStaHandler# $ \inp -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp})
@@ -382,9 +382,9 @@ into the `Ctx`.
 -}
 setupJoinPoint :: forall s o xs n r a x. JoinBuilder o
                => ΦVar x                     -- ^ The name of the binding.
-               -> Machine s o (x : xs) n r a -- ^ The definition of the binding.
-               -> Machine s o xs n r a       -- ^ The scope within which the binding is valid.
-               -> MachineMonad s o xs n r a
+               -> Machine s o a (x : xs) n r -- ^ The definition of the binding.
+               -> Machine s o a xs n r       -- ^ The scope within which the binding is valid.
+               -> MachineMonad s o a xs n r
 setupJoinPoint φ (Machine k) mx = freshUnique $ \u ->
     liftM2 (\mk ctx γ ->
       setupJoinPoint# @o
@@ -404,7 +404,7 @@ the loop consumed input in its final iteration.
 bindIterAlways :: forall s o a. RecBuilder o
                => Ctx s o a                  -- ^ The context to keep the binding
                -> MVar Void                  -- ^ The name of the binding.
-               -> Machine s o '[] One Void a -- ^ The body of the loop.
+               -> Machine s o a '[] One Void -- ^ The body of the loop.
                -> Bool                       -- ^ Does loop exit require a binding?
                -> StaHandlerBuilder s o a    -- ^ What to do after the loop exits (by failing)
                -> Input o                    -- ^ The initial offset to provide to the loop
@@ -426,7 +426,7 @@ the same way as `bindSameHandler`.
 bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
              => Ctx s o a                  -- ^ The context to store the binding in.
              -> MVar Void                  -- ^ The name of the binding.
-             -> Machine s o '[] One Void a -- ^ The loop body.
+             -> Machine s o a '[] One Void -- ^ The loop body.
              -> Bool                       -- ^ Is a binding required for the matching handler?
              -> StaHandler s o a           -- ^ The handler when input is the same.
              -> Bool                       -- ^ Is a binding required for the differing handler?
@@ -457,7 +457,7 @@ buildRec :: forall rs s o a r. RecBuilder o
          => MVar r                  -- ^ The name of the binding.
          -> Regs rs                 -- ^ The registered required by the binding.
          -> Ctx s o a               -- ^ The context to re-insert the register-less binding
-         -> Machine s o '[] One r a -- ^ The body of the binding.
+         -> Machine s o a '[] One r -- ^ The body of the binding.
          -> Metadata                -- ^ The metadata associated with the binding
          -> DynFunc rs s o a r
 buildRec μ rs ctx k meta =

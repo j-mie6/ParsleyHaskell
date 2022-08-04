@@ -24,25 +24,25 @@ Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.
 
 @since 1.4.0.0
 -}
-type DynHandler s o a = Code (Handler# s o a)
+type DynHandler s o err a = Code (Handler# s o err a)
 
 {-|
 Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.Cont#`
 
 @since 1.4.0.0
 -}
-type DynCont s o a x = Code (Cont# s o a x)
+type DynCont s o err a x = Code (Cont# s o err a x)
 
 {-|
 Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.Subroutine#`
 
 @since 1.4.0.0
 -}
-type DynSubroutine s o a x = Code (Subroutine# s o a x)
+type DynSubroutine s o err a x = Code (Subroutine# s o err a x)
 
 {-|
 Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.Func#`
 
 @since 1.4.0.0
 -}
-type DynFunc (rs :: [Type]) s o a x = Code (Func rs s o a x)
+type DynFunc (rs :: [Type]) s o err a x = Code (Func rs s o err a x)

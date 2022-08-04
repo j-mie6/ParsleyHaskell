@@ -49,9 +49,9 @@ but @Handler#@ is used at the boundaries, such as for recursion.
 
 @since 1.4.0.0
 -}
-type Handler# s o a =  Pos            -- ^ The current position
-                    -> Rep o          -- ^ The current input on failure
-                    -> ST s (Result () a)
+type Handler# s o err a =  Pos            -- ^ The current position
+                        -> Rep o          -- ^ The current input on failure
+                        -> ST s (Result err a)
 
 {-|
 @Cont#@ represents return continuation from recursive parsers. They
@@ -59,10 +59,10 @@ feed back their result @x@ back to the caller as well as the updated input.
 
 @since 1.4.0.0
 -}
-type Cont# s o a x =  x              -- ^ The value to be returned to the caller
-                   -> Pos            -- ^ The current position
-                   -> Rep o          -- ^ The new input after the call is executed
-                   -> ST s (Result () a)
+type Cont# s o err a x =  x              -- ^ The value to be returned to the caller
+                       -> Pos            -- ^ The current position
+                       -> Rep o          -- ^ The new input after the call is executed
+                       -> ST s (Result err a)
 
 {-|
 @Subroutine#@ represents top-level parsers, which require a return continuation,
@@ -70,11 +70,11 @@ input, an error handler in order to produce (or contribute to) a result of type 
 
 @since 1.4.0.0
 -}
-type Subroutine# s o a x =  Cont# s o a x  -- ^ What to do when this parser returns
-                         -> Handler# s o a -- ^ How to handle failure within the call
-                         -> Pos            -- ^ The current position
-                         -> Rep o          -- ^ The input on entry to the call
-                         -> ST s (Result () a)
+type Subroutine# s o err a x =  Cont# s o err a x  -- ^ What to do when this parser returns
+                             -> Handler# s o err a -- ^ How to handle failure within the call
+                             -> Pos            -- ^ The current position
+                             -> Rep o          -- ^ The input on entry to the call
+                             -> ST s (Result err a)
 
 {-|
 A @Func@ is a `Subroutine#` augmented with extra arguments with which to handle over
@@ -83,6 +83,6 @@ by the parser, but are used to execute it.
 
 @since 1.4.0.0
 -}
-type family Func (rs :: [Type]) s o a x where
-  Func '[] s o a x      = Subroutine# s o a x
-  Func (r : rs) s o a x = STRef s r -> Func rs s o a x
+type family Func (rs :: [Type]) s o err a x where
+  Func '[] s o err a x      = Subroutine# s o err a x
+  Func (r : rs) s o err a x = STRef s r -> Func rs s o err a x

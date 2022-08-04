@@ -85,15 +85,15 @@ may form part of the generated code.
 
 @since 1.0.0.0
 -}
-data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))              -- ^ Map of subroutine bindings.
-                     , φs         :: !(DMap ΦVar (QJoin s o a))                    -- ^ Map of join point bindings.
-                     , σs         :: !(DMap ΣVar (Reg s))                          -- ^ Map of available registers.
-                     , debugLevel :: {-# UNPACK #-} !Int                           -- ^ Approximate depth of debug combinator.
-                     , coins      :: {-# UNPACK #-} !Int                           -- ^ Number of tokens free to consume without length check.
-                     , offsetUniq :: {-# UNPACK #-} !Word                          -- ^ Next unique offset identifier.
-                     , piggies    :: !(Queue Coins)                                -- ^ Queue of future length check credit.
-                     , knownChars :: !(RewindQueue (Code Char, CharPred, Input o)) -- ^ Characters that can be reclaimed on backtrack.
-                     }
+data Ctx s o err a = Ctx { μs         :: !(DMap MVar (QSubroutine s o err a))          -- ^ Map of subroutine bindings.
+                         , φs         :: !(DMap ΦVar (QJoin s o err a))                -- ^ Map of join point bindings.
+                         , σs         :: !(DMap ΣVar (Reg s))                          -- ^ Map of available registers.
+                         , debugLevel :: {-# UNPACK #-} !Int                           -- ^ Approximate depth of debug combinator.
+                         , coins      :: {-# UNPACK #-} !Int                           -- ^ Number of tokens free to consume without length check.
+                         , offsetUniq :: {-# UNPACK #-} !Word                          -- ^ Next unique offset identifier.
+                         , piggies    :: !(Queue Coins)                                -- ^ Queue of future length check credit.
+                         , knownChars :: !(RewindQueue (Code Char, CharPred, Input o)) -- ^ Characters that can be reclaimed on backtrack.
+                         }
 
 {-|
 `QJoin` represents Φ-nodes in the generated parser, and is represented
@@ -101,7 +101,7 @@ as a `Parsley.Internal.Backend.Machine.Types.Statics.StaCont`.
 
 @since 1.0.0.0
 -}
-newtype QJoin s o a x = QJoin { unwrapJoin :: StaCont s o a x }
+newtype QJoin s o err a x = QJoin { unwrapJoin :: StaCont s o err a x }
 
 {-|
 Creates an empty `Ctx` populated with a map of the top-level (recursive)
@@ -109,7 +109,7 @@ bindings: information about their required free-registers is included.
 
 @since 1.0.0.0
 -}
-emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
+emptyCtx :: DMap MVar (QSubroutine s o err a) -> Ctx s o err a
 emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty Queue.empty
 
 -- Subroutines
@@ -129,10 +129,10 @@ according to "local" @Reader@ semantics.
 
 @since 1.2.0.0
 -}
-insertSub :: MVar x                -- ^ The name of the binding.
-          -> StaSubroutine s o a x -- ^ The binding to register.
-          -> Ctx s o a             -- ^ The current context.
-          -> Ctx s o a             -- ^ The new context.
+insertSub :: MVar x                    -- ^ The name of the binding.
+          -> StaSubroutine s o err a x -- ^ The binding to register.
+          -> Ctx s o err a             -- ^ The current context.
+          -> Ctx s o err a             -- ^ The new context.
 insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs) (μs ctx)}
 
 {-|
@@ -142,12 +142,12 @@ exception. If this binding had free registers, these are generously provided by 
 
 @since 1.2.0.0
 -}
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubroutine s o a x)
+askSub :: MonadReader (Ctx s o err a) m => MVar x -> m (StaSubroutine s o err a x)
 askSub μ =
   do QSubroutine sub rs <- askSubUnbound μ
      asks (provideFreeRegisters sub rs)
 
-askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubroutine s o a x)
+askSubUnbound :: MonadReader (Ctx s o err a) m => MVar x -> m (QSubroutine s o err a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
 
 -- Join Points
@@ -162,10 +162,10 @@ expires according to "local" @Reader@ semantics.
 
 @since 1.0.0.0
 -}
-insertΦ :: ΦVar x          -- ^ The name of the new binding.
-        -> StaCont s o a x -- ^ The binding to add.
-        -> Ctx s o a       -- ^ The old context.
-        -> Ctx s o a       -- ^ The new context.
+insertΦ :: ΦVar x              -- ^ The name of the new binding.
+        -> StaCont s o err a x -- ^ The binding to add.
+        -> Ctx s o err a       -- ^ The old context.
+        -> Ctx s o err a       -- ^ The new context.
 insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
 
 {-|
@@ -173,7 +173,7 @@ Fetches a binding from the `Ctx`.
 
 @since 1.2.0.0
 -}
-askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (StaCont s o a x)
+askΦ :: MonadReader (Ctx s o err a) m => ΦVar x -> m (StaCont s o err a x)
 askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
 
 -- Registers
@@ -200,8 +200,8 @@ the original value in the register, which is injected into the cache.
 insertNewΣ :: ΣVar x                   -- ^ The name of the register.
            -> Maybe (Code (STRef s x)) -- ^ The runtime representation, if available.
            -> Defunc x                 -- ^ The initial value stored into the register.
-           -> Ctx s o a                -- ^ The old context.
-           -> Ctx s o a                -- ^ The new context.
+           -> Ctx s o err a                -- ^ The old context.
+           -> Ctx s o err a                -- ^ The new context.
 insertNewΣ σ qref x ctx = ctx {σs = DMap.insert σ (Reg qref (Just x)) (σs ctx)}
 
 {-|
@@ -209,7 +209,7 @@ Updated the "last-known value" of a register in the cache.
 
 @since 1.0.0.0
 -}
-cacheΣ :: ΣVar x -> Defunc x -> Ctx s o a -> Ctx s o a
+cacheΣ :: ΣVar x -> Defunc x -> Ctx s o err a -> Ctx s o err a
 cacheΣ σ x ctx = case DMap.lookup σ (σs ctx) of
   Just (Reg ref _) -> ctx {σs = DMap.insert σ (Reg ref (Just x)) (σs ctx)}
   Nothing          -> throw (outOfScopeRegister σ)
@@ -221,7 +221,7 @@ at runtime as an @STRef@). If this register does not exist, this throws an
 
 @since 1.0.0.0
 -}
-concreteΣ :: ΣVar x -> Ctx s o a -> Code (STRef s x)
+concreteΣ :: ΣVar x -> Ctx s o err a -> Code (STRef s x)
 concreteΣ σ = fromMaybe (throw (intangibleRegister σ)) . (getReg <=< DMap.lookup σ . σs)
 
 {-|
@@ -230,7 +230,7 @@ this value, a @RegisterFault@ exception is thrown.
 
 @since 1.0.0.0
 -}
-cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
+cachedΣ :: ΣVar x -> Ctx s o err a -> Defunc x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< (DMap.lookup σ . σs))
 
 {-|
@@ -244,17 +244,17 @@ of these freshly bound registers into the `Ctx`. Has the effect of converting a
 -}
 -- This needs to return a DynFunc: it is fed back to shared territory
 takeFreeRegisters :: Regs rs                              -- ^ The free registers demanded by the binding.
-                  -> Ctx s o a                            -- ^ The old context.
-                  -> (Ctx s o a -> DynSubroutine s o a x) -- ^ Given the new context, function that produces the subroutine.
-                  -> DynFunc rs s o a x                   -- ^ The newly produced dynamic function.
+                  -> Ctx s o err a                            -- ^ The old context.
+                  -> (Ctx s o err a -> DynSubroutine s o err a x) -- ^ Given the new context, function that produces the subroutine.
+                  -> DynFunc rs s o err a x                   -- ^ The newly produced dynamic function.
 takeFreeRegisters NoRegs ctx body = body ctx
 takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
-insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
+insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o err a -> Ctx s o err a
 insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing) (σs ctx)}
 
 -- This needs to take a StaFunc, it is fed back via `askSub`
-provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine s o a x
+provideFreeRegisters :: StaFunc rs s o err a x -> Regs rs -> Ctx s o err a -> StaSubroutine s o err a x
 provideFreeRegisters sub NoRegs _ = sub
 provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
 
@@ -273,7 +273,7 @@ Increase the debug level for the forseeable static future.
 
 @since 1.0.0.0
 -}
-debugUp :: Ctx s o a -> Ctx s o a
+debugUp :: Ctx s o err a -> Ctx s o err a
 debugUp ctx = ctx {debugLevel = debugLevel ctx + 1}
 
 {-|
@@ -281,7 +281,7 @@ Decrease the debug level for the forseeable static future.
 
 @since 1.0.0.0
 -}
-debugDown :: Ctx s o a -> Ctx s o a
+debugDown :: Ctx s o err a -> Ctx s o err a
 debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
 -- Unique Offsets
@@ -296,7 +296,7 @@ Advances the unique identifier stored in the `Ctx`. This is used to /skip/ a giv
 
 @since 1.4.0.0
 -}
-nextUnique :: Ctx s o a -> Ctx s o a
+nextUnique :: Ctx s o err a -> Ctx s o err a
 nextUnique ctx = ctx {offsetUniq = offsetUniq ctx + 1}
 
 {-|
@@ -304,7 +304,7 @@ Generate a fresh name that is valid for the scope of the provided continuation.
 
 @since 1.4.0.0
 -}
-freshUnique :: MonadReader (Ctx s o a) m => (Word -> m b) -> m b
+freshUnique :: MonadReader (Ctx s o err a) m => (Word -> m b) -> m b
 freshUnique f =
   do unique <- asks offsetUniq
      local nextUnique (f unique)
@@ -346,7 +346,7 @@ broken.
 
 @since 1.5.0.0
 -}
-storePiggy :: Coins -> Ctx s o a -> Ctx s o a
+storePiggy :: Coins -> Ctx s o err a -> Ctx s o err a
 storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
 
 {-|
@@ -356,7 +356,7 @@ __Note__: This should generate a length check when used!
 
 @since 1.0.0.0
 -}
-breakPiggy :: Ctx s o a -> Ctx s o a
+breakPiggy :: Ctx s o err a -> Ctx s o err a
 breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = willConsume coins, piggies = piggies'}
 
 {-|
@@ -364,7 +364,7 @@ Does the context have coins available?
 
 @since 1.0.0.0
 -}
-hasCoin :: Ctx s o a -> Bool
+hasCoin :: Ctx s o err a -> Bool
 hasCoin = canAfford 1
 
 {-|
@@ -372,7 +372,7 @@ Is it the case that there are no coins /and/ no piggy-banks remaining?
 
 @since 1.0.0.0
 -}
-isBankrupt :: Ctx s o a -> Bool
+isBankrupt :: Ctx s o err a -> Bool
 isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
 
 {-|
@@ -380,7 +380,7 @@ Spend a single coin, used when a token is consumed.
 
 @since 1.0.0.0
 -}
-spendCoin :: Ctx s o a -> Ctx s o a
+spendCoin :: Ctx s o err a -> Ctx s o err a
 spendCoin ctx = ctx {coins = coins ctx - 1}
 
 {-|
@@ -388,7 +388,7 @@ Adds coins into the current supply.
 
 @since 1.5.0.0
 -}
-giveCoins :: Coins -> Ctx s o a -> Ctx s o a
+giveCoins :: Coins -> Ctx s o err a -> Ctx s o err a
 giveCoins c ctx = ctx {coins = coins ctx + willConsume c}
 
 {-|
@@ -396,7 +396,7 @@ Adds coins into the current supply.
 
 @since 1.5.0.0
 -}
-refundCoins :: Coins -> Ctx s o a -> Ctx s o a
+refundCoins :: Coins -> Ctx s o err a -> Ctx s o err a
 refundCoins c ctx = ctx { coins = coins ctx + willConsume c
                         , knownChars = Queue.rewind (canReclaim c) (knownChars ctx)
                         }
@@ -406,7 +406,7 @@ Removes all coins and piggy-banks, such that @isBankrupt == True@.
 
 @since 1.0.0.0
 -}
-voidCoins :: Ctx s o a -> Ctx s o a
+voidCoins :: Ctx s o err a -> Ctx s o err a
 voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty}
 
 {-|
@@ -417,7 +417,7 @@ of size \(n\) if this quota cannot be reached.
 
 @since 1.5.0.0
 -}
-canAfford :: Int -> Ctx s o a -> Bool
+canAfford :: Int -> Ctx s o err a -> Bool
 canAfford n = (>= n) . coins
 
 {-|
@@ -426,7 +426,7 @@ can be retrieved later.
 
 @since 1.5.0.0
 -}
-addChar :: Code Char -> Input o -> Ctx s o a -> Ctx s o a
+addChar :: Code Char -> Input o -> Ctx s o err a -> Ctx s o err a
 addChar c o ctx = ctx { knownChars = enqueue (c, Item, o) (knownChars ctx) }
 
 {-|
@@ -436,10 +436,10 @@ rewind buffer).
 
 @since 2.1.0.0
 -}
-readChar :: Ctx s o a                                                             -- ^ The original context.
+readChar :: Ctx s o err a                                                             -- ^ The original context.
          -> CharPred                                                              -- ^ The predicate that this character will be tested against
          -> ((Code Char -> Input o -> Code b) -> Code b)                          -- ^ The fallback source of input.
-         -> (Code Char -> CharPred -> CharPred -> Input o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
+         -> (Code Char -> CharPred -> CharPred -> Input o -> Ctx s o err a -> Code b) -- ^ The continuation that needs the read characters and updated context.
          -> Code b
 readChar ctx pred fallback k
   | reclaimable = unsafeReadChar ctx k

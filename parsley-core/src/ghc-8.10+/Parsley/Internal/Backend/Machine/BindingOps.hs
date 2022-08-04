@@ -57,8 +57,8 @@ class HandlerOps o where
 
   @since 1.4.0.0
   -}
-  bindHandler# :: StaHandler# s o a            -- ^ Static handler to bind
-               -> (DynHandler s o a -> Code b) -- ^ The continuation that expects the bound handler
+  bindHandler# :: StaHandler# s o err a            -- ^ Static handler to bind
+               -> (DynHandler s o err a -> Code b) -- ^ The continuation that expects the bound handler
                -> Code b
 
 #define deriveHandlerOps(_o)                  \
@@ -83,8 +83,8 @@ class JoinBuilder o where
 
   @since 1.4.0.0
   -}
-  setupJoinPoint# :: StaCont# s o a x            -- ^ The join point to bind.
-                  -> (DynCont s o a x -> Code b) -- ^ The continuation that expects the bound join point
+  setupJoinPoint# :: StaCont# s o err a x            -- ^ The join point to bind.
+                  -> (DynCont s o err a x -> Code b) -- ^ The continuation that expects the bound join point
                   -> Code b
 
 #define deriveJoinBuilder(_o)                                                         \
@@ -109,8 +109,8 @@ class RecBuilder o where
 
   @since 1.4.0.0
   -}
-  bindIterHandler# :: (Input# o -> StaHandler# s o a)                   -- ^ The iter handler to bind
-                   -> (Code (Pos -> Rep o -> Handler# s o a) -> Code b) -- ^ The continuation that accepts the bound handler
+  bindIterHandler# :: (Input# o -> StaHandler# s o err a)                   -- ^ The iter handler to bind
+                   -> (Code (Pos -> Rep o -> Handler# s o err a) -> Code b) -- ^ The continuation that accepts the bound handler
                    -> Code b
 
   {-|
@@ -127,8 +127,8 @@ class RecBuilder o where
 
   @since 1.4.0.0
   -}
-  bindRec#  :: (DynSubroutine s o a x -> StaSubroutine# s o a x) -- ^ Code for the binding, accepting itself as an argument.
-            -> DynSubroutine s o a x                             -- ^ The code that represents this binding's name.
+  bindRec#  :: (DynSubroutine s o err a x -> StaSubroutine# s o err a x) -- ^ Code for the binding, accepting itself as an argument.
+            -> DynSubroutine s o err a x                                 -- ^ The code that represents this binding's name.
 
 #define deriveRecBuilder(_o)                                                                        \
 instance RecBuilder _o where                                                                        \
@@ -162,14 +162,14 @@ class MarshalOps o where
 
   @since 1.4.0.0
   -}
-  dynHandler# :: StaHandler# s o a -> DynHandler s o a
+  dynHandler# :: StaHandler# s o err a -> DynHandler s o err a
 
   {-|
   Converts a static continuation into a dynamic one (represented as a lambda)
 
   @since 1.4.0.0
   -}
-  dynCont# :: StaCont# s o a x -> DynCont s o a x
+  dynCont# :: StaCont# s o err a x -> DynCont s o err a x
 
 #define deriveMarshalOps(_o)                                                                          \
 instance MarshalOps _o where                                                                          \

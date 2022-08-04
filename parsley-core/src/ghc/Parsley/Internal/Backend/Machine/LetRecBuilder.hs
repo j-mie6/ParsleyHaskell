@@ -35,9 +35,9 @@ refer to every other. These are then in scope for the top-level parser.
 letRec :: GCompare key
        => {-bindings-}  DMap key (LetBinding o)   -- ^ The bindings that should form part of the recursive group
       -> {-nameof-}     (forall x. key x -> String) -- ^ A function which can give a name to a key in the map
-      -> {-genBinding-} (forall x rs. key x -> Binding o x -> Regs rs -> DMap key (QSubroutine s o a) -> Metadata -> Code (Func rs s o a x))
+      -> {-genBinding-} (forall x rs. key x -> Binding o x -> Regs rs -> DMap key (QSubroutine s o err a) -> Metadata -> Code (Func rs s o err a x))
       -- ^ How a binding - and their free registers - should be converted into code
-      -> {-expr-}       (DMap key (QSubroutine s o a) -> Code b)
+      -> {-expr-}       (DMap key (QSubroutine s o err a) -> Code b)
       -- ^ How to produce the top-level binding given the compiled bindings, i.e. the @in@ for the @let@
       -> Code b
 letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
@@ -56,5 +56,5 @@ letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
      -- Construct the let expression
      return (LetE decls exp)
   where
-     makeTypedName :: Const (Name, Some Regs, Metadata) x -> QSubroutine s o a x
+     makeTypedName :: Const (Name, Some Regs, Metadata) x -> QSubroutine s o err a x
      makeTypedName (Const (name, Some frees, meta)) = qSubroutine (unsafeCodeCoerce (return (VarE name))) frees meta

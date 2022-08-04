@@ -32,14 +32,14 @@ The monad stack used to evaluate a parser machine, see `run`.
 
 @since 1.4.0.0
 -}
-type MachineMonad s o a xs n r = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Result () a)))
+type MachineMonad s o err a xs n r = Reader (Ctx s o err a) (Γ s o err a xs n r -> Code (ST s (Result err a)))
 
 {-|
 Wraps up the `MachineMonad` type so that it can serve as the carrier of `Parsley.Internal.Common.Indexed.cata4`.
 
 @since 1.4.0.0
 -}
-newtype Machine s o a xs n r = Machine { getMachine :: MachineMonad s o a xs n r }
+newtype Machine s o err a xs n r = Machine { getMachine :: MachineMonad s o err a xs n r }
 
 {-|
 Used to execute the evaluator for a parser machine, resulting in the final code
@@ -47,8 +47,8 @@ to be returned back to the User API.
 
 @since 1.4.0.0
 -}
-run :: Machine s o a xs n r  -- ^ The action that will generate the final code.
-    -> Γ s o xs n r a        -- ^ The informaton that is threaded through the parsing machinery, which appears in some form in the generated code.
-    -> Ctx s o a             -- ^ Static information used in the code generation process, but not in the generated code.
-    -> Code (ST s (Result () a)) -- ^ The code that represents this parser (after having been given an input).
+run :: Machine s o err a xs n r   -- ^ The action that will generate the final code.
+    -> Γ s o err a xs n r         -- ^ The informaton that is threaded through the parsing machinery, which appears in some form in the generated code.
+    -> Ctx s o err a              -- ^ Static information used in the code generation process, but not in the generated code.
+    -> Code (ST s (Result err a)) -- ^ The code that represents this parser (after having been given an input).
 run = flip . runReader . getMachine

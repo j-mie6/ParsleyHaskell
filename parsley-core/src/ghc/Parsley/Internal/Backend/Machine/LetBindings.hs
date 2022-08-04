@@ -26,7 +26,7 @@ import Data.Some                                                  (Some, pattern
 import Parsley.Internal.Backend.Machine.Identifiers               (ΣVar, SomeΣVar(..))
 import Parsley.Internal.Backend.Machine.Instructions              (Instr)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
-import Parsley.Internal.Common                                    (Fix4, One)
+import Parsley.Internal.Common                                    (Fix3, One)
 
 {-|
 Type represents a binding, which is a completed parser that can
@@ -36,7 +36,7 @@ the one of type @`Binding` o a a@.
 
 @since 1.0.0.0
 -}
-type Binding o a x = Fix4 (Instr o) '[] One x a
+type Binding o x = Fix3 (Instr o) '[] One x
 
 {-|
 Packages a binding along with its free registers that are required
@@ -47,8 +47,8 @@ from analysis.
 
 @since 1.5.0.0
 -}
-data LetBinding o a x = LetBinding {
-    body :: Binding o a x,
+data LetBinding o x = LetBinding {
+    body :: Binding o x,
     freeRegs :: Some Regs,
     meta :: Metadata
   }
@@ -82,7 +82,7 @@ Given a `Binding` , a set of existential `ΣVar`s, and some `Metadata`, produces
 
 @since 1.5.0.0
 -}
-makeLetBinding :: Binding o a x -> Set SomeΣVar -> Metadata -> LetBinding o a x
+makeLetBinding :: Binding o x -> Set SomeΣVar -> Metadata -> LetBinding o x
 makeLetBinding m rs = LetBinding m (makeRegs rs)
 
 {-|

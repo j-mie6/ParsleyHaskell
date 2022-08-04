@@ -36,7 +36,7 @@ type HandlerStack n s o a = Vec n (Code (Handler s o a))
 type Handler s o a = Unboxed o -> Int -> Int -> ST s (Maybe a)
 type Cont s o a x = x -> Unboxed o -> Int -> Int -> ST s (Maybe a)
 type Subroutine s o a x = Cont s o a x -> Unboxed o -> Int -> Int -> Handler s o a -> ST s (Maybe a)
-type MachineMonad s o xs n r a = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
+type MachineMonad s o a xs n r = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
 
 type family Func (rs :: [Type]) s o a x where
   Func '[] s o a x      = Subroutine s o a x
@@ -48,9 +48,9 @@ qSubroutine :: Code (Func rs s o a x) -> Regs rs -> Metadata -> QSubroutine s o 
 qSubroutine body frees _ = QSubroutine body frees
 
 newtype QJoin s o a x = QJoin { unwrapJoin :: Code (Cont s o a x) }
-newtype Machine s o xs n r a = Machine { getMachine :: MachineMonad s o xs n r a }
+newtype Machine s o a xs n r = Machine { getMachine :: MachineMonad s o a xs n r }
 
-run :: Machine s o xs n r a -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
+run :: Machine s o a xs n r -> Γ s o xs n r a -> Ctx s o a -> Code (ST s (Maybe a))
 run = flip . runReader . getMachine
 
 data OpStack xs where

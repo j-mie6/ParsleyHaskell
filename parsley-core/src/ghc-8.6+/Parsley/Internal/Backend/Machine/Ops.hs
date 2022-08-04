@@ -154,16 +154,16 @@ inputInstances(deriveReturnOps)
 
 {- Builder Operations -}
 class BoxOps o => JoinBuilder o where
-  setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+  setupJoinPoint :: ΦVar x -> Machine s o a (x : xs) n r -> Machine s o a xs n r -> MachineMonad s o a xs n r
 
 class BoxOps o => RecBuilder o where
   buildIter :: ReturnOps o
-            => Ctx s o a -> MVar Void -> Machine s o '[] One Void a
+            => Ctx s o a -> MVar Void -> Machine s o a '[] One Void
             -> (Code o -> (Code Int, Code Int) -> Code (Handler s o a)) -> Code o -> (Code Int, Code Int) -> Code (ST s (Maybe a))
   buildRec  :: MVar r
             -> Regs rs
             -> Ctx s o a
-            -> Machine s o '[] One r a
+            -> Machine s o a '[] One r
             -> Code (Func rs s o a r)
 
 #define deriveJoinBuilder(_o)                                                             \

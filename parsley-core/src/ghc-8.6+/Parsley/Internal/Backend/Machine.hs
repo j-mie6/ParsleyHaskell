@@ -35,7 +35,7 @@ import Parsley.Internal.Trace                        (Trace)
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
 import qualified Parsley.Internal.Backend.Machine.Eval as Eval (eval)
 
-eval :: forall input a. (Input input, Trace) => Code input -> (LetBinding (Rep input) a a, DMap MVar (LetBinding (Rep input) a)) -> Code (Maybe a)
+eval :: (Input input, Trace) => Code input -> (LetBinding (Rep input) a, DMap MVar (LetBinding (Rep input))) -> Code (Maybe a)
 eval input (toplevel, bindings) = Eval.eval (prepare input) toplevel bindings
 
 class (InputPrep input, Ops (Rep input)) => Input input

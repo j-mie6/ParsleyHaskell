@@ -29,6 +29,7 @@ import Parsley.Internal.Backend.Machine.Ops          (Ops)
 import Parsley.Internal.Backend.Machine.Types.Coins  (Coins(..), zero, minCoins, maxCoins, plus, plus1, minus, plusNotReclaim)
 import Parsley.Internal.Common.Utils                 (Code)
 import Parsley.Internal.Core.InputTypes
+import Parsley.Internal.Core.Result                  (Result)
 import Parsley.Internal.Trace                        (Trace)
 
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
@@ -40,7 +41,7 @@ for a parser.
 
 @since 0.1.0.0
 -}
-eval :: (Input input, Trace) => Code input -> (LetBinding input a, DMap MVar (LetBinding input)) -> Code (Maybe a)
+eval :: (Input input, Trace) => Code input -> (LetBinding input a, DMap MVar (LetBinding input)) -> Code (Result () a)
 eval input (toplevel, bindings) = Eval.eval (prepare input) toplevel bindings
 
 {-|

@@ -23,7 +23,6 @@ here.
 -}
 module Parsley.Internal.Backend.Machine.BindingOps (module Parsley.Internal.Backend.Machine.BindingOps) where
 
-import Control.Monad.ST                                (ST)
 import Data.Array.Unboxed                              (UArray)
 import Data.ByteString.Internal                        (ByteString)
 import Data.Text                                       (Text)
@@ -119,9 +118,9 @@ class RecBuilder o where
 
   @since 1.4.0.0
   -}
-  bindIter# :: Input# o                                                                     -- ^ Initial offset for the loop.
-            -> (Code (Pos -> Rep o -> ST s (Maybe a)) -> Input# o -> Code (ST s (Maybe a))) -- ^ The code for the loop given self-call and offset.
-            -> Code (ST s (Maybe a))                                                        -- ^ Code of the executing loop.
+  bindIter# :: Input# o                                         -- ^ Initial offset for the loop.
+            -> (Code (Pos -> Rep o -> b) -> Input# o -> Code b) -- ^ The code for the loop given self-call and offset.
+            -> Code b                                           -- ^ Code of the executing loop.
 
   {-|
   Creates a binding for a regular let-bound parser.

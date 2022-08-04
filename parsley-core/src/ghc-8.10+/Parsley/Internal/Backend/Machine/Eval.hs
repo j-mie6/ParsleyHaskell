@@ -40,6 +40,7 @@ import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput,
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix3, cata3, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm, optimisePredGiven)
+import Parsley.Internal.Core.Result                        (Result(..))
 import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
@@ -52,9 +53,9 @@ This function performs the evaluation on the top-level let-bound parser to conve
 -}
 eval :: (Trace, Ops o)
      => Code (InputDependant (Rep o)) -- ^ The input as provided by the user.
-     -> LetBinding o a              -- ^ The binding to be generated.
-     -> DMap MVar (LetBinding o)    -- ^ The map of all other required bindings.
-     -> Code (Maybe a)                -- ^ The code for this parser.
+     -> LetBinding o a                -- ^ The binding to be generated.
+     -> DMap MVar (LetBinding o)      -- ^ The map of all other required bindings.
+     -> Code (Result () a)            -- ^ The code for this parser.
 eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(# next, more, offset #) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]

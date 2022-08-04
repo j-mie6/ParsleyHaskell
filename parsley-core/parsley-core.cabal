@@ -64,6 +64,7 @@ library
                        Parsley.Internal.Core.InputTypes,
                        Parsley.Internal.Core.Lam,
                        Parsley.Internal.Core.Primitives,
+                       Parsley.Internal.Core.Result,
 
                        Parsley.Internal.Frontend,
                        Parsley.Internal.Frontend.Compiler,

@@ -25,13 +25,14 @@ import Parsley.Internal.Backend.Machine.Types.Context (Ctx)
 import Parsley.Internal.Backend.Machine.Types.State   (Γ)
 import Parsley.Internal.Backend.Machine.Types.Statics (QSubroutine, qSubroutine)
 import Parsley.Internal.Common.Utils                  (Code)
+import Parsley.Internal.Core.Result                   (Result)
 
 {-|
 The monad stack used to evaluate a parser machine, see `run`.
 
 @since 1.4.0.0
 -}
-type MachineMonad s o a xs n r = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Maybe a)))
+type MachineMonad s o a xs n r = Reader (Ctx s o a) (Γ s o xs n r a -> Code (ST s (Result () a)))
 
 {-|
 Wraps up the `MachineMonad` type so that it can serve as the carrier of `Parsley.Internal.Common.Indexed.cata4`.
@@ -49,5 +50,5 @@ to be returned back to the User API.
 run :: Machine s o a xs n r  -- ^ The action that will generate the final code.
     -> Γ s o xs n r a        -- ^ The informaton that is threaded through the parsing machinery, which appears in some form in the generated code.
     -> Ctx s o a             -- ^ Static information used in the code generation process, but not in the generated code.
-    -> Code (ST s (Maybe a)) -- ^ The code that represents this parser (after having been given an input).
+    -> Code (ST s (Result () a)) -- ^ The code that represents this parser (after having been given an input).
 run = flip . runReader . getMachine

@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, TypeApplications #-}
 {-|
 Module      : Parsley.Internal
 Description : The gateway into the internals: here be monsters!
@@ -41,4 +41,4 @@ import Parsley.Internal.Common.Utils    as THUtils    (Quapplicative(..), WQ, Co
 import Parsley.Internal.Trace           as Trace      (Trace(trace))
 
 parse :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
-parse p = [||\input -> $$(eval [||input||] (compile (try p) codeGen))||]
+parse p = [||\input -> toMaybe @() $$(eval [||input||] (compile (try p) codeGen))||]

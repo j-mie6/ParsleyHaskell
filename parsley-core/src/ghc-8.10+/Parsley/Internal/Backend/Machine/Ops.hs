@@ -84,6 +84,7 @@ import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacte
 import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                                    (One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Core.Result                               (Result(..))
 import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
 import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..))
@@ -205,7 +206,7 @@ by returning @Nothing@.
 @since 1.2.0.0
 -}
 fatal :: AugmentedStaHandler s o a
-fatal = augmentHandlerSta Nothing (const [|| returnST Nothing ||])
+fatal = augmentHandlerSta Nothing (const [|| returnST (Failure ()) ||])
 
 {-|
 Fails by evaluating the next handler with the current input. Makes
@@ -214,7 +215,7 @@ about the state of the input (since 1.4.0.0).
 
 @since 1.0.0.0
 -}
-raise :: Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
+raise :: Γ s o xs (Succ n) r a -> Code (ST s (Result () a))
 raise γ = let VCons h _ = handlers γ in staHandlerEval h (input γ)
 
 -- Handler preparation
@@ -227,7 +228,7 @@ which takes the captured offset as the first argument.
 @since 1.2.0.0
 -}
 buildHandler :: Γ s o xs n r a                                  -- ^ State to execute the handler with.
-             -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a))) -- ^ Partial parserccepting the modified state.
+             -> (Γ s o (o : xs) n r a -> Code (ST s (Result () a))) -- ^ Partial parser accepting the modified state.
              -> Word                                            -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o a
 buildHandler γ h u c = fromStaHandler# $ \inp -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp})
@@ -240,7 +241,7 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 @since 2.1.0.0
 -}
 buildYesHandler :: Γ s o xs n r a
-                -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
+                -> (Γ s o xs n r a -> Code (ST s (Result () a)))
                 -> StaYesHandler s o a
 buildYesHandler γ h inp = h (γ {input = inp})
 
@@ -252,7 +253,7 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 @since 2.1.0.0
 -}
 buildIterYesHandler :: Γ s o xs n r a
-                    -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
+                    -> (Γ s o xs n r a -> Code (ST s (Result () a)))
                     -> Word
                     -> StaHandler s o a
 buildIterYesHandler γ h u = fromStaHandler# (buildYesHandler γ h . toInput u)
@@ -307,7 +308,7 @@ the entire parser.
 @since 1.2.0.0
 -}
 halt :: StaCont s o a a
-halt = mkStaCont $ \x _ -> [||returnST (Just $$x)||]
+halt = mkStaCont $ \x _ -> [||returnST (Success $$x)||]
 
 {-|
 This continuation is used for binding that never return, which is
@@ -325,7 +326,7 @@ join point) taking the required components from the state `Γ`.
 
 @since 1.2.0.0
 -}
-resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
+resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Result () a))
 resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (fromInput (input γ))
 
 {-|
@@ -340,7 +341,7 @@ callWithContinuation :: MarshalOps o
                      -> StaCont s o a x                 -- ^ The return continuation for the subroutine.
                      -> Input o                         -- ^ The input to feed to @sub@.
                      -> Vec (Succ n) (AugmentedStaHandler s o a) -- ^ The stack from which to obtain the handler to pass to @sub@.
-                     -> Code (ST s (Maybe a))
+                     -> Code (ST s (Result () a))
 callWithContinuation sub ret input (VCons h _) = staSubroutine# sub (dynCont ret) (dynHandler h (failureInputCharacteristic (meta sub))) (fromInput input)
 
 -- Continuation preparation
@@ -350,7 +351,7 @@ to `buildHandler`.
 
 @since 1.8.0.0
 -}
-suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -- ^ The partial parser to turn into a return continuation.
+suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Result () a))) -- ^ The partial parser to turn into a return continuation.
         -> Γ s o xs n r a                                  -- ^ The state to execute the continuation with.
         -> (Input# o -> Input o)                           -- ^ Function used to generate the offset
         -> StaCont s o a x
@@ -365,9 +366,9 @@ an optimisation on the offset if the subroutine has known input characteristics.
 callCC :: forall s o xs n r a x. MarshalOps o
        => Word                                                   --
        -> StaSubroutine s o a x                                  -- ^ The subroutine @sub@ that will be called.
-       -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
+       -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Result () a))) -- ^ The return continuation to generate
        -> Γ s o xs (Succ n) r a                                  --
-       -> Code (ST s (Maybe a))
+       -> Code (ST s (Result () a))
 callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseInput (successInputCharacteristic (meta sub)) u inp)) inp (handlers γ)
   where
     inp :: Input o
@@ -409,7 +410,7 @@ bindIterAlways :: forall s o a. RecBuilder o
                -> StaHandlerBuilder s o a    -- ^ What to do after the loop exits (by failing)
                -> Input o                    -- ^ The initial offset to provide to the loop
                -> Word                       -- ^ The unique name for captured offset /and/ iteration offset
-               -> Code (ST s (Maybe a))
+               -> Code (ST s (Result () a))
 bindIterAlways ctx μ l needed h inp u =
   bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
     bindIter# @o (fromInput inp) $ \qloop inp# ->
@@ -433,7 +434,7 @@ bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
              -> StaHandlerBuilder s o a    -- ^ The handler when input differs.
              -> Input o                    -- ^ The initial offset of the loop.
              -> Word                       -- ^ The unique name of the captured offsets /and/ the iteration offset.
-             -> Code (ST s (Maybe a))
+             -> Code (ST s (Result () a))
 bindIterSame ctx μ l neededYes yes neededNo no inp u =
   bindHandlerInline# @o neededYes (staHandler# yes) $ \qyes ->
     bindIterHandlerInline# neededNo (staHandler# . no . toInput u) $ \qno ->
@@ -586,4 +587,4 @@ A "yes-handler" that has not yet captured its offset
 
 @since 2.1.0.0
 -}
-type StaYesHandler s o a = Input o -> Code (ST s (Maybe a))
+type StaYesHandler s o a = Input o -> Code (ST s (Result () a))

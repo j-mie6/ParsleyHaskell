@@ -23,6 +23,7 @@ import Data.STRef                                (STRef)
 import Data.Kind                                 (Type)
 import GHC.Prim                                  (Word#)
 import Parsley.Internal.Backend.Machine.InputRep (Rep)
+import Parsley.Internal.Core.Result              (Result)
 
 #include "MachDeps.h"
 #if WORD_SIZE_IN_BITS < 64
@@ -50,7 +51,7 @@ but @Handler#@ is used at the boundaries, such as for recursion.
 -}
 type Handler# s o a =  Pos            -- ^ The current position
                     -> Rep o          -- ^ The current input on failure
-                    -> ST s (Maybe a)
+                    -> ST s (Result () a)
 
 {-|
 @Cont#@ represents return continuation from recursive parsers. They
@@ -61,7 +62,7 @@ feed back their result @x@ back to the caller as well as the updated input.
 type Cont# s o a x =  x              -- ^ The value to be returned to the caller
                    -> Pos            -- ^ The current position
                    -> Rep o          -- ^ The new input after the call is executed
-                   -> ST s (Maybe a)
+                   -> ST s (Result () a)
 
 {-|
 @Subroutine#@ represents top-level parsers, which require a return continuation,
@@ -73,7 +74,7 @@ type Subroutine# s o a x =  Cont# s o a x  -- ^ What to do when this parser retu
                          -> Handler# s o a -- ^ How to handle failure within the call
                          -> Pos            -- ^ The current position
                          -> Rep o          -- ^ The input on entry to the call
-                         -> ST s (Maybe a)
+                         -> ST s (Result () a)
 
 {-|
 A @Func@ is a `Subroutine#` augmented with extra arguments with which to handle over

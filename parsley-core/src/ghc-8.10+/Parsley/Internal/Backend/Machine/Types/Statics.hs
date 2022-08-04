@@ -56,6 +56,7 @@ import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), In
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common.Utils                              (Code)
+import Parsley.Internal.Core.Result                               (Result)
 
 -- Handlers
 {-|
@@ -65,7 +66,7 @@ on handlers, a simple form of inlining optimisation.
 
 @since 1.8.0.0
 -}
-type StaHandler# s o a = Input# o -> Code (ST s (Maybe a))
+type StaHandler# s o a = Input# o -> Code (ST s (Result () a))
 
 mkStaHandler# :: forall o s a. DynHandler s o a -> StaHandler# s o a
 mkStaHandler# dh inp = [||$$dh $$(pos# inp) $$(off# inp)||]
@@ -158,7 +159,7 @@ a handler to its argument.
 -}
 augmentHandlerFull :: Input o                   -- ^ The offset captured by the creation of the handler.
                    -> StaHandler s o a          -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
-                   -> Code (ST s (Maybe a))     -- ^ The code that is executed when the captured offset matches the input.
+                   -> Code (ST s (Result () a)) -- ^ The code that is executed when the captured offset matches the input.
                    -> StaHandler s o a          -- ^ The handler to be executed when offsets are known not to match.
                    -> AugmentedStaHandler s o a -- ^ A handler that carries this information around for later refinement.
 augmentHandlerFull c handler yes no = AugmentedStaHandler (Just (off c))
@@ -181,7 +182,7 @@ which can be used to refine the outcome of the execution of the handler as follo
 
 @since 1.7.0.0
 -}
-staHandlerEval :: AugmentedStaHandler s o a -> Input o -> Code (ST s (Maybe a))
+staHandlerEval :: AugmentedStaHandler s o a -> Input o -> Code (ST s (Result () a))
 staHandlerEval (AugmentedStaHandler (Just c) sh) inp
   | Just True <- same c (off inp)             = maybe (staHandler# (unknown sh)) const (yesSame sh) (fromInput inp)
   | Just False <- same c (off inp)            = staHandler# (fromMaybe (unknown sh) (notSame sh)) (fromInput inp)
@@ -228,7 +229,7 @@ data StaHandlerCase s (o :: Type) a = StaHandlerCase {
   -- | The static function representing this handler when offsets are incomparable.
   unknown :: StaHandler s o a,
   -- | The static value representing this handler when offsets are known to match, if available.
-  yesSame :: Maybe (Code (ST s (Maybe a))),
+  yesSame :: Maybe (Code (ST s (Result () a))),
   -- | The static function representing this handler when offsets are known not to match, if available.
   notSame :: Maybe (StaHandler s o a)
 }
@@ -236,7 +237,7 @@ data StaHandlerCase s (o :: Type) a = StaHandlerCase {
 mkUnknown :: StaHandler s o a -> StaHandlerCase s o a
 mkUnknown h = StaHandlerCase h Nothing Nothing
 
-mkFull :: StaHandler s o a -> Code (ST s (Maybe a)) -> StaHandler s o a -> StaHandlerCase s o a
+mkFull :: StaHandler s o a -> Code (ST s (Result () a)) -> StaHandler s o a -> StaHandlerCase s o a
 mkFull h yes no = StaHandlerCase h (Just yes) (Just no)
 
 -- Continuations
@@ -247,7 +248,7 @@ on continuations, a simple form of inlining optimisation.
 
 @since 1.8.0.0
 -}
-type StaCont# s o a x = Code x -> Input# o -> Code (ST s (Maybe a))
+type StaCont# s o a x = Code x -> Input# o -> Code (ST s (Result () a))
 
 {-|
 Compared with `StaCont#`, this type also bundles the static continuation
@@ -295,7 +296,7 @@ on subroutines, a simple form of inlining optimisation: useful for iteration.
 
 @since 1.8.0.0
 -}
-type StaSubroutine# s o a x = DynCont s o a x -> DynHandler s o a -> Input# o -> Code (ST s (Maybe a))
+type StaSubroutine# s o a x = DynCont s o a x -> DynHandler s o a -> Input# o -> Code (ST s (Result () a))
 
 {-|
 Packages a `StaSubroutine#` along with statically determined metadata that describes it derived from

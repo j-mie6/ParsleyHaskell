@@ -206,7 +206,7 @@ by returning @Nothing@.
 @since 1.2.0.0
 -}
 fatal :: AugmentedStaHandler s o a
-fatal = augmentHandlerSta Nothing (const [|| returnST (Failure ()) ||])
+fatal = augmentHandlerSta Nothing (const [|| returnST (Failure {-()-}) ||])
 
 {-|
 Fails by evaluating the next handler with the current input. Makes

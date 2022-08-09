@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveLift, DerivingStrategies #-}
+{-# LANGUAGE DeriveLift, DerivingStrategies, UnboxedTuples #-}
 {-# OPTIONS_GHC -Wno-partial-fields #-}
 module Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncGhosts, size, DefuncError, offset, merge, withGhosts, withReason, label, amend, entrench, isExpectedEmpty, classicExpectedError, emptyError, classicExpectedErrorWithReason, classicUnexpectedError, classicFancyError) where
 

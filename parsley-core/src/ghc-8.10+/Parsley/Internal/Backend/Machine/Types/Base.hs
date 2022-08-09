@@ -2,6 +2,7 @@
              MagicHash,
              TypeFamilies,
              UnboxedTuples #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Base
 Description : Base types representing core machine components
@@ -22,7 +23,13 @@ import Control.Monad.ST                          (ST)
 import Data.STRef                                (STRef)
 import Data.Kind                                 (Type)
 import GHC.Prim                                  (Word#)
+#ifdef FULL_WIDTH_POSITIONS
+import Language.Haskell.TH.Syntax                  (Lift(liftTyped, lift))
+#endif
 import Parsley.Internal.Backend.Machine.InputRep (Rep)
+#ifdef FULL_WIDTH_POSITIONS
+import Parsley.Internal.Backend.Machine.THUtils    (unTypeCode)
+#endif
 import Parsley.Internal.Core.Result              (Result)
 
 #include "MachDeps.h"
@@ -39,6 +46,10 @@ The type of positions within a parser. This may or may not be packed into a sing
 type Pos = Word#
 #else
 type Pos = (# Word#, Word# #)
+
+instance Lift Pos where
+  liftTyped (# line, col #) = [|| (# line, col #) ||]
+  lift pos = unTypeCode (liftTyped pos)
 #endif
 
 {-|

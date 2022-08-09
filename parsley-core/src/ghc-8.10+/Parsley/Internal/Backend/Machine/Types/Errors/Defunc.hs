@@ -1,15 +1,13 @@
-{-# LANGUAGE UnboxedTuples, DerivingStrategies, DeriveLift, RecordWildCards #-}
-{-# OPTIONS_GHC -Wno-partial-fields #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# LANGUAGE UnboxedTuples, DerivingStrategies, DeriveLift #-}
+{-# OPTIONS_GHC -Wno-partial-fields -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Unused LANGUAGE pragma" #-}
-module Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncGhosts, size, DefuncError, offset, mergeErrors, withGhosts, withReason, label, amend, entrench, isExpectedEmpty, classicExpectedError, emptyError, classicExpectedErrorWithReason, classicUnexpectedError, classicFancyError, mergeGhosts, pop, rename, addGhost) where
+module Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncGhosts, size, DefuncError, pos, offset, mergeErrors, withGhosts, withReason, label, amend, entrench, isExpectedEmpty, classicExpectedError, emptyError, classicExpectedErrorWithReason, classicUnexpectedError, classicFancyError, mergeGhosts, pop, rename, addGhost) where
 
 import Parsley.Internal.Backend.Machine.Types.Base (Pos)
 import Parsley.Internal.Backend.Machine.Types.Errors.ErrorItem (ErrorItem)
-import qualified Parsley.Internal.Backend.Machine.PosOps as Pos (lift)
 import Data.Word (Word8)
 import Data.Bits (Bits((.&.), testBit, setBit, clearBit, zeroBits))
-import Language.Haskell.TH.Syntax (Lift(liftTyped))
+import Language.Haskell.TH.Syntax (Lift)
 
 -- We still want to defunctionalise the ghosts mechanism, because it allows us to both inspect
 -- the error in-flight, as well as collapse it in an efficient way.
@@ -100,6 +98,7 @@ data DefuncError where
   WithLabel                      :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError, _label :: !String } -> DefuncError
   Amended                        :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError } -> DefuncError
   Entrenched                     :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError } -> DefuncError
+  deriving stock Lift
 
 -- Smart Constructors
 emptyError :: Int -> Pos -> DefuncError
@@ -179,19 +178,6 @@ addGhost :: DefuncGhosts -> DefuncError -> DefuncGhosts
 addGhost !ghosts !err
   | isTrivial err = AddGhost (size ghosts + 1) ghosts err
   | otherwise     = error "only trivial errors will get added to the ghosts"
-
-instance Lift DefuncError where
-  liftTyped EmptyError{..}                     = [|| EmptyError flags offset $$(Pos.lift pos) ||]
-  liftTyped ClassicExpectedError{..}           = [|| ClassicExpectedError flags offset $$(Pos.lift pos) _expected ||]
-  liftTyped ClassicExpectedErrorWithReason{..} = [|| ClassicExpectedErrorWithReason flags offset $$(Pos.lift pos) _expected _reason ||]
-  liftTyped ClassicUnexpectedError{..}         = [|| ClassicUnexpectedError flags offset $$(Pos.lift pos) _expected _unexpected ||]
-  liftTyped ClassicFancyError{..}              = [|| ClassicFancyError flags offset $$(Pos.lift pos) _msgs ||]
-  liftTyped MergedErrors{..}                   = [|| MergedErrors flags offset _err1 _err2 ||]
-  liftTyped WithGhosts{..}                     = [|| WithGhosts flags offset _err _ghosts ||]
-  liftTyped WithReason{..}                     = [|| WithReason flags offset _err _reason ||]
-  liftTyped WithLabel{..}                      = [|| WithLabel flags offset _err _label ||]
-  liftTyped Amended{..}                        = [|| Amended flags offset _err ||]
-  liftTyped Entrenched{..}                     = [|| Entrenched flags offset _err ||]
 
 instance Show DefuncError where
   show _ = "TODO"

@@ -54,6 +54,6 @@ eta = unsafeCodeCoerce . fmap checkEtaMulti . unTypeCode
 unsafeCodeCoerce :: Q Exp -> Code a
 unsafeCodeCoerce = unsafeTExpCoerce
 
-unTypeCode :: Code a -> Q Exp
+unTypeCode :: forall r (a :: TYPE r). Code a -> Q Exp
 unTypeCode = unTypeQ
 #endif

@@ -179,5 +179,5 @@ rename !ghosts !l
 
 addGhost :: DefuncGhosts -> DefuncError -> DefuncGhosts
 addGhost !ghosts !err
-  | isTrivial err = AddGhost (size ghosts) ghosts err
+  | isTrivial err = AddGhost (size ghosts + 1) ghosts err
   | otherwise     = error "only trivial errors will get added to the ghosts"

@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveLift, DerivingStrategies, UnboxedTuples #-}
+{-# LANGUAGE UnboxedTuples #-}
 {-# OPTIONS_GHC -Wno-partial-fields #-}
 module Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncGhosts, size, DefuncError, offset, merge, withGhosts, withReason, label, amend, entrench, isExpectedEmpty, classicExpectedError, emptyError, classicExpectedErrorWithReason, classicUnexpectedError, classicFancyError) where
 
@@ -21,7 +21,9 @@ data DefuncGhosts where
   ReplaceLabel :: {-# UNPACK #-} !Int -> String -> DefuncGhosts -> DefuncGhosts
   MergeGhosts :: {-# UNPACK #-} !Int -> DefuncGhosts -> DefuncGhosts -> DefuncGhosts
   AddGhost :: {-# UNPACK #-} !Int -> DefuncGhosts -> DefuncError -> DefuncGhosts
-  deriving stock (Lift{-, Eq, Show-})
+  -- Pos can be Word#, but it can be (# Word#, Word# #) and therefore cannot be used
+  -- in derivations, we'll have to do this manually!
+  {-deriving stock (Lift, Eq, Show)-}
 
 size :: DefuncGhosts -> Int
 size EmptyGhosts = 0
@@ -92,7 +94,7 @@ data DefuncError where
   WithLabel                      :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError, _label :: !String } -> DefuncError
   Amended                        :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError } -> DefuncError
   Entrenched                     :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError } -> DefuncError
-  deriving stock (Lift{-, Eq, Show-})
+  {-deriving stock (Lift, Eq, Show)-}
 
 -- Smart Constructors
 emptyError :: Int -> Pos -> DefuncError

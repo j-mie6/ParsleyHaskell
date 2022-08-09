@@ -21,7 +21,7 @@ data DefuncGhosts where
   ReplaceLabel :: {-# UNPACK #-} !Int -> String -> DefuncGhosts -> DefuncGhosts
   MergeGhosts :: {-# UNPACK #-} !Int -> DefuncGhosts -> DefuncGhosts -> DefuncGhosts
   AddGhost :: {-# UNPACK #-} !Int -> DefuncGhosts -> DefuncError -> DefuncGhosts
-  deriving stock (Lift, Eq, Show)
+  deriving stock (Lift{-, Eq, Show-})
 
 size :: DefuncGhosts -> Int
 size EmptyGhosts = 0
@@ -92,7 +92,7 @@ data DefuncError where
   WithLabel                      :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError, _label :: !String } -> DefuncError
   Amended                        :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError } -> DefuncError
   Entrenched                     :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError } -> DefuncError
-  deriving stock (Lift, Eq, Show)
+  deriving stock (Lift{-, Eq, Show-})
 
 -- Smart Constructors
 emptyError :: Int -> Pos -> DefuncError

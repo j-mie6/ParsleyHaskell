@@ -109,8 +109,12 @@ library
                        Parsley.Internal.Backend.Machine.Types.Base,
                        Parsley.Internal.Backend.Machine.Types.Context,
                        Parsley.Internal.Backend.Machine.Types.Dynamics,
+                       Parsley.Internal.Backend.Machine.Types.Errors,
                        Parsley.Internal.Backend.Machine.Types.Input,
                        Parsley.Internal.Backend.Machine.Types.Statics,
+
+                       Parsley.Internal.Backend.Machine.Types.Errors.Defunc,
+                       Parsley.Internal.Backend.Machine.Types.Errors.ErrorItem
 
                        Parsley.Internal.Backend.Machine.Types.Input.Offset,
                        Parsley.Internal.Backend.Machine.Types.Input.Pos

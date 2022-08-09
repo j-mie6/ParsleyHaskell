@@ -1,8 +1,10 @@
 {-# LANGUAGE UnboxedTuples #-}
 {-# OPTIONS_GHC -Wno-partial-fields #-}
-module Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncGhosts, size, DefuncError, offset, merge, withGhosts, withReason, label, amend, entrench, isExpectedEmpty, classicExpectedError, emptyError, classicExpectedErrorWithReason, classicUnexpectedError, classicFancyError) where
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Unused LANGUAGE pragma" #-}
+module Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncGhosts, size, DefuncError, offset, mergeErrors, withGhosts, withReason, label, amend, entrench, isExpectedEmpty, classicExpectedError, emptyError, classicExpectedErrorWithReason, classicUnexpectedError, classicFancyError, mergeGhosts, pop, rename, addGhost) where
 
-import Language.Haskell.TH.Syntax (Lift)
+--import Language.Haskell.TH.Syntax (Lift)
 import Parsley.Internal.Backend.Machine.Types.Base (Pos)
 import Parsley.Internal.Backend.Machine.Types.Errors.ErrorItem (ErrorItem)
 import Data.Word (Word8)
@@ -31,6 +33,11 @@ size (PopGhost sz _) = sz
 size (ReplaceLabel sz _ _) = sz
 size (MergeGhosts sz _ _) = sz
 size (AddGhost sz _ _) = sz
+
+isEmpty :: DefuncGhosts -> Bool
+--isEmpty = (== 0) . size
+isEmpty EmptyGhosts = True
+isEmpty _           = False
 
 type Flags = Word8
 
@@ -116,8 +123,8 @@ classicFancyError :: Int -> Pos -> [String] -> DefuncError
 classicFancyError = ClassicFancyError (_flags False True False)
 
 -- Operations
-merge :: DefuncError -> DefuncError -> DefuncError
-merge err1 err2 = case compare (offset err1) (offset err2) of
+mergeErrors :: DefuncError -> DefuncError -> DefuncError
+mergeErrors !err1 !err2 = case compare (offset err1) (offset err2) of
   GT -> err1
   LT -> err2
   EQ | trivial1 == trivial2 -> MergedErrors (_andFlags (flags err1) (flags err2)) (offset err1) err1 err2
@@ -128,26 +135,49 @@ merge err1 err2 = case compare (offset err1) (offset err2) of
     trivial2 = isTrivial err2
 
 withGhosts :: DefuncError -> DefuncGhosts -> DefuncError
-withGhosts err ghosts
-  | isTrivial err, size ghosts /= 0 = WithGhosts (_setExpectedEmpty False (flags err)) (offset err) err ghosts
+withGhosts !err !ghosts
+  | isTrivial err, not (isEmpty ghosts) = WithGhosts (_setExpectedEmpty False (flags err)) (offset err) err ghosts
   | otherwise = err
 
 withReason :: DefuncError -> String -> DefuncError
-withReason err reason
+withReason !err !reason
   | isTrivial err = WithReason (flags err) (offset err) err reason
   | otherwise = err
 
 label :: DefuncError -> String -> Int -> DefuncError
-label err l off
+label !err !l !off
   | isTrivial err, offset err == off = WithLabel (_setExpectedEmpty (null l) (flags err)) off err l
   | otherwise                        = err
 
 amend :: DefuncError -> DefuncError
-amend err
+amend !err
   | entrenched err = err
   | otherwise = Amended (flags err) (offset err) err
 
 entrench :: DefuncError -> DefuncError
-entrench err
+entrench !err
   | entrenched err = err
   | otherwise = Entrenched (_setEntrenched (flags err)) (offset err) err
+
+mergeGhosts :: DefuncGhosts -> DefuncGhosts -> DefuncGhosts
+mergeGhosts !g1 !g2
+  | isEmpty g1 = g2
+  | isEmpty g2 = g1
+  | otherwise = MergeGhosts (size g1 + size g2) g1 g2
+
+pop :: DefuncGhosts -> DefuncGhosts
+pop !ghosts
+  | sz  > 1 = PopGhost (sz - 1) ghosts
+  | otherwise = EmptyGhosts
+  where
+    !sz = size ghosts
+
+rename :: DefuncGhosts -> String -> DefuncGhosts
+rename !ghosts !l
+  | not (isEmpty ghosts) = ReplaceLabel (size ghosts) l ghosts
+  | otherwise            = ghosts
+
+addGhost :: DefuncGhosts -> DefuncError -> DefuncGhosts
+addGhost !ghosts !err
+  | isTrivial err = AddGhost (size ghosts) ghosts err
+  | otherwise     = error "only trivial errors will get added to the ghosts"

@@ -15,7 +15,7 @@ bits in a word, or if the @full-width-positions@ flag was set on the @parsley-co
 module Parsley.Internal.Backend.Machine.PosOps (
     initPos, tabWidth,
     extractLine, extractCol,
-    liftPos,
+    liftPos, lift,
     updatePos, updatePosQ,
     updatePosNewlineOnly, updatePosNewlineOnlyQ,
     shiftLineAndSetCol, shiftCol, shiftAlignAndShiftCol,
@@ -191,6 +191,8 @@ Converts a static position into a dynamic one.
 -}
 liftPos :: Word -> Word -> Code Pos
 
+lift :: Pos -> Code Pos
+
 #ifndef FULL_WIDTH_POSITIONS
 
 -- This is referred to directly in generated code, leave optimised primitives
@@ -218,6 +220,7 @@ extractLine qpos = [||I# (word2Int# ($$qpos `uncheckedShiftRL#` 32#))||]
 extractCol qpos = [||I# (word2Int# ($$qpos `and#` 0x00000000_ffffffff##))||]
 
 liftPos line col = let !(W# p) = (line `unsafeShiftL` 32) .|. col in [||p||]
+lift pos = [|| pos ||]
 
 #else
 -- This is referred to directly in generated code, leave optimised primitives
@@ -247,4 +250,5 @@ extractLine qpos = [|| case $$qpos of (# line, _ #) -> I# (word2Int# line) ||]
 extractCol qpos = [|| case $$qpos of (# _, col #) -> I# (word2Int# col) ||]
 
 liftPos (W# line) (W# col) = [||(# line, col #)||]
+lift (# line, col #) = [||(# line, col #)||]
 #endif

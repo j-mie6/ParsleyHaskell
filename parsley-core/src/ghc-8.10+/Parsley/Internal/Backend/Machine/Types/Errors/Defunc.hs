@@ -86,11 +86,17 @@ isExpectedEmpty = _isExpectedEmpty . flags
 entrenched :: DefuncError -> Bool
 entrenched = _entrenched . flags
 
+-- TODO: I think these need to changed to reflect the 6 kinds of error generated:
+--         EmptyError - from empty
+--         UnexpectedError - from unexpected
+--         FancyError - from fail
+--         EndOfInputError - from failed `more` check
+--         NotEnoughInputError - from failed input check (with n >= 2) (this has a multi-width unexpected token!)
+--         InvalidTokenError - from failed `sat` check
 data DefuncError where
   EmptyError                     :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos } -> DefuncError
   ClassicExpectedError           :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _expected :: !(Maybe ErrorItem) } -> DefuncError
-  --ClassicExpectedErrorWithReason :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _expected :: !(Maybe ErrorItem), _reason :: !String } -> DefuncError
-  ClassicUnexpectedError         :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _expected :: !(Maybe ErrorItem), _unexpected :: !ErrorItem } -> DefuncError
+  ClassicUnexpectedError         :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _unexpected :: !ErrorItem } -> DefuncError
   ClassicFancyError              :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _msgs :: ![String] } -> DefuncError
   MergedErrors                   :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err1 :: !DefuncError, _err2 :: !DefuncError } -> DefuncError
   WithGhosts                     :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err :: !DefuncError, _ghosts :: !DefuncGhosts } -> DefuncError
@@ -104,20 +110,15 @@ data DefuncError where
 emptyError :: Int -> Pos -> DefuncError
 emptyError = EmptyError (_flags True True False)
 
-classicExpectedError :: Int -> Pos -> Maybe ErrorItem -> DefuncError
-classicExpectedError !offset !pos Nothing = ClassicExpectedError (_flags True True False) offset pos Nothing
-classicExpectedError offset pos item = ClassicExpectedError (_flags True False False) offset pos item
+classicExpectedError :: Maybe ErrorItem -> Int -> Pos -> DefuncError
+classicExpectedError Nothing !offset !pos = ClassicExpectedError (_flags True True False) offset pos Nothing
+classicExpectedError item offset pos = ClassicExpectedError (_flags True False False) offset pos item
 
-{-classicExpectedErrorWithReason :: Int -> Pos -> Maybe ErrorItem -> String -> DefuncError
-classicExpectedErrorWithReason !offset !pos Nothing = ClassicExpectedErrorWithReason (_flags True True False) offset pos Nothing
-classicExpectedErrorWithReason offset pos item = ClassicExpectedErrorWithReason (_flags True False False) offset pos item-}
+classicUnexpectedError :: ErrorItem -> Int -> Pos -> DefuncError
+classicUnexpectedError !unexpected !offset !pos = ClassicUnexpectedError (_flags True True False) offset pos unexpected
 
-classicUnexpectedError :: Int -> Pos -> Maybe ErrorItem -> ErrorItem -> DefuncError
-classicUnexpectedError !offset !pos Nothing = ClassicUnexpectedError (_flags True True False) offset pos Nothing
-classicUnexpectedError offset pos item = ClassicUnexpectedError (_flags True False False) offset pos item
-
-classicFancyError :: Int -> Pos -> [String] -> DefuncError
-classicFancyError = ClassicFancyError (_flags False True False)
+classicFancyError :: [String] -> Int -> Pos -> DefuncError
+classicFancyError !msgs !offset !pos = ClassicFancyError (_flags False True False)  offset pos msgs
 
 -- Operations
 mergeErrors :: DefuncError -> DefuncError -> DefuncError

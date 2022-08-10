@@ -77,10 +77,12 @@ import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
 import Parsley.Internal.Backend.Machine.THUtils                   (eta)
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.Types.Base                (Pos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Errors              (DefuncGhosts(EmptyGhosts))
+import Parsley.Internal.Backend.Machine.Types.Errors              (DefuncGhosts(EmptyGhosts), DefuncError)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, consume, chooseInput)
+import Parsley.Internal.Backend.Machine.Types.Input.Pos           (toDynPos)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
 import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
@@ -216,8 +218,12 @@ about the state of the input (since 1.4.0.0).
 
 @since 1.0.0.0
 -}
-raise :: Γ s o err a xs (Succ n) r -> Code (ST s (Result err a))
-raise γ = let VCons h _ = handlers γ in staHandlerEval h (input γ)
+raise :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) r -> Code (ST s (Result err a))
+raise ferr γ =
+  let VCons h _ = handlers γ
+      -- TODO: Move this into the input module, because this is a bit unclean
+      _err = [|| $$ferr (I# $$(extractRawOffset (offset (off (input γ))))) $$(toDynPos (pos (input γ))) ||]
+  in staHandlerEval h (input γ)
 
 -- Handler preparation
 {-|

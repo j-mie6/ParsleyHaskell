@@ -12,7 +12,7 @@ for static augmented information, and `Input#` is a raw combination of the two c
 @since 1.8.0.0
 -}
 module Parsley.Internal.Backend.Machine.Types.Input (
-    Input(off), Input#(..),
+    Input(off, pos), Input#(..),
     mkInput, fromInput, toInput,
     consume,
     forcePos, updatePos,

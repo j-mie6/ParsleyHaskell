@@ -1,7 +1,7 @@
 {-# LANGUAGE UnboxedTuples, DerivingStrategies, DeriveLift #-}
 {-# OPTIONS_GHC -Wno-partial-fields -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Unused LANGUAGE pragma" #-}
-module Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncGhosts, size, DefuncError, pos, offset, mergeErrors, withGhosts, withReason, label, amend, entrench, isExpectedEmpty, classicExpectedError, emptyError, classicExpectedErrorWithReason, classicUnexpectedError, classicFancyError, mergeGhosts, pop, rename, addGhost) where
+module Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncGhosts(..), size, DefuncError, pos, offset, mergeErrors, withGhosts, withReason, label, amend, entrench, isExpectedEmpty, classicExpectedError, emptyError, classicUnexpectedError, classicFancyError, mergeGhosts, pop, rename, addGhost) where
 
 import Parsley.Internal.Backend.Machine.Types.Base (Pos)
 import Parsley.Internal.Backend.Machine.Types.Errors.ErrorItem (ErrorItem)
@@ -89,7 +89,7 @@ entrenched = _entrenched . flags
 data DefuncError where
   EmptyError                     :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos } -> DefuncError
   ClassicExpectedError           :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _expected :: !(Maybe ErrorItem) } -> DefuncError
-  ClassicExpectedErrorWithReason :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _expected :: !(Maybe ErrorItem), _reason :: !String } -> DefuncError
+  --ClassicExpectedErrorWithReason :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _expected :: !(Maybe ErrorItem), _reason :: !String } -> DefuncError
   ClassicUnexpectedError         :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _expected :: !(Maybe ErrorItem), _unexpected :: !ErrorItem } -> DefuncError
   ClassicFancyError              :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, pos :: !Pos, _msgs :: ![String] } -> DefuncError
   MergedErrors                   :: { flags :: {-# UNPACK #-} !Flags, offset :: {-# UNPACK #-} !Int, _err1 :: !DefuncError, _err2 :: !DefuncError } -> DefuncError
@@ -108,9 +108,9 @@ classicExpectedError :: Int -> Pos -> Maybe ErrorItem -> DefuncError
 classicExpectedError !offset !pos Nothing = ClassicExpectedError (_flags True True False) offset pos Nothing
 classicExpectedError offset pos item = ClassicExpectedError (_flags True False False) offset pos item
 
-classicExpectedErrorWithReason :: Int -> Pos -> Maybe ErrorItem -> String -> DefuncError
+{-classicExpectedErrorWithReason :: Int -> Pos -> Maybe ErrorItem -> String -> DefuncError
 classicExpectedErrorWithReason !offset !pos Nothing = ClassicExpectedErrorWithReason (_flags True True False) offset pos Nothing
-classicExpectedErrorWithReason offset pos item = ClassicExpectedErrorWithReason (_flags True False False) offset pos item
+classicExpectedErrorWithReason offset pos item = ClassicExpectedErrorWithReason (_flags True False False) offset pos item-}
 
 classicUnexpectedError :: Int -> Pos -> Maybe ErrorItem -> ErrorItem -> DefuncError
 classicUnexpectedError !offset !pos Nothing = ClassicUnexpectedError (_flags True True False) offset pos Nothing

@@ -26,7 +26,7 @@ import Control.Monad.Reader                                (ask, asks, reader, l
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps))
+import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps), PositionOps (extractGhostOffset))
 import Parsley.Internal.Backend.Machine.InputRep           (Rep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
@@ -36,6 +36,7 @@ import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machin
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
+import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts))
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix3, cata3, One, Code, Vec(..), Nat(..))
@@ -62,7 +63,9 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding))
+                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) [] [||EmptyGhosts||] [] (extractGhostOffset [||offset||]))
+                 . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String

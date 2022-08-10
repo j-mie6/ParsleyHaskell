@@ -22,13 +22,13 @@ module Parsley.Internal.Backend.Machine.Types.Base (
 import Control.Monad.ST                          (ST)
 import Data.STRef                                (STRef)
 import Data.Kind                                 (Type)
-import GHC.Prim                                  (Word#)
+import GHC.Prim                                  (Word#, Int#)
 #ifdef FULL_WIDTH_POSITIONS
-import Language.Haskell.TH.Syntax                  (Lift(liftTyped, lift))
+import Language.Haskell.TH.Syntax                (Lift(liftTyped, lift))
 #endif
 import Parsley.Internal.Backend.Machine.InputRep (Rep)
 #ifdef FULL_WIDTH_POSITIONS
-import Parsley.Internal.Backend.Machine.THUtils    (unTypeCode)
+import Parsley.Internal.Backend.Machine.THUtils  (unTypeCode)
 #endif
 import Parsley.Internal.Core.Result              (Result)
 
@@ -51,6 +51,8 @@ instance Lift Pos where
   liftTyped (# line, col #) = [|| (# line, col #) ||]
   lift pos = unTypeCode (liftTyped pos)
 #endif
+
+type GhostOffset = Int#
 
 {-|
 @Handler#@ represents the functions that handle failure within a

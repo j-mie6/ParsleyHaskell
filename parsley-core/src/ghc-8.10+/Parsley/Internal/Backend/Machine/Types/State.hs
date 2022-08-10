@@ -17,8 +17,11 @@ module Parsley.Internal.Backend.Machine.Types.State (
   ) where
 
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc)
+import Parsley.Internal.Backend.Machine.Types.Base    (GhostOffset)
+import Parsley.Internal.Backend.Machine.Types.Errors  (DefuncError, DefuncGhosts)
 import Parsley.Internal.Backend.Machine.Types.Input   (Input)
 import Parsley.Internal.Backend.Machine.Types.Statics (StaCont, AugmentedStaHandler)
+import Parsley.Internal.Common.Utils                  (Code)
 import Parsley.Internal.Common.Vec                    (Vec)
 
 {-|
@@ -41,9 +44,12 @@ of a parser in their variously statically augmented forms.
 
 @since 1.4.0.0
 -}
--- TODO: Need a hint stack, need a maybe error, need hints valid offset
-data Γ s o err a xs n r = Γ { operands :: !(OpStack xs)                            -- ^ The current values available for applicative application.
-                            , retCont  :: !(StaCont s o err a r)                   -- ^ The current return continuation when this parser is finished.
-                            , input    :: !(Input o)                               -- ^ The current offset into the input of the parser.
-                            , handlers :: !(Vec n (AugmentedStaHandler s o err a)) -- ^ The failure handlers that are used to process failure during a parser.
+data Γ s o err a xs n r = Γ { operands    :: !(OpStack xs)                            -- ^ The current values available for applicative application.
+                            , retCont     :: !(StaCont s o err a r)                   -- ^ The current return continuation when this parser is finished.
+                            , input       :: !(Input o)                               -- ^ The current offset into the input of the parser.
+                            , handlers    :: !(Vec n (AugmentedStaHandler s o err a)) -- ^ The failure handlers that are used to process failure during a parser.
+                            , errs        :: ![Code DefuncError]
+                            , ghosts      :: !(Code DefuncGhosts)
+                            , savedGhosts :: ![(Code DefuncGhosts, Code GhostOffset)]
+                            , ghostOffset :: !(Code GhostOffset)
                             }

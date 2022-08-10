@@ -79,6 +79,7 @@ import Parsley.Internal.Backend.Machine.THUtils                   (eta)
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
+import Parsley.Internal.Backend.Machine.Types.Errors              (DefuncGhosts(EmptyGhosts))
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, consume, chooseInput)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
 import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
@@ -415,7 +416,7 @@ bindIterAlways ctx μ l needed h inp u =
   bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
     bindIter# @o (fromInput inp) $ \qloop inp# ->
       let inp = toInput u inp#
-      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
+      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil) [] [||EmptyGhosts||] [] [||0#||])
                (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
 
 {-|
@@ -442,7 +443,7 @@ bindIterSame ctx μ l neededYes yes neededNo no inp u =
       in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (fromInput inp) $ \qloop inp# ->
           let off = toInput u inp#
-          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil))
+          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil) [] [||EmptyGhosts||] [] [||0#||])
                    (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
 
 {- Recursion Operations -}
@@ -464,7 +465,7 @@ buildRec :: forall rs s o err a r. RecBuilder o
 buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qh inp ->
-      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil))
+      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil) [] [||EmptyGhosts||] [] [||0#||])
             (insertSub μ (mkStaSubroutineMeta meta $ \k h inp -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) ||]) (nextUnique ctx))
 
 {- Binding Operations -}

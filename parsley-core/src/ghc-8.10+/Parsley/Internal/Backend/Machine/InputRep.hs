@@ -25,7 +25,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * @Int#@ Operations
     intSame, intLess, min#, max#,
     -- * @Offwith@ Operations
-    OffWith, offWith, offWithSame, offWithShiftRight,
+    OffWith, offWith, offWithSame, offWithShiftRight, offWithExtract,
     --OffWithStreamAnd(..),
     -- * @LazyByteString@ Operations
     UnpackedLazyByteString, emptyUnpackedLazyByteString,
@@ -181,6 +181,9 @@ offWithSame qi# qj# = [||
       (# i#, _ #) -> case $$(qj#) of
         (# j#, _ #) -> $$(intSame [||i#||] [||j#||])
   ||]
+
+offWithExtract :: Code (OffWith ts) -> Code Int#
+offWithExtract qi# = [|| case $$(qi#) of (# i#, _ #) -> i# ||]
 
 {-|
 Shifts an `OffWith` to the right, taking care to also drop tokens from the

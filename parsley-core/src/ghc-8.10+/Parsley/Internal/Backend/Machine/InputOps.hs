@@ -4,6 +4,8 @@
              MagicHash,
              TypeApplications,
              UnboxedTuples #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Redundant case" #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.InputOps
 Description : Primitive operations for working with input.
@@ -38,9 +40,9 @@ import GHC.Prim                                    (word16ToWord#, word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
-import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
+import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString, OffWith,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess,
-                                                    offsetText, offWithSame, offWithShiftRight, dropStream,
+                                                    offsetText, offWithSame, offWithExtract, offWithShiftRight, dropStream,
                                                     textShiftRight, textShiftLeft, byteStringShiftRight,
                                                     byteStringShiftLeft, max#)
 import Parsley.Internal.Common.Utils               (Code)
@@ -116,6 +118,11 @@ class PositionOps (rep :: TYPE r) where
   @since 1.0.0.0
   -}
   shiftRight :: Code rep -> Code Int# -> Code rep
+
+  {-|
+  @since 2.3.0.0
+  -}
+  extractGhostOffset :: Code rep -> Code Int#
 
 {-|
 Defines operation used for debugging operations.
@@ -254,18 +261,22 @@ shiftRightInt qo# qi# = [||$$(qo#) +# $$(qi#)||]
 instance PositionOps Int# where
   same = intSame
   shiftRight = shiftRightInt
+  extractGhostOffset = id
 
-instance PositionOps (# Int#, [Char] #) where
+instance PositionOps (OffWith [Char]) where
   same = offWithSame
-  shiftRight qo# qi# = offWithShiftRight [||drop||] qo# qi#
+  shiftRight = offWithShiftRight [||drop||]
+  extractGhostOffset = offWithExtract
 
-instance PositionOps (# Int#, Stream #) where
+instance PositionOps (OffWith Stream) where
   same = offWithSame
-  shiftRight qo# qi# = offWithShiftRight [||dropStream||] qo# qi#
+  shiftRight = offWithShiftRight [||dropStream||]
+  extractGhostOffset = offWithExtract
 
 instance PositionOps Text where
   same qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
   shiftRight qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
+  extractGhostOffset qo = [||case $$qo of Text _ (I# off) _ -> off||]
 
 instance PositionOps UnpackedLazyByteString where
   same qx# qy# = [||
@@ -274,6 +285,7 @@ instance PositionOps UnpackedLazyByteString where
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
   shiftRight qo# qi# = [||byteStringShiftRight $$(qo#) $$(qi#)||]
+  extractGhostOffset qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> i# ||]
 
 -- LogOps Instances
 instance LogOps Int# where

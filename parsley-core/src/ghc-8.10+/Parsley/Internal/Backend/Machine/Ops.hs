@@ -80,7 +80,7 @@ import Parsley.Internal.Backend.Machine.Types                     (MachineMonad,
 import Parsley.Internal.Backend.Machine.Types.Base                (Pos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Errors              (DefuncGhosts(EmptyGhosts), DefuncError)
+import Parsley.Internal.Backend.Machine.Types.Errors              (DefuncGhosts, DefuncError)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, consume, chooseInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Pos           (toDynPos)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
@@ -315,7 +315,7 @@ the entire parser.
 @since 1.2.0.0
 -}
 halt :: StaCont s o err a a
-halt = mkStaCont $ \x _ -> [||returnST (Success $$x)||]
+halt = mkStaCont $ \x _ _ -> [||returnST (Success $$x)||]
 
 {-|
 This continuation is used for binding that never return, which is
@@ -325,7 +325,7 @@ may only exit on failure, which is the case with iterating parsers.
 @since 1.2.0.0
 -}
 noreturn :: StaCont s o err a Void
-noreturn = mkStaCont $ \_ _ -> [||error "Return is not permitted here"||]
+noreturn = mkStaCont $ \_ _ _ -> [||error "Return is not permitted here"||]
 
 {-|
 Executes a given continuation (which may be a return continuation or a
@@ -334,7 +334,7 @@ join point) taking the required components from the state `Γ`.
 @since 1.2.0.0
 -}
 resume :: StaCont s o err a x -> Γ s o err a (x : xs) n r -> Code (ST s (Result err a))
-resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (fromInput (input γ))
+resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (fromInput (input γ)) (ghosts γ)
 
 {-|
 A form of @callCC@, this calls a subroutine with a given return continuation
@@ -347,9 +347,11 @@ callWithContinuation :: MarshalOps o
                      => StaSubroutine s o err a x                    -- ^ The subroutine @sub@ that will be called.
                      -> StaCont s o err a x                          -- ^ The return continuation for the subroutine.
                      -> Input o                                      -- ^ The input to feed to @sub@.
+                     -> Code DefuncGhosts
                      -> Vec (Succ n) (AugmentedStaHandler s o err a) -- ^ The stack from which to obtain the handler to pass to @sub@.
                      -> Code (ST s (Result err a))
-callWithContinuation sub ret input (VCons h _) = staSubroutine# sub (dynCont ret) (dynHandler h (failureInputCharacteristic (meta sub))) (fromInput input)
+callWithContinuation sub ret input ghosts (VCons h _) =
+  staSubroutine# sub (dynCont ret) (dynHandler h (failureInputCharacteristic (meta sub))) (fromInput input) ghosts
 
 -- Continuation preparation
 {-|
@@ -362,7 +364,7 @@ suspend :: (Γ s o err a (x : xs) n r -> Code (ST s (Result err a))) -- ^ The pa
         -> Γ s o err a xs n r                                       -- ^ The state to execute the continuation with.
         -> (Input# o -> Input o)                                    -- ^ Function used to generate the offset
         -> StaCont s o err a x
-suspend m γ off = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = off o#})
+suspend m γ off = mkStaCont $ \x o# ghosts -> m (γ {operands = Op (FREEVAR x) (operands γ), input = off o#, ghosts = ghosts})
 
 {-|
 Combines `suspend` and `callWithContinuation`, simultaneously performing
@@ -376,7 +378,7 @@ callCC :: forall s o err a xs n r x. MarshalOps o
        -> (Γ s o err a (x : xs) (Succ n) r -> Code (ST s (Result err a))) -- ^ The return continuation to generate
        -> Γ s o err a xs (Succ n) r                                       --
        -> Code (ST s (Result err a))
-callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseInput (successInputCharacteristic (meta sub)) u inp)) inp (handlers γ)
+callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseInput (successInputCharacteristic (meta sub)) u inp)) inp (ghosts γ) (handlers γ)
   where
     inp :: Input o
     inp = input γ
@@ -396,7 +398,7 @@ setupJoinPoint :: forall s o err a xs n r x. JoinBuilder o
 setupJoinPoint φ (Machine k) mx = freshUnique $ \u ->
     liftM2 (\mk ctx γ ->
       setupJoinPoint# @o
-        (\qx inp -> mk (γ {operands = Op (FREEVAR qx) (operands γ), input = toInput u inp}))
+        (\qx inp ghosts -> mk (γ {operands = Op (FREEVAR qx) (operands γ), input = toInput u inp, ghosts = ghosts}))
         (\qjoin -> run mx γ (insertΦ φ (mkStaContDyn qjoin) ctx)))
       (local voidCoins k) ask
 
@@ -416,14 +418,15 @@ bindIterAlways :: forall s o err a. RecBuilder o
                -> Bool                           -- ^ Does loop exit require a binding?
                -> StaHandlerBuilder s o err a    -- ^ What to do after the loop exits (by failing)
                -> Input o                        -- ^ The initial offset to provide to the loop
+               -> Code DefuncGhosts
                -> Word                           -- ^ The unique name for captured offset /and/ iteration offset
                -> Code (ST s (Result err a))
-bindIterAlways ctx μ l needed h inp u =
+bindIterAlways ctx μ l needed h inp ghosts u =
   bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
-    bindIter# @o (fromInput inp) $ \qloop inp# ->
+    bindIter# @o (fromInput inp) ghosts $ \qloop inp# ghosts ->
       let inp = toInput u inp#
-      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil) [] [||EmptyGhosts||] [] [||0#||])
-               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
+      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil) [] ghosts [] [||0#||])
+               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts ||]) ctx))
 
 {-|
 Similar to `bindIterAlways`, but builds a handler that performs in
@@ -440,17 +443,18 @@ bindIterSame :: forall s o err a. (RecBuilder o, HandlerOps o, PositionOps (Rep 
              -> Bool                           -- ^ Is a binding required for the differing handler?
              -> StaHandlerBuilder s o err a    -- ^ The handler when input differs.
              -> Input o                        -- ^ The initial offset of the loop.
+             -> Code DefuncGhosts
              -> Word                           -- ^ The unique name of the captured offsets /and/ the iteration offset.
              -> Code (ST s (Result err a))
-bindIterSame ctx μ l neededYes yes neededNo no inp u =
+bindIterSame ctx μ l neededYes yes neededNo no inp ghosts u =
   bindHandlerInline# @o neededYes (staHandler# yes) $ \qyes ->
     bindIterHandlerInline# neededNo (staHandler# . no . toInput u) $ \qno ->
       let handler inpc inpo err = [||if $$(same (off# inpc) (off# inpo)) then $$(staHandler# qyes inpc err) else $$(staHandler# (qno inpc) inpo err)||]
       in bindIterHandlerInline# @o True handler $ \qhandler ->
-        bindIter# @o (fromInput inp) $ \qloop inp# ->
+        bindIter# @o (fromInput inp) ghosts $ \qloop inp# ghosts ->
           let off = toInput u inp#
-          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil) [] [||EmptyGhosts||] [] [||0#||])
-                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
+          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil) [] ghosts [] [||0#||])
+                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts ||]) ctx))
 
 {- Recursion Operations -}
 {-|
@@ -470,9 +474,9 @@ buildRec :: forall rs s o err a r. RecBuilder o
          -> DynFunc rs s o err a r
 buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
-    bindRec# @o $ \qself qret qh inp ->
-      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil) [] [||EmptyGhosts||] [] [||0#||])
-            (insertSub μ (mkStaSubroutineMeta meta $ \k h inp -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) ||]) (nextUnique ctx))
+    bindRec# @o $ \qself qret qh inp ghosts ->
+      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil) [] ghosts [] [||0#||])
+            (insertSub μ (mkStaSubroutineMeta meta $ \k h inp ghosts -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) $$ghosts ||]) (nextUnique ctx))
 
 {- Binding Operations -}
 bindHandlerInline# :: forall o s err a b. HandlerOps o

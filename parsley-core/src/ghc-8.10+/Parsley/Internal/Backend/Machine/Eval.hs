@@ -109,7 +109,7 @@ evalCall :: MarshalOps o => MVar x -> Machine s o err a (x : xs) (Succ n) r -> M
 evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
 
 evalJump :: forall s o err a x n. MarshalOps o => MVar x -> MachineMonad s o err a '[] (Succ n) x
-evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input handlers
+evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input ghosts handlers
 
 evalPush :: Defunc x -> Machine s o err a (x : xs) n r -> MachineMonad s o err a xs n r
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
@@ -187,9 +187,9 @@ evalIter μ l h =
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       case h of
         Always gh (Machine h) ->
-          liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
+          liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) (ghosts γ) u2) h ask
         Same gyes (Machine yes) gno (Machine no) ->
-          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
+          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) (ghosts γ) u2) yes no ask
 
 evalJoin :: ΦVar x -> MachineMonad s o err a (x : xs) n r
 evalJoin φ = askΦ φ <&> resume

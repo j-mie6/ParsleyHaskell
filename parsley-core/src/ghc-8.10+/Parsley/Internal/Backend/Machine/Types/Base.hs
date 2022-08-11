@@ -30,7 +30,7 @@ import Parsley.Internal.Backend.Machine.InputRep (Rep)
 #ifdef FULL_WIDTH_POSITIONS
 import Parsley.Internal.Backend.Machine.THUtils  (unTypeCode)
 #endif
-import {-# SOURCE #-} Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncError{-, DefuncGhosts-})
+import {-# SOURCE #-} Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncError, DefuncGhosts)
 import Parsley.Internal.Core.Result              (Result)
 
 #include "MachDeps.h"
@@ -77,7 +77,7 @@ feed back their result @x@ back to the caller as well as the updated input.
 type Cont# s o err a x =  x              -- ^ The value to be returned to the caller
                        -> Pos            -- ^ The current position
                        -> Rep o          -- ^ The new input after the call is executed
-                       -- -> DefuncGhosts   -- ^ The ghosts carried along by departed errors
+                       -> DefuncGhosts   -- ^ The ghosts carried along by departed errors
                        -> ST s (Result err a)
 
 {-|
@@ -90,7 +90,7 @@ type Subroutine# s o err a x =  Cont# s o err a x  -- ^ What to do when this par
                              -> Handler# s o err a -- ^ How to handle failure within the call
                              -> Pos            -- ^ The current position
                              -> Rep o          -- ^ The input on entry to the call
-                             -- -> DefuncGhosts   -- ^
+                             -> DefuncGhosts   -- ^ The ghosts carried along by departed errors
                              -> ST s (Result err a)
 
 {-|

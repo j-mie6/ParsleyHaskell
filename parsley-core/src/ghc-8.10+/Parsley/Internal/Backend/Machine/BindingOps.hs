@@ -29,7 +29,7 @@ import Data.Text                                       (Text)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
 import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncError)
+import Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncError, DefuncGhosts)
 import Parsley.Internal.Backend.Machine.Types.Input    (Input#(..))
 import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#, StaSubroutine#)
 import Parsley.Internal.Common.Utils                   (Code)
@@ -92,8 +92,8 @@ class JoinBuilder o where
 instance JoinBuilder _o where                                                         \
 {                                                                                     \
   setupJoinPoint# binding k =                                                         \
-    [|| let join x (pos :: Pos) !(o# :: Rep _o) =                                     \
-              $$(binding [||x||] (Input# [||o#||] [||pos||])) in $$(k [||join||]) ||] \
+    [|| let join x (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) =            \
+              $$(binding [||x||] (Input# [||o#||] [||pos||]) [||ghosts||]) in $$(k [||join||]) ||] \
 };
 inputInstances(deriveJoinBuilder)
 
@@ -120,7 +120,8 @@ class RecBuilder o where
   @since 1.4.0.0
   -}
   bindIter# :: Input# o                                         -- ^ Initial offset for the loop.
-            -> (Code (Pos -> Rep o -> b) -> Input# o -> Code b) -- ^ The code for the loop given self-call and offset.
+            -> Code DefuncGhosts
+            -> (Code (Pos -> Rep o -> DefuncGhosts -> b) -> Input# o -> Code DefuncGhosts -> Code b) -- ^ The code for the loop given self-call and offset.
             -> Code b                                           -- ^ Code of the executing loop.
 
   {-|
@@ -138,14 +139,14 @@ instance RecBuilder _o where                                                    
       let handler (posc :: Pos) (c# :: Rep _o) (poso :: Pos) (o# :: Rep _o) (err :: DefuncError) =                       \
             $$(h (Input# [||c#||] [||posc||]) (Input# [||o#||] [||poso||]) [||err||]) in $$(k [||handler||])  \
     ||];                                                                                            \
-  bindIter# inp l = [||                                                                             \
-      let loop (pos :: Pos) !(o# :: Rep _o) = $$(l [||loop||] (Input# [||o#||] [||pos||]))          \
-      in loop $$(pos# inp) $$(off# inp)                                                             \
+  bindIter# inp ghosts l = [||                                                                             \
+      let loop (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) = $$(l [||loop||] (Input# [||o#||] [||pos||]) [||ghosts||])          \
+      in loop $$(pos# inp) $$(off# inp) $$(ghosts)                                                            \
     ||];                                                                                            \
   bindRec# binding =                                                                                \
     {- The idea here is to try and reduce the number of times registers have to be passed around -} \
-    [|| let self ret h (pos :: Pos) !(o# :: Rep _o) =                                               \
-              $$(binding [||self||] [||ret||] [||h||] (Input# [||o#||] [||pos||])) in self ||]      \
+    [|| let self ret h (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) =                                               \
+              $$(binding [||self||] [||ret||] [||h||] (Input# [||o#||] [||pos||]) [||ghosts||]) in self ||]      \
 };
 inputInstances(deriveRecBuilder)
 
@@ -176,6 +177,6 @@ class MarshalOps o where
 instance MarshalOps _o where                                                                          \
 {                                                                                                     \
   dynHandler# sh = [||\ (pos :: Pos) (o# :: Rep _o) (err :: DefuncError) -> $$(sh (Input# [||o#||] [||pos||]) [||err||]) ||];        \
-  dynCont# sk = [||\ x (pos :: Pos) (o# :: Rep _o) -> $$(sk [||x||] (Input# [||o#||] [||pos||])) ||]; \
+  dynCont# sk = [||\ x (pos :: Pos) (o# :: Rep _o) (ghosts :: DefuncGhosts) -> $$(sk [||x||] (Input# [||o#||] [||pos||]) [||ghosts||]) ||]; \
 };
 inputInstances(deriveMarshalOps)

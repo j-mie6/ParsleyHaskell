@@ -209,7 +209,7 @@ by returning @Nothing@.
 @since 1.2.0.0
 -}
 fatal :: AugmentedStaHandler s o err a
-fatal = augmentHandlerSta Nothing (const [|| returnST (Failure {-()-}) ||])
+fatal = augmentHandlerSta Nothing (\_ _err -> [|| returnST (Failure {-()-}) ||])
 
 {-|
 Fails by evaluating the next handler with the current input. Makes
@@ -222,8 +222,8 @@ raise :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a
 raise ferr γ =
   let VCons h _ = handlers γ
       -- TODO: Move this into the input module, because this is a bit unclean
-      _err = [|| $$ferr (I# $$(extractRawOffset (offset (off (input γ))))) $$(toDynPos (pos (input γ))) ||]
-  in staHandlerEval h (input γ)
+      err = [|| $$ferr (I# $$(extractRawOffset (offset (off (input γ))))) $$(toDynPos (pos (input γ))) ||]
+  in staHandlerEval h (input γ) err
 
 -- Handler preparation
 {-|
@@ -238,7 +238,7 @@ buildHandler :: Γ s o err a xs n r                                       -- ^ S
              -> (Γ s o err a (o : xs) n r -> Code (ST s (Result err a))) -- ^ Partial parser accepting the modified state.
              -> Word                                                     -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o err a
-buildHandler γ h u c = fromStaHandler# $ \inp -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp})
+buildHandler γ h u c = fromStaHandler# $ \inp _err -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp})
 
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
@@ -250,7 +250,7 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 buildYesHandler :: Γ s o err a xs n r
                 -> (Γ s o err a xs n r -> Code (ST s (Result err a)))
                 -> StaYesHandler s o err a
-buildYesHandler γ h inp = h (γ {input = inp})
+buildYesHandler γ h inp _err = h (γ {input = inp})
 
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
@@ -301,7 +301,7 @@ bindSameHandler :: forall s o err a xs n r b. (HandlerOps o, PositionOps (Rep o)
 bindSameHandler γ yesNeeded yes noNeeded no k =
   bindYesInline# yesNeeded (yes (input γ)) $ \qyes ->
     bindHandlerInline# noNeeded (staHandler# (no (input γ))) $ \qno ->
-      let handler inp = [||if $$(same (offset (off (input γ))) (off# inp)) then $$qyes else $$(staHandler# qno inp)||]
+      let handler inp err = [||if $$(same (offset (off (input γ))) (off# inp)) then $$(qyes err) else $$(staHandler# qno inp err)||]
       in bindHandlerInline# @o True handler $ \qhandler ->
           k (γ {handlers = VCons (augmentHandlerFull (input γ) qhandler qyes qno) (handlers γ)})
 
@@ -445,7 +445,7 @@ bindIterSame :: forall s o err a. (RecBuilder o, HandlerOps o, PositionOps (Rep 
 bindIterSame ctx μ l neededYes yes neededNo no inp u =
   bindHandlerInline# @o neededYes (staHandler# yes) $ \qyes ->
     bindIterHandlerInline# neededNo (staHandler# . no . toInput u) $ \qno ->
-      let handler inpc inpo = [||if $$(same (off# inpc) (off# inpo)) then $$(staHandler# qyes inpc) else $$(staHandler# (qno inpc) inpo)||]
+      let handler inpc inpo err = [||if $$(same (off# inpc) (off# inpo)) then $$(staHandler# qyes inpc err) else $$(staHandler# (qno inpc) inpo err)||]
       in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (fromInput inp) $ \qloop inp# ->
           let off = toInput u inp#
@@ -483,8 +483,8 @@ bindHandlerInline# :: forall o s err a b. HandlerOps o
 bindHandlerInline# True  h k = bindHandler# @o h (k . fromDynHandler)
 bindHandlerInline# False h k = k (fromStaHandler# h)
 
-bindYesInline# :: Bool -> Code a -> (Code a -> Code b) -> Code b
-bindYesInline# True  v k = [|| let yesSame = $$v in $$(k [||yesSame||]) ||]
+bindYesInline# :: Bool -> (Code DefuncError -> Code a) -> ((Code DefuncError -> Code a) -> Code b) -> Code b
+bindYesInline# True  v k = [|| let yesSame err = $$(v [||err||]) in $$(k (\err -> [||yesSame $$err||])) ||]
 bindYesInline# False v k = k v
 
 bindIterHandlerInline# :: forall o s err a b. RecBuilder o
@@ -518,7 +518,7 @@ dynCont :: forall s o err a x. MarshalOps o => StaCont s o err a x -> DynCont s 
 dynCont (StaCont sk Nothing)  = eta (dynCont# @o sk)
 dynCont (StaCont _ (Just dk)) = dk
 
-{- Log Operations =-}
+{- Log Operations -}
 {-|
 The specialised handler for the @debug@ combinator. It will fail again after
 having printed the debug information.
@@ -526,8 +526,8 @@ having printed the debug information.
 @since 1.2.0.0
 -}
 logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o err a -> Γ s o err a xs (Succ n) r -> Word -> StaHandlerBuilder s o err a
-logHandler name ctx γ u _ = let VCons h _ = handlers γ in fromStaHandler# $ \inp# -> let inp = toInput u inp# in [||
-    trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h inp)
+logHandler name ctx γ u _ = let VCons h _ = handlers γ in fromStaHandler# $ \inp# err -> let inp = toInput u inp# in [||
+    trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h inp err)
   ||]
 
 {-|
@@ -594,4 +594,4 @@ A "yes-handler" that has not yet captured its offset
 
 @since 2.1.0.0
 -}
-type StaYesHandler s o err a = Input o -> Code (ST s (Result err a))
+type StaYesHandler s o err a = Input o -> Code DefuncError -> Code (ST s (Result err a))

@@ -52,6 +52,7 @@ import Data.Kind                                                  (Type)
 import Data.Maybe                                                 (fromMaybe)
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata, newMeta)
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc)
+import Parsley.Internal.Backend.Machine.Types.Errors.Defunc       (DefuncError{-, DefuncGhosts-})
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), fromInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
@@ -66,10 +67,10 @@ on handlers, a simple form of inlining optimisation.
 
 @since 1.8.0.0
 -}
-type StaHandler# s o err a = Input# o -> Code (ST s (Result err a))
+type StaHandler# s o err a = Input# o -> Code DefuncError -> Code (ST s (Result err a))
 
 mkStaHandler# :: forall o s err a. DynHandler s o err a -> StaHandler# s o err a
-mkStaHandler# dh inp = [||$$dh $$(pos# inp) $$(off# inp)||]
+mkStaHandler# dh inp err = [||$$dh $$(pos# inp) $$(off# inp) $$err||]
 
 {-|
 Encapsulates a static handler with its possible dynamic origin for costless conversion.
@@ -159,7 +160,7 @@ a handler to its argument.
 -}
 augmentHandlerFull :: Input o                       -- ^ The offset captured by the creation of the handler.
                    -> StaHandler s o err a          -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
-                   -> Code (ST s (Result err a))    -- ^ The code that is executed when the captured offset matches the input.
+                   -> (Code DefuncError -> Code (ST s (Result err a)))    -- ^ The code that is executed when the captured offset matches the input.
                    -> StaHandler s o err a          -- ^ The handler to be executed when offsets are known not to match.
                    -> AugmentedStaHandler s o err a -- ^ A handler that carries this information around for later refinement.
 augmentHandlerFull c handler yes no = AugmentedStaHandler (Just (off c))
@@ -182,7 +183,7 @@ which can be used to refine the outcome of the execution of the handler as follo
 
 @since 1.7.0.0
 -}
-staHandlerEval :: AugmentedStaHandler s o err a -> Input o -> Code (ST s (Result err a))
+staHandlerEval :: AugmentedStaHandler s o err a -> Input o -> Code DefuncError -> Code (ST s (Result err a))
 staHandlerEval (AugmentedStaHandler (Just c) sh) inp
   | Just True <- same c (off inp)             = maybe (staHandler# (unknown sh)) const (yesSame sh) (fromInput inp)
   | Just False <- same c (off inp)            = staHandler# (fromMaybe (unknown sh) (notSame sh)) (fromInput inp)
@@ -229,7 +230,7 @@ data StaHandlerCase s (o :: Type) err a = StaHandlerCase {
   -- | The static function representing this handler when offsets are incomparable.
   unknown :: StaHandler s o err a,
   -- | The static value representing this handler when offsets are known to match, if available.
-  yesSame :: Maybe (Code (ST s (Result err a))),
+  yesSame :: Maybe (Code DefuncError -> Code (ST s (Result err a))),
   -- | The static function representing this handler when offsets are known not to match, if available.
   notSame :: Maybe (StaHandler s o err a)
 }
@@ -237,7 +238,7 @@ data StaHandlerCase s (o :: Type) err a = StaHandlerCase {
 mkUnknown :: StaHandler s o err a -> StaHandlerCase s o err a
 mkUnknown h = StaHandlerCase h Nothing Nothing
 
-mkFull :: StaHandler s o err a -> Code (ST s (Result err a)) -> StaHandler s o err a -> StaHandlerCase s o err a
+mkFull :: StaHandler s o err a -> (Code DefuncError -> Code (ST s (Result err a))) -> StaHandler s o err a -> StaHandlerCase s o err a
 mkFull h yes no = StaHandlerCase h (Just yes) (Just no)
 
 -- Continuations

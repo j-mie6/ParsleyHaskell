@@ -29,6 +29,7 @@ import Data.Text                                       (Text)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
 import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler)
+import Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncError)
 import Parsley.Internal.Backend.Machine.Types.Input    (Input#(..))
 import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#, StaSubroutine#)
 import Parsley.Internal.Common.Utils                   (Code)
@@ -65,8 +66,8 @@ class HandlerOps o where
 instance HandlerOps _o where                  \
 {                                             \
   bindHandler# h k = [||                      \
-    let handler (pos :: Pos) (o# :: Rep _o) = \
-          $$(h (Input# [||o#||] [||pos||]))   \
+    let handler (pos :: Pos) (o# :: Rep _o) (err :: DefuncError) = \
+          $$(h (Input# [||o#||] [||pos||]) [||err||])   \
     in $$(k [||handler||])                    \
   ||];                                        \
 };
@@ -134,8 +135,8 @@ class RecBuilder o where
 instance RecBuilder _o where                                                                        \
 {                                                                                                   \
   bindIterHandler# h k = [||                                                                        \
-      let handler (posc :: Pos) (c# :: Rep _o) (poso :: Pos) (o# :: Rep _o) =                       \
-            $$(h (Input# [||c#||] [||posc||]) (Input# [||o#||] [||poso||])) in $$(k [||handler||])  \
+      let handler (posc :: Pos) (c# :: Rep _o) (poso :: Pos) (o# :: Rep _o) (err :: DefuncError) =                       \
+            $$(h (Input# [||c#||] [||posc||]) (Input# [||o#||] [||poso||]) [||err||]) in $$(k [||handler||])  \
     ||];                                                                                            \
   bindIter# inp l = [||                                                                             \
       let loop (pos :: Pos) !(o# :: Rep _o) = $$(l [||loop||] (Input# [||o#||] [||pos||]))          \
@@ -174,7 +175,7 @@ class MarshalOps o where
 #define deriveMarshalOps(_o)                                                                          \
 instance MarshalOps _o where                                                                          \
 {                                                                                                     \
-  dynHandler# sh = [||\ (pos :: Pos) (o# :: Rep _o) -> $$(sh (Input# [||o#||] [||pos||])) ||];        \
+  dynHandler# sh = [||\ (pos :: Pos) (o# :: Rep _o) (err :: DefuncError) -> $$(sh (Input# [||o#||] [||pos||]) [||err||]) ||];        \
   dynCont# sk = [||\ x (pos :: Pos) (o# :: Rep _o) -> $$(sk [||x||] (Input# [||o#||] [||pos||])) ||]; \
 };
 inputInstances(deriveMarshalOps)

@@ -222,7 +222,7 @@ raise :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a
 raise ferr γ =
   let VCons h _ = handlers γ
       -- TODO: Move this into the input module, because this is a bit unclean
-      err = [|| $$ferr (I# $$(extractRawOffset (offset (off (input γ))))) $$(toDynPos (pos (input γ))) ||]
+      err = [|| $$ferr $$(extractRawOffset (offset (off (input γ)))) $$(toDynPos (pos (input γ))) ||]
   in staHandlerEval h (input γ) err
 
 -- Handler preparation
@@ -238,7 +238,7 @@ buildHandler :: Γ s o err a xs n r                                       -- ^ S
              -> (Γ s o err a (o : xs) n r -> Code (ST s (Result err a))) -- ^ Partial parser accepting the modified state.
              -> Word                                                     -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o err a
-buildHandler γ h u c = fromStaHandler# $ \inp _err -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp})
+buildHandler γ h u c = fromStaHandler# $ \inp err -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp, errs = err : errs γ})
 
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
@@ -250,7 +250,7 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 buildYesHandler :: Γ s o err a xs n r
                 -> (Γ s o err a xs n r -> Code (ST s (Result err a)))
                 -> StaYesHandler s o err a
-buildYesHandler γ h inp _err = h (γ {input = inp})
+buildYesHandler γ h inp err = h (γ {input = inp, errs = err : errs γ})
 
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
@@ -425,7 +425,7 @@ bindIterAlways ctx μ l needed h inp ghosts u =
   bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
     bindIter# @o (fromInput inp) ghosts $ \qloop inp# ghosts ->
       let inp = toInput u inp#
-      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil) [] ghosts [] [||0#||])
+      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil) [] ghosts [])
                (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts ||]) ctx))
 
 {-|
@@ -453,7 +453,7 @@ bindIterSame ctx μ l neededYes yes neededNo no inp ghosts u =
       in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (fromInput inp) ghosts $ \qloop inp# ghosts ->
           let off = toInput u inp#
-          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil) [] ghosts [] [||0#||])
+          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil) [] ghosts [])
                    (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts ||]) ctx))
 
 {- Recursion Operations -}
@@ -475,7 +475,7 @@ buildRec :: forall rs s o err a r. RecBuilder o
 buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qh inp ghosts ->
-      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil) [] ghosts [] [||0#||])
+      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil) [] ghosts [])
             (insertSub μ (mkStaSubroutineMeta meta $ \k h inp ghosts -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) $$ghosts ||]) (nextUnique ctx))
 
 {- Binding Operations -}

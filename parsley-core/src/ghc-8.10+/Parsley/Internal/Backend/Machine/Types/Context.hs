@@ -29,6 +29,9 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- $join-doc
     insertΦ, askΦ,
 
+    -- * Ghost Ref
+    ghostOffsetRef,
+
     -- * Registers
     -- $reg-doc
 
@@ -61,6 +64,7 @@ import Control.Exception                               (Exception, throw)
 import Control.Monad                                   (liftM2, (<=<))
 import Control.Monad.Reader                            (asks, local, MonadReader)
 import Data.STRef                                      (STRef)
+import Data.STRef.Unboxed                              (STRefU)
 import Data.Dependent.Map                              (DMap)
 import Data.Maybe                                      (fromMaybe)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
@@ -93,6 +97,7 @@ data Ctx s o err a = Ctx { μs         :: !(DMap MVar (QSubroutine s o err a))  
                          , offsetUniq :: {-# UNPACK #-} !Word                          -- ^ Next unique offset identifier.
                          , piggies    :: !(Queue Coins)                                -- ^ Queue of future length check credit.
                          , knownChars :: !(RewindQueue (Code Char, CharPred, Input o)) -- ^ Characters that can be reclaimed on backtrack.
+                         , ghostOffsetRef :: !(Code (STRefU s Int))
                          }
 
 {-|
@@ -109,8 +114,8 @@ bindings: information about their required free-registers is included.
 
 @since 1.0.0.0
 -}
-emptyCtx :: DMap MVar (QSubroutine s o err a) -> Ctx s o err a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty Queue.empty
+emptyCtx :: Code (STRefU s Int) -> DMap MVar (QSubroutine s o err a) -> Ctx s o err a
+emptyCtx ghostRef μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty Queue.empty ghostRef
 
 -- Subroutines
 {- $sub-doc

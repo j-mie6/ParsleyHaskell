@@ -20,6 +20,7 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 
 import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
+import Data.STRef.Unboxed                                  (newSTRefU)
 import Data.Void                                           (Void)
 import Control.Monad                                       (forM, liftM2, liftM3, when)
 import Control.Monad.Reader                                (ask, asks, reader, local)
@@ -59,13 +60,14 @@ eval :: (Trace, Ops o)
      -> Code (Result err a)           -- ^ The code for this parser.
 eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(# next, more, offset #) = $$input
+     ghostOffsetRef <- newSTRefU $$(extractRawOffset [||offset||])
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
-             (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
+             (\μ exp rs names -> buildRec μ rs (emptyCtx [||ghostOffsetRef||] names) (readyMachine exp))
              (run (readyMachine (body binding))
-                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) [] [||EmptyGhosts||] [] (extractRawOffset [||offset||]))
-                 . nextUnique . emptyCtx))
+                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) [] [||EmptyGhosts||] [])
+                 . nextUnique . emptyCtx [||ghostOffsetRef||]))
   ||]
   where
     nameLet :: MVar x -> String

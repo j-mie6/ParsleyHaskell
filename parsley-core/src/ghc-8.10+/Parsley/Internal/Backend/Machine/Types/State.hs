@@ -51,5 +51,5 @@ data Γ s o err a xs n r = Γ { operands    :: !(OpStack xs)                    
                             , errs        :: ![Code DefuncError]
                             , ghosts      :: !(Code DefuncGhosts)
                             , savedGhosts :: ![(Code DefuncGhosts, Code GhostOffset)]
-                            , ghostOffset :: !(Code GhostOffset)
+                            --, ghostOffset :: !(Code GhostOffset)
                             }

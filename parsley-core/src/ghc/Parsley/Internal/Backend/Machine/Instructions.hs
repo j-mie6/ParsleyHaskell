@@ -87,10 +87,6 @@ data Instr (o :: Type)                          -- The FIXED input type
 
   @since 1.0.0.0 -}
   Jump      :: MVar x {- ^ The binding to jump to. -} -> Instr o k '[] (Succ n) x
-  {-| Fails unconditionally.
-
-  @since 1.0.0.0 -}
-  Empt      :: Instr o k xs (Succ n) r {- ^ -}
   {-| Discards a failure handler, so that it is no longer in scope.
 
   @since 1.0.0.0 -}
@@ -172,6 +168,18 @@ data Instr (o :: Type)                          -- The FIXED input type
             -> k xs n r
             -> Instr o k (x : xs) n r
   SelectPos :: PosSelector -> k (Int : xs) n r -> Instr o k xs n r
+
+  -- Error Instructions
+  {-| Fails unconditionally.
+
+  @since 1.0.0.0 -}
+  Empt      :: Instr o k xs (Succ n) r {- ^ -}
+
+  --Fail      :: ErrorMsg -> Instr o k xs (Succ n) r -- this will replace Empt
+  -- These should only be used in Handlers, how to enforce?
+  Raise     :: Instr o k xs (Succ n) r
+  MergeErrorsAndRaise :: Instr o k xs (Succ n) r
+
   {-| Begins a debugging scope, the inner scope requires /two/ handlers,
       the first is the log handler itself, and then the second is the
       "real" fail handler for when the log handler is executed.
@@ -385,7 +393,6 @@ instance IFunctor3 (Instr o) where
   imap3 f (Sat g k)           = Sat g (f k)
   imap3 f (Call μ k)          = Call μ (f k)
   imap3 _ (Jump μ)            = Jump μ
-  imap3 _ Empt                = Empt
   imap3 f (Commit k)          = Commit (f k)
   imap3 f (Catch p h)         = Catch (f p) (imap3 f h)
   imap3 f (Tell k)            = Tell (f k)
@@ -400,6 +407,9 @@ instance IFunctor3 (Instr o) where
   imap3 f (Make σ a k)        = Make σ a (f k)
   imap3 f (Get σ a k)         = Get σ a (f k)
   imap3 f (Put σ a k)         = Put σ a (f k)
+  imap3 _ Empt                = Empt
+  imap3 _ Raise               = Raise
+  imap3 _ MergeErrorsAndRaise = MergeErrorsAndRaise
   imap3 f (SelectPos sel k)   = SelectPos sel (f k)
   imap3 f (LogEnter name k)   = LogEnter name (f k)
   imap3 f (LogExit name k)    = LogExit name (f k)
@@ -420,7 +430,6 @@ instance Show (Fix3 (Instr o) xs n r) where
       alg (Pop k)                  = "(Pop " . getConst3 k . ")"
       alg (Lift2 f k)              = "(Lift2 " . shows f . " " . getConst3 k . ")"
       alg (Sat f k)                = "(Sat " . shows f . " " . getConst3 k . ")"
-      alg Empt                     = "Empt"
       alg (Commit k)               = "(Commit " . getConst3 k . ")"
       alg (Catch p h)              = "(Catch " . getConst3 p . " " . shows h . ")"
       alg (Tell k)                 = "(Tell " . getConst3 k . ")"
@@ -437,6 +446,9 @@ instance Show (Fix3 (Instr o) xs n r) where
       alg (Put σ a k)              = "(Put " . shows σ . " " . shows a . " " . getConst3 k . ")"
       alg (SelectPos Line k)       = "(Line " . getConst3 k . ")"
       alg (SelectPos Col k)        = "(Col " . getConst3 k . ")"
+      alg Empt                     = "Empt"
+      alg Raise                    = "Raise"
+      alg MergeErrorsAndRaise      = "(MergeErrors Raise)"
       alg (LogEnter _ k)           = getConst3 k
       alg (LogExit _ k)            = getConst3 k
       alg (MetaInstr BlockCoins k) = getConst3 k

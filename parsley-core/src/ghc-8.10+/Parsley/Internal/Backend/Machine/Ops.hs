@@ -32,7 +32,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     newΣ, writeΣ, readΣ,
     -- ** Handler Operations
     -- *** Basic handlers and operations
-    fatal, raise,
+    fatal, raise, makeErr, raiseWith,
     -- *** Handler preparation
     buildHandler, buildYesHandler, buildIterYesHandler,
     -- *** Handler binding
@@ -218,12 +218,19 @@ about the state of the input (since 1.4.0.0).
 
 @since 1.0.0.0
 -}
-raise :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) r -> Code (ST s (Result err a))
-raise ferr γ =
+makeErr :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) r -> Code DefuncError
+-- TODO: Move this into the input module, because this is a bit unclean
+makeErr ferr γ = [|| $$ferr $$(extractRawOffset (offset (off (input γ)))) $$(toDynPos (pos (input γ))) ||]
+
+raise :: Γ s o err a xs (Succ n) r -> Code (ST s (Result err a))
+raise γ =
   let VCons h _ = handlers γ
       -- TODO: Move this into the input module, because this is a bit unclean
-      err = [|| $$ferr $$(extractRawOffset (offset (off (input γ)))) $$(toDynPos (pos (input γ))) ||]
+      err : _ = errs γ
   in staHandlerEval h (input γ) err
+
+raiseWith :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) r -> Code (ST s (Result err a))
+raiseWith ferr γ = raise (γ {errs = makeErr ferr γ : errs γ} )
 
 -- Handler preparation
 {-|

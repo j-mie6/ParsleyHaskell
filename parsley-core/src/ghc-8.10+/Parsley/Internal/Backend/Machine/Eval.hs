@@ -37,7 +37,7 @@ import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machin
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts), emptyError)
+import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts), emptyError, mergeErrors)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix3, cata3, One, Code, Vec(..), Nat(..))
@@ -84,7 +84,6 @@ readyMachine = cata3 (Machine . alg)
     alg (Pop k)             = evalPop k
     alg (Lift2 f k)         = evalLift2 f k
     alg (Sat p k)           = evalSat p k
-    alg Empt                = evalEmpt
     alg (Commit k)          = evalCommit k
     alg (Catch k h)         = evalCatch k h
     alg (Tell k)            = evalTell k
@@ -99,6 +98,9 @@ readyMachine = cata3 (Machine . alg)
     alg (Make σ c k)        = evalMake σ c k
     alg (Get σ c k)         = evalGet σ c k
     alg (Put σ c k)         = evalPut σ c k
+    alg Empt                = evalEmpt
+    alg Raise               = evalRaise
+    alg MergeErrorsAndRaise = evalMergeErrorsAndRaise
     alg (SelectPos sel k)   = evalSelectPos sel k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
@@ -138,27 +140,26 @@ evalSat p k@(Machine k') = do
       readChar ctx p (fetch (input γ)) $ \c staOldPred staPosPred input' ctx' ->
         let staPredC' = optimisePredGiven p staOldPred
         in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos input' c staPosPred) ctx')
-                                                (raise {- TODO: -} [||emptyError||] γ)
+                                                (raiseWith {- TODO: -} [||emptyError||] γ)
 
     emitCheckAndFetch :: Int -> Machine s o err a (Char : xs) (Succ n) r -> MachineMonad s o err a xs (Succ n) r
     emitCheckAndFetch n mk = do
       sat <- satFetch mk
-      return $ \γ -> emitLengthCheck n (sat γ) (raise {- TODO: -} [||emptyError||] γ) (off (input γ))
+      return $ \γ -> emitLengthCheck n (sat γ) (raiseWith {- TODO: -} [||emptyError||] γ) (off (input γ))
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
-
-evalEmpt :: PositionOps (Rep o) => MachineMonad s o err a xs (Succ n) r
-evalEmpt = return $! raise [||emptyError||]
 
 evalCommit :: Machine s o err a xs n r -> MachineMonad s o err a xs (Succ n) r
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
 evalCatch :: (PositionOps (Rep o), HandlerOps o) => Machine s o err a xs (Succ n) r -> Handler o (Machine s o err a) (o : xs) n r -> MachineMonad s o err a xs n r
-evalCatch (Machine k) h = freshUnique $ \u -> case h of
-  Always gh (Machine h) ->
-    liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
-  Same gyes (Machine yes) gno (Machine no) ->
-    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes{- u-}) gno (buildHandler γ mno u) mk) k yes no
+evalCatch k = freshUnique . evalHandler k
+
+evalHandler :: (PositionOps (Rep o), HandlerOps o) => Machine s o err a xs (Succ n) r -> Handler o (Machine s o err a) (o : xs) n r -> Word -> MachineMonad s o err a xs n r
+evalHandler (Machine k) (Always gh (Machine h)) u =
+  liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
+evalHandler (Machine k) (Same gyes (Machine yes) gno (Machine no)) u =
+  liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes) gno (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o err a (o : xs) n r -> MachineMonad s o err a xs n r
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ)) (operands γ)})
@@ -224,6 +225,18 @@ evalSelectPos :: PosSelector -> Machine s o err a (Int : xs) n r -> MachineMonad
 evalSelectPos sel (Machine k) = k <&> \m γ -> forcePos (input γ) sel $ \component input' ->
   m (γ {operands = Op (FREEVAR component) (operands γ), input = input'})
 
+evalEmpt :: PositionOps (Rep o) => MachineMonad s o err a xs (Succ n) r
+evalEmpt = return $! raiseWith [||emptyError||]
+
+evalRaise :: MachineMonad s o err a xs (Succ n) r
+evalRaise = return $! raise
+
+evalMergeErrorsAndRaise :: MachineMonad s o err a xs (Succ n) r
+evalMergeErrorsAndRaise = return $ \γ ->
+  let err2:err1:_ = errs γ
+  in raise (γ {errs = [||mergeErrors $$err1 $$err2||] : errs γ})
+
+-- TODO: This could be made more consistent with a top-level debug level register
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
              => String -> Machine s o err a xs (Succ (Succ n)) r -> MachineMonad s o err a xs (Succ n) r
 evalLogEnter name (Machine mk) = freshUnique $ \u ->
@@ -242,13 +255,13 @@ evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Ma
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise [||emptyError||] γ) (off (input γ))
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raiseWith [||emptyError||] γ) (off (input γ))
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
   -- If there are enough coins left to cover the cost, no length check is required
   -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
-  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise [||emptyError||] γ) (off (input γ)))
+  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raiseWith [||emptyError||] γ) (off (input γ)))
          (asks (canAfford (willConsume coins)))
          k
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
@@ -257,7 +270,7 @@ evalMeta (PrefetchChar check) k =
      when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
      mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
   where
-    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise [||emptyError||] γ) (off (input γ))
+    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raiseWith [||emptyError||] γ) (off (input γ))
     mkCheck False k = k
     prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
 evalMeta BlockCoins (Machine k) = k

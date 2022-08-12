@@ -69,10 +69,13 @@ pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 -- it would be nice to generate `yesSame` handler bindings for Try, perhaps a special flag?
 -- relevancy analysis might help too I guess, for a more general one?
 rollbackHandler :: Handler o (Fix3 (Instr o)) (o : xs) (Succ n) r
-rollbackHandler = Always False (In3 (Seek (In3 Empt)))
+rollbackHandler = Always False (In3 (Seek (In3 Raise)))
+
+mergeErrors :: Handler o (Fix3 (Instr o)) (o : xs) (Succ n) r
+mergeErrors = Always False (In3 MergeErrorsAndRaise)
 
 parsecHandler :: Fix3 (Instr o) xs (Succ n) r -> Handler o (Fix3 (Instr o)) (o : xs) (Succ n) r
-parsecHandler k = Same (not (shouldInline k)) k False (In3 Empt)
+parsecHandler k = Same (not (shouldInline k)) k False (In3 Raise)
 
 recoverHandler :: Fix3 (Instr o) xs n r -> Handler o (Fix3 (Instr o)) (o : xs) n r
 recoverHandler = Always . not . shouldInline <*> In3 . Seek
@@ -84,7 +87,7 @@ altNoCutCompile :: Trace => CodeGen o y -> CodeGen o x
 altNoCutCompile p q handler post m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (post φ)))
-     qc <- freshΦ (runCodeGen q φ)
+     qc <- In3 . flip Catch mergeErrors <$> freshΦ (runCodeGen q (In3 (Commit φ)))
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
      let dp = np `minus` minCoins np nq

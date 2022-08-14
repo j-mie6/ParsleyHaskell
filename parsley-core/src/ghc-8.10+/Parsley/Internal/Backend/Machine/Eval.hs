@@ -66,7 +66,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx [||ghostOffsetRef||] names) (readyMachine exp))
              (run (readyMachine (body binding))
-                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) [] [||EmptyGhosts||] [])
+                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) VNil [||EmptyGhosts||] [])
                  . nextUnique . emptyCtx [||ghostOffsetRef||]))
   ||]
   where
@@ -184,7 +184,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go _ _      _        def γ = def γ
 
 evalIter :: (RecBuilder o, PositionOps (Rep o), HandlerOps o)
-         => MVar Void -> Machine s o err a '[] One Zero Void -> Handler o (Machine s o err a) (o : xs) n m r
+         => MVar Void -> Machine s o err a '[] One Zero Void -> Handler o (Machine s o err a) (o : xs) n (Succ m) r
          -> MachineMonad s o err a xs n m r
 evalIter μ l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
@@ -234,11 +234,11 @@ evalRaise = return $! raise
 
 evalMergeErrorsAndRaise :: MachineMonad s o err a xs (Succ n) (Succ (Succ m)) r
 evalMergeErrorsAndRaise = return $ \γ ->
-  let err2:err1:_ = errs γ
-  in raise (γ {errs = [||mergeErrors $$err1 $$err2||] : errs γ})
+  let VCons err2 (VCons err1 _) = errs γ
+  in raise (γ {errs = VCons [||mergeErrors $$err1 $$err2||] (errs γ)})
 
 evalPopError :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
-evalPopError (Machine k) = k <&> \mk γ -> let _:es = errs γ in mk (γ {errs = es})
+evalPopError (Machine k) = k <&> \mk γ -> let VCons _ es = errs γ in mk (γ {errs = es})
 
 -- TODO: This could be made more consistent with a top-level debug level register
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)

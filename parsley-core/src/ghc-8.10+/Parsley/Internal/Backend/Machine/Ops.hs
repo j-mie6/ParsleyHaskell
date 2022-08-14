@@ -218,19 +218,19 @@ about the state of the input (since 1.4.0.0).
 
 @since 1.0.0.0
 -}
-makeErr :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) r -> Code DefuncError
+makeErr :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs n m r -> Code DefuncError
 -- TODO: Move this into the input module, because this is a bit unclean
 makeErr ferr γ = [|| $$ferr $$(extractRawOffset (offset (off (input γ)))) $$(toDynPos (pos (input γ))) ||]
 
-raise :: Γ s o err a xs (Succ n) r -> Code (ST s (Result err a))
+raise :: Γ s o err a xs (Succ n) (Succ m) r -> Code (ST s (Result err a))
 raise γ =
   let VCons h _ = handlers γ
       -- TODO: Move this into the input module, because this is a bit unclean
-      err : _ = errs γ
+      VCons err _ = errs γ
   in staHandlerEval h (input γ) err
 
-raiseWith :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) r -> Code (ST s (Result err a))
-raiseWith ferr γ = raise (γ {errs = makeErr ferr γ : errs γ} )
+raiseWith :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) m r -> Code (ST s (Result err a))
+raiseWith ferr γ = raise (γ {errs = VCons (makeErr ferr γ) (errs γ)} )
 
 -- Handler preparation
 {-|
@@ -241,11 +241,11 @@ which takes the captured offset as the first argument.
 
 @since 1.2.0.0
 -}
-buildHandler :: Γ s o err a xs n r                                       -- ^ State to execute the handler with.
-             -> (Γ s o err a (o : xs) n r -> Code (ST s (Result err a))) -- ^ Partial parser accepting the modified state.
-             -> Word                                                     -- ^ The unique identifier for the offset on failure.
+buildHandler :: Γ s o err a xs n m r                                       -- ^ State to execute the handler with.
+             -> (Γ s o err a (o : xs) n (Succ m) r -> Code (ST s (Result err a))) -- ^ Partial parser accepting the modified state.
+             -> Word                                                       -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o err a
-buildHandler γ h u c = fromStaHandler# $ \inp err -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp, errs = err : errs γ})
+buildHandler γ h u c = fromStaHandler# $ \inp err -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp, errs = VCons err (errs γ)})
 
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
@@ -254,10 +254,10 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 
 @since 2.1.0.0
 -}
-buildYesHandler :: Γ s o err a xs n r
-                -> (Γ s o err a xs n r -> Code (ST s (Result err a)))
+buildYesHandler :: Γ s o err a xs n m r
+                -> (Γ s o err a xs n (Succ m) r -> Code (ST s (Result err a)))
                 -> StaYesHandler s o err a
-buildYesHandler γ h inp err = h (γ {input = inp, errs = err : errs γ})
+buildYesHandler γ h inp err = h (γ {input = inp, errs = VCons err (errs γ)})
 
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
@@ -266,8 +266,8 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 
 @since 2.1.0.0
 -}
-buildIterYesHandler :: Γ s o err a xs n r
-                    -> (Γ s o err a xs n r -> Code (ST s (Result err a)))
+buildIterYesHandler :: Γ s o err a xs n m r
+                    -> (Γ s o err a xs n (Succ m) r -> Code (ST s (Result err a)))
                     -> Word
                     -> StaHandler s o err a
 buildIterYesHandler γ h u = fromStaHandler# (buildYesHandler γ h . toInput u)
@@ -280,11 +280,11 @@ not.
 
 @since 1.4.0.0
 -}
-bindAlwaysHandler :: forall s o err a xs n r b. HandlerOps o
-                  => Γ s o err a xs n r                    -- ^ The state from which to capture the offset.
+bindAlwaysHandler :: forall s o err a xs n m r b. HandlerOps o
+                  => Γ s o err a xs n m r                    -- ^ The state from which to capture the offset.
                   -> Bool                                  -- ^ Whether or not a binding is required
                   -> StaHandlerBuilder s o err a           -- ^ The handler waiting to receive the captured offset and be bound.
-                  -> (Γ s o err a xs (Succ n) r -> Code b) -- ^ The parser to receive the binding.
+                  -> (Γ s o err a xs (Succ n) m r -> Code b) -- ^ The parser to receive the binding.
                   -> Code b
 bindAlwaysHandler γ needed h k = bindHandlerInline# needed (staHandler# (h (input γ))) $ \qh ->
   k (γ {handlers = VCons (augmentHandler (Just (input γ)) qh) (handlers γ)})
@@ -297,13 +297,13 @@ where they are unknown (which is defined in terms of the previous two).
 
 @since 2.1.0.0
 -}
-bindSameHandler :: forall s o err a xs n r b. (HandlerOps o, PositionOps (Rep o))
-                => Γ s o err a xs n r                    -- ^ The state from which to capture the offset.
+bindSameHandler :: forall s o err a xs n m r b. (HandlerOps o, PositionOps (Rep o))
+                => Γ s o err a xs n m r                    -- ^ The state from which to capture the offset.
                 -> Bool                                  -- ^ Is a binding required for the matching handler?
                 -> StaYesHandler s o err a               -- ^ The handler that handles matching input.
                 -> Bool                                  -- ^ Is a binding required for the mismatched handler?
                 -> StaHandlerBuilder s o err a           -- ^ The handler that handles mismatched input.
-                -> (Γ s o err a xs (Succ n) r -> Code b) -- ^ The parser to receive the composite handler.
+                -> (Γ s o err a xs (Succ n) m r -> Code b) -- ^ The parser to receive the composite handler.
                 -> Code b
 bindSameHandler γ yesNeeded yes noNeeded no k =
   bindYesInline# yesNeeded (yes (input γ)) $ \qyes ->
@@ -340,7 +340,7 @@ join point) taking the required components from the state `Γ`.
 
 @since 1.2.0.0
 -}
-resume :: StaCont s o err a x -> Γ s o err a (x : xs) n r -> Code (ST s (Result err a))
+resume :: StaCont s o err a x -> Γ s o err a (x : xs) n m r -> Code (ST s (Result err a))
 resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (fromInput (input γ)) (ghosts γ)
 
 {-|
@@ -367,8 +367,8 @@ to `buildHandler`.
 
 @since 1.8.0.0
 -}
-suspend :: (Γ s o err a (x : xs) n r -> Code (ST s (Result err a))) -- ^ The partial parser to turn into a return continuation.
-        -> Γ s o err a xs n r                                       -- ^ The state to execute the continuation with.
+suspend :: (Γ s o err a (x : xs) n m r -> Code (ST s (Result err a))) -- ^ The partial parser to turn into a return continuation.
+        -> Γ s o err a xs n m r                                       -- ^ The state to execute the continuation with.
         -> (Input# o -> Input o)                                    -- ^ Function used to generate the offset
         -> StaCont s o err a x
 suspend m γ off = mkStaCont $ \x o# ghosts -> m (γ {operands = Op (FREEVAR x) (operands γ), input = off o#, ghosts = ghosts})
@@ -379,11 +379,11 @@ an optimisation on the offset if the subroutine has known input characteristics.
 
 @since 1.5.0.0
 -}
-callCC :: forall s o err a xs n r x. MarshalOps o
+callCC :: forall s o err a xs n m r x. MarshalOps o
        => Word                                                            --
        -> StaSubroutine s o err a x                                       -- ^ The subroutine @sub@ that will be called.
-       -> (Γ s o err a (x : xs) (Succ n) r -> Code (ST s (Result err a))) -- ^ The return continuation to generate
-       -> Γ s o err a xs (Succ n) r                                       --
+       -> (Γ s o err a (x : xs) (Succ n) m r -> Code (ST s (Result err a))) -- ^ The return continuation to generate
+       -> Γ s o err a xs (Succ n) m r                                       --
        -> Code (ST s (Result err a))
 callCC u sub k γ = callWithContinuation sub (suspend k γ (chooseInput (successInputCharacteristic (meta sub)) u inp)) inp (ghosts γ) (handlers γ)
   where
@@ -432,7 +432,7 @@ bindIterAlways ctx μ l needed h inp ghosts u =
   bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
     bindIter# @o (fromInput inp) ghosts $ \qloop inp# ghosts ->
       let inp = toInput u inp#
-      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil) [] ghosts [])
+      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil) VNil ghosts [])
                (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts ||]) ctx))
 
 {-|
@@ -460,7 +460,7 @@ bindIterSame ctx μ l neededYes yes neededNo no inp ghosts u =
       in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (fromInput inp) ghosts $ \qloop inp# ghosts ->
           let off = toInput u inp#
-          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil) [] ghosts [])
+          in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil) VNil ghosts [])
                    (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts ||]) ctx))
 
 {- Recursion Operations -}
@@ -482,7 +482,7 @@ buildRec :: forall rs s o err a r. RecBuilder o
 buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qh inp ghosts ->
-      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil) [] ghosts [])
+      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil) VNil ghosts [])
             (insertSub μ (mkStaSubroutineMeta meta $ \k h inp ghosts -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) $$ghosts ||]) (nextUnique ctx))
 
 {- Binding Operations -}
@@ -536,7 +536,7 @@ having printed the debug information.
 
 @since 1.2.0.0
 -}
-logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o err a -> Γ s o err a xs (Succ n) r -> Word -> StaHandlerBuilder s o err a
+logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o err a -> Γ s o err a xs (Succ n) m r -> Word -> StaHandlerBuilder s o err a
 logHandler name ctx γ u _ = let VCons h _ = handlers γ in fromStaHandler# $ \inp# err -> let inp = toInput u inp# in [||
     trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h inp err)
   ||]
@@ -547,10 +547,10 @@ string.
 
 @since 1.2.0.0
 -}
-preludeString :: forall s o err a xs n r. (?ops :: InputOps (Rep o), LogHandler o)
+preludeString :: forall s o err a xs n m r. (?ops :: InputOps (Rep o), LogHandler o)
               => String         -- ^ The name as per the debug combinator
               -> Char           -- ^ Either @<@ or @>@ depending on whether we are entering or leaving.
-              -> Γ s o err a xs n r
+              -> Γ s o err a xs n m r
               -> Ctx s o err a
               -> String         -- ^ String that represents the current status
               -> Code String

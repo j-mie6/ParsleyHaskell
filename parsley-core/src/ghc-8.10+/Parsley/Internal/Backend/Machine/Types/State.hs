@@ -44,11 +44,11 @@ of a parser in their variously statically augmented forms.
 
 @since 1.4.0.0
 -}
-data Γ s o err a xs n r = Γ { operands    :: !(OpStack xs)                            -- ^ The current values available for applicative application.
+data Γ s o err a xs n m r = Γ { operands    :: !(OpStack xs)                            -- ^ The current values available for applicative application.
                             , retCont     :: !(StaCont s o err a r)                   -- ^ The current return continuation when this parser is finished.
                             , input       :: !(Input o)                               -- ^ The current offset into the input of the parser.
                             , handlers    :: !(Vec n (AugmentedStaHandler s o err a)) -- ^ The failure handlers that are used to process failure during a parser.
-                            , errs        :: ![Code DefuncError]
+                            , errs        :: !(Vec m (Code DefuncError))
                             , ghosts      :: !(Code DefuncGhosts)
                             , savedGhosts :: ![(Code DefuncGhosts, Code GhostOffset)]
                             --, ghostOffset :: !(Code GhostOffset)

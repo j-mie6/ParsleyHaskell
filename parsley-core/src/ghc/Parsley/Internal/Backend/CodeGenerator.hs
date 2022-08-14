@@ -71,14 +71,18 @@ pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r
 rollbackHandler = Always False (In4 (Seek (In4 Raise)))
 
-mergeErrors :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ (Succ m)) r
-mergeErrors = Always False (In4 (MergeErrors (In4 Raise)))
+mergeErrorsHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ (Succ m)) r
+mergeErrorsHandler = Always False (In4 (MergeErrors (In4 Raise)))
 
 parsecHandler :: Fix4 (Instr o) xs (Succ n) (Succ m) r -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r
 parsecHandler k = Same (not (shouldInline k)) k False (In4 Raise)
 
 recoverHandler :: Fix4 (Instr o) xs n (Succ m) r -> Handler o (Fix4 (Instr o)) (o : xs) n (Succ m) r
 recoverHandler = Always . not . shouldInline <*> In4 . Seek
+
+mergeErrorsOrMakeGhosts :: CodeGen o x -> Fix4 (Instr o) (x : xs) (Succ n) m l -> CodeGenStack (Fix4 (Instr o) xs (Succ n) (Succ m) l)
+mergeErrorsOrMakeGhosts q φ = In4 . flip Catch mergeErrorsHandler <$>
+  freshΦ (runCodeGen q (In4 (ErrorToGhost (In4 (Commit φ)))))
 
 altNoCutCompile :: Trace => CodeGen o y -> CodeGen o x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) (Succ m) r -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r)
@@ -87,7 +91,7 @@ altNoCutCompile :: Trace => CodeGen o y -> CodeGen o x
 altNoCutCompile p q handler post m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (post φ)))
-     qc <- In4 . flip Catch mergeErrors . In4 . PopError <$> freshΦ (runCodeGen q (In4 (Commit φ)))
+     qc <- mergeErrorsOrMakeGhosts q φ
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
      let dp = np `minus` minCoins np nq
@@ -102,7 +106,7 @@ loopCompile body exit prebody preExit m =
   do μ <- askM
      bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (Jump μ)))))
      exitc <- freshM (runCodeGen exit m)
-     return $! In4 (Iter μ (prebody bodyc) (parsecHandler (In4 (PopError (preExit exitc)))))
+     return $! In4 (Iter μ (prebody bodyc) (parsecHandler (In4 ({-TODO:-}PopError (preExit exitc)))))
 
 deep :: Trace => Combinator (Cofree Combinator (CodeGen o)) x -> Maybe (CodeGen o x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
@@ -112,8 +116,8 @@ deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ al
 deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     qc <- freshΦ (runCodeGen q φ)
-     return $! binder (In4 (Catch pc (parsecHandler (In4 (PopError qc)))))
+     qc <- mergeErrorsOrMakeGhosts q φ
+     return $! binder (In4 (Catch pc (parsecHandler qc)))
 deep (MetaCombinator RequiresCut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit id addCoinsNeeded
 deep (MetaCombinator Cut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit addCoinsNeeded addCoinsNeeded
 deep _ = Nothing
@@ -138,7 +142,8 @@ shallow (NotFollowedBy p) m =
      let np = coinsNeeded pc
      let nm = coinsNeeded m
      -- The minus here is used because the shared coins are propagated out front, neat.
-     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc))) (Always (not (shouldInline m)) (In4 (PopError ((In4 (Seek (In4 (Push (user UNIT) m)))))))))
+     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc)))
+                          (Always (not (shouldInline m)) (In4 (PopError (In4 (Seek (In4 (Push (user UNIT) m))))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))

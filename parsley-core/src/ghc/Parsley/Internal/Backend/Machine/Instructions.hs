@@ -181,6 +181,7 @@ data Instr (o :: Type)                          -- The FIXED input type
   Raise     :: Instr o k xs (Succ n) (Succ m) r
   MergeErrors :: k xs n (Succ m) r -> Instr o k xs n (Succ (Succ m)) r
   PopError  :: k xs n m r -> Instr o k xs n (Succ m) r
+  ErrorToGhost :: k xs n m r -> Instr o k xs n (Succ m) r
 
   {-| Begins a debugging scope, the inner scope requires /two/ handlers,
       the first is the log handler itself, and then the second is the
@@ -413,6 +414,7 @@ instance IFunctor4 (Instr o) where
   imap4 _ Raise               = Raise
   imap4 f (MergeErrors k)     = MergeErrors (f k)
   imap4 f (PopError k)        = PopError (f k)
+  imap4 f (ErrorToGhost k)    = ErrorToGhost (f k)
   imap4 f (SelectPos sel k)   = SelectPos sel (f k)
   imap4 f (LogEnter name k)   = LogEnter name (f k)
   imap4 f (LogExit name k)    = LogExit name (f k)
@@ -453,6 +455,7 @@ instance Show (Fix4 (Instr o) xs n m r) where
       alg Raise                    = "Raise"
       alg (MergeErrors k)          = "(MergeErrors " . getConst4 k . ")"
       alg (PopError k)             = "(PopError " . getConst4 k . ")"
+      alg (ErrorToGhost k)         = "(ErrorToGhost " . getConst4 k . ")"
       alg (LogEnter _ k)           = getConst4 k
       alg (LogExit _ k)            = getConst4 k
       alg (MetaInstr BlockCoins k) = getConst4 k

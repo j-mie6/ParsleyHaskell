@@ -37,7 +37,7 @@ import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machin
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts), emptyError, mergeErrors)
+import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts), emptyError, mergeErrors, addGhost)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -102,6 +102,7 @@ readyMachine = cata4 (Machine . alg)
     alg Raise               = evalRaise
     alg (MergeErrors k)     = evalMergeErrors k
     alg (PopError k)        = evalPopError k
+    alg (ErrorToGhost k)    = evalErrorToGhost k
     alg (SelectPos sel k)   = evalSelectPos sel k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
@@ -239,6 +240,12 @@ evalMergeErrors (Machine k) = k <&> \mk γ ->
 
 evalPopError :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
 evalPopError (Machine k) = k <&> \mk γ -> let VCons _ es = errs γ in mk (γ {errs = es})
+
+--FIXME: This needs to do checks before a ghost is added: this is ripe for static information use!
+evalErrorToGhost :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
+evalErrorToGhost (Machine k) = k <&> \mk γ ->
+  let VCons err es = errs γ
+  in mk (γ {errs = es, ghosts = [||addGhost $$(ghosts γ) $$err||]})
 
 -- TODO: This could be made more consistent with a top-level debug level register
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)

@@ -60,6 +60,7 @@ alg Empt               = 0
 alg Raise              = 0
 alg (MergeErrors k)    = 0 + getWeight k
 alg (PopError k)       = 0 + getWeight k
+alg (ErrorToGhost k)   = 0 + getWeight k
 alg (LogEnter _ k)     = 1 % 4 + getWeight k
 alg (LogExit _ k)      = 1 % 4 + getWeight k
 alg (MetaInstr _ k)    = 0 + getWeight k

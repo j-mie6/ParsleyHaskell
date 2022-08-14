@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -ddump-splices -ddump-to-file #-}
 {-# LANGUAGE TemplateHaskell,
              ScopedTypeVariables,
              StandaloneDeriving,

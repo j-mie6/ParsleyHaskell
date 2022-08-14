@@ -74,6 +74,7 @@ alg _     Empt                                    = (zero, True)
 alg _     Raise                                   = (zero, True)
 alg _     (MergeErrors k)                         = getConst4 k
 alg _     (PopError k)                            = getConst4 k
+alg _     (ErrorToGhost k)                        = getConst4 k
 alg _     (MetaInstr (AddCoins _) (Const4 k))     = k
 alg _     (MetaInstr (RefundCoins n) (Const4 k))  = first (maxCoins zero . (`minus` n)) k -- These were refunded, so deduct
 alg _     (MetaInstr (DrainCoins n) _)            = (n, False)                            -- Used to be `second (const False) k`, but these should be additive?

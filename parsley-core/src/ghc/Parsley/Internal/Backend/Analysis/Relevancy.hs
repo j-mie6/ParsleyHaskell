@@ -72,6 +72,7 @@ alg Empt               n         = replicateVec n False
 alg Raise              n         = replicateVec n False
 alg (MergeErrors k)    n         = getStack k n
 alg (PopError k)       n         = getStack k n
+alg (ErrorToGhost k)   n         = getStack k n
 alg (LogEnter _ k)     n         = getStack k n
 alg (LogExit _ k)      n         = getStack k n
 alg (MetaInstr _ k)    n         = getStack k n

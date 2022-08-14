@@ -397,11 +397,11 @@ into the `Ctx`.
 
 @since 1.4.0.0
 -}
-setupJoinPoint :: forall s o err a xs n r x. JoinBuilder o
+setupJoinPoint :: forall s o err a xs n m r x. JoinBuilder o
                => ΦVar x                     -- ^ The name of the binding.
-               -> Machine s o err a (x : xs) n r -- ^ The definition of the binding.
-               -> Machine s o err a xs n r       -- ^ The scope within which the binding is valid.
-               -> MachineMonad s o err a xs n r
+               -> Machine s o err a (x : xs) n m r -- ^ The definition of the binding.
+               -> Machine s o err a xs n m r       -- ^ The scope within which the binding is valid.
+               -> MachineMonad s o err a xs n m r
 setupJoinPoint φ (Machine k) mx = freshUnique $ \u ->
     liftM2 (\mk ctx γ ->
       setupJoinPoint# @o
@@ -421,7 +421,7 @@ the loop consumed input in its final iteration.
 bindIterAlways :: forall s o err a. RecBuilder o
                => Ctx s o err a                  -- ^ The context to keep the binding
                -> MVar Void                      -- ^ The name of the binding.
-               -> Machine s o err a '[] One Void -- ^ The body of the loop.
+               -> Machine s o err a '[] One Zero Void -- ^ The body of the loop.
                -> Bool                           -- ^ Does loop exit require a binding?
                -> StaHandlerBuilder s o err a    -- ^ What to do after the loop exits (by failing)
                -> Input o                        -- ^ The initial offset to provide to the loop
@@ -444,7 +444,7 @@ the same way as `bindSameHandler`.
 bindIterSame :: forall s o err a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
              => Ctx s o err a                  -- ^ The context to store the binding in.
              -> MVar Void                      -- ^ The name of the binding.
-             -> Machine s o err a '[] One Void -- ^ The loop body.
+             -> Machine s o err a '[] One Zero Void -- ^ The loop body.
              -> Bool                           -- ^ Is a binding required for the matching handler?
              -> StaHandler s o err a           -- ^ The handler when input is the same.
              -> Bool                           -- ^ Is a binding required for the differing handler?
@@ -476,7 +476,7 @@ buildRec :: forall rs s o err a r. RecBuilder o
          => MVar r                      -- ^ The name of the binding.
          -> Regs rs                     -- ^ The registered required by the binding.
          -> Ctx s o err a               -- ^ The context to re-insert the register-less binding
-         -> Machine s o err a '[] One r -- ^ The body of the binding.
+         -> Machine s o err a '[] One Zero r -- ^ The body of the binding.
          -> Metadata                    -- ^ The metadata associated with the binding
          -> DynFunc rs s o err a r
 buildRec μ rs ctx k meta =

@@ -26,7 +26,7 @@ import Data.Some                                                  (Some, pattern
 import Parsley.Internal.Backend.Machine.Identifiers               (ΣVar, SomeΣVar(..))
 import Parsley.Internal.Backend.Machine.Instructions              (Instr)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
-import Parsley.Internal.Common                                    (Fix3, One)
+import Parsley.Internal.Common                                    (Fix4, One, Nat(Zero))
 
 {-|
 Type represents a binding, which is a completed parser that can
@@ -36,7 +36,7 @@ the one of type @`Binding` o a a@.
 
 @since 1.0.0.0
 -}
-type Binding o x = Fix3 (Instr o) '[] One x
+type Binding o x = Fix4 (Instr o) '[] One Zero x
 
 {-|
 Packages a binding along with its free registers that are required

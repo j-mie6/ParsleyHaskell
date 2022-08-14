@@ -11,17 +11,17 @@ type One = Succ Zero
 class IFunctor (f :: (Type -> Type) -> Type -> Type) where
   imap :: (forall j. a j -> b j) -> f a i -> f b i
 
-class IFunctor3 (f :: ([Type] -> Nat -> Type -> Type) -> [Type] -> Nat -> Type -> Type) where
-  imap3 :: (forall i' j' k'. a i' j' k' -> b i' j' k') -> f a i j k -> f b i j k
+class IFunctor4 (f :: ([Type] -> Nat -> Nat -> Type -> Type) -> [Type] -> Nat -> Nat -> Type -> Type) where
+  imap4 :: (forall i' j' k' l'. a i' j' k' l' -> b i' j' k' l') -> f a i j k l -> f b i j k l
 
 newtype Fix f a = In (f (Fix f) a)
-newtype Fix3 f i j k = In3 (f (Fix3 f) i j k)
+newtype Fix4 f i j k l = In4 (f (Fix4 f) i j k l)
 
 inop :: Fix f a -> f (Fix f) a
 inop (In x) = x
 
-inop3 :: Fix3 f i j k -> f (Fix3 f) i j k
-inop3 (In3 x) = x
+inop4 :: Fix4 f i j k l -> f (Fix4 f) i j k l
+inop4 (In4 x) = x
 
 cata :: forall f a i. IFunctor f => (forall j. f a j -> a j) -> Fix f i -> a i
 cata alg = go where
@@ -35,12 +35,12 @@ cata' alg = go where
   go :: Fix f j -> a j
   go i@(In x) = alg i (imap go x)
 
-cata3 :: forall f a i j k. IFunctor3 f =>
-         (forall i' j' k'. f a i' j' k' -> a i' j' k') ->
-         Fix3 f i j k -> a i j k
-cata3 alg = go where
-  go :: Fix3 f i' j' k' -> a i' j' k'
-  go (In3 x) = alg (imap3 go x)
+cata4 :: forall f a i j k l. IFunctor4 f =>
+         (forall i' j' k' l'. f a i' j' k' l' -> a i' j' k' l') ->
+         Fix4 f i j k l -> a i j k l
+cata4 alg = go where
+  go :: Fix4 f i' j' k' l' -> a i' j' k' l'
+  go (In4 x) = alg (imap4 go x)
 
 data (f :+: g) k a where
   L :: f k a -> (f :+: g) k a
@@ -94,5 +94,5 @@ instance {-# OVERLAPS #-}     Chain a (Maybe a) where (|>) = liftA2 (<|>)
 data Unit1 k = Unit
 newtype Const1 a k = Const1 {getConst1 :: a}
 
-data Unit3 i j k = Unit3
-newtype Const3 a i j k = Const3 {getConst3 :: a}
+data Unit4 i j k l = Unit4
+newtype Const4 a i j k l = Const4 {getConst4 :: a}

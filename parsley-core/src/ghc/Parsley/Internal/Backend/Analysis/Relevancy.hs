@@ -18,7 +18,7 @@ module Parsley.Internal.Backend.Analysis.Relevancy (relevancy, Length) where
 
 import Data.Kind                        (Type)
 import Parsley.Internal.Backend.Machine (Instr(..), Handler(..))
-import Parsley.Internal.Common.Indexed  (cata3, Fix3)
+import Parsley.Internal.Common.Indexed  (cata4, Fix4)
 import Parsley.Internal.Common.Vec      (Vec(..), Nat(..), SNat(..), SingNat(..), zipWithVec, replicateVec)
 
 {-|
@@ -27,8 +27,8 @@ entry to a machine are actually used in the computation.
 
 @since 1.5.0.0
 -}
-relevancy :: SingNat (Length xs) => Fix3 (Instr o) xs n r -> Vec (Length xs) Bool
-relevancy = ($ sing) . getStack . cata3 (RelevancyStack . alg)
+relevancy :: SingNat (Length xs) => Fix4 (Instr o) xs n m r -> Vec (Length xs) Bool
+relevancy = ($ sing) . getStack . cata4 (RelevancyStack . alg)
 
 {-|
 Computes the length of a type-level list. Used to index a `Vec`.
@@ -39,13 +39,13 @@ type family Length (xs :: [Type]) :: Nat where
   Length '[] = Zero
   Length (_ : xs) = Succ (Length xs)
 
-newtype RelevancyStack xs (n :: Nat) r = RelevancyStack { getStack :: SNat (Length xs) -> Vec (Length xs) Bool }
+newtype RelevancyStack xs (n :: Nat) (m :: Nat) r = RelevancyStack { getStack :: SNat (Length xs) -> Vec (Length xs) Bool }
 
 zipRelevancy :: Vec n Bool -> Vec n Bool -> Vec n Bool
 zipRelevancy = zipWithVec (||)
 
 -- This algorithm is over-approximating: join and ret aren't _always_ relevant
-alg :: Instr o RelevancyStack xs n r -> SNat (Length xs) -> Vec (Length xs) Bool
+alg :: Instr o RelevancyStack xs n m r -> SNat (Length xs) -> Vec (Length xs) Bool
 alg Ret                _         = VCons True VNil
 alg (Push _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg (Pop k)            (SSucc n) = VCons False (getStack k n)
@@ -71,10 +71,11 @@ alg (SelectPos _ k)    n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg Empt               n         = replicateVec n False
 alg Raise              n         = replicateVec n False
 alg MergeErrorsAndRaise n         = replicateVec n False
+alg (PopError k)       n         = getStack k n
 alg (LogEnter _ k)     n         = getStack k n
 alg (LogExit _ k)      n         = getStack k n
 alg (MetaInstr _ k)    n         = getStack k n
 
-algHandler :: Handler o RelevancyStack xs n r -> SNat (Length xs) -> Vec (Length xs) Bool
+algHandler :: Handler o RelevancyStack xs n m r -> SNat (Length xs) -> Vec (Length xs) Bool
 algHandler (Same _ yes _ no) (SSucc n) = VCons True (let VCons _ xs = zipRelevancy (VCons False (getStack yes n)) (getStack no (SSucc n)) in xs)
 algHandler (Always _ k) n = getStack k n

@@ -70,7 +70,7 @@ alg (Put _ _ k)        (SSucc n) = VCons False (getStack k n)
 alg (SelectPos _ k)    n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg Empt               n         = replicateVec n False
 alg Raise              n         = replicateVec n False
-alg MergeErrorsAndRaise n         = replicateVec n False
+alg (MergeErrors k)    n         = getStack k n
 alg (PopError k)       n         = getStack k n
 alg (LogEnter _ k)     n         = getStack k n
 alg (LogExit _ k)      n         = getStack k n

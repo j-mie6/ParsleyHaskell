@@ -179,7 +179,7 @@ data Instr (o :: Type)                          -- The FIXED input type
   --Fail      :: ErrorMsg -> Instr o k xs (Succ n) r -- this will replace Empt
   -- These should only be used in Handlers, how to enforce?
   Raise     :: Instr o k xs (Succ n) (Succ m) r
-  MergeErrorsAndRaise :: Instr o k xs (Succ n) (Succ (Succ m)) r
+  MergeErrors :: k xs n (Succ m) r -> Instr o k xs n (Succ (Succ m)) r
   PopError  :: k xs n m r -> Instr o k xs n (Succ m) r
 
   {-| Begins a debugging scope, the inner scope requires /two/ handlers,
@@ -411,7 +411,7 @@ instance IFunctor4 (Instr o) where
   imap4 f (Put σ a k)         = Put σ a (f k)
   imap4 _ Empt                = Empt
   imap4 _ Raise               = Raise
-  imap4 _ MergeErrorsAndRaise = MergeErrorsAndRaise
+  imap4 f (MergeErrors k)     = MergeErrors (f k)
   imap4 f (PopError k)        = PopError (f k)
   imap4 f (SelectPos sel k)   = SelectPos sel (f k)
   imap4 f (LogEnter name k)   = LogEnter name (f k)
@@ -451,7 +451,7 @@ instance Show (Fix4 (Instr o) xs n m r) where
       alg (SelectPos Col k)        = "(Col " . getConst4 k . ")"
       alg Empt                     = "Empt"
       alg Raise                    = "Raise"
-      alg MergeErrorsAndRaise      = "(MergeErrors Raise)"
+      alg (MergeErrors k)          = "(MergeErrors " . getConst4 k . ")"
       alg (PopError k)             = "(PopError " . getConst4 k . ")"
       alg (LogEnter _ k)           = getConst4 k
       alg (LogExit _ k)            = getConst4 k

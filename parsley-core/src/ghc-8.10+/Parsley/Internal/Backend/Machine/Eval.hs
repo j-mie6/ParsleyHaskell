@@ -100,7 +100,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Put σ c k)         = evalPut σ c k
     alg Empt                = evalEmpt
     alg Raise               = evalRaise
-    alg MergeErrorsAndRaise = evalMergeErrorsAndRaise
+    alg (MergeErrors k)     = evalMergeErrors k
     alg (PopError k)        = evalPopError k
     alg (SelectPos sel k)   = evalSelectPos sel k
     alg (LogEnter name k)   = evalLogEnter name k
@@ -232,10 +232,10 @@ evalEmpt = return $! raiseWith [||emptyError||]
 evalRaise :: MachineMonad s o err a xs (Succ n) (Succ m) r
 evalRaise = return $! raise
 
-evalMergeErrorsAndRaise :: MachineMonad s o err a xs (Succ n) (Succ (Succ m)) r
-evalMergeErrorsAndRaise = return $ \γ ->
-  let VCons err2 (VCons err1 _) = errs γ
-  in raise (γ {errs = VCons [||mergeErrors $$err1 $$err2||] (errs γ)})
+evalMergeErrors :: Machine s o err a xs n (Succ m) r -> MachineMonad s o err a xs n (Succ (Succ m)) r
+evalMergeErrors (Machine k) = k <&> \mk γ ->
+  let VCons err2 (VCons err1 errs') = errs γ
+  in mk (γ {errs = VCons [||mergeErrors $$err1 $$err2||] errs'})
 
 evalPopError :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
 evalPopError (Machine k) = k <&> \mk γ -> let VCons _ es = errs γ in mk (γ {errs = es})

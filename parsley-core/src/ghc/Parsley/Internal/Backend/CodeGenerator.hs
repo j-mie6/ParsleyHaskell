@@ -72,7 +72,7 @@ rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r
 rollbackHandler = Always False (In4 (Seek (In4 Raise)))
 
 mergeErrors :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ (Succ m)) r
-mergeErrors = Always False (In4 MergeErrorsAndRaise)
+mergeErrors = Always False (In4 (MergeErrors (In4 Raise)))
 
 parsecHandler :: Fix4 (Instr o) xs (Succ n) (Succ m) r -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r
 parsecHandler k = Same (not (shouldInline k)) k False (In4 Raise)

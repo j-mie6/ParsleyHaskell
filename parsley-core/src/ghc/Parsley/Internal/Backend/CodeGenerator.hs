@@ -81,8 +81,7 @@ recoverHandler :: Fix4 (Instr o) xs n (Succ m) r -> Handler o (Fix4 (Instr o)) (
 recoverHandler = Always . not . shouldInline <*> In4 . Seek
 
 mergeErrorsOrMakeGhosts :: CodeGen o x -> Fix4 (Instr o) (x : xs) (Succ n) m l -> CodeGenStack (Fix4 (Instr o) xs (Succ n) (Succ m) l)
-mergeErrorsOrMakeGhosts q φ = In4 . flip Catch mergeErrorsHandler <$>
-  freshΦ (runCodeGen q (In4 (ErrorToGhost (In4 (Commit φ)))))
+mergeErrorsOrMakeGhosts q m = In4 . flip Catch mergeErrorsHandler <$> runCodeGen q (In4 (ErrorToGhost (In4 (Commit m))))
 
 altNoCutCompile :: Trace => CodeGen o y -> CodeGen o x
                 -> (forall n xs r. Fix4 (Instr o) xs (Succ n) (Succ m) r -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r)
@@ -91,14 +90,13 @@ altNoCutCompile :: Trace => CodeGen o y -> CodeGen o x
 altNoCutCompile p q handler post m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (PopGhosts {-MergeGhosts?-}(deadCommitOptimisation (post φ)))))
-     qc <- mergeErrorsOrMakeGhosts q φ
+     qc <- freshΦ (mergeErrorsOrMakeGhosts q φ)
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
      let dp = np `minus` minCoins np nq
      let dq = nq `minus` minCoins np nq
      return $! binder (In4 (Catch (In4 (SaveGhosts True (addCoins dp pc))) (handler (addCoins dq qc))))
 
---TODO: What are the ghost/error characteristics of a loop?
 loopCompile :: CodeGen o () -> CodeGen o x
             -> (forall xs r. Fix4 (Instr o) xs One Zero r -> Fix4 (Instr o) xs One Zero r)
             -> (forall n m xs r. Fix4 (Instr o) xs (Succ n) m r -> Fix4 (Instr o) xs (Succ n) m r)
@@ -106,8 +104,8 @@ loopCompile :: CodeGen o () -> CodeGen o x
 loopCompile body exit prebody preExit m =
   do μ <- askM
      bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (Jump μ)))))
-     exitc <- freshM (runCodeGen exit m)
-     return $! In4 (Iter μ (prebody bodyc) (parsecHandler (In4 ({-TODO:-}PopError (preExit exitc)))))
+     exitc <- freshM (mergeErrorsOrMakeGhosts exit m)
+     return $! In4 (Iter μ (prebody bodyc) (parsecHandler (preExit exitc)))
 
 deep :: Trace => Combinator (Cofree Combinator (CodeGen o)) x -> Maybe (CodeGen o x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
@@ -117,7 +115,7 @@ deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ al
 deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (PopGhosts {-MergeGhosts?-} (deadCommitOptimisation φ))))
-     qc <- mergeErrorsOrMakeGhosts q φ
+     qc <- freshΦ (mergeErrorsOrMakeGhosts q φ)
      return $! binder (In4 (Catch (In4 (SaveGhosts True pc)) (parsecHandler qc)))
 deep (MetaCombinator RequiresCut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit id addCoinsNeeded
 deep (MetaCombinator Cut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit addCoinsNeeded addCoinsNeeded

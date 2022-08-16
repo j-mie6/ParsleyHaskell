@@ -250,7 +250,8 @@ evalErrorToGhost (Machine k) = k <&> \mk γ ->
 
 -- TODO: Some type indices might be good? lol
 evalSaveGhosts :: Bool -> Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
-evalSaveGhosts _ (Machine k) = k <&> \mk γ -> mk (γ {savedGhosts = (ghosts γ, ghostOffset γ) : savedGhosts γ})
+evalSaveGhosts True (Machine k) = k <&> \mk γ -> mk (γ {savedGhosts = (ghosts γ, ghostOffset γ) : savedGhosts γ})
+evalSaveGhosts False (Machine k) = k <&> \mk γ -> mk (γ {ghosts = [||EmptyGhosts||], savedGhosts = (ghosts γ, ghostOffset γ) : savedGhosts γ})
 
 evalPopGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalPopGhosts (Machine k) = k <&> \mk γ -> let _ : savedGhosts' = savedGhosts γ in mk (γ { savedGhosts = savedGhosts' })

@@ -419,7 +419,7 @@ the loop consumed input in its final iteration.
 
 @since 1.8.0.0
 -}
-bindIterAlways :: forall s o err a. RecBuilder o
+bindIterAlways :: forall s o err a. (RecBuilder o, PositionOps (Rep o))
                => Ctx s o err a                  -- ^ The context to keep the binding
                -> MVar Void                      -- ^ The name of the binding.
                -> Machine s o err a '[] One Zero Void -- ^ The body of the loop.
@@ -435,7 +435,9 @@ bindIterAlways ctx μ l needed h inp ghosts valid u =
     bindIter# @o (fromInput inp) ghosts valid $ \qloop inp# ghosts valid ->
       let inp = toInput u inp#
       in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil) VNil ghosts [] valid)
-               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts valid -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts $$valid ||]) ctx))
+               -- We ignore valid here purposefully: in Scala Parsley, the next iteration around the loop always updates the hint offset
+               -- to the current offset, this is accomplished here the same way
+               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts _ -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts $$(extractRawOffset (off# inp)) ||]) ctx))
 
 {-|
 Similar to `bindIterAlways`, but builds a handler that performs in
@@ -464,7 +466,9 @@ bindIterSame ctx μ l neededYes yes neededNo no inp ghosts valid u =
         bindIter# @o (fromInput inp) ghosts valid $ \qloop inp# ghosts valid ->
           let off = toInput u inp#
           in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil) VNil ghosts [] valid)
-                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts valid -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts $$valid ||]) ctx))
+                   -- We ignore valid here purposefully: in Scala Parsley, the next iteration around the loop always updates the hint offset
+                   -- to the current offset, this is accomplished here the same way
+                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp ghosts _ -> [|| $$qloop $$(pos# inp) $$(off# inp) $$ghosts $$(extractRawOffset (off# inp)) ||]) ctx))
 
 {- Recursion Operations -}
 {-|

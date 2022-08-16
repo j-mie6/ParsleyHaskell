@@ -183,6 +183,7 @@ data Instr (o :: Type)                          -- The FIXED input type
   MergeErrors :: k xs n (Succ m) r -> Instr o k xs n (Succ (Succ m)) r
   PopError  :: k xs n m r -> Instr o k xs n (Succ m) r
   ErrorToGhost :: k xs n m r -> Instr o k xs n (Succ m) r
+  -- TODO: Some type indices might be good? lol
   SaveGhosts :: Bool -> k xs n m r -> Instr o k xs n m r
   PopGhosts :: k xs n m r -> Instr o k xs n m r
   MergeGhosts :: k xs n m r -> Instr o k xs n m r

@@ -27,7 +27,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- * Core Machine Operations
     dup, returnST,
     -- ** Abstracted Input Operations
-    sat, emitLengthCheck, fetch,
+    sat, emitLengthCheck, fetch, compareGhostOffset,
     -- ** Register Operations
     newΣ, writeΣ, readΣ,
     -- ** Handler Operations
@@ -66,7 +66,7 @@ import Control.Monad.ST                                           (ST)
 import Data.STRef                                                 (writeSTRef, readSTRef, newSTRef)
 import Data.Void                                                  (Void)
 import Debug.Trace                                                (trace)
-import GHC.Exts                                                   (Int(..), (-#))
+import GHC.Exts                                                   (Int(..), (-#), (==#), isTrue#)
 import Language.Haskell.TH.Syntax                                 (liftTyped)
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
@@ -159,6 +159,9 @@ emitLengthCheck (I# n) good bad input = [||
   if $$(more (shiftRight (offset input) (liftTyped (n -# 1#)))) then $$good
   else $$bad ||]
 
+compareGhostOffset :: Code GhostOffset -> Code GhostOffset -> Code Bool
+compareGhostOffset gs1 gs2 = [|| isTrue# ($$gs1 ==# $$gs2) ||]
+
 {- Register Operations -}
 {-|
 Depending on the access type either generates the code for a new register and
@@ -225,7 +228,6 @@ makeErr ferr γ = [|| $$ferr (I# $$(extractRawOffset (offset (off (input γ)))))
 raise :: Γ s o err a xs (Succ n) (Succ m) r -> Code (ST s (Result err a))
 raise γ =
   let VCons h _ = handlers γ
-      -- TODO: Move this into the input module, because this is a bit unclean
       VCons err _ = errs γ
   in staHandlerEval h (input γ) err
 

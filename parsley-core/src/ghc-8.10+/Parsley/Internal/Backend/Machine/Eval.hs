@@ -246,9 +246,18 @@ evalPopError (Machine k) = k <&> \mk γ -> let VCons _ es = errs γ in mk (γ {e
 evalErrorToGhost :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
 evalErrorToGhost (Machine k) = k <&> \mk γ ->
   let VCons err es = errs γ
-  in mk (γ {errs = es, ghosts = [||addGhost $$(ghosts γ) $$err||]})
+  {- ewwwww gross
+  let (ghosts', ghostOffset') =
+    if not (isExpectedEmpty err) && offset err == offset then
+      let (ghosts', ghostOffset') = if ghostOffset < offset then (EmptyGhosts, offset)
+                                    else (ghosts, ghostOffset))
+      in (addGhost ghosts' err, ghostOffset')
+    else (ghosts, ghostOffset)
+  in mk ...
+  -}
+  in [|| let newGhosts = addGhost $$(ghosts γ) $$err
+         in $$(mk (γ {errs = es, ghosts = [||newGhosts||]})) ||]
 
--- TODO: Some type indices might be good? lol
 evalSaveGhosts :: Bool -> Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalSaveGhosts True (Machine k) = k <&> \mk γ -> mk (γ {savedGhosts = (ghosts γ, ghostOffset γ) : savedGhosts γ})
 evalSaveGhosts False (Machine k) = k <&> \mk γ -> mk (γ {ghosts = [||EmptyGhosts||], savedGhosts = (ghosts γ, ghostOffset γ) : savedGhosts γ})
@@ -256,11 +265,15 @@ evalSaveGhosts False (Machine k) = k <&> \mk γ -> mk (γ {ghosts = [||EmptyGhos
 evalPopGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalPopGhosts (Machine k) = k <&> \mk γ -> let _ : savedGhosts' = savedGhosts γ in mk (γ { savedGhosts = savedGhosts' })
 
--- FIXME: This needs to do checks before a ghost is added: this is ripe for static information use!
+-- TODO: this is ripe for static information use!
 evalMergeGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalMergeGhosts (Machine k) = k <&> \mk γ ->
   let (ghosts', validOffset') : savedGhosts' = savedGhosts γ
-  in mk (γ { savedGhosts = ([||mergeGhosts $$(ghosts γ) $$ghosts'||], validOffset') : savedGhosts' })
+     -- This will probably move elsewhere
+  in [|| let newGhosts = if $$(compareGhostOffset (ghostOffset γ) validOffset')
+                         then mergeGhosts $$(ghosts γ) $$ghosts'
+                         else $$(ghosts γ)
+         in $$(mk (γ { savedGhosts = ([||newGhosts||], validOffset') : savedGhosts' })) ||]
 
 -- TODO: This could be made more consistent with a top-level debug level register
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)

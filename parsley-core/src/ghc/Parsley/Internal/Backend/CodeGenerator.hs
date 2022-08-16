@@ -90,14 +90,15 @@ altNoCutCompile :: Trace => CodeGen o y -> CodeGen o x
                 -> Fix4 (Instr o) (x : xs) (Succ n) m r -> CodeGenStack (Fix4 (Instr o) xs (Succ n) m r)
 altNoCutCompile p q handler post m =
   do (binder, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation (post φ)))
+     pc <- freshΦ (runCodeGen p (In4 (PopGhosts {-MergeGhosts?-}(deadCommitOptimisation (post φ)))))
      qc <- mergeErrorsOrMakeGhosts q φ
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
      let dp = np `minus` minCoins np nq
      let dq = nq `minus` minCoins np nq
-     return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
+     return $! binder (In4 (Catch (In4 (SaveGhosts True (addCoins dp pc))) (handler (addCoins dq qc))))
 
+--TODO: What are the ghost/error characteristics of a loop?
 loopCompile :: CodeGen o () -> CodeGen o x
             -> (forall xs r. Fix4 (Instr o) xs One Zero r -> Fix4 (Instr o) xs One Zero r)
             -> (forall n m xs r. Fix4 (Instr o) xs (Succ n) m r -> Fix4 (Instr o) xs (Succ n) m r)
@@ -115,9 +116,9 @@ deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCo
 deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q recoverHandler (In4 . _Fmap (user f))
 deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
   do (binder, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
+     pc <- freshΦ (runCodeGen p (In4 (PopGhosts {-MergeGhosts?-} (deadCommitOptimisation φ))))
      qc <- mergeErrorsOrMakeGhosts q φ
-     return $! binder (In4 (Catch pc (parsecHandler qc)))
+     return $! binder (In4 (Catch (In4 (SaveGhosts True pc)) (parsecHandler qc)))
 deep (MetaCombinator RequiresCut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit id addCoinsNeeded
 deep (MetaCombinator Cut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit addCoinsNeeded addCoinsNeeded
 deep _ = Nothing
@@ -138,11 +139,11 @@ shallow (LookAhead p) m =
   do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
 shallow (NotFollowedBy p) m =
-  do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
+  do pc <- runCodeGen p (In4 (PopGhosts (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
      -- The minus here is used because the shared coins are propagated out front, neat.
-     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc)))
+     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell (In4 (SaveGhosts False pc)))))
                           (Always (not (shouldInline m)) (In4 (PopError (In4 (Seek (In4 (Push (user UNIT) m))))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m

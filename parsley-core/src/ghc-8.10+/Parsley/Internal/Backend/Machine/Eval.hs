@@ -242,7 +242,7 @@ evalMergeErrors (Machine k) = k <&> \mk γ ->
 evalPopError :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
 evalPopError (Machine k) = k <&> \mk γ -> let VCons _ es = errs γ in mk (γ {errs = es})
 
---FIXME: This needs to do checks before a ghost is added: this is ripe for static information use!
+-- FIXME: This needs to do checks before a ghost is added: this is ripe for static information use!
 evalErrorToGhost :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
 evalErrorToGhost (Machine k) = k <&> \mk γ ->
   let VCons err es = errs γ
@@ -255,7 +255,7 @@ evalSaveGhosts _ (Machine k) = k <&> \mk γ -> mk (γ {savedGhosts = (ghosts γ,
 evalPopGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalPopGhosts (Machine k) = k <&> \mk γ -> let _ : savedGhosts' = savedGhosts γ in mk (γ { savedGhosts = savedGhosts' })
 
---FIXME: This needs to do checks before a ghost is added: this is ripe for static information use!
+-- FIXME: This needs to do checks before a ghost is added: this is ripe for static information use!
 evalMergeGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalMergeGhosts (Machine k) = k <&> \mk γ ->
   let (ghosts', validOffset') : savedGhosts' = savedGhosts γ

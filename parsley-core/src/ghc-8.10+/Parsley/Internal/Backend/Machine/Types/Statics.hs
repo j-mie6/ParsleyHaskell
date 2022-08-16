@@ -51,6 +51,7 @@ import Data.STRef                                                 (STRef)
 import Data.Kind                                                  (Type)
 import Data.Maybe                                                 (fromMaybe)
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata, newMeta)
+import Parsley.Internal.Backend.Machine.Types.Base                (GhostOffset)
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc)
 import Parsley.Internal.Backend.Machine.Types.Errors.Defunc       (DefuncError, DefuncGhosts)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), fromInput)
@@ -249,7 +250,7 @@ on continuations, a simple form of inlining optimisation.
 
 @since 1.8.0.0
 -}
-type StaCont# s o err a x = Code x -> Input# o -> Code DefuncGhosts -> Code (ST s (Result err a))
+type StaCont# s o err a x = Code x -> Input# o -> Code DefuncGhosts -> Code GhostOffset -> Code (ST s (Result err a))
 
 {-|
 Compared with `StaCont#`, this type also bundles the static continuation
@@ -268,7 +269,7 @@ if it is converted back the conversion is free.
 @since 1.4.0.0
 -}
 mkStaContDyn :: DynCont s o err a x -> StaCont s o err a x
-mkStaContDyn dk = StaCont (\x inp ghosts -> [|| $$dk $$x $$(pos# inp) $$(off# inp) $$ghosts ||]) (Just dk)
+mkStaContDyn dk = StaCont (\x inp ghosts valid -> [|| $$dk $$x $$(pos# inp) $$(off# inp) $$ghosts $$valid ||]) (Just dk)
 
 {-|
 Given a static continuation, extracts the underlying continuation which
@@ -297,7 +298,7 @@ on subroutines, a simple form of inlining optimisation: useful for iteration.
 
 @since 1.8.0.0
 -}
-type StaSubroutine# s o err a x = DynCont s o err a x -> DynHandler s o err a -> Input# o -> Code DefuncGhosts -> Code (ST s (Result err a))
+type StaSubroutine# s o err a x = DynCont s o err a x -> DynHandler s o err a -> Input# o -> Code DefuncGhosts -> Code GhostOffset -> Code (ST s (Result err a))
 
 {-|
 Packages a `StaSubroutine#` along with statically determined metadata that describes it derived from
@@ -357,5 +358,5 @@ qSubroutine :: forall s o err a x rs. DynFunc rs s o err a x -> Regs rs -> Metad
 qSubroutine func frees meta = QSubroutine (staFunc frees func) frees
   where
     staFunc :: forall rs. Regs rs -> DynFunc rs s o err a x -> StaFunc rs s o err a x
-    staFunc NoRegs func = StaSubroutine (\dk dh inp ghosts -> [|| $$func $$dk $$dh $$(pos# inp) $$(off# inp) $$ghosts ||]) meta
+    staFunc NoRegs func = StaSubroutine (\dk dh inp ghosts valid -> [|| $$func $$dk $$dh $$(pos# inp) $$(off# inp) $$ghosts $$valid ||]) meta
     staFunc (FreeReg _ witness) func = \r -> staFunc witness [|| $$func $$r ||]

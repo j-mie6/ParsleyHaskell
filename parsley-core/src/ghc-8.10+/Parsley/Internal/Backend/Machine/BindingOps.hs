@@ -27,7 +27,7 @@ import Data.Array.Unboxed                              (UArray)
 import Data.ByteString.Internal                        (ByteString)
 import Data.Text                                       (Text)
 import Parsley.Internal.Backend.Machine.InputRep       (Rep)
-import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos)
+import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos, GhostOffset)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler)
 import Parsley.Internal.Backend.Machine.Types.Errors.Defunc (DefuncError, DefuncGhosts)
 import Parsley.Internal.Backend.Machine.Types.Input    (Input#(..))
@@ -92,8 +92,8 @@ class JoinBuilder o where
 instance JoinBuilder _o where                                                         \
 {                                                                                     \
   setupJoinPoint# binding k =                                                         \
-    [|| let join x (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) =            \
-              $$(binding [||x||] (Input# [||o#||] [||pos||]) [||ghosts||]) in $$(k [||join||]) ||] \
+    [|| let join x (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) (ghostValid :: GhostOffset) =            \
+              $$(binding [||x||] (Input# [||o#||] [||pos||]) [||ghosts||] [||ghostValid||]) in $$(k [||join||]) ||] \
 };
 inputInstances(deriveJoinBuilder)
 
@@ -121,7 +121,8 @@ class RecBuilder o where
   -}
   bindIter# :: Input# o                                         -- ^ Initial offset for the loop.
             -> Code DefuncGhosts
-            -> (Code (Pos -> Rep o -> DefuncGhosts -> b) -> Input# o -> Code DefuncGhosts -> Code b) -- ^ The code for the loop given self-call and offset.
+            -> Code GhostOffset
+            -> (Code (Pos -> Rep o -> DefuncGhosts -> GhostOffset -> b) -> Input# o -> Code DefuncGhosts -> Code GhostOffset -> Code b) -- ^ The code for the loop given self-call and offset.
             -> Code b                                           -- ^ Code of the executing loop.
 
   {-|
@@ -139,14 +140,14 @@ instance RecBuilder _o where                                                    
       let handler (posc :: Pos) (c# :: Rep _o) (poso :: Pos) (o# :: Rep _o) (err :: DefuncError) =                       \
             $$(h (Input# [||c#||] [||posc||]) (Input# [||o#||] [||poso||]) [||err||]) in $$(k [||handler||])  \
     ||];                                                                                            \
-  bindIter# inp ghosts l = [||                                                                             \
-      let loop (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) = $$(l [||loop||] (Input# [||o#||] [||pos||]) [||ghosts||])          \
-      in loop $$(pos# inp) $$(off# inp) $$(ghosts)                                                            \
+  bindIter# inp ghosts valid l = [||                                                                             \
+      let loop (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) (ghostValid :: GhostOffset) = $$(l [||loop||] (Input# [||o#||] [||pos||]) [||ghosts||] [||ghostValid||])          \
+      in loop $$(pos# inp) $$(off# inp) $$ghosts $$valid                                                            \
     ||];                                                                                            \
   bindRec# binding =                                                                                \
     {- The idea here is to try and reduce the number of times registers have to be passed around -} \
-    [|| let self ret h (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) =                                               \
-              $$(binding [||self||] [||ret||] [||h||] (Input# [||o#||] [||pos||]) [||ghosts||]) in self ||]      \
+    [|| let self ret h (pos :: Pos) !(o# :: Rep _o) (ghosts :: DefuncGhosts) (ghostValid :: GhostOffset) =                                               \
+              $$(binding [||self||] [||ret||] [||h||] (Input# [||o#||] [||pos||]) [||ghosts||] [||ghostValid||]) in self ||]      \
 };
 inputInstances(deriveRecBuilder)
 
@@ -177,6 +178,6 @@ class MarshalOps o where
 instance MarshalOps _o where                                                                          \
 {                                                                                                     \
   dynHandler# sh = [||\ (pos :: Pos) (o# :: Rep _o) (err :: DefuncError) -> $$(sh (Input# [||o#||] [||pos||]) [||err||]) ||];        \
-  dynCont# sk = [||\ x (pos :: Pos) (o# :: Rep _o) (ghosts :: DefuncGhosts) -> $$(sk [||x||] (Input# [||o#||] [||pos||]) [||ghosts||]) ||]; \
+  dynCont# sk = [||\ x (pos :: Pos) (o# :: Rep _o) (ghosts :: DefuncGhosts) (ghostValid :: GhostOffset) -> $$(sk [||x||] (Input# [||o#||] [||pos||]) [||ghosts||] [||ghostValid||]) ||]; \
 };
 inputInstances(deriveMarshalOps)

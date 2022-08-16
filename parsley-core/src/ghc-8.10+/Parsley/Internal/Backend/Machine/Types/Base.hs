@@ -78,6 +78,7 @@ type Cont# s o err a x =  x              -- ^ The value to be returned to the ca
                        -> Pos            -- ^ The current position
                        -> Rep o          -- ^ The new input after the call is executed
                        -> DefuncGhosts   -- ^ The ghosts carried along by departed errors
+                       -> GhostOffset
                        -> ST s (Result err a)
 
 {-|
@@ -91,6 +92,7 @@ type Subroutine# s o err a x =  Cont# s o err a x  -- ^ What to do when this par
                              -> Pos            -- ^ The current position
                              -> Rep o          -- ^ The input on entry to the call
                              -> DefuncGhosts   -- ^ The ghosts carried along by departed errors
+                             -> GhostOffset
                              -> ST s (Result err a)
 
 {-|

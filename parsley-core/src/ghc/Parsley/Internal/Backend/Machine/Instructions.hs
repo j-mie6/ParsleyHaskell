@@ -72,6 +72,7 @@ data Instr (o :: Type)                          -- The FIXED input type
   Lift2     :: Machine.Defunc (x -> y -> z) {- ^ Function to apply. -}
             -> k (z : xs) n m r               {- ^ Machine requiring new value. -}
             -> Instr o k (y : x : xs) n m r
+  --TODO: perhaps in future we can roll up loops of character reads (i.e. strings) to make them generate less code and thus faster?
   {-| Reads a character so long as it matches a given predicate. If it does not, or no input is available, this instruction fails.
 
   @since 2.1.0.0 -}
@@ -182,6 +183,9 @@ data Instr (o :: Type)                          -- The FIXED input type
   MergeErrors :: k xs n (Succ m) r -> Instr o k xs n (Succ (Succ m)) r
   PopError  :: k xs n m r -> Instr o k xs n (Succ m) r
   ErrorToGhost :: k xs n m r -> Instr o k xs n (Succ m) r
+  SaveGhosts :: Bool -> k xs n m r -> Instr o k xs n m r
+  PopGhosts :: k xs n m r -> Instr o k xs n m r
+  MergeGhosts :: k xs n m r -> Instr o k xs n m r
 
   {-| Begins a debugging scope, the inner scope requires /two/ handlers,
       the first is the log handler itself, and then the second is the
@@ -415,6 +419,9 @@ instance IFunctor4 (Instr o) where
   imap4 f (MergeErrors k)     = MergeErrors (f k)
   imap4 f (PopError k)        = PopError (f k)
   imap4 f (ErrorToGhost k)    = ErrorToGhost (f k)
+  imap4 f (SaveGhosts b k)    = SaveGhosts b (f k)
+  imap4 f (PopGhosts k)       = PopGhosts (f k)
+  imap4 f (MergeGhosts k)     = MergeGhosts (f k)
   imap4 f (SelectPos sel k)   = SelectPos sel (f k)
   imap4 f (LogEnter name k)   = LogEnter name (f k)
   imap4 f (LogExit name k)    = LogExit name (f k)
@@ -456,6 +463,10 @@ instance Show (Fix4 (Instr o) xs n m r) where
       alg (MergeErrors k)          = "(MergeErrors " . getConst4 k . ")"
       alg (PopError k)             = "(PopError " . getConst4 k . ")"
       alg (ErrorToGhost k)         = "(ErrorToGhost " . getConst4 k . ")"
+      alg (SaveGhosts True k)      = "(SaveGhosts Hide " . getConst4 k . ")"
+      alg (SaveGhosts False k)     = "(SaveGhosts Shadow " . getConst4 k . ")"
+      alg (PopGhosts k)            = "(PopGhosts " . getConst4 k . ")"
+      alg (MergeGhosts k)          = "(MergeGhosts " . getConst4 k . ")"
       alg (LogEnter _ k)           = getConst4 k
       alg (LogExit _ k)            = getConst4 k
       alg (MetaInstr BlockCoins k) = getConst4 k

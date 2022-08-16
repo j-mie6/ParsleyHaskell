@@ -182,8 +182,8 @@ offWithSame qi# qj# = [||
         (# j#, _ #) -> $$(intSame [||i#||] [||j#||])
   ||]
 
-offWithExtract :: Code (OffWith ts) -> Code Int
-offWithExtract qi# = [|| case $$(qi#) of (# i#, _ #) -> I# i# ||]
+offWithExtract :: Code (OffWith ts) -> Code Int#
+offWithExtract qi# = [|| case $$(qi#) of (# i#, _ #) -> i# ||]
 
 {-|
 Shifts an `OffWith` to the right, taking care to also drop tokens from the

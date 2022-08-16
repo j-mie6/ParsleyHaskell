@@ -40,6 +40,7 @@ import GHC.Prim                                    (word16ToWord#, word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
+import Parsley.Internal.Backend.Machine.Types.Base (GhostOffset)
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString, OffWith,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess,
                                                     offsetText, offWithSame, offWithExtract, offWithShiftRight, dropStream,
@@ -122,7 +123,7 @@ class PositionOps (rep :: TYPE r) where
   {-|
   @since 2.3.0.0
   -}
-  extractRawOffset :: Code rep -> Code Int
+  extractRawOffset :: Code rep -> Code GhostOffset
 
 {-|
 Defines operation used for debugging operations.
@@ -261,7 +262,7 @@ shiftRightInt qo# qi# = [||$$(qo#) +# $$(qi#)||]
 instance PositionOps Int# where
   same = intSame
   shiftRight = shiftRightInt
-  extractRawOffset x = [||I# $$x||]
+  extractRawOffset x = [||$$x||]
 
 instance PositionOps (OffWith [Char]) where
   same = offWithSame
@@ -276,7 +277,7 @@ instance PositionOps (OffWith Stream) where
 instance PositionOps Text where
   same qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
   shiftRight qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
-  extractRawOffset qo = [||case $$qo of Text _ off _ -> off||]
+  extractRawOffset qo = [||case $$qo of Text _ (I# off) _ -> off||]
 
 instance PositionOps UnpackedLazyByteString where
   same qx# qy# = [||
@@ -285,7 +286,7 @@ instance PositionOps UnpackedLazyByteString where
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
   shiftRight qo# qi# = [||byteStringShiftRight $$(qo#) $$(qi#)||]
-  extractRawOffset qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> I# i# ||]
+  extractRawOffset qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> i# ||]
 
 -- LogOps Instances
 instance LogOps Int# where

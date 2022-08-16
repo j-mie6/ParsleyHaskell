@@ -20,7 +20,6 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 
 import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
-import Data.STRef.Unboxed                                  (newSTRefU)
 import Data.Void                                           (Void)
 import Control.Monad                                       (forM, liftM2, liftM3, when)
 import Control.Monad.Reader                                (ask, asks, reader, local)
@@ -37,7 +36,7 @@ import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machin
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts), emptyError, mergeErrors, addGhost)
+import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts), emptyError, mergeErrors, addGhost, mergeGhosts)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -60,14 +59,13 @@ eval :: (Trace, Ops o)
      -> Code (Result err a)           -- ^ The code for this parser.
 eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(# next, more, offset #) = $$input
-     ghostOffsetRef <- newSTRefU $$(extractRawOffset [||offset||])
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
-             (\μ exp rs names -> buildRec μ rs (emptyCtx [||ghostOffsetRef||] names) (readyMachine exp))
+             (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
              (run (readyMachine (body binding))
-                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) VNil [||EmptyGhosts||] [])
-                 . nextUnique . emptyCtx [||ghostOffsetRef||]))
+                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) VNil [||EmptyGhosts||] [] (extractRawOffset [||offset||]))
+                 . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -103,6 +101,9 @@ readyMachine = cata4 (Machine . alg)
     alg (MergeErrors k)     = evalMergeErrors k
     alg (PopError k)        = evalPopError k
     alg (ErrorToGhost k)    = evalErrorToGhost k
+    alg (SaveGhosts b k)    = evalSaveGhosts b k
+    alg (PopGhosts k)       = evalPopGhosts k
+    alg (MergeGhosts k)     = evalMergeGhosts k
     alg (SelectPos sel k)   = evalSelectPos sel k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
@@ -115,7 +116,7 @@ evalCall :: MarshalOps o => MVar x -> Machine s o err a (x : xs) (Succ n) m r ->
 evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
 
 evalJump :: forall s o err a x n m. MarshalOps o => MVar x -> MachineMonad s o err a '[] (Succ n) m x
-evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input ghosts handlers
+evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input ghosts ghostOffset handlers
 
 evalPush :: Defunc x -> Machine s o err a (x : xs) n m r -> MachineMonad s o err a xs n m r
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
@@ -192,9 +193,9 @@ evalIter μ l h =
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       case h of
         Always gh (Machine h) ->
-          liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) (ghosts γ) u2) h ask
+          liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) (ghosts γ) (ghostOffset γ) u2) h ask
         Same gyes (Machine yes) gno (Machine no) ->
-          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) (ghosts γ) u2) yes no ask
+          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) (ghosts γ) (ghostOffset γ) u2) yes no ask
 
 evalJoin :: ΦVar x -> MachineMonad s o err a (x : xs) n m r
 evalJoin φ = askΦ φ <&> resume
@@ -246,6 +247,19 @@ evalErrorToGhost :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (S
 evalErrorToGhost (Machine k) = k <&> \mk γ ->
   let VCons err es = errs γ
   in mk (γ {errs = es, ghosts = [||addGhost $$(ghosts γ) $$err||]})
+
+-- TODO: Some type indices might be good? lol
+evalSaveGhosts :: Bool -> Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
+evalSaveGhosts _ (Machine k) = k <&> \mk γ -> mk (γ {savedGhosts = (ghosts γ, ghostOffset γ) : savedGhosts γ})
+
+evalPopGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
+evalPopGhosts (Machine k) = k <&> \mk γ -> let _ : savedGhosts' = savedGhosts γ in mk (γ { savedGhosts = savedGhosts' })
+
+--FIXME: This needs to do checks before a ghost is added: this is ripe for static information use!
+evalMergeGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
+evalMergeGhosts (Machine k) = k <&> \mk γ ->
+  let (ghosts', validOffset') : savedGhosts' = savedGhosts γ
+  in mk (γ { savedGhosts = ([||mergeGhosts $$(ghosts γ) $$ghosts'||], validOffset') : savedGhosts' })
 
 -- TODO: This could be made more consistent with a top-level debug level register
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)

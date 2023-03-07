@@ -10,7 +10,7 @@ module Parsley.Patterns (
 import Prelude hiding (pure, (<*>))
 
 import Control.Monad (replicateM)
-import Data.List     (intercalate, elemIndex)
+import Data.List     (intercalate, elemIndex, foldl')
 import Language.Haskell.TH (Name, Q, reify, Info(TyConI, DataConI), Extension(KindSignatures), newName, mkName, isExtEnabled)
 import Language.Haskell.TH.Syntax (Type(ConT, AppT, ArrowT, ForallT, StarT),
                                    Con(NormalC, RecC, GadtC, RecGadtC),
@@ -49,8 +49,7 @@ deriveLiftedConstructors prefix = fmap concat . traverse deriveCon
                ]
 
     applyArgs :: Q Exp -> [Q Exp] -> Q Exp
-    applyArgs rest [] = rest
-    applyArgs rest (arg:args) = applyArgs [e|$rest <*> $arg|] args
+    applyArgs = foldl' (\rest arg -> [e|$rest <*> $arg|])
 
     buildType :: (Q Type -> Q Type) -> [Q Type] -> Q Type
     buildType forall tys = forall (foldr (\ty rest -> [t|Parser $ty -> $rest|]) [t|Parser $(last tys)|] (init tys))

@@ -6,7 +6,7 @@ module Parsley.Internal.Core.Primitives (
   ) where
 
 import Prelude hiding                      (pure, (<*>))
-import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..), PosSelector(..))
+import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..), PosSelector(..), pattern Empty, pattern FailErr, pattern UnexpectedErr)
 import Parsley.Internal.Core.Defunc        (Defunc, charPred)
 
 import Parsley.Internal.Common.Indexed     (Fix(In), (:+:)(..))
@@ -89,3 +89,27 @@ col = Parser (In (L (Position Col)))
 {-# INLINE debug #-}
 debug :: String -> Parser a -> Parser a
 debug name (Parser p) = Parser (In (L (Debug name p)))
+
+{-# INLINE label #-}
+label :: String -> Parser a -> Parser a
+label name (Parser p) = Parser (In (L (LabelErr name p)))
+
+{-# INLINE explain #-}
+explain :: String -> Parser a -> Parser a
+explain reason (Parser p) =  Parser (In (L (ExplainErr reason p)))
+
+{-# INLINE fail #-}
+fail :: [String] -> Parser a
+fail msgs =  Parser (In (L (FailErr msgs)))
+
+{-# INLINE unexpected #-}
+unexpected :: String -> Parser a
+unexpected token =  Parser (In (L (UnexpectedErr token)))
+
+{-# INLINE amend #-}
+amend :: Parser a -> Parser a
+amend (Parser p) =  Parser (In (L (AmendErr p)))
+
+{-# INLINE entrench #-}
+entrench :: Parser a -> Parser a
+entrench (Parser p) =  Parser (In (L (EntrenchErr p)))

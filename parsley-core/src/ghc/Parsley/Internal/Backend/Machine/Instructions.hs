@@ -36,6 +36,7 @@ import Parsley.Internal.Backend.Machine.Types.Coins (Coins(Coins))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))
 import Parsley.Internal.Core.CharPred               (CharPred)
+import Parsley.Internal.Core.Error                  (BaseError)
 
 import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
 import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
@@ -175,11 +176,14 @@ data Instr (o :: Type)                          -- The FIXED input type
   {-| Fails unconditionally.
 
   @since 1.0.0.0 -}
-  Empt      :: Instr o k xs (Succ n) m r {- ^ -}
-
-  --Fail      :: ErrorMsg -> Instr o k xs (Succ n) r -- this will replace Empt
+  Fail      :: BaseError -> Instr o k xs (Succ n) m r
   -- These should only be used in Handlers, how to enforce?
   Raise     :: Instr o k xs (Succ n) (Succ m) r
+  RelabelError  :: String -> k xs n (Succ m) r -> Instr o k (o : xs) n (Succ m) r
+  RelabelGhosts :: String -> k xs n m r -> Instr o k (o : xs) n m r
+  Explain       :: String -> k xs n (Succ m) r -> Instr o k (o : xs) n (Succ m) r
+  Amend         :: k xs n (Succ m) r -> Instr o k (o : xs) n (Succ m) r
+  Entrench      :: k xs n (Succ m) r -> Instr o k xs n (Succ m) r
   MergeErrors :: k xs n (Succ m) r -> Instr o k xs n (Succ (Succ m)) r
   PopError  :: k xs n m r -> Instr o k xs n (Succ m) r
   ErrorToGhost :: k xs n m r -> Instr o k xs n (Succ m) r
@@ -415,8 +419,13 @@ instance IFunctor4 (Instr o) where
   imap4 f (Make σ a k)        = Make σ a (f k)
   imap4 f (Get σ a k)         = Get σ a (f k)
   imap4 f (Put σ a k)         = Put σ a (f k)
-  imap4 _ Empt                = Empt
+  imap4 _ (Fail err)          = Fail err
   imap4 _ Raise               = Raise
+  imap4 f (RelabelError name k)  = RelabelError name (f k)
+  imap4 f (RelabelGhosts name k) = RelabelGhosts name (f k)
+  imap4 f (Explain reason k)     = Explain reason (f k)
+  imap4 f (Amend k)              = Amend (f k)
+  imap4 f (Entrench k)           = Entrench (f k)
   imap4 f (MergeErrors k)     = MergeErrors (f k)
   imap4 f (PopError k)        = PopError (f k)
   imap4 f (ErrorToGhost k)    = ErrorToGhost (f k)
@@ -459,8 +468,13 @@ instance Show (Fix4 (Instr o) xs n m r) where
       alg (Put σ a k)              = "(Put " . shows σ . " " . shows a . " " . getConst4 k . ")"
       alg (SelectPos Line k)       = "(Line " . getConst4 k . ")"
       alg (SelectPos Col k)        = "(Col " . getConst4 k . ")"
-      alg Empt                     = "Empt"
+      alg (Fail err)               = "(Fail " . shows err . ")"
       alg Raise                    = "Raise"
+      alg (RelabelError name k)    = "(RelabelError " . shows name . " " . getConst4 k . ")"
+      alg (RelabelGhosts name k)   = "(RelabelGhosts " . shows name . " " . getConst4 k . ")"
+      alg (Explain reason k)       = "(Explain " . shows reason . " " . getConst4 k . ")"
+      alg (Amend k)                = "(Amend " . getConst4 k . ")"
+      alg (Entrench k)             = "(Entrench " . getConst4 k . ")"
       alg (MergeErrors k)          = "(MergeErrors " . getConst4 k . ")"
       alg (PopError k)             = "(PopError " . getConst4 k . ")"
       alg (ErrorToGhost k)         = "(ErrorToGhost " . getConst4 k . ")"

@@ -159,7 +159,7 @@ benchmark brainfuck-bench
 benchmark javascript-bench
   import:              benchmark-common
   type:                exitcode-stdio-1.0
-  other-modules:       JavascriptBench.Shared, JavascriptBench.Parsley.Parser, JavascriptBench.Parsec.Parser, JavascriptBench.Megaparsec.Parser,
+  other-modules:       JavascriptBench.Shared, JavascriptBench.Parsley.Parser, JavascriptBench.Parsley.String, JavascriptBench.Parsley.Text, JavascriptBench.Parsec.Parser, JavascriptBench.Megaparsec.Parser,
                        JavascriptBench.Attoparsec.Parser, JavascriptBench.Happy.Parser
   main-is:             JavascriptBench/Main.hs
 

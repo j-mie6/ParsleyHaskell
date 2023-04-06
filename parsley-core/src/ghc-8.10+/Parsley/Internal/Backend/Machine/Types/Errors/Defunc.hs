@@ -147,10 +147,10 @@ label !err !l !off
   | isTrivial err, offset err == off = WithLabel (_setExpectedEmpty (null l) (flags err)) off err l
   | otherwise                        = err
 
-amend :: DefuncError -> DefuncError
-amend !err
+amend :: DefuncError -> Int -> DefuncError
+amend !err !off
   | entrenched err = err
-  | otherwise = Amended (flags err) (offset err) err
+  | otherwise = Amended (flags err) off err
 
 entrench :: DefuncError -> DefuncError
 entrench !err
@@ -178,8 +178,8 @@ rename !ghosts !l
 addGhost :: DefuncGhosts -> DefuncError -> DefuncGhosts
 addGhost !ghosts !err
   -- a non-empty expected implies trivial
-  | {-isTrivial err, -} not (isExpectedEmpty err) = AddGhost (size ghosts + 1) ghosts err
-  | otherwise     = error "only trivial errors will get added to the ghosts"
+  {- redundant | {-isTrivial err, -} not (isExpectedEmpty err)-} = AddGhost (size ghosts + 1) ghosts err
+  {- redundant | otherwise     = error "only trivial errors will get added to the ghosts"-}
 
 instance Show DefuncError where
   show _ = "TODO"

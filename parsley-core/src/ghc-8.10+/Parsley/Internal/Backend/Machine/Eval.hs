@@ -25,8 +25,9 @@ import Control.Monad                                       (forM, liftM2, liftM3
 import Control.Monad.Reader                                (ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
+import Parsley.Internal.Backend.Machine.ErrorOps           (mergeGhostsIfValid)
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps), PositionOps(extractRawOffset))
+import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps), ErrorOps)
 import Parsley.Internal.Backend.Machine.InputRep           (Rep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
@@ -36,11 +37,12 @@ import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machin
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts), emptyError, mergeErrors, addGhost, mergeGhosts)
+import Parsley.Internal.Backend.Machine.Types.Errors       (DefuncGhosts(EmptyGhosts), emptyError, mergeErrors, entrench)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm, optimisePredGiven)
+import Parsley.Internal.Core.Error                         (BaseError)
 import Parsley.Internal.Core.Result                        (Result(..))
 import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
@@ -64,7 +66,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
              (run (readyMachine (body binding))
-                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) VNil [||EmptyGhosts||] [] (extractRawOffset [||offset||]))
+                  (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil) VNil [||EmptyGhosts||] [] [||0#||])
                  . nextUnique . emptyCtx))
   ||]
   where
@@ -96,8 +98,13 @@ readyMachine = cata4 (Machine . alg)
     alg (Make σ c k)        = evalMake σ c k
     alg (Get σ c k)         = evalGet σ c k
     alg (Put σ c k)         = evalPut σ c k
-    alg Empt                = evalEmpt
+    alg (Fail err)          = evalFail err
     alg Raise               = evalRaise
+    alg (RelabelError name k)  = evalRelabelError name k
+    alg (RelabelGhosts name k) = evalRelabelGhosts name k
+    alg (Explain reason k)     = evalExplain reason k
+    alg (Amend k)              = evalAmend k
+    alg (Entrench k)           = evalEntrench k
     alg (MergeErrors k)     = evalMergeErrors k
     alg (PopError k)        = evalPopError k
     alg (ErrorToGhost k)    = evalErrorToGhost k
@@ -127,7 +134,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o err a (z : xs) n m r -> MachineMonad s o err a (y : x : xs) n m r
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: forall s o err a xs n m r. (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => CharPred -> Machine s o err a (Char : xs) (Succ n) m r -> MachineMonad s o err a xs (Succ n) m r
+evalSat :: forall s o err a xs n m r. (?ops :: InputOps (Rep o), PositionOps (Rep o), ErrorOps (Rep o), Trace) => CharPred -> Machine s o err a (Char : xs) (Succ n) m r -> MachineMonad s o err a xs (Succ n) m r
 evalSat p k@(Machine k') = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -185,7 +192,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go x (f:fs) (mk:mks) def γ = _if (ap f x) (mk γ) (go x fs mks def γ)
     go _ _      _        def γ = def γ
 
-evalIter :: (RecBuilder o, PositionOps (Rep o), HandlerOps o)
+evalIter :: (RecBuilder o, PositionOps (Rep o), ErrorOps (Rep o), HandlerOps o)
          => MVar Void -> Machine s o err a '[] One Zero Void -> Handler o (Machine s o err a) (o : xs) n (Succ m) r
          -> MachineMonad s o err a xs n m r
 evalIter μ l h =
@@ -228,11 +235,52 @@ evalSelectPos :: PosSelector -> Machine s o err a (Int : xs) n m r -> MachineMon
 evalSelectPos sel (Machine k) = k <&> \m γ -> forcePos (input γ) sel $ \component input' ->
   m (γ {operands = Op (FREEVAR component) (operands γ), input = input'})
 
-evalEmpt :: PositionOps (Rep o) => MachineMonad s o err a xs (Succ n) m r
-evalEmpt = return $! raiseWith [||emptyError||]
+evalFail :: ErrorOps (Rep o) => BaseError -> MachineMonad s o err a xs (Succ n) m r
+evalFail _ = return $! raiseWith [||emptyError||]
 
 evalRaise :: MachineMonad s o err a xs (Succ n) (Succ m) r
 evalRaise = return $! raise
+
+evalRelabelError :: String -> Machine s o err a xs n (Succ m) r -> MachineMonad s o err a (o : xs) n (Succ m) r
+--TODO:
+{-
+ctx.errs.error = ctx.useHints {
+            // only use the label if the error message is generated at the same offset
+            // as the check stack saved for the start of the `label` combinator.
+            ctx.errs.error.label(label, ctx.checkStack.offset)
+        }
+-}
+evalRelabelError name (Machine k) = k <&> \mk γ -> let Op off xs = operands γ in mk (γ {operands = xs})
+
+evalRelabelGhosts :: String -> Machine s o err a xs n m r -> MachineMonad s o err a (o : xs) n m r
+--TODO:
+{-
+// if this was a hide, pop the hints if possible
+ctx.popHints
+-}
+evalRelabelGhosts "" (Machine k) = k <&> \mk γ -> mk (γ {operands = let Op _ xs = operands γ in xs})
+{-
+// replace the head of the hints with the singleton for our label
+if (ctx.offset == ctx.checkStack.offset) ctx.replaceHint(label)
+-}
+evalRelabelGhosts name (Machine k) = k <&> \mk γ -> let Op off xs = operands γ in mk (γ {operands = xs})
+
+evalExplain :: String -> Machine s o err a xs n (Succ m) r -> MachineMonad s o err a (o : xs) n (Succ m) r
+--TODO:
+{-
+if (ctx.errs.error.offset == ctx.checkStack.offset) ctx.errs.error = ctx.errs.error.withReason(reason)
+-}
+evalExplain reason (Machine k) = k <&> \mk γ -> let Op off xs = operands γ in mk (γ {operands = xs})
+
+evalAmend :: ErrorOps (Rep o) => Machine s o err a xs n (Succ m) r -> MachineMonad s o err a (o : xs) n (Succ m) r
+evalAmend (Machine k) = k <&> \mk γ ->
+  let Op (INPUT off) xs = operands γ
+  in amend off (γ {operands = xs}) mk
+
+evalEntrench :: Machine s o err a xs n (Succ m) r -> MachineMonad s o err a xs n (Succ m) r
+evalEntrench (Machine k) = k <&> \mk γ ->
+  let VCons err errs' = errs γ
+  in mk (γ {errs = VCons [||entrench $$err||] errs'})
 
 evalMergeErrors :: Machine s o err a xs n (Succ m) r -> MachineMonad s o err a xs n (Succ (Succ m)) r
 evalMergeErrors (Machine k) = k <&> \mk γ ->
@@ -242,21 +290,10 @@ evalMergeErrors (Machine k) = k <&> \mk γ ->
 evalPopError :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
 evalPopError (Machine k) = k <&> \mk γ -> let VCons _ es = errs γ in mk (γ {errs = es})
 
--- FIXME: This needs to do checks before a ghost is added: this is ripe for static information use!
-evalErrorToGhost :: Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
+evalErrorToGhost :: ErrorOps (Rep o) => Machine s o err a xs n m r -> MachineMonad s o err a xs n (Succ m) r
 evalErrorToGhost (Machine k) = k <&> \mk γ ->
   let VCons err es = errs γ
-  {- ewwwww gross
-  let (ghosts', ghostOffset') =
-    if not (isExpectedEmpty err) && offset err == offset then
-      let (ghosts', ghostOffset') = if ghostOffset < offset then (EmptyGhosts, offset)
-                                    else (ghosts, ghostOffset))
-      in (addGhost ghosts' err, ghostOffset')
-    else (ghosts, ghostOffset)
-  in mk ...
-  -}
-  in [|| let newGhosts = addGhost $$(ghosts γ) $$err
-         in $$(mk (γ {errs = es, ghosts = [||newGhosts||]})) ||]
+  in updateGhostsWithError err γ $ \γ' -> mk (γ' {errs = es})
 
 evalSaveGhosts :: Bool -> Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalSaveGhosts True (Machine k) = k <&> \mk γ -> mk (γ {savedGhosts = (ghosts γ, ghostOffset γ) : savedGhosts γ})
@@ -265,15 +302,10 @@ evalSaveGhosts False (Machine k) = k <&> \mk γ -> mk (γ {ghosts = [||EmptyGhos
 evalPopGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalPopGhosts (Machine k) = k <&> \mk γ -> let _ : savedGhosts' = savedGhosts γ in mk (γ { savedGhosts = savedGhosts' })
 
--- TODO: this is ripe for static information use!
 evalMergeGhosts :: Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalMergeGhosts (Machine k) = k <&> \mk γ ->
   let (ghosts', validOffset') : savedGhosts' = savedGhosts γ
-     -- This will probably move elsewhere
-  in [|| let newGhosts = if $$(compareGhostOffset (ghostOffset γ) validOffset')
-                         then mergeGhosts $$(ghosts γ) $$ghosts'
-                         else $$(ghosts γ)
-         in $$(mk (γ { savedGhosts = ([||newGhosts||], validOffset') : savedGhosts' })) ||]
+  in mk (γ { ghosts = [||mergeGhostsIfValid $$(ghosts γ) $$ghosts' $$(ghostOffset γ) $$validOffset'||], savedGhosts = savedGhosts' })
 
 -- TODO: This could be made more consistent with a top-level debug level register
 evalLogEnter :: (?ops :: InputOps (Rep o), LogHandler o, HandlerOps o)
@@ -290,7 +322,7 @@ evalLogExit name (Machine mk) =
     ask
 
 -- TODO: What errors go here?
-evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
+evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o), ErrorOps (Rep o)) => MetaInstr n -> Machine s o err a xs n m r -> MachineMonad s o err a xs n m r
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k

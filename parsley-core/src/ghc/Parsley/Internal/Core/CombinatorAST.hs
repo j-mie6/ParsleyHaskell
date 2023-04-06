@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, PatternSynonyms #-}
 module Parsley.Internal.Core.CombinatorAST (module Parsley.Internal.Core.CombinatorAST) where
 
 import Data.Kind                         (Type)
@@ -6,6 +6,9 @@ import Parsley.Internal.Common           (IFunctor(..), Fix, Const1(..), cata, i
 import Parsley.Internal.Core.Identifiers (MVar, ΣVar)
 import Parsley.Internal.Core.CharPred    (CharPred)
 import Parsley.Internal.Core.Defunc      (Defunc)
+import Parsley.Internal.Core.Error       (UserError)
+
+import qualified Parsley.Internal.Core.Error as Error
 
 {-|
 The opaque datatype that represents parsers.
@@ -22,7 +25,6 @@ data Combinator (k :: Type -> Type) (a :: Type) where
   (:*>:)         :: k a -> k b -> Combinator k b
   (:<*:)         :: k a -> k b -> Combinator k a
   (:<|>:)        :: k a -> k a -> Combinator k a
-  Empty          :: Combinator k a
   Try            :: k a -> Combinator k a
   LookAhead      :: k a -> Combinator k a
   Let            :: Bool -> MVar a -> Combinator k a
@@ -35,7 +37,21 @@ data Combinator (k :: Type -> Type) (a :: Type) where
   PutRegister    :: ΣVar a -> k a -> Combinator k ()
   Position       :: PosSelector -> Combinator k Int
   Debug          :: String -> k a -> Combinator k a
+  LabelErr       :: String -> k a -> Combinator k a
+  ExplainErr     :: String -> k a -> Combinator k a
+  Error          :: UserError -> Combinator k a
+  AmendErr       :: k a -> Combinator k a
+  EntrenchErr    :: k a -> Combinator k a
   MetaCombinator :: MetaCombinator -> k a -> Combinator k a
+
+pattern Empty :: Combinator k a
+pattern Empty = Error Error.Empty
+
+pattern FailErr :: [String] -> Combinator k a
+pattern FailErr msgs = Error (Error.Fancy msgs)
+
+pattern UnexpectedErr :: String -> Combinator k a
+pattern UnexpectedErr token = Error (Error.Unexpect token)
 
 data ScopeRegister (k :: Type -> Type) (a :: Type) where
   ScopeRegister :: k a -> (forall r. Reg r a -> k b) -> ScopeRegister k b
@@ -65,26 +81,30 @@ data MetaCombinator where
 
 -- Instances
 instance IFunctor Combinator where
-  imap _ (Pure x)             = Pure x
-  imap _ (Satisfy p)          = Satisfy p
-  imap f (p :<*>: q)          = f p :<*>: f q
-  imap f (p :*>: q)           = f p :*>: f q
-  imap f (p :<*: q)           = f p :<*: f q
-  imap f (p :<|>: q)          = f p :<|>: f q
-  imap _ Empty                = Empty
-  imap f (Try p)              = Try (f p)
-  imap f (LookAhead p)        = LookAhead (f p)
-  imap _ (Let r v)            = Let r v
-  imap f (NotFollowedBy p)    = NotFollowedBy (f p)
-  imap f (Branch b p q)       = Branch (f b) (f p) (f q)
-  imap f (Match p fs qs d)    = Match (f p) fs (map f qs) (f d)
-  imap f (Loop body exit)     = Loop (f body) (f exit)
-  imap f (MakeRegister σ p q) = MakeRegister σ (f p) (f q)
-  imap _ (GetRegister σ)      = GetRegister σ
-  imap f (PutRegister σ p)    = PutRegister σ (f p)
-  imap _ (Position sel)       = Position sel
-  imap f (Debug name p)       = Debug name (f p)
-  imap f (MetaCombinator m p) = MetaCombinator m (f p)
+  imap _ (Pure x)              = Pure x
+  imap _ (Satisfy p)           = Satisfy p
+  imap f (p :<*>: q)           = f p :<*>: f q
+  imap f (p :*>: q)            = f p :*>: f q
+  imap f (p :<*: q)            = f p :<*: f q
+  imap f (p :<|>: q)           = f p :<|>: f q
+  imap _ (Error err)           = Error err
+  imap f (Try p)               = Try (f p)
+  imap f (LookAhead p)         = LookAhead (f p)
+  imap _ (Let r v)             = Let r v
+  imap f (NotFollowedBy p)     = NotFollowedBy (f p)
+  imap f (Branch b p q)        = Branch (f b) (f p) (f q)
+  imap f (Match p fs qs d)     = Match (f p) fs (map f qs) (f d)
+  imap f (Loop body exit)      = Loop (f body) (f exit)
+  imap f (MakeRegister σ p q)  = MakeRegister σ (f p) (f q)
+  imap _ (GetRegister σ)       = GetRegister σ
+  imap f (PutRegister σ p)     = PutRegister σ (f p)
+  imap _ (Position sel)        = Position sel
+  imap f (Debug name p)        = Debug name (f p)
+  imap f (LabelErr name p)     = LabelErr name (f p)
+  imap f (ExplainErr reason p) = ExplainErr reason (f p)
+  imap f (AmendErr p)          = AmendErr (f p)
+  imap f (EntrenchErr p)       = EntrenchErr (f p)
+  imap f (MetaCombinator m p)  = MetaCombinator m (f p)
 
 instance Show (Fix Combinator a) where
   show = ($ "") . getConst1 . cata (Const1 . alg)
@@ -95,7 +115,7 @@ instance Show (Fix Combinator a) where
       alg (Const1 p :*>: Const1 q)                  = "(" . p . " *> " . q . ")"
       alg (Const1 p :<*: Const1 q)                  = "(" . p . " <* " . q . ")"
       alg (Const1 p :<|>: Const1 q)                 = "(" . p . " <|> " . q . ")"
-      alg Empty                                     = "empty"
+      alg (Error Error.Empty)                       = "empty"
       alg (Try (Const1 p))                          = "try (". p . ")"
       alg (LookAhead (Const1 p))                    = "lookAhead (" . p . ")"
       alg (Let False v)                             = "let-bound " . shows v
@@ -110,6 +130,12 @@ instance Show (Fix Combinator a) where
       alg (Position Line)                           = "line"
       alg (Position Col)                            = "col"
       alg (Debug _ (Const1 p))                      = p
+      alg (LabelErr label (Const1 p))               = "label " . shows label . " (" . p . ")"
+      alg (ExplainErr reason (Const1 p))            = "explain " . shows reason . " (" . p . ")"
+      alg (Error (Error.Fancy msgs))                = "fail " . shows msgs
+      alg (Error (Error.Unexpect token))            = "unexpected " . shows token
+      alg (AmendErr (Const1 p))                     = "amend (" . p . ")"
+      alg (EntrenchErr (Const1 p))                  = "entrench (". p . ")"
       alg (MetaCombinator m (Const1 p))             = p . " [" . shows m . "]"
 
 instance IFunctor ScopeRegister where
@@ -122,23 +148,27 @@ instance Show MetaCombinator where
 
 {-# INLINE traverseCombinator #-}
 traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)
-traverseCombinator expose (pf :<*>: px)        = (:<*>:) <$> expose pf <*> expose px
-traverseCombinator expose (p :*>: q)           = (:*>:) <$> expose p <*> expose q
-traverseCombinator expose (p :<*: q)           = (:<*:) <$> expose p <*> expose q
-traverseCombinator expose (p :<|>: q)          = (:<|>:) <$> expose p <*> expose q
-traverseCombinator _      Empty                = pure Empty
-traverseCombinator expose (Try p)              = Try <$> expose p
-traverseCombinator expose (LookAhead p)        = LookAhead <$> expose p
-traverseCombinator expose (NotFollowedBy p)    = NotFollowedBy <$> expose p
-traverseCombinator expose (Branch b p q)       = Branch <$> expose b <*> expose p <*> expose q
-traverseCombinator expose (Match p fs qs d)    = Match <$> expose p <*> pure fs <*> traverse expose qs <*> expose d
-traverseCombinator expose (Loop body exit)     = Loop <$> expose body <*> expose exit
-traverseCombinator expose (MakeRegister σ p q) = MakeRegister σ <$> expose p <*> expose q
-traverseCombinator _      (GetRegister σ)      = pure (GetRegister σ)
-traverseCombinator expose (PutRegister σ p)    = PutRegister σ <$> expose p
-traverseCombinator _      (Position sel)       = pure (Position sel)
-traverseCombinator expose (Debug name p)       = Debug name <$> expose p
-traverseCombinator _      (Pure x)             = pure (Pure x)
-traverseCombinator _      (Satisfy f)          = pure (Satisfy f)
-traverseCombinator _      (Let r v)            = pure (Let r v)
-traverseCombinator expose (MetaCombinator m p) = MetaCombinator m <$> expose p
+traverseCombinator expose (pf :<*>: px)         = (:<*>:) <$> expose pf <*> expose px
+traverseCombinator expose (p :*>: q)            = (:*>:) <$> expose p <*> expose q
+traverseCombinator expose (p :<*: q)            = (:<*:) <$> expose p <*> expose q
+traverseCombinator expose (p :<|>: q)           = (:<|>:) <$> expose p <*> expose q
+traverseCombinator _      (Error err)           = pure (Error err)
+traverseCombinator expose (Try p)               = Try <$> expose p
+traverseCombinator expose (LookAhead p)         = LookAhead <$> expose p
+traverseCombinator expose (NotFollowedBy p)     = NotFollowedBy <$> expose p
+traverseCombinator expose (Branch b p q)        = Branch <$> expose b <*> expose p <*> expose q
+traverseCombinator expose (Match p fs qs d)     = Match <$> expose p <*> pure fs <*> traverse expose qs <*> expose d
+traverseCombinator expose (Loop body exit)      = Loop <$> expose body <*> expose exit
+traverseCombinator expose (MakeRegister σ p q)  = MakeRegister σ <$> expose p <*> expose q
+traverseCombinator _      (GetRegister σ)       = pure (GetRegister σ)
+traverseCombinator expose (PutRegister σ p)     = PutRegister σ <$> expose p
+traverseCombinator _      (Position sel)        = pure (Position sel)
+traverseCombinator expose (Debug name p)        = Debug name <$> expose p
+traverseCombinator _      (Pure x)              = pure (Pure x)
+traverseCombinator _      (Satisfy f)           = pure (Satisfy f)
+traverseCombinator _      (Let r v)             = pure (Let r v)
+traverseCombinator expose (LabelErr name p)     = LabelErr name <$> expose p
+traverseCombinator expose (ExplainErr reason p) = ExplainErr reason <$> expose p
+traverseCombinator expose (AmendErr p)          = AmendErr <$> expose p
+traverseCombinator expose (EntrenchErr p)       = EntrenchErr <$> expose p
+traverseCombinator expose (MetaCombinator m p)  = MetaCombinator m <$> expose p

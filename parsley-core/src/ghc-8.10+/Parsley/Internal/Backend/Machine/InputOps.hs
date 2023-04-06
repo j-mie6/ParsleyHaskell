@@ -19,7 +19,7 @@ parsing machinery to work with input.
 @since 1.0.0.0
 -}
 module Parsley.Internal.Backend.Machine.InputOps (
-    InputPrep(..), PositionOps(..), LogOps(..),
+    InputPrep(..), PositionOps(..), ErrorOps(..), LogOps(..),
     InputOps(..), more, next,
 #if __GLASGOW_HASKELL__ <= 900
     word8ToWord#, word16ToWord#,
@@ -27,26 +27,28 @@ module Parsley.Internal.Backend.Machine.InputOps (
     InputDependant
   ) where
 
-import Data.Array.Base                             (UArray(..), listArray)
-import Data.ByteString.Internal                    (ByteString(..))
-import Data.Text.Array                             (aBA{-, empty-})
-import Data.Text.Internal                          (Text(..))
-import Data.Text.Unsafe                            (iter, Iter(..){-, iter_, reverseIter_-})
-import GHC.Exts                                    (Int(..), Char(..), TYPE, Int#)
-import GHC.ForeignPtr                              (ForeignPtr(..))
-import GHC.Prim                                    (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
+import Data.Array.Base                               (UArray(..), listArray)
+import Data.ByteString.Internal                      (ByteString(..))
+import Data.Text.Array                               (aBA{-, empty-})
+import Data.Text.Internal                            (Text(..))
+import Data.Text.Unsafe                              (iter, Iter(..){-, iter_, reverseIter_-})
+import GHC.Exts                                      (Int(..), Char(..), TYPE, Int#)
+import GHC.ForeignPtr                                (ForeignPtr(..))
+import GHC.Prim                                      (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
 #if __GLASGOW_HASKELL__ > 900
-import GHC.Prim                                    (word16ToWord#, word8ToWord#)
+import GHC.Prim                                      (word16ToWord#, word8ToWord#)
 #else
-import GHC.Prim                                    (Word#)
+import GHC.Prim                                      (Word#)
 #endif
-import Parsley.Internal.Backend.Machine.Types.Base (GhostOffset)
-import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString, OffWith,
-                                                    offWith, emptyUnpackedLazyByteString, intSame, intLess,
-                                                    offsetText, offWithSame, offWithExtract, offWithShiftRight, dropStream,
-                                                    textShiftRight, textShiftLeft, byteStringShiftRight,
-                                                    byteStringShiftLeft, max#)
-import Parsley.Internal.Common.Utils               (Code)
+import Parsley.Internal.Backend.Machine.ErrorOps
+import Parsley.Internal.Backend.Machine.Types.Base   (GhostOffset)
+import Parsley.Internal.Backend.Machine.Types.Errors (DefuncError, DefuncGhosts)
+import Parsley.Internal.Backend.Machine.InputRep     (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString, OffWith,
+                                                      offWith, emptyUnpackedLazyByteString, intSame, intLess,
+                                                      offsetText, offWithSame, offWithExtract, offWithShiftRight, dropStream,
+                                                      textShiftRight, textShiftLeft, byteStringShiftRight,
+                                                      byteStringShiftLeft, max#)
+import Parsley.Internal.Common.Utils                 (Code)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
@@ -120,10 +122,15 @@ class PositionOps (rep :: TYPE r) where
   -}
   shiftRight :: Code rep -> Code Int# -> Code rep
 
+class ErrorOps (rep :: TYPE r) where
   {-|
   @since 2.3.0.0
   -}
   extractRawOffset :: Code rep -> Code GhostOffset
+
+  updateGhostsWithError :: Code DefuncGhosts -> Code DefuncError -> Code rep -> Code GhostOffset -> (Code DefuncGhosts -> Code GhostOffset -> Code res) -> Code res
+
+  amend :: Code DefuncError -> Code rep -> Code DefuncError
 
 {-|
 Defines operation used for debugging operations.
@@ -262,22 +269,18 @@ shiftRightInt qo# qi# = [||$$(qo#) +# $$(qi#)||]
 instance PositionOps Int# where
   same = intSame
   shiftRight = shiftRightInt
-  extractRawOffset x = [||$$x||]
 
 instance PositionOps (OffWith [Char]) where
   same = offWithSame
   shiftRight = offWithShiftRight [||drop||]
-  extractRawOffset = offWithExtract
 
 instance PositionOps (OffWith Stream) where
   same = offWithSame
   shiftRight = offWithShiftRight [||dropStream||]
-  extractRawOffset = offWithExtract
 
 instance PositionOps Text where
   same qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
   shiftRight qo# qi# = [||textShiftRight $$(qo#) (I# $$(qi#))||]
-  extractRawOffset qo = [||case $$qo of Text _ (I# off) _ -> off||]
 
 instance PositionOps UnpackedLazyByteString where
   same qx# qy# = [||
@@ -286,7 +289,35 @@ instance PositionOps UnpackedLazyByteString where
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
   shiftRight qo# qi# = [||byteStringShiftRight $$(qo#) $$(qi#)||]
+
+-- ErrorOps Instances
+instance ErrorOps Int# where
+  extractRawOffset x = [||$$x||]
+  updateGhostsWithError ghosts err off validOffset k =
+    [|| case updateGhostsWithErrorInt# $$ghosts $$err $$off $$validOffset of
+          (# ghosts', validOffset' #) -> $$(k [||ghosts'||] [||validOffset'||]) ||]
+  amend err off = [|| amendInt# $$err $$off ||]
+
+instance ErrorOps (OffWith t) where
+  extractRawOffset = offWithExtract
+  updateGhostsWithError ghosts err off validOffset k =
+    [|| case updateGhostsWithErrorOffWith $$ghosts $$err $$off $$validOffset of
+          (# ghosts', validOffset' #) -> $$(k [||ghosts'||] [||validOffset'||]) ||]
+  amend err off = [|| amendOffWith $$err $$off ||]
+
+instance ErrorOps Text where
+  extractRawOffset qo = [||case $$qo of Text _ (I# off) _ -> off||]
+  updateGhostsWithError ghosts err off validOffset k =
+    [|| case updateGhostsWithErrorText $$ghosts $$err $$off $$validOffset of
+          (# ghosts', validOffset' #) -> $$(k [||ghosts'||] [||validOffset'||]) ||]
+  amend err off = [|| amendText $$err $$off ||]
+
+instance ErrorOps UnpackedLazyByteString where
   extractRawOffset qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> i# ||]
+  updateGhostsWithError ghosts err off validOffset k =
+    [|| case updateGhostsWithErrorByteString $$ghosts $$err $$off $$validOffset of
+          (# ghosts', validOffset' #) -> $$(k [||ghosts'||] [||validOffset'||]) ||]
+  amend err off = [|| amendByteString $$err $$off ||]
 
 -- LogOps Instances
 instance LogOps Int# where

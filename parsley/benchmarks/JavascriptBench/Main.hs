@@ -13,12 +13,12 @@ import Control.DeepSeq (NFData)
 import GHC.Generics    (Generic)
 import Data.Text       (Text)
 --import Parsley.Internal.Verbose ()
-import qualified JavascriptBench.Parsley.Parser
 import qualified JavascriptBench.Parsec.Parser
 import qualified JavascriptBench.Megaparsec.Parser
 import qualified JavascriptBench.Attoparsec.Parser
 import qualified JavascriptBench.Happy.Parser
-import qualified Parsley
+import JavascriptBench.Parsley.String
+import JavascriptBench.Parsley.Text
 import JavascriptBench.Shared
 import Shared.BenchmarkUtils
 
@@ -41,12 +41,6 @@ deriving instance NFData JSUnary
 deriving instance NFData JSMember
 deriving instance NFData JSCons
 deriving instance NFData JSAtom
-
-javascriptParsleyS :: String -> Maybe JSProgram
-javascriptParsleyS = $$(Parsley.parse JavascriptBench.Parsley.Parser.javascript)
-
-javascriptParsleyT :: Text -> Maybe JSProgram
-javascriptParsleyT = $$(Parsley.parse JavascriptBench.Parsley.Parser.javascript)
 
 javascript :: Benchmark
 javascript =

@@ -60,6 +60,7 @@ library
                        Parsley.Internal.Core.CombinatorAST,
                        Parsley.Internal.Core.CharPred,
                        Parsley.Internal.Core.Defunc,
+                       Parsley.Internal.Core.Error,
                        Parsley.Internal.Core.Identifiers,
                        Parsley.Internal.Core.InputTypes,
                        Parsley.Internal.Core.Lam,
@@ -104,6 +105,7 @@ library
 
   if impl(ghc >= 8.10)
     exposed-modules:   Parsley.Internal.Backend.Machine.BindingOps,
+                       Parsley.Internal.Backend.Machine.ErrorOps,
                        Parsley.Internal.Backend.Machine.PosOps,
 
                        Parsley.Internal.Backend.Machine.Types.Base,

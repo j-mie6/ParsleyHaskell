@@ -27,12 +27,12 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- * Core Machine Operations
     dup, returnST,
     -- ** Abstracted Input Operations
-    sat, emitLengthCheck, fetch, compareGhostOffset,
+    sat, emitLengthCheck, fetch,
     -- ** Register Operations
     newΣ, writeΣ, readΣ,
     -- ** Handler Operations
     -- *** Basic handlers and operations
-    fatal, raise, makeErr, raiseWith,
+    fatal, raise, makeErr, raiseWith, updateGhostsWithError, amend,
     -- *** Handler preparation
     buildHandler, buildYesHandler, buildIterYesHandler,
     -- *** Handler binding
@@ -66,12 +66,12 @@ import Control.Monad.ST                                           (ST)
 import Data.STRef                                                 (writeSTRef, readSTRef, newSTRef)
 import Data.Void                                                  (Void)
 import Debug.Trace                                                (trace)
-import GHC.Exts                                                   (Int(..), (-#), (==#), isTrue#)
+import GHC.Exts                                                   (Int(..), (-#))
 import Language.Haskell.TH.Syntax                                 (liftTyped)
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), ErrorOps(extractRawOffset), LogOps(..), InputOps, next, more)
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
@@ -91,6 +91,8 @@ import Parsley.Internal.Core.Result                               (Result(..))
 import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
 import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..))
+
+import qualified Parsley.Internal.Backend.Machine.InputOps as InputOps (ErrorOps(..))
 
 {- General Operations -}
 {-|
@@ -159,9 +161,6 @@ emitLengthCheck (I# n) good bad input = [||
   if $$(more (shiftRight (offset input) (liftTyped (n -# 1#)))) then $$good
   else $$bad ||]
 
-compareGhostOffset :: Code GhostOffset -> Code GhostOffset -> Code Bool
-compareGhostOffset gs1 gs2 = [|| isTrue# ($$gs1 ==# $$gs2) ||]
-
 {- Register Operations -}
 {-|
 Depending on the access type either generates the code for a new register and
@@ -221,9 +220,19 @@ about the state of the input (since 1.4.0.0).
 
 @since 1.0.0.0
 -}
-makeErr :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs n m r -> Code DefuncError
+makeErr :: ErrorOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs n m r -> Code DefuncError
 -- TODO: Move this into the input module, because this is a bit unclean
 makeErr ferr γ = [|| $$ferr (I# $$(extractRawOffset (offset (off (input γ))))) $$(toDynPos (pos (input γ))) ||]
+
+updateGhostsWithError :: ErrorOps (Rep o) => Code DefuncError -> Γ s o err a xs n m r -> (Γ s o err a xs n m r -> Code b) -> Code b
+updateGhostsWithError err γ k =
+  InputOps.updateGhostsWithError (ghosts γ) err (offset (off (input γ))) (ghostOffset γ) $ \ghosts' ghostOffset' ->
+    k (γ {ghosts = ghosts', ghostOffset = ghostOffset'})
+
+amend :: ErrorOps (Rep o) => Input o -> Γ s o err a xs n (Succ m) r -> (Γ s o err a xs n (Succ m) r -> Code b) -> Code b
+amend input γ k =
+  let VCons err errs' = errs γ
+  in k (γ {errs = VCons (InputOps.amend err (offset (off input))) errs'})
 
 raise :: Γ s o err a xs (Succ n) (Succ m) r -> Code (ST s (Result err a))
 raise γ =
@@ -231,7 +240,8 @@ raise γ =
       VCons err _ = errs γ
   in staHandlerEval h (input γ) err
 
-raiseWith :: PositionOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) m r -> Code (ST s (Result err a))
+--TODO: Ghosts are only added by Label or by a raising of an error
+raiseWith :: ErrorOps (Rep o) => Code (Int -> Pos -> DefuncError) -> Γ s o err a xs (Succ n) m r -> Code (ST s (Result err a))
 raiseWith ferr γ = raise (γ {errs = VCons (makeErr ferr γ) (errs γ)} )
 
 -- Handler preparation
@@ -421,7 +431,7 @@ the loop consumed input in its final iteration.
 
 @since 1.8.0.0
 -}
-bindIterAlways :: forall s o err a. (RecBuilder o, PositionOps (Rep o))
+bindIterAlways :: forall s o err a. (RecBuilder o, ErrorOps (Rep o))
                => Ctx s o err a                  -- ^ The context to keep the binding
                -> MVar Void                      -- ^ The name of the binding.
                -> Machine s o err a '[] One Zero Void -- ^ The body of the loop.
@@ -447,7 +457,7 @@ the same way as `bindSameHandler`.
 
 @since 2.1.0.0
 -}
-bindIterSame :: forall s o err a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
+bindIterSame :: forall s o err a. (RecBuilder o, HandlerOps o, PositionOps (Rep o), ErrorOps (Rep o))
              => Ctx s o err a                  -- ^ The context to store the binding in.
              -> MVar Void                      -- ^ The name of the binding.
              -> Machine s o err a '[] One Zero Void -- ^ The loop body.
@@ -591,6 +601,7 @@ type Ops o =
   , JoinBuilder o
   , RecBuilder o
   , PositionOps (Rep o)
+  , ErrorOps (Rep o)
   , MarshalOps o
   , LogOps (Rep o)
   )

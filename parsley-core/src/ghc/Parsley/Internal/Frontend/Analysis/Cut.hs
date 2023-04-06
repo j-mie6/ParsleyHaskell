@@ -45,33 +45,37 @@ caseCompliance _ _                     = NonComp
 
 {-# INLINE compliance #-}
 compliance :: Combinator Compliance a -> Compliance a
-compliance (Pure _)                 = FullPure
-compliance (Satisfy _)              = NonComp
-compliance Empty                    = FullPure
+compliance Pure{}                   = FullPure
+compliance Satisfy{}                = NonComp
+compliance Error{}                  = FullPure
 compliance Let{}                    = DomComp
-compliance (Try _)                  = DomComp
+compliance Try{}                    = DomComp
 compliance (NonComp :<|>: FullPure) = Comp
 compliance (_ :<|>: _)              = NonComp
 compliance (l :<*>: r)              = seqCompliance l r
 compliance (l :<*: r)               = seqCompliance l r
 compliance (l :*>: r)               = seqCompliance l r
 compliance (LookAhead c)            = c -- Lookahead will consume input on failure, so its compliance matches that which is beneath it
-compliance (NotFollowedBy _)        = FullPure
+compliance NotFollowedBy{}          = FullPure
 compliance (Debug _ c)              = c
 compliance (Loop NonComp exit)      = seqCompliance Comp exit
 compliance (Loop _ exit)            = seqCompliance NonComp exit
 compliance (Branch b p q)           = seqCompliance b (caseCompliance p q)
 compliance (Match p _ qs def)       = seqCompliance p (foldr1 caseCompliance (def:qs))
 compliance (MakeRegister _ l r)     = seqCompliance l r
-compliance (GetRegister _)          = FullPure
-compliance (Position _)             = FullPure
+compliance GetRegister{}            = FullPure
+compliance Position{}               = FullPure
 compliance (PutRegister _ c)        = coerce c
+compliance (LabelErr _ p)           = coerce p
+compliance (ExplainErr _ p)         = coerce p
+compliance (AmendErr p)             = coerce p
+compliance (EntrenchErr p)          = coerce p
 compliance (MetaCombinator _ c)     = c
 
 cutAlg :: Combinator (CutAnalysis :*: Compliance) a -> Bool -> (Fix Combinator a, Bool)
 cutAlg (Pure x) _ = (In (Pure x), False)
 cutAlg (Satisfy f) cut = (mkCut cut (In (Satisfy f)), True)
-cutAlg Empty _ = (In Empty, False)
+cutAlg (Error err) _ = (In (Error err), False)
 cutAlg (Let r μ) cut = (mkCut (not cut) (In (Let r μ)), False) -- If there is no cut, we generate a piggy for the continuation
 cutAlg (Try p) cut = (In (Try (mkImmune cut (fst (doCut (ifst p) False)))), False)
 -- Special case of below, but we know immunity is useless within `q`
@@ -120,6 +124,10 @@ cutAlg (MakeRegister σ l r) cut = seqCutAlg (MakeRegister σ) cut (ifst l) (ifs
 cutAlg (GetRegister σ) _ = (In (GetRegister σ), False)
 cutAlg (PutRegister σ p) cut = rewrap (PutRegister σ) cut (ifst p)
 cutAlg (Position sel) _ = (In (Position sel), False)
+cutAlg (LabelErr name p) cut = rewrap (LabelErr name) cut (ifst p)
+cutAlg (ExplainErr reason p) cut = rewrap (ExplainErr reason) cut (ifst p)
+cutAlg (AmendErr p) cut = rewrap AmendErr cut (ifst p)
+cutAlg (EntrenchErr p) cut = rewrap EntrenchErr cut (ifst p)
 cutAlg (MetaCombinator m p) cut = rewrap (MetaCombinator m) cut (ifst p)
 
 mkCut :: Bool -> Fix Combinator a -> Fix Combinator a

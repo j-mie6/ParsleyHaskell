@@ -26,6 +26,7 @@ import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFre
 import Parsley.Internal.Common.Indexed     (Fix, Fix4(In4), Cofree(..), Nat(..), One, imap, histo, extract, (|>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 import Parsley.Internal.Core.Defunc        (pattern UNIT)
+import Parsley.Internal.Core.Error         (BaseError(..), UserError(Empty))
 import Parsley.Internal.Trace              (Trace(trace))
 
 import Parsley.Internal.Core.Defunc as Core (Defunc)
@@ -80,6 +81,18 @@ parsecHandler k = Same (not (shouldInline k)) k False (In4 Raise)
 recoverHandler :: Fix4 (Instr o) xs n (Succ m) r -> Handler o (Fix4 (Instr o)) (o : xs) n (Succ m) r
 recoverHandler = Always . not . shouldInline <*> In4 . Seek
 
+labelHandler :: String -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r
+labelHandler name = Always False (In4 (RelabelError name (In4 Raise)))
+
+explainHandler :: String -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r
+explainHandler reason = Always False (In4 (Explain reason (In4 Raise)))
+
+amendHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r
+amendHandler = Always False (In4 (Amend (In4 Raise)))
+
+entrenchHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) (Succ m) r
+entrenchHandler = Always False (In4 (Entrench (In4 Raise)))
+
 mergeErrorsOrMakeGhosts :: CodeGen o x -> Fix4 (Instr o) (x : xs) (Succ n) m l -> CodeGenStack (Fix4 (Instr o) xs (Succ n) (Succ m) l)
 mergeErrorsOrMakeGhosts q m = In4 . flip Catch mergeErrorsHandler <$> runCodeGen q (In4 (ErrorToGhost (In4 (Commit m))))
 
@@ -130,18 +143,18 @@ shallow (Satisfy p)   m = do return $! In4 (Sat p m)
 shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf pxc
 shallow (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 shallow (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
-shallow Empty         _ = do return $! In4 Empt
+shallow (Error err)  _ = do return $! In4 (Fail (User err))
 shallow (p :<|>: q)   m = do altNoCutCompile p q parsecHandler id m
 shallow (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 shallow (LookAhead p) m =
   do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
 shallow (NotFollowedBy p) m =
-  do pc <- runCodeGen p (In4 (PopGhosts (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))))
+  do pc <- runCodeGen p (In4 (PopGhosts (In4 (Pop (In4 (Seek (In4 (Commit (In4 (Fail (User Empty)))))))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
      -- The minus here is used because the shared coins are propagated out front, neat.
-     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell (In4 (SaveGhosts False pc)))))
+     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell (In4 (SaveGhosts {-TODO: this needs checking, Parsley Scala is inconsistent in naming!-} False pc)))))
                           (Always (not (shouldInline m)) (In4 (PopError (In4 (Seek (In4 (Push (user UNIT) m))))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
@@ -165,6 +178,11 @@ shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
 shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) m))))
 shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
+shallow (LabelErr name p)            m = do fmap (In4 . flip Catch (labelHandler name) . In4 . Tell . In4 . SaveGhosts False)
+                                                 (runCodeGen p (In4 (Swap (In4 (RelabelGhosts name (In4 (MergeGhosts (In4 (Commit m)))))))))
+shallow (ExplainErr reason p)        m = do fmap (In4 . flip Catch (explainHandler reason)) (runCodeGen p (In4 (Commit m)))
+shallow (AmendErr p)                 m = do fmap (In4 . flip Catch amendHandler) (runCodeGen p (In4 (Commit m)))
+shallow (EntrenchErr p)              m = do fmap (In4 . flip Catch entrenchHandler) (runCodeGen p (In4 (Commit m)))
 shallow (MetaCombinator Cut p)       m = do blockCoins <$> runCodeGen p (addCoins (coinsNeeded m) m)
 shallow (MetaCombinator CutImmune p) m = do addCoins . coinsNeeded <$> runCodeGen p (In4 Ret) <*> runCodeGen p m
 

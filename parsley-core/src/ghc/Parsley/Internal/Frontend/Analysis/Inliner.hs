@@ -35,9 +35,9 @@ newtype InlineWeight a = InlineWeight { getWeight :: Rational }
 
 -- Ideally these should mirror those in the backend inliner, how can we unify them?
 alg :: Combinator InlineWeight a -> Rational
-alg (Pure _)             = 0
-alg (Satisfy _)          = 1
-alg Empty                = 0
+alg Pure{}               = 0
+alg Satisfy{}            = 1
+alg Error{}              = 0
 alg Let{}                = 2 % 3
 alg (Try p)              = getWeight p
 alg (l :<|>: r)          = 1 % 4 + 2 % 5 + getWeight l + getWeight r
@@ -51,7 +51,11 @@ alg (Loop body exit)     = 2 % 3 + getWeight body + getWeight exit
 alg (Branch b p q)       = 1 % 3 + 2 % 5 + getWeight b + getWeight p + getWeight q
 alg (Match p _ qs def)   = fromIntegral (length qs + 1) % 3 + sum (map getWeight qs) + getWeight def + getWeight p
 alg (MakeRegister _ l r) = 1 % 3 + getWeight l + getWeight r
-alg (GetRegister _)      = 1 % 3
+alg GetRegister{}        = 1 % 3
 alg (PutRegister _ c)    = 1 % 3 + getWeight c
-alg (Position _)         = 1 % 5
+alg Position{}           = 1 % 5
+alg (LabelErr _ p)       = getWeight p
+alg (ExplainErr _ p)     = getWeight p
+alg (AmendErr p)         = getWeight p
+alg (EntrenchErr p)      = getWeight p
 alg (MetaCombinator _ c) = getWeight c

@@ -397,9 +397,8 @@ Adds coins into the current supply.
 @since 1.5.0.0
 -}
 refundCoins :: Coins -> Ctx s o a -> Ctx s o a
-refundCoins c ctx = ctx { coins = coins ctx + willConsume c
-                        , knownChars = Queue.rewind (canReclaim c) (knownChars ctx)
-                        }
+refundCoins c ctx =
+  giveCoins c ctx { knownChars = Queue.rewind (canReclaim c) (knownChars ctx) }
 
 {-|
 Removes all coins and piggy-banks, such that @isBankrupt == True@.
@@ -449,6 +448,7 @@ readChar ctx pred fallback k
     unsafeReadChar ctx k = let -- combine the old information with the new information, refining the predicate
                                -- This works for notFollowedBy at the /moment/ because the predicate does not cross the handler boundary...
                                -- Perhaps any that cross handler boundaries should be complemented if that ever happens.
+                               -- FIXME: why does this poke and dequeue, why not just dequeue and then process?
                                updateChar (c, p, o) = (c, andPred p pred, o)
                                ((_, pOld, _), q) = poke updateChar (knownChars ctx)
                                ((c, p, o), q') = dequeue q

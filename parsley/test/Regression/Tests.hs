@@ -25,6 +25,10 @@ issue41 = testGroup "#41 Length-factoring can cross `put` but shouldn't"
   [ testCase "it should work when enough input is given" $ issue41_ex1 (CharList "ab") @?= Just True
   , testCase "it should work when enough input is given" $ issue41_ex1 (CharList "ac") @?= Just True
   , testCase "it should prevent factoring" $ issue41_ex1 (CharList "a") @?= Just True
+  , testCase "it should prevent factoring" $ issue41_ex2 (CharList "a") @?= Just False
+  , testCase "it should prevent factoring" $ issue41_ex2 (CharList "b") @?= Just True
+  , testCase "it should prevent factoring" $ issue41_ex2 (CharList "ab") @?= Just False
+  , testCase "it should prevent factoring" $ issue41_ex2 (CharList "abc") @?= Just False
   ]
 
 issue26_ex1 :: CharList -> Maybe ()
@@ -35,3 +39,6 @@ issue26_ex2 = $$(Parsley.parse Parsers.issue26_ex2)
 
 issue41_ex1 :: CharList -> Maybe Bool
 issue41_ex1 = $$(Parsley.parse Parsers.issue41_ex1)
+
+issue41_ex2 :: CharList -> Maybe Bool
+issue41_ex2 = $$(Parsley.parse Parsers.issue41_ex2)

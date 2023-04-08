@@ -58,9 +58,10 @@ sat p k bad γ@Γ{..} = next input $ \c input' -> let v = FREEVAR c in
 
 emitLengthCheck :: (?ops :: InputOps o, PositionOps o) => Int -> (Γ s o xs n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 emitLengthCheck 0 good _ γ   = good γ
-emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good γ) else $$bad ||]
+emitLengthCheck 1 good bad γ = [|| if $$more $$(input γ) then $$(good (γ { deepestKnownChar = Just (input γ)})) else $$bad ||]
 emitLengthCheck n good bad γ = [||
-  if $$more ($$shiftRight $$(input γ) (n - 1)) then $$(good γ)
+  let lookAheadInput = $$shiftRight $$(input γ) (n - 1) in
+  if $$more lookAheadInput then $$(good (γ { deepestKnownChar = Just [||lookAheadInput||]}))
   else $$bad ||]
 
 {- General Operations -}
@@ -117,7 +118,7 @@ instance HandlerOps _o where                         \
 {                                                    \
   buildHandler γ h c pos = [||\(o# :: Unboxed _o) !(line :: Int) !(col :: Int) ->     \
     $$(h (γ {operands = Op (INPUT c pos) (operands γ), \
-             input = [||$$box o#||], pos = ([||line||], [||col||])}))||];           \
+             input = [||$$box o#||], deepestKnownChar = Nothing, pos = ([||line||], [||col||])}))||];           \
   fatal = [||\(!_) !_ !_ -> returnST Nothing ||];          \
   raise γ = let VCons h _ = handlers γ               \
             in [|| $$h ($$unbox $$(input γ)) $$(fst (pos γ)) $$(snd (pos γ)) ||];    \
@@ -138,7 +139,7 @@ class ReturnOps o where
 instance ContOps _o where                                                                      \
 {                                                                                              \
   suspend m γ = [|| \x (!o#) !l !c -> $$(m (γ {operands = Op (FREEVAR [||x||]) (operands γ),         \
-                                             input = [||$$box o#||], pos = ([||l||], [||c||])})) ||];                        \
+                                             input = [||$$box o#||], deepestKnownChar = Nothing, pos = ([||l||], [||c||])})) ||];                        \
   resume k γ = let Op x _ = operands γ in [|| $$k $$(genDefunc x) ($$unbox $$(input γ)) $$(fst (pos γ)) $$(snd (pos γ)) ||];   \
   callWithContinuation sub ret input (ql, qc) (VCons h _) = [||$$sub $$ret ($$unbox $$input) $$ql $$qc $! $$h||]; \
 };
@@ -172,7 +173,7 @@ instance JoinBuilder _o where                                                   
   setupJoinPoint φ (Machine k) mx =                                                       \
     liftM2 (\mk ctx γ -> [||                                                              \
       let join x !(o# :: Unboxed _o) !(line :: Int) !(col :: Int) =                                                    \
-        $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = [||$$box o#||], pos = ([||line||], [||col||])})) \
+        $$(mk (γ {operands = Op (FREEVAR [||x||]) (operands γ), input = [||$$box o#||], deepestKnownChar = Nothing, pos = ([||line||], [||col||])})) \
       in $$(run mx γ (insertΦ φ [||join||] ctx))                                          \
     ||]) (local voidCoins k) ask;                                                         \
 };
@@ -185,13 +186,13 @@ instance RecBuilder _o where                                                    
       let handler !o# !line !col = $$(h [||$$bx o#||] ([||line||], [||col||]));           \
           loop !o# !line !col =                                                             \
         $$(run l                                                                 \
-            (Γ Empty (noreturn @_o) [||$$bx o#||] ([||line||], [||col||]) (VCons [||handler o# line col||] VNil)) \
+            (Γ Empty (noreturn @_o) [||$$bx o#||] Nothing ([||line||], [||col||]) (VCons [||handler o# line col||] VNil)) \
             (voidCoins (insertSub μ [||\_ (!o#) !line !col _ -> loop o# line col||] ctx)))           \
       in loop ($$unbox $$o) $$line $$col                                                      \
     ||];                                                                         \
   buildRec _ rs ctx k = let bx = box in takeFreeRegisters rs ctx (\ctx ->        \
     [|| \(!ret) (!o#) !line !col h ->                                                       \
-      $$(run k (Γ Empty [||ret||] [||$$bx o#||] ([||line||], [||col||]) (VCons [||h||] VNil)) ctx) ||]); \
+      $$(run k (Γ Empty [||ret||] [||$$bx o#||] Nothing ([||line||], [||col||]) (VCons [||h||] VNil)) ctx) ||]); \
 };
 inputInstances(deriveRecBuilder)
 

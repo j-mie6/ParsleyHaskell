@@ -15,7 +15,7 @@ module Parsley.Internal.Backend.Machine.Types.Input (
     Input(off), Input#(..),
     mkInput, fromInput, toInput,
     consume,
-    forcePos, updatePos,
+    forcePos, updatePos, updateOffset,
     chooseInput
   ) where
 
@@ -80,9 +80,10 @@ Register that a character has been consumed on this input, incorporating the new
 @since 2.1.0.0
 -}
 consume :: Code (Rep o) -> Input o -> Input o
-consume offset' input = input {
-    off = moveOne (off input) offset'
-  }
+consume offset' input = updateOffset (moveOne (off input) offset') input
+
+updateOffset :: Offset o -> Input o -> Input o
+updateOffset off inp = inp { off = off }
 
 {-|
 Collapse the position stored inside the input applying all updates to it. Once this has been completed,

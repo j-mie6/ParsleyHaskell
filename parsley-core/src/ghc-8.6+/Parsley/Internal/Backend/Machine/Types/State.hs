@@ -63,6 +63,7 @@ data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x))
 data Γ s o xs n r a = Γ { operands :: OpStack xs
                         , retCont  :: Code (Cont s o a r)
                         , input    :: Code o
+                        , deepestKnownChar :: Maybe (Code o)
                         , pos      :: (Code Int, Code Int)
                         , handlers :: HandlerStack n s o a }
 

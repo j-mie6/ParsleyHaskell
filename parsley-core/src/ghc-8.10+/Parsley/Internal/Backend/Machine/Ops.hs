@@ -86,7 +86,7 @@ import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                                    (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
-import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..))
+import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), updateDeepestKnown)
 
 {- General Operations -}
 {-|
@@ -144,16 +144,16 @@ when the \(n\) characters are available and the @bad@ when they are not.
 @since 1.4.0.0
 -}
 emitLengthCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
-                => Int      -- ^ The number of required characters \(n\).
-                -> Code a   -- ^ The good continuation if \(n\) characters are available.
-                -> Code a   -- ^ The bad continuation if the characters are unavailable.
-                -> Offset o -- ^ The input to test on.
+                => Int                    -- ^ The number of required characters \(n\).
+                -> (Offset o -> Code a)   -- ^ The good continuation if \(n\) characters are available.
+                -> Code a                 -- ^ The bad continuation if the characters are unavailable.
+                -> Offset o               -- ^ The input to test on.
                 -> Code a
-emitLengthCheck 0 good _ _   = good
-emitLengthCheck 1 good bad input = [|| if $$(more (offset input)) then $$good else $$bad ||]
+emitLengthCheck 0 good _ input  = good input
+emitLengthCheck 1 good bad input = [|| if $$(more (offset input)) then $$(good (updateDeepestKnown (offset input) input)) else $$bad ||]
 emitLengthCheck (I# n) good bad input = [||
   let lookAheadInput = $$(shiftRight (offset input) (liftTyped (n -# 1#))) in
-  if $$(more [||lookAheadInput||]) then $$good
+  if $$(more [||lookAheadInput||]) then $$(good (updateDeepestKnown [||lookAheadInput||] input))
   else $$bad ||]
 
 {- Register Operations -}

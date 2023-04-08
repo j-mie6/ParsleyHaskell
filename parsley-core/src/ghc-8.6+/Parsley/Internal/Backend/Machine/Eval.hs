@@ -37,7 +37,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names _meta -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty (halt @o) [||offset||] ([||1||], [||1||]) (VCons (fatal @o) VNil)) . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty (halt @o) [||offset||] Nothing ([||1||], [||1||]) (VCons (fatal @o) VNil)) . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String

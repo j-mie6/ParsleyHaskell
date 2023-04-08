@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine
 Description : The implementation of the low level parsing machinery is found here
@@ -26,7 +27,7 @@ import Parsley.Internal.Backend.Machine.InputOps     (InputPrep(..))
 import Parsley.Internal.Backend.Machine.Instructions
 import Parsley.Internal.Backend.Machine.LetBindings  (LetBinding, makeLetBinding, newMeta)
 import Parsley.Internal.Backend.Machine.Ops          (Ops)
-import Parsley.Internal.Backend.Machine.Types.Coins  (Coins(..), zero, minCoins, plus, plus1, minus)
+import Parsley.Internal.Backend.Machine.Types.Coins  (Coins(..), minCoins, plus1, minus, pattern Zero)
 import Parsley.Internal.Common.Utils                 (Code)
 import Parsley.Internal.Core.InputTypes
 import Parsley.Internal.Trace                        (Trace)

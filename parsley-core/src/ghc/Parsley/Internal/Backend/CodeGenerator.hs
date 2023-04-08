@@ -56,7 +56,7 @@ codeGen letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\
     alg :: Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
     -- it is now safe to add coins to the top-level of a binding, because it is always assumed to not cut
-    finalise cg = let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 in addCoins (coinsNeeded m) m
+    finalise cg = addCoinsNeeded (runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0)
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
 pattern f :<$>: p <- (_ :< Pure f) :<*>: p
@@ -76,11 +76,11 @@ parsecHandler k = Same (not (shouldInline k)) k False (In4 Empt)
 recoverHandler :: Fix4 (Instr o) xs n r a -> Handler o (Fix4 (Instr o)) (o : xs) n r a
 recoverHandler = Always . not . shouldInline <*> In4 . Seek
 
-altNoCutCompile :: Trace => CodeGen o a y -> CodeGen o a x
-                -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
-                -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a)
-                -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
-altNoCutCompile p q handler post m =
+altCompile :: Trace => CodeGen o a y -> CodeGen o a x
+           -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
+           -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a)
+           -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
+altCompile p q handler post m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (post φ)))
      qc <- freshΦ (runCodeGen q φ)
@@ -91,26 +91,17 @@ altNoCutCompile p q handler post m =
      let dq = nq `minus` min
      return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
 
-loopCompile :: CodeGen o a () -> CodeGen o a x
-            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
-            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
-            -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
-loopCompile body exit prebody preExit m =
-  do μ <- askM
-     bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (Jump μ)))))
-     exitc <- freshM (runCodeGen exit m)
-     return $! In4 (Iter μ (prebody bodyc) (parsecHandler (preExit exitc)))
-
 deep :: Trace => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
-deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q recoverHandler id
-deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q recoverHandler (In4 . Pop . In4 . Push (user x))
-deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q recoverHandler (In4 . _Fmap (user f))
+deep (TryOrElse p q) = Just $ CodeGen $ altCompile p q recoverHandler id
+deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . Pop . In4 . Push (user x))
+deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . _Fmap (user f))
 deep _ = Nothing
 
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 addCoinsNeeded = coinsNeeded >>= addCoins
 
+-- TODO: comments!
 shallow :: Trace => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 shallow (Pure x)      m = do return $! In4 (Push (user x) m)
 shallow (Satisfy p)   m = do return $! In4 (Sat p m)
@@ -118,7 +109,7 @@ shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf 
 shallow (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 shallow (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
 shallow Empty         _ = do return $! In4 Empt
-shallow (p :<|>: q)   m = do altNoCutCompile p q parsecHandler id m
+shallow (p :<|>: q)   m = do altCompile p q parsecHandler id m
 shallow (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 shallow (LookAhead p) m =
   do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
@@ -145,7 +136,11 @@ shallow (Match p fs qs def) m =
      let defc':qcs' = map ((`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m
-shallow (Loop body exit)             m = do loopCompile body exit addCoinsNeeded addCoinsNeeded m
+shallow (Loop body exit)             m =
+  do μ <- askM
+     bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (Jump μ)))))
+     exitc <- freshM (runCodeGen exit m)
+     return $! In4 (Iter μ (addCoinsNeeded bodyc) (parsecHandler (addCoinsNeeded exitc)))
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
 shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) (blockCoins m)))))

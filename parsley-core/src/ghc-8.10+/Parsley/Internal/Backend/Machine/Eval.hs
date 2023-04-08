@@ -21,7 +21,7 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
 import Data.Void                                           (Void)
-import Control.Monad                                       (forM, liftM2, liftM3, when)
+import Control.Monad                                       (forM, liftM2, liftM3)
 import Control.Monad.Reader                                (ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
@@ -35,7 +35,7 @@ import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
+import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos, updateOffset)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
@@ -259,14 +259,14 @@ evalMeta (DrainCoins coins) (Machine k) =
       -- can be partially paid from last known deepest offset
       | otherwise = emitLengthCheck (m + 1) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) unsafeDeepestKnown
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
-evalMeta (PrefetchChar check) k =
+{-evalMeta (PrefetchChar check) k =
   do bankrupt <- asks isBankrupt
      when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
      mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
   where
     mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
     mkCheck False k = k
-    prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
+    prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))-}
 evalMeta BlockCoins (Machine k) = k
 
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t

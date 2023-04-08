@@ -1,4 +1,4 @@
-{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingStrategies, PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Coins
 Description : Meta-data associated with input consumption optimisations.
@@ -14,10 +14,13 @@ reads (in the case of lookahead).
 -}
 module Parsley.Internal.Backend.Machine.Types.Coins (
     Coins(..),
-    int, zero,
     minCoins,
-    plus1, plus, minus, canReclaim
+    plus1, minus, canReclaim,
+    pattern Zero
   ) where
+
+import Parsley.Internal.Core (CharPred)
+import Parsley.Internal.Core.CharPred (mergePreds)
 
 {-|
 Packages together the known input that can be consumed after a length-check with the number of
@@ -25,32 +28,30 @@ characters that can be rewound on a lookahead backtrack.
 
 @since 1.5.0.0
 -}
-newtype Coins = Coins {
+data Coins = Coins {
     -- | The number of tokens we know must be consumed along the path to succeed.
-    willConsume :: Int
+    willConsume :: {-# UNPACK #-} !Int,
+    knownPreds :: ![CharPred]
   } deriving stock Show
 
 canReclaim :: Coins -> Int
 canReclaim = willConsume
 
 {-|
-Makes a `Coins` value with equal quantities of coins and characters.
-
-@since 1.5.0.0
--}
-int :: Int -> Coins
-int = Coins
-
-{-|
 Makes a `Coins` value of 0.
 
 @since 1.5.0.0
 -}
-zero :: Coins
-zero = int 0
+pattern Zero :: Coins
+pattern Zero = Coins 0 []
 
-zipCoins :: (Int -> Int -> Int) -> Coins -> Coins -> Coins
-zipCoins f (Coins k1) (Coins k2) = Coins (f k1 k2)
+zipCoins :: (Int -> Int -> Int) -> ([CharPred] -> [CharPred] -> [CharPred]) -> Coins -> Coins -> Coins
+zipCoins f g (Coins k1 cs1) (Coins k2 cs2)
+  | length cs' /= k' = error "the number of coins must always equal the number of predicates"
+  | otherwise        = Coins k' cs'
+  where
+    k' = f k1 k2
+    cs' = g cs1 cs2
 
 {-|
 Takes the pairwise min of two `Coins` values.
@@ -58,31 +59,15 @@ Takes the pairwise min of two `Coins` values.
 @since 1.5.0.0
 -}
 minCoins :: Coins -> Coins -> Coins
-minCoins = zipCoins min
-
-{-|
-Takes the pairwise max of two `Coins` values.
-
-@since 1.5.0.0
--}
-maxCoins :: Coins -> Coins -> Coins
-maxCoins = zipCoins max
+minCoins = zipCoins min (zipWith mergePreds)
 
 {-|
 Adds 1 to all the `Coins` values.
 
 @since 1.5.0.0
 -}
-plus1 :: Coins -> Coins
-plus1 = plus (int 1)
-
-{-|
-Performs the pairwise addition of two `Coins` values.
-
-@since 1.5.0.0
--}
-plus :: Coins -> Coins -> Coins
-plus = zipCoins (+)
+plus1 :: CharPred -> Coins -> Coins
+plus1 p =  zipCoins (+) (++) (Coins 1 [p])
 
 {-|
 Performs the pairwise subtraction of two `Coins` values.
@@ -90,4 +75,5 @@ Performs the pairwise subtraction of two `Coins` values.
 @since 1.5.0.0
 -}
 minus :: Coins -> Coins -> Coins
-minus c1 c2 = maxCoins zero (zipCoins (-) c1 c2)
+-- FIXME: just awful lol
+minus = zipCoins (\m n -> max 0 (m - n)) (\cs1 cs2 -> drop (length cs2) cs1)

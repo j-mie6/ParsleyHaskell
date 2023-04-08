@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal.Backend.Analysis.Coins
 Description : Coins analysis.
@@ -15,7 +16,7 @@ metadata to perform the piggybank algorithm in the machine (see
 module Parsley.Internal.Backend.Analysis.Coins (coinsNeeded, reclaimable) where
 
 import Data.Bifunctor                   (first)
-import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, minCoins, zero, minus)
+import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, minCoins, pattern Zero, minus)
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Const4(..))
 
 {-|
@@ -43,26 +44,27 @@ algHandler :: Handler o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)
 algHandler (Same _ yes _ no) = algCatch (getConst4 yes) (getConst4 no)
 algHandler (Always _ k) = getConst4 k
 
+-- TODO: comments!
 -- Bool represents if an empty is found in a branch (of a Catch)
 -- This helps to get rid of `min` being used for `Try` where min is always 0
 -- (The input is needed to /succeed/, so if one branch is doomed to fail it doesn't care about coins)
 alg :: Bool -> Instr o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)
-alg _     Ret                                     = (zero, False)
+alg _     Ret                                     = (Zero, False)
 alg _     (Push _ k)                              = getConst4 k -- was const False on the second parameter, I think that's probably right but a bit presumptive
 alg _     (Pop k)                                 = getConst4 k
 alg _     (Lift2 _ k)                             = getConst4 k
-alg _     (Sat _ (Const4 k))                      = first plus1 k
-alg _     (Call _ _)                              = (zero, False)
-alg _     (Jump _)                                = (zero, False)
-alg _     Empt                                    = (zero, True)
+alg _     (Sat p (Const4 k))                      = first (plus1 p) k
+alg _     (Call _ _)                              = (Zero, False)
+alg _     (Jump _)                                = (Zero, False)
+alg _     Empt                                    = (Zero, True)
 alg _     (Commit k)                              = getConst4 k
 alg _     (Catch k h)                             = algCatch (getConst4 k) (algHandler h)
 alg _     (Tell k)                                = getConst4 k
 alg _     (Seek k)                                = getConst4 k
 alg _     (Case p q)                              = algCatch (getConst4 p) (getConst4 q)
 alg _     (Choices _ ks def)                      = foldr (algCatch . getConst4) (getConst4 def) ks
-alg _     Iter{}                                  = (zero, False)
-alg _     Join{}                                  = (zero, False) -- this is zero because a DrainCoins is generated just in front!
+alg _     Iter{}                                  = (Zero, False)
+alg _     Join{}                                  = (Zero, False) -- this is zero because a DrainCoins is generated just in front!
 alg _     (MkJoin _ _ k)                          = getConst4 k
 alg _     (Swap k)                                = getConst4 k
 alg _     (Dup k)                                 = getConst4 k
@@ -75,7 +77,7 @@ alg _     (LogExit _ k)                           = getConst4 k
 alg _     (MetaInstr (AddCoins _) (Const4 k))     = k
 alg _     (MetaInstr (RefundCoins n) (Const4 k))  = first (`minus` n) k -- These were refunded, so deduct
 alg _     (MetaInstr (DrainCoins n) _)            = (n, False)
-alg _     (MetaInstr (GiveBursary _) _)           = (zero, False) -- No point in propagating forward, these are at the front of a binding
-alg _     (MetaInstr (PrefetchChar _) (Const4 k)) = k
-alg True  (MetaInstr BlockCoins (Const4 k))       = first (const zero) k
+alg _     (MetaInstr (GiveBursary _) _)           = (Zero, False) -- No point in propagating forward, these are at the front of a binding
+--alg _     (MetaInstr (PrefetchChar _) (Const4 k)) = k
+alg True  (MetaInstr BlockCoins (Const4 k))       = first (const Zero) k
 alg False (MetaInstr BlockCoins (Const4 k))       = k

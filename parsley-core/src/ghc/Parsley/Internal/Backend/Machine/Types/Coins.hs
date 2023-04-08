@@ -15,7 +15,7 @@ reads (in the case of lookahead).
 module Parsley.Internal.Backend.Machine.Types.Coins (
     Coins(..),
     int, zero,
-    minCoins, maxCoins,
+    minCoins, {-maxCoins,-}
     plus1, plus, minus,
     plusNotReclaim,
   ) where
@@ -28,9 +28,9 @@ characters that can be rewound on a lookahead backtrack.
 -}
 data Coins = Coins {
     -- | The number of tokens we know must be consumed along the path to succeed.
-    willConsume :: Int,
+    willConsume :: !Int,
     -- | The number of tokens we can reclaim if the parser backtracks.
-    canReclaim :: Int
+    canReclaim :: !Int
   } deriving stock Show
 
 {-|
@@ -74,7 +74,7 @@ Adds 1 to all the `Coins` values.
 @since 1.5.0.0
 -}
 plus1 :: Coins -> Coins
-plus1 = plus (Coins 1 1)
+plus1 = plus (int 1)
 
 {-|
 Performs the pairwise addition of two `Coins` values.
@@ -90,7 +90,7 @@ Performs the pairwise subtraction of two `Coins` values.
 @since 1.5.0.0
 -}
 minus :: Coins -> Coins -> Coins
-minus = zipCoins (-)
+minus c1 c2 = maxCoins zero (zipCoins (-) c1 c2)
 
 {-|
 A verson of plus where the reclaim value remains constant.

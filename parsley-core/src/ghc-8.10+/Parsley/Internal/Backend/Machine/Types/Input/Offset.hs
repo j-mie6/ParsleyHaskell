@@ -29,14 +29,14 @@ This can be used to statically evaluate handlers (see
 -}
 data Offset o = Offset {
     -- | The underlying code that represents the current offset into the input.
-    offset :: Code (Rep o),
+    offset :: !(Code (Rep o)),
     -- | The unique identifier that determines where this offset originated from.
-    unique :: Word,
+    unique :: {-# UNPACK #-} !Word,
     -- | The amount of input that has been consumed on this offset since it was born.
-    moved  :: Amount
+    moved  :: {-# UNPACK #-} !Amount
   }
 
-data Amount = Amount Word {- ^ The multiplicity. -} Word {- ^ The additive offset. -}
+data Amount = Amount {-# UNPACK #-} !Word {- ^ The multiplicity. -} {-# UNPACK #-} !Word {- ^ The additive offset. -}
   deriving stock Eq
 
 {-|

@@ -286,6 +286,7 @@ Smart-constuctor around `AddCoins`.
 @since 1.5.0.0
 -}
 addCoins :: Coins -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+-- FIXME: remove
 addCoins (Coins 1 1) = id
 addCoins coins       = mkCoin AddCoins coins
 

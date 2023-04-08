@@ -152,7 +152,8 @@ emitLengthCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
 emitLengthCheck 0 good _ _   = good
 emitLengthCheck 1 good bad input = [|| if $$(more (offset input)) then $$good else $$bad ||]
 emitLengthCheck (I# n) good bad input = [||
-  if $$(more (shiftRight (offset input) (liftTyped (n -# 1#)))) then $$good
+  let lookAheadInput = $$(shiftRight (offset input) (liftTyped (n -# 1#))) in
+  if $$(more [||lookAheadInput||]) then $$good
   else $$bad ||]
 
 {- Register Operations -}

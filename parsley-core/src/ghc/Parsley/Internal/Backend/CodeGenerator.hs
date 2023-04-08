@@ -19,7 +19,7 @@ import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                             _Fmap, _App, _Get, _Put, _Make,
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
-                                            minus, minCoins, maxCoins, zero,
+                                            minus, minCoins,
                                             IMVar, IΦVar, MVar(..), ΦVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline, reclaimable)
 import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
@@ -135,21 +135,21 @@ shallow (NotFollowedBy p) m =
      let np = coinsNeeded pc
      let nm = coinsNeeded m
      -- The minus here is used because the shared coins are propagated out front, neat.
-     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
+     return $! In4 (Catch (addCoins (np `minus` nm) (In4 (Tell pc))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
      qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (_App φ)))))
      let minc = coinsNeeded (In4 (Case pc qc))
-     let dp = maxCoins zero (coinsNeeded pc `minus` minc)
-     let dq = maxCoins zero (coinsNeeded qc `minus` minc)
+     let dp = coinsNeeded pc `minus` minc
+     let dq = coinsNeeded qc `minus` minc
      fmap binder (runCodeGen b (In4 (Case (addCoins dp pc) (addCoins dq qc))))
 shallow (Match p fs qs def) m =
   do (binder, φ) <- makeΦ m
      qcs <- traverse (\q -> freshΦ (runCodeGen q φ)) qs
      defc <- freshΦ (runCodeGen def φ)
      let minc = coinsNeeded (In4 (Choices (map user fs) qcs defc))
-     let defc':qcs' = map (maxCoins zero . (`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
+     let defc':qcs' = map ((`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m
 shallow (Loop body exit)             m = do loopCompile body exit addCoinsNeeded id m

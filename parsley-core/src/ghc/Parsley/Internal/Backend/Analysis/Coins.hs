@@ -15,7 +15,7 @@ metadata to perform the piggybank algorithm in the machine (see
 module Parsley.Internal.Backend.Analysis.Coins (coinsNeeded, reclaimable) where
 
 import Data.Bifunctor                   (first)
-import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, minCoins, maxCoins, zero, minus, plusNotReclaim, willConsume)
+import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, minCoins, zero, minus, plusNotReclaim, willConsume)
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Const4(..))
 
 {-|
@@ -72,7 +72,7 @@ alg _     (SelectPos _ k)                         = getConst4 k
 alg _     (LogEnter _ k)                          = getConst4 k
 alg _     (LogExit _ k)                           = getConst4 k
 alg _     (MetaInstr (AddCoins _) (Const4 k))     = k
-alg _     (MetaInstr (RefundCoins n) (Const4 k))  = first (maxCoins zero . (`minus` n)) k -- These were refunded, so deduct
+alg _     (MetaInstr (RefundCoins n) (Const4 k))  = first (`minus` n) k -- These were refunded, so deduct
 alg _     (MetaInstr (DrainCoins n) _)            = (n, False)                            -- Used to be `second (const False) k`, but these should be additive?
 alg _     (MetaInstr (GiveBursary n) _)           = (n, False)                            -- We know that `n` is the required for `k`
 alg _     (MetaInstr (PrefetchChar _) (Const4 k)) = k

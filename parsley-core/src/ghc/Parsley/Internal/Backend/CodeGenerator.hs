@@ -55,9 +55,8 @@ codeGen letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\
     m = finalise (histo alg p)
     alg :: Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
-    -- It is never safe to add coins to the top of a binding
-    -- This is because we don't know the characteristics of the caller (even the top-level!)
-    finalise cg = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0
+    -- it is now safe to add coins to the top-level of a binding, because it is always assumed to not cut
+    finalise cg = let m = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0 in addCoins (coinsNeeded m) m
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
 pattern f :<$>: p <- (_ :< Pure f) :<*>: p
@@ -87,8 +86,9 @@ altNoCutCompile p q handler post m =
      qc <- freshΦ (runCodeGen q φ)
      let np = coinsNeeded pc
      let nq = coinsNeeded qc
-     let dp = np `minus` minCoins np nq
-     let dq = nq `minus` minCoins np nq
+     let min = minCoins np nq
+     let dp = np `minus` min
+     let dq = nq `minus` min
      return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
 
 loopCompile :: CodeGen o a () -> CodeGen o a x
@@ -106,13 +106,6 @@ deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user 
 deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q recoverHandler id
 deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q recoverHandler (In4 . Pop . In4 . Push (user x))
 deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q recoverHandler (In4 . _Fmap (user f))
-deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
-  do (binder, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     qc <- freshΦ (runCodeGen q φ)
-     return $! binder (In4 (Catch pc (parsecHandler qc)))
-deep (MetaCombinator RequiresCut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit id addCoinsNeeded
-deep (MetaCombinator Cut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit addCoinsNeeded addCoinsNeeded
 deep _ = Nothing
 
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
@@ -152,14 +145,13 @@ shallow (Match p fs qs def) m =
      let defc':qcs' = map ((`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m
-shallow (Loop body exit)             m = do loopCompile body exit addCoinsNeeded id m
+shallow (Loop body exit)             m = do loopCompile body exit addCoinsNeeded addCoinsNeeded m
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
-shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) m))))
+shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) (blockCoins m)))))
 shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
-shallow (MetaCombinator Cut p)       m = do blockCoins <$> runCodeGen p (addCoins (coinsNeeded m) m)
-shallow (MetaCombinator CutImmune p) m = do addCoins . coinsNeeded <$> runCodeGen p (In4 Ret) <*> runCodeGen p m
+shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins (addCoins (coinsNeeded m) m))
 
 tailCallOptimise :: MVar x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 tailCallOptimise μ (In4 Ret) = In4 (Jump μ)

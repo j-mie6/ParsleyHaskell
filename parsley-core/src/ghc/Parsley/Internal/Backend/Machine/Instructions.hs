@@ -277,8 +277,8 @@ data MetaInstr (n :: Nat) where
   BlockCoins :: MetaInstr n
 
 mkCoin :: (Coins -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-mkCoin _    (Coins 0 0) = id
-mkCoin meta n           = In4 . MetaInstr (meta n)
+mkCoin _    (Coins 0) = id
+mkCoin meta n         = In4 . MetaInstr (meta n)
 
 {-|
 Smart-constuctor around `AddCoins`.
@@ -286,9 +286,7 @@ Smart-constuctor around `AddCoins`.
 @since 1.5.0.0
 -}
 addCoins :: Coins -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
--- FIXME: remove
-addCoins (Coins 1 1) = id
-addCoins coins       = mkCoin AddCoins coins
+addCoins = mkCoin AddCoins
 
 {-|
 Smart-constuctor around `RefundCoins`.

@@ -15,9 +15,8 @@ reads (in the case of lookahead).
 module Parsley.Internal.Backend.Machine.Types.Coins (
     Coins(..),
     int, zero,
-    minCoins, {-maxCoins,-}
-    plus1, plus, minus,
-    plusNotReclaim,
+    minCoins,
+    plus1, plus, minus, canReclaim
   ) where
 
 {-|
@@ -26,12 +25,13 @@ characters that can be rewound on a lookahead backtrack.
 
 @since 1.5.0.0
 -}
-data Coins = Coins {
+newtype Coins = Coins {
     -- | The number of tokens we know must be consumed along the path to succeed.
-    willConsume :: !Int,
-    -- | The number of tokens we can reclaim if the parser backtracks.
-    canReclaim :: !Int
+    willConsume :: Int
   } deriving stock Show
+
+canReclaim :: Coins -> Int
+canReclaim = willConsume
 
 {-|
 Makes a `Coins` value with equal quantities of coins and characters.
@@ -39,7 +39,7 @@ Makes a `Coins` value with equal quantities of coins and characters.
 @since 1.5.0.0
 -}
 int :: Int -> Coins
-int n = Coins n n
+int = Coins
 
 {-|
 Makes a `Coins` value of 0.
@@ -50,7 +50,7 @@ zero :: Coins
 zero = int 0
 
 zipCoins :: (Int -> Int -> Int) -> Coins -> Coins -> Coins
-zipCoins f (Coins k1 r1) (Coins k2 r2) = Coins (f k1 k2) (f r1 r2)
+zipCoins f (Coins k1) (Coins k2) = Coins (f k1 k2)
 
 {-|
 Takes the pairwise min of two `Coins` values.
@@ -91,11 +91,3 @@ Performs the pairwise subtraction of two `Coins` values.
 -}
 minus :: Coins -> Coins -> Coins
 minus c1 c2 = maxCoins zero (zipCoins (-) c1 c2)
-
-{-|
-A verson of plus where the reclaim value remains constant.
-
-@since 1.5.0.0
--}
-plusNotReclaim :: Coins -> Int -> Coins
-plusNotReclaim (Coins k r) n = Coins (k + n) r

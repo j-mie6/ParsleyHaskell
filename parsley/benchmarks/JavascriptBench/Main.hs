@@ -10,6 +10,7 @@ module Main where
 import Gauge.Main      (Benchmark, bgroup)
 import Control.DeepSeq (NFData)
 import GHC.Generics    (Generic)
+import Parsley.InputExtras (CharList(..))
 import Data.Text       (Text)
 --import Parsley.Internal.Verbose ()
 import qualified JavascriptBench.Parsley.Parser
@@ -47,6 +48,9 @@ javascriptParsleyS = $$(Parsley.parse JavascriptBench.Parsley.Parser.javascript)
 javascriptParsleyT :: Text -> Maybe JSProgram
 javascriptParsleyT = $$(Parsley.parse JavascriptBench.Parsley.Parser.javascript)
 
+javascriptParsleyC :: String -> Maybe JSProgram
+javascriptParsleyC input = $$(Parsley.parse @CharList JavascriptBench.Parsley.Parser.javascript) (CharList input)
+
 javascript :: Benchmark
 javascript =
   let jsTest :: NFData rep => (FilePath -> IO rep) -> String -> (rep -> Maybe JSProgram) -> Benchmark
@@ -54,6 +58,7 @@ javascript =
   in bgroup "Javascript"
        [ jsTest text   "Parsley (Text)"       javascriptParsleyT
        , jsTest string "Parsley (String)"     javascriptParsleyS
+       , jsTest string "Parsley (CharList)"   javascriptParsleyC
        , jsTest text   "Atto"                 (attoParse JavascriptBench.Attoparsec.Parser.javascript)
        , jsTest string "Happy"                (JavascriptBench.Happy.Parser.runParser JavascriptBench.Happy.Parser.javascript)
        , jsTest string "Parsec (String)"      (parsecParse JavascriptBench.Parsec.Parser.javascript)

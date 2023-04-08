@@ -37,7 +37,7 @@ import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos, updateOffset)
-import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
 import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm, optimisePredGiven)
@@ -138,7 +138,7 @@ evalSat p k@(Machine k') = do
     emitCheckAndFetch :: Int -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     emitCheckAndFetch n mk = do
       sat <- satFetch mk
-      return $ \γ -> emitLengthCheck n (withUpdatedOffset sat γ) (raise γ) (off (input γ))
+      return $ \γ -> emitLengthCheck n (withUpdatedOffset sat γ) (raise γ) (off (input γ)) offset
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
@@ -236,22 +236,35 @@ evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Ma
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (withUpdatedOffset mk γ) (raise γ) (off (input γ))
+     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
+  -- FIXME: don't fuck up the logic:
+  --       * if we are bankrupt, emit normal length check
+  --       * otherwise, if we have the coins, no check
+  --       * otherwise, if we don't have the coins: emit check for `coins - remainder + 1` at the deepestknown offset which must exist
   -- If there are enough coins left to cover the cost, no length check is required
   -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
-  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (withUpdatedOffset mk γ) (raise γ) (off (input γ)))
+  liftM3 drain
+         (asks isBankrupt)
          (asks (canAfford (willConsume coins)))
          k
+  where
+    -- there are enough coins to pay in full
+    drain _ Nothing mk γ = mk γ
+    drain bankrupt ~(Just m) mk γ
+      -- full length check required
+      | bankrupt = emitLengthCheck (willConsume coins) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
+      -- can be partially paid from last known deepest offset
+      | otherwise = emitLengthCheck (m + 1) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) unsafeDeepestKnown
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
 evalMeta (PrefetchChar check) k =
   do bankrupt <- asks isBankrupt
      when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
      mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
   where
-    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (withUpdatedOffset mk γ) (raise γ) (off (input γ))
+    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
     mkCheck False k = k
     prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
 evalMeta BlockCoins (Machine k) = k

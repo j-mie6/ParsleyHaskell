@@ -13,11 +13,12 @@ a parser as it is evaluated.
 @since 1.8.0.0
 -}
 module Parsley.Internal.Backend.Machine.Types.Input.Offset (
-    Offset, mkOffset, offset, moveOne, moveN, same, updateDeepestKnown
+    Offset, mkOffset, offset, moveOne, moveN, same, updateDeepestKnown, unsafeDeepestKnown
   ) where
 
 import Parsley.Internal.Backend.Machine.InputRep   (Rep)
 import Parsley.Internal.Common.Utils               (Code)
+import Data.Maybe                                  (fromJust)
 
 {-|
 Augments a regular @'Code' ('Rep' o)@ with information about its origins and
@@ -86,6 +87,9 @@ mkOffset offset unique = Offset offset Nothing unique (Amount 0 0)
 
 updateDeepestKnown :: Code (Rep o) -> Offset o -> Offset o
 updateDeepestKnown known offset = offset { deepestKnownChar = Just known }
+
+unsafeDeepestKnown :: Offset o -> Code (Rep o)
+unsafeDeepestKnown = fromJust . deepestKnownChar
 
 add :: Amount -> Amount -> Amount
 add a1@(Amount n i) a2@(Amount m j)

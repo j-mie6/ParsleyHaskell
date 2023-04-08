@@ -62,7 +62,7 @@ import Control.Monad                                   (liftM2, (<=<))
 import Control.Monad.Reader                            (asks, local, MonadReader)
 import Data.STRef                                      (STRef)
 import Data.Dependent.Map                              (DMap)
-import Data.Maybe                                      (fromMaybe)
+import Data.Maybe                                      (fromMaybe, isNothing)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
@@ -365,7 +365,7 @@ Does the context have coins available?
 @since 1.0.0.0
 -}
 hasCoin :: Ctx s o a -> Bool
-hasCoin = canAfford 1
+hasCoin = isNothing . canAfford 1
 
 {-|
 Is it the case that there are no coins /and/ no piggy-banks remaining?
@@ -416,8 +416,11 @@ of size \(n\) if this quota cannot be reached.
 
 @since 1.5.0.0
 -}
-canAfford :: Int -> Ctx s o a -> Bool
-canAfford n = (>= n) . coins
+--canAfford :: Int -> Ctx s o a -> Bool
+--canAfford n = (>= n) . coins
+
+canAfford :: Int -> Ctx s o a -> Maybe Int
+canAfford n ctx = if coins ctx >= n then Nothing else Just (n - coins ctx)
 
 {-|
 Caches a known character and the next offset into the context so that it

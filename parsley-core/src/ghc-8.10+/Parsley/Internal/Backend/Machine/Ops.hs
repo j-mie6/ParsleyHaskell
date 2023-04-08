@@ -148,11 +148,12 @@ emitLengthCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
                 -> (Offset o -> Code a)   -- ^ The good continuation if \(n\) characters are available.
                 -> Code a                 -- ^ The bad continuation if the characters are unavailable.
                 -> Offset o               -- ^ The input to test on.
+                -> (Offset o -> Code (Rep o))
                 -> Code a
-emitLengthCheck 0 good _ input  = good input
-emitLengthCheck 1 good bad input = [|| if $$(more (offset input)) then $$(good (updateDeepestKnown (offset input) input)) else $$bad ||]
-emitLengthCheck (I# n) good bad input = [||
-  let lookAheadInput = $$(shiftRight (offset input) (liftTyped (n -# 1#))) in
+emitLengthCheck 0 good _ input _ = good input
+emitLengthCheck 1 good bad input sel = [|| if $$(more (sel input)) then $$(good (updateDeepestKnown (offset input) input)) else $$bad ||]
+emitLengthCheck (I# n) good bad input sel = [||
+  let lookAheadInput = $$(shiftRight (sel input) (liftTyped (n -# 1#))) in
   if $$(more [||lookAheadInput||]) then $$(good (updateDeepestKnown [||lookAheadInput||] input))
   else $$bad ||]
 

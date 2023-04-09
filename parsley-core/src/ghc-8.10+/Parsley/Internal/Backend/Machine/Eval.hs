@@ -233,6 +233,7 @@ evalLogExit name (Machine mk) =
     ask
 
 evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+-- TODO: prefetch all predicates stored in coins
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
@@ -240,12 +241,6 @@ evalMeta (AddCoins coins) (Machine k) =
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
-  -- FIXME: don't fuck up the logic:
-  --       * if we are bankrupt, emit normal length check
-  --       * otherwise, if we have the coins, no check
-  --       * otherwise, if we don't have the coins: emit check for `coins - remainder + 1` at the deepestknown offset which must exist
-  -- If there are enough coins left to cover the cost, no length check is required
-  -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
   liftM3 drain
          (asks isBankrupt)
          (asks (canAfford (willConsume coins)))

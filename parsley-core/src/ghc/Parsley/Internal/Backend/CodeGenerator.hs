@@ -101,7 +101,6 @@ deep _ = Nothing
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 addCoinsNeeded = coinsNeeded >>= addCoins
 
--- TODO: comments!
 shallow :: Trace => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 shallow (Pure x)      m = do return $! In4 (Push (user x) m)
 shallow (Satisfy p)   m = do return $! In4 (Sat p m)
@@ -112,13 +111,14 @@ shallow Empty         _ = do return $! In4 Empt
 shallow (p :<|>: q)   m = do altCompile p q parsecHandler id m
 shallow (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 shallow (LookAhead p) m =
-  do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
+  do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- dodgy hack, but oh well
+     -- always refund the input consumed during a lookahead, so it can be reused (lookahead is handlerless)
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      let np = coinsNeeded pc
      let nm = coinsNeeded m
-     -- The minus here is used because the shared coins are propagated out front, neat.
+     -- the minus here is used because the shared coins are propagated out front, neat
      return $! In4 (Catch (addCoins (np `minus` nm) (In4 (Tell pc))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
@@ -143,9 +143,11 @@ shallow (Loop body exit)             m =
      return $! In4 (Iter μ (addCoinsNeeded bodyc) (parsecHandler (addCoinsNeeded exitc)))
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
+-- seems effective: blocks upstream coins from commuting down, but allows them to self factor
 shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) (blockCoins m)))))
 shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
+-- make sure to issue the fence after `p` is generated, to allow for a (safe) single character factor
 shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins (addCoins (coinsNeeded m) m))
 
 tailCallOptimise :: MVar x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a

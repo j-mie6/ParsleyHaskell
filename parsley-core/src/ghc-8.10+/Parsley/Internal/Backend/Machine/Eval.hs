@@ -254,6 +254,8 @@ evalMeta BlockCoins (Machine k) = k
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
+--FIXME: apparently, horrible things happen when using `more *>` these days... with if/while/etc/etc
+--       must minimise and then try and find the root cause, it's evil!
 withLengthCheckAndCoins :: (?ops::InputOps (Rep o), PositionOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     let prefetch pred k ctx γ =

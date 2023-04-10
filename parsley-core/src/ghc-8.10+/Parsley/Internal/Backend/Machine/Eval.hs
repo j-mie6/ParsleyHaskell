@@ -259,8 +259,7 @@ withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     let prefetch pred k ctx γ =
           -- input is known to exist
           -- FIXME: this is broken!
-          -- it seems like (a) the static handler analysis fails for some reason
-          --               (b) prefetching must not move out of the scope of a handler that rolls back (like try)
+          -- it seems like prefetching must not move out of the scope of a handler that rolls back (like try)
           -- It does work, however, if exactly one character is considered (see take 1 below)
           fetch (input γ) $ \c input' ->
             flip (sat (ap (LAM (lamTerm pred))) c) (raise γ) $ \_ -> -- this character isn't needed

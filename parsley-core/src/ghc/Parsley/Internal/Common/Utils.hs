@@ -110,7 +110,7 @@ instance IsString (String -> String) where
 
 newtype Id a = Id {unId :: a -> a}
 instance Semigroup (Id a) where f <> g = Id $ unId f . unId g
-instance Monoid (Id a) where mempty = Id $ id
+instance Monoid (Id a) where mempty = Id id
 
 intercalateDiff :: (a -> a) -> [a -> a] -> a -> a
 intercalateDiff sep xs = unId $ intercalate (Id sep) (map Id xs)

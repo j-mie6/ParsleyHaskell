@@ -16,7 +16,7 @@ module Parsley.Internal.Backend.Machine.Types.Coins (
     Coins(..),
     minCoins,
     plus1, minus, canReclaim,
-    pattern Zero
+    pattern Zero, one
   ) where
 
 import Parsley.Internal.Core (CharPred)
@@ -45,6 +45,9 @@ Makes a `Coins` value of 0.
 pattern Zero :: Coins
 pattern Zero = Coins 0 []
 
+one :: CharPred -> Coins
+one p = Coins 1 [p]
+
 zipCoins :: (Int -> Int -> Int) -> ([CharPred] -> [CharPred] -> [CharPred]) -> Coins -> Coins -> Coins
 zipCoins f g (Coins k1 cs1) (Coins k2 cs2)
   | length cs' /= k' = error "the number of coins must always equal the number of predicates"
@@ -67,7 +70,7 @@ Adds 1 to all the `Coins` values.
 @since 1.5.0.0
 -}
 plus1 :: CharPred -> Coins -> Coins
-plus1 p =  zipCoins (+) (++) (Coins 1 [p])
+plus1 p =  zipCoins (+) (++) (one p)
 
 {-|
 Performs the pairwise subtraction of two `Coins` values.

@@ -356,8 +356,8 @@ __Note__: This should generate a length check when used!
 
 @since 1.0.0.0
 -}
-breakPiggy :: Ctx s o a -> Ctx s o a
-breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = willConsume coins, piggies = piggies'}
+breakPiggy :: Ctx s o a -> (Coins, Ctx s o a)
+breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in (coins, ctx {piggies = piggies'})
 
 {-|
 Does the context have coins available?

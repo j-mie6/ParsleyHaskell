@@ -22,7 +22,7 @@ import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
 import Data.Void                                           (Void)
 import Control.Monad                                       (forM, liftM2, liftM3)
-import Control.Monad.Reader                                (ask, asks, reader, local)
+import Control.Monad.Reader                                (Reader, ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
@@ -35,7 +35,7 @@ import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume)
+import Parsley.Internal.Backend.Machine.Types.Coins        (Coins, willConsume, one)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos, updateOffset)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
@@ -118,27 +118,22 @@ evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad 
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
 evalSat :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalSat p k@(Machine k') = do
+evalSat p k = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
-  if | bankrupt -> emitCheckAndFetch 1 k
-     | hasChange -> local spendCoin (satFetch k)
-     | otherwise -> trace "I have a piggy :)" $
-        local breakPiggy $
-          do check <- asks (emitCheckAndFetch . coins)
-             check (Machine (local spendCoin k'))
+  if | bankrupt -> emitCheckAndFetch (one p) k
+     | hasChange -> satFetch k
+     | otherwise -> trace "I have a piggy :)" $ state breakPiggy $ \coins -> emitCheckAndFetch coins k
   where
     satFetch :: Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     satFetch mk = reader $ \ctx γ ->
-      readChar ctx p (fetch (input γ)) $ \c staOldPred staPosPred input' ctx' ->
+      readChar (spendCoin ctx) p (fetch (input γ)) $ \c staOldPred staPosPred input' ctx' ->
         let staPredC' = optimisePredGiven p staOldPred
         in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos input' c staPosPred) ctx')
                                                 (raise γ)
 
-    emitCheckAndFetch :: Int -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-    emitCheckAndFetch n mk = do
-      sat <- satFetch mk
-      return $ \γ -> emitLengthCheck n (withUpdatedOffset sat γ) (raise γ) (off (input γ)) offset
+    emitCheckAndFetch :: Coins -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+    emitCheckAndFetch coins = withLengthCheckAndCoins coins . satFetch
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
@@ -237,7 +232,7 @@ evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Ma
 evalMeta (AddCoins coins) (Machine k) =
   do requiresPiggy <- asks hasCoin
      if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
+     else withLengthCheckAndCoins coins k
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
@@ -266,3 +261,16 @@ evalMeta BlockCoins (Machine k) = k
 
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
+
+-- TODO: prefetch all predicates stored in coins
+withLengthCheckAndCoins :: (?ops::InputOps (Rep o), PositionOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+withLengthCheckAndCoins coins k =
+  -- to do prefetch, generate a length check, then read the characters, then refundCoins instead of
+  -- give: this will also perform a rewind.
+  local (giveCoins coins) k <&> \mk γ ->
+    emitLengthCheck (willConsume coins) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
+
+state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b
+state f k = do
+  (x, r) <- asks f
+  local (const r) (k x)

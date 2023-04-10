@@ -35,7 +35,7 @@ import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins        (Coins, willConsume, one)
+import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(knownPreds, willConsume), one)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos, updateOffset)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
@@ -238,37 +238,37 @@ evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 evalMeta (DrainCoins coins) (Machine k) =
   liftM3 drain
          (asks isBankrupt)
-         (asks (canAfford (willConsume coins)))
+         (asks (canAfford coins))
          k
   where
     -- there are enough coins to pay in full
     drain _ Nothing mk γ = mk γ
     drain bankrupt ~(Just m) mk γ
       -- full length check required
-      | bankrupt = emitLengthCheck (willConsume coins) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
+      | bankrupt = emitLengthCheck coins (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
       -- can be partially paid from last known deepest offset
-      | otherwise = emitLengthCheck (m + 1) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) unsafeDeepestKnown
+      | otherwise = Debug.Trace.trace ("dealing with " ++ show (m + 1)) $ emitLengthCheck (m + 1) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) unsafeDeepestKnown
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
-{-evalMeta (PrefetchChar check) k =
-  do bankrupt <- asks isBankrupt
-     when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
-     mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
-  where
-    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
-    mkCheck False k = k
-    prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))-}
 evalMeta BlockCoins (Machine k) = k
 
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
--- TODO: prefetch all predicates stored in coins
 withLengthCheckAndCoins :: (?ops::InputOps (Rep o), PositionOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-withLengthCheckAndCoins coins k =
-  -- to do prefetch, generate a length check, then read the characters, then refundCoins instead of
-  -- give: this will also perform a rewind.
-  local (giveCoins coins) k <&> \mk γ ->
-    emitLengthCheck (willConsume coins) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
+withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
+    let prefetch pred k ctx γ =
+          -- input is known to exist
+          -- FIXME: this is broken!
+          -- it seems like (a) the static handler analysis fails for some reason
+          --               (b) prefetching must not move out of the scope of a handler that rolls back (like try)
+          -- It does work, however, if exactly one character is considered (see take 1 below)
+          fetch (input γ) $ \c input' ->
+            flip (sat (ap (LAM (lamTerm pred))) c) (raise γ) $ \_ -> -- this character isn't needed
+              k (addChar pred c input' ctx) (γ {input = updatePos input' c pred})
+        -- ignore the second γ parameter, as to perform a rollback on the input
+        remainder γ ctx _ = run (Machine k) γ (giveCoins (willConsume coins) ctx)
+        good = withUpdatedOffset (\γ -> foldr prefetch (remainder γ) (take 1 (knownPreds coins)) ctx γ) γOrig
+    in emitLengthCheck (willConsume coins) good (raise γOrig) (off (input γOrig)) offset
 
 state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b
 state f k = do

@@ -16,11 +16,10 @@ module Parsley.Internal.Backend.Machine.Types.Coins (
     Coins(..),
     minCoins,
     plus1, minus, canReclaim,
-    pattern Zero, one
+    pattern Zero, one, items
   ) where
 
-import Parsley.Internal.Core (CharPred)
-import Parsley.Internal.Core.CharPred (mergePreds)
+import Parsley.Internal.Core.CharPred (CharPred, mergePreds, pattern Item)
 
 {-|
 Packages together the known input that can be consumed after a length-check with the number of
@@ -47,6 +46,9 @@ pattern Zero = Coins 0 []
 
 one :: CharPred -> Coins
 one p = Coins 1 [p]
+
+items :: Int -> Coins
+items n = Coins n (replicate n Item)
 
 zipCoins :: (Int -> Int -> Int) -> ([CharPred] -> [CharPred] -> [CharPred]) -> Coins -> Coins -> Coins
 zipCoins f g (Coins k1 cs1) (Coins k2 cs2)

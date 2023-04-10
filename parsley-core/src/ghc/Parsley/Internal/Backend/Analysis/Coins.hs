@@ -16,7 +16,7 @@ metadata to perform the piggybank algorithm in the machine (see
 module Parsley.Internal.Backend.Analysis.Coins (coinsNeeded, reclaimable) where
 
 import Data.Bifunctor                   (first)
-import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, minCoins, pattern Zero, minus)
+import Parsley.Internal.Backend.Machine (Instr(..), MetaInstr(..), Handler(..), Coins, plus1, minCoins, pattern Zero, minus, items)
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Const4(..))
 
 {-|
@@ -84,8 +84,11 @@ alg _     (Catch k h)                            = algCatch (getConst4 k) (algHa
 alg _     (Case p q)                             = algCatch (getConst4 p) (getConst4 q)
 alg _     (Choices _ ks def)                     = foldr (algCatch . getConst4) (getConst4 def) ks
 -- as these coins are refunded in `k`, they should be deducted from the required coins for `k`
-alg _     (MetaInstr (RefundCoins n) (Const4 k)) = first (`minus` n) k
-alg _     (MetaInstr (DrainCoins n) _)           = (n, False)
+alg _     (MetaInstr (RefundCoins n) (Const4 k)) = first (`minus` items n) k
+-- we want these propagated out so that they commute across a factored boundary
+-- FIXME: ideally, they should have no items with them: they cannot be used in the binding, so no point pulling them out
+--       if two branches merge, perhaps [Maybe CharPred] and use zipWith (<|>)?
+alg _     (MetaInstr (DrainCoins n) _)           = (items n, False)
 -- no point in propagating forward, these are at the front of a binding
 alg _     (MetaInstr (GiveBursary _) _)          = (Zero, False)
 -- this is the instruction that actions a cut by blocking all coins from traversing it

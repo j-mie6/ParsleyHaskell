@@ -28,7 +28,7 @@ import Parsley.Internal.Backend.Machine.InputRep     (Rep)
 import Parsley.Internal.Backend.Machine.Instructions
 import Parsley.Internal.Backend.Machine.LetBindings  (LetBinding, makeLetBinding, newMeta)
 import Parsley.Internal.Backend.Machine.Ops          (Ops)
-import Parsley.Internal.Backend.Machine.Types.Coins  (Coins(..), minCoins, plus1, minus, pattern Zero)
+import Parsley.Internal.Backend.Machine.Types.Coins  (Coins(..), minCoins, plus1, minus, pattern Zero, items)
 import Parsley.Internal.Common.Utils                 (Code)
 import Parsley.Internal.Core.InputTypes
 import Parsley.Internal.Trace                        (Trace)

@@ -23,7 +23,9 @@ import JavascriptBench.Shared
 import Shared.BenchmarkUtils
 
 main :: IO ()
-main = condensedMain [javascript]
+main = do
+  print (javascriptParsleyC "function foo(x) { return x; }")
+  condensedMain [javascript]
 
 deriving instance Generic JSElement
 deriving instance Generic JSStm

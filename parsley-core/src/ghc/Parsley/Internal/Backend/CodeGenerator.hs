@@ -114,6 +114,7 @@ shallow (LookAhead p) m =
   do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- dodgy hack, but oh well
      -- always refund the input consumed during a lookahead, so it can be reused (lookahead is handlerless)
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
+-- FIXME: I think notFollowedBy needs a fence
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      let np = coinsNeeded pc

@@ -66,11 +66,11 @@ import Data.Maybe                                      (fromMaybe, isNothing)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Coins    (Coins, willConsume, canReclaim)
+import Parsley.Internal.Backend.Machine.Types.Coins    (Coins)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input    (Input)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
 import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
@@ -388,17 +388,17 @@ Adds coins into the current supply.
 
 @since 1.5.0.0
 -}
-giveCoins :: Coins -> Ctx s o a -> Ctx s o a
-giveCoins c ctx = ctx {coins = coins ctx + willConsume c}
+giveCoins :: Int -> Ctx s o a -> Ctx s o a
+giveCoins c ctx = ctx {coins = coins ctx + c}
 
 {-|
 Adds coins into the current supply.
 
 @since 1.5.0.0
 -}
-refundCoins :: Coins -> Ctx s o a -> Ctx s o a
+refundCoins :: Int -> Ctx s o a -> Ctx s o a
 refundCoins c ctx =
-  giveCoins c ctx { knownChars = Queue.rewind (canReclaim c) (knownChars ctx) }
+  giveCoins c ctx { knownChars = Queue.rewind c (knownChars ctx) }
 
 {-|
 Removes all coins and piggy-banks, such that @isBankrupt == True@.
@@ -428,8 +428,8 @@ can be retrieved later.
 
 @since 1.5.0.0
 -}
-addChar :: Code Char -> Input o -> Ctx s o a -> Ctx s o a
-addChar c o ctx = ctx { knownChars = enqueue (c, Item, o) (knownChars ctx) }
+addChar :: CharPred -> Code Char -> Input o -> Ctx s o a -> Ctx s o a
+addChar p c o ctx = ctx { knownChars = enqueue (c, p, o) (knownChars ctx) }
 
 {-|
 Reads a character from the context's retrieval queue if one exists.
@@ -445,17 +445,14 @@ readChar :: Ctx s o a                                                           
          -> Code b
 readChar ctx pred fallback k
   | reclaimable = unsafeReadChar ctx k
-  | otherwise   = fallback $ \c o -> unsafeReadChar (addChar c o ctx) k
+  | otherwise   = fallback $ \c o -> unsafeReadChar (addChar Item c o ctx) k
   where
     reclaimable = not (Queue.null (knownChars ctx))
     unsafeReadChar ctx k = let -- combine the old information with the new information, refining the predicate
                                -- This works for notFollowedBy at the /moment/ because the predicate does not cross the handler boundary...
                                -- Perhaps any that cross handler boundaries should be complemented if that ever happens.
-                               -- FIXME: why does this poke and dequeue, why not just dequeue and then process?
-                               updateChar (c, p, o) = (c, andPred p pred, o)
-                               ((_, pOld, _), q) = poke updateChar (knownChars ctx)
-                               ((c, p, o), q') = dequeue q
-                           in k c pOld p o (ctx { knownChars = q' })
+                               ((c, oldPred, o), q) = dequeue (knownChars ctx)
+                           in k c oldPred (andPred oldPred pred) o (ctx { knownChars = q })
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

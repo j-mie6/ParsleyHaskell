@@ -8,6 +8,8 @@ import qualified Regression.Parsers as Parsers
 import Parsley (parse)
 import Parsley.InputExtras (CharList(..))
 
+import Parsley.Internal.Verbose ()
+
 main :: IO ()
 main = defaultMain tests
 

@@ -32,7 +32,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
 import Data.Kind                                    (Type)
 import Data.Void                                    (Void)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.Types.Coins (Coins)
+import Parsley.Internal.Backend.Machine.Types.Coins (Coins(willConsume))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))
 import Parsley.Internal.Core.CharPred               (CharPred)
@@ -251,20 +251,20 @@ data MetaInstr (n :: Nat) where
       This always happens for free, and is added straight to the coins.
 
   @since 1.5.0.0 -}
-  RefundCoins :: Coins -> MetaInstr n
+  RefundCoins :: Int -> MetaInstr n
   {-| Remove coins from piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information)
       This is used to pay for more expensive calls to bindings with known required input.
 
       A handler is required, as there may not be enough coins to pay the cost and a length check causes a failure.
 
   @since 1.5.0.0 -}
-  DrainCoins  :: Coins -> MetaInstr (Succ n)
+  DrainCoins  :: Int -> MetaInstr (Succ n)
   {-| Refunds to the piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information).
       This always happens for free, and is added straight to the coins. Unlike `RefundCoins` this cannot reclaim
       input, nor is is subtractive in the analysis.
 
   @since 1.5.0.0 -}
-  GiveBursary :: Coins -> MetaInstr n
+  GiveBursary :: Int -> MetaInstr n
   {-|
   True meta instruction: does /nothing/ except for reset coin count during coin analysis.
 
@@ -290,7 +290,7 @@ Smart-constuctor around `RefundCoins`.
 @since 1.5.0.0
 -}
 refundCoins :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-refundCoins = mkCoin RefundCoins
+refundCoins = mkCoin (RefundCoins . willConsume)
 
 {-|
 Smart-constuctor around `DrainCoins`.
@@ -298,7 +298,7 @@ Smart-constuctor around `DrainCoins`.
 @since 1.5.0.0
 -}
 drainCoins :: Coins -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
-drainCoins = mkCoin DrainCoins
+drainCoins = mkCoin (DrainCoins . willConsume)
 
 {-|
 Smart-constuctor around `RefundCoins`.
@@ -306,7 +306,7 @@ Smart-constuctor around `RefundCoins`.
 @since 1.5.0.0
 -}
 giveBursary :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-giveBursary = mkCoin GiveBursary
+giveBursary = mkCoin (GiveBursary . willConsume)
 
 {-|
 Smart-constructor around `BlockCoins`.

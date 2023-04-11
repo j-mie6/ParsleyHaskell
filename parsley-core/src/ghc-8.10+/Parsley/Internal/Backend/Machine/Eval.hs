@@ -35,7 +35,7 @@ import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(knownPreds, willConsume), one)
+import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(knownPreds, willConsume), one, minus)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos, updateOffset)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
@@ -228,10 +228,14 @@ evalLogExit name (Machine mk) =
     ask
 
 evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
--- TODO: prefetch all predicates stored in coins
 evalMeta (AddCoins coins) (Machine k) =
-  do requiresPiggy <- asks hasCoin
-     if requiresPiggy then local (storePiggy coins) k
+  -- when there are coins available, this cannot be discharged, and will wait until the current amounts
+  -- are exhausted. Because it might have been the case that lookahead was performed to refund, the
+  -- over-imbursement cannot be done in advance, and is instead done here, deducting the net-worth
+  -- of the coin count to ensure that only enough to make up the change is put in the piggy-banks
+  do net <- asks netWorth
+     let requiresPiggy = net /= 0
+     if requiresPiggy then local (storePiggy (coins `minus` net)) k
      else withLengthCheckAndCoins coins k
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
@@ -247,15 +251,13 @@ evalMeta (DrainCoins coins) (Machine k) =
       -- full length check required
       | bankrupt = emitLengthCheck coins (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
       -- can be partially paid from last known deepest offset
-      | otherwise = Debug.Trace.trace ("dealing with " ++ show (m + 1)) $ emitLengthCheck (m + 1) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) unsafeDeepestKnown
+      | otherwise = emitLengthCheck (m + 1) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) unsafeDeepestKnown
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
 evalMeta BlockCoins (Machine k) = k
 
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
---FIXME: apparently, horrible things happen when using `more *>` these days... with if/while/etc/etc
---       must minimise and then try and find the root cause, it's evil!
 withLengthCheckAndCoins :: (?ops::InputOps (Rep o), PositionOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     let prefetch pred k ctx γ =

@@ -106,16 +106,20 @@ common test-common
   default-language:    Haskell2010
   ghc-options:         -pgmP cpphs -optP --cpp
   other-modules:       TestUtils
+  if false && impl(ghc < 9)
+    build-depends:     dump-core
+    ghc-options:       -fplugin=DumpCore
 
 test-suite parsley-test
   import:              test-common
   type:                exitcode-stdio-1.0
-  build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq
+  build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq, containers
   main-is:             Parsley/Tests.hs
   other-modules:       Parsley.Alternative.Test, Parsley.Applicative.Test, Parsley.Combinator.Test, Parsley.Fold.Test,
                        Parsley.Precedence.Test, Parsley.Register.Test, Parsley.Selective.Test, Parsley.Char.Test,
                        Parsley.Alternative.Parsers, Parsley.Applicative.Parsers, Parsley.Combinator.Parsers, Parsley.Fold.Parsers,
                        Parsley.Precedence.Parsers, Parsley.Register.Parsers, Parsley.Selective.Parsers, Parsley.Char.Parsers
+                       --Parsley.Javascript.Parsers, Parsley.Javascript.Shared, Parsley.Javascript.Test
 
 test-suite regression-test
   import:              test-common

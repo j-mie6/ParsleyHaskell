@@ -10,7 +10,7 @@ module JavascriptBench.Parsley.Parser where
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
 import Parsley
 import Parsley.Char (token, oneOf, noneOf, digit)
-import Parsley.Combinator (eof, more)
+import Parsley.Combinator (eof)
 import Parsley.Fold (skipMany, skipSome, sepBy, sepBy1, somel, chainl1)
 import Parsley.Precedence (precHomo, ops, Fixity(InfixL, Prefix, Postfix))
 import Parsley.Defunctionalized (Defunc(CONS, ID, LIFTED, LAM_S), pattern FLIP_H, pattern COMPOSE_H)
@@ -41,7 +41,7 @@ javascript = whitespace *> many element <* eof
     compound :: Parser JSCompoundStm
     compound = braces (many stmt)
     stmt :: Parser JSStm
-    stmt = {-(more *>) $-} semi $> QQ(JSSemi)
+    stmt = semi $> QQ(JSSemi)
        <|> keyword "if" *> liftA3 QQ(JSIf) parensExpr stmt (maybeP (keyword "else" *> stmt))
        <|> keyword "while" *> liftA2 QQ(JSWhile) parensExpr stmt
        <|> (keyword "for" *> parens

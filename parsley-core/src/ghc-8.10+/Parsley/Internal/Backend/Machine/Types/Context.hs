@@ -52,13 +52,13 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- ** Modifiers
     storePiggy, breakPiggy, spendCoin, giveCoins, refundCoins, voidCoins,
     -- ** Getters
-    coins, hasCoin, isBankrupt, canAfford,
+    coins, hasCoin, isBankrupt, canAfford, netWorth,
     -- ** Input Reclamation
     addChar, readChar
   ) where
 
 import Control.Exception                               (Exception, throw)
-import Control.Monad                                   (liftM2, (<=<))
+import Control.Monad                                   ((<=<))
 import Control.Monad.Reader                            (asks, local, MonadReader)
 import Data.STRef                                      (STRef)
 import Data.Dependent.Map                              (DMap)
@@ -66,7 +66,7 @@ import Data.Maybe                                      (fromMaybe, isNothing)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Coins    (Coins)
+import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(willConsume))
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input    (Input)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
@@ -92,6 +92,7 @@ data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))          
                      , coins      :: {-# UNPACK #-} !Int                           -- ^ Number of tokens free to consume without length check.
                      , offsetUniq :: {-# UNPACK #-} !Word                          -- ^ Next unique offset identifier.
                      , piggies    :: !(Queue Coins)                                -- ^ Queue of future length check credit.
+                     , netWorth   :: {-# UNPACK #-} !Int                           -- ^ The sum of the coins and piggies
                      , knownChars :: !(RewindQueue (Code Char, CharPred, Input o)) -- ^ Characters that can be reclaimed on backtrack.
                      }
 
@@ -110,7 +111,7 @@ bindings: information about their required free-registers is included.
 @since 1.0.0.0
 -}
 emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty 0 Queue.empty
 
 -- Subroutines
 {- $sub-doc
@@ -347,7 +348,7 @@ broken.
 @since 1.5.0.0
 -}
 storePiggy :: Coins -> Ctx s o a -> Ctx s o a
-storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
+storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx), netWorth = netWorth ctx + willConsume coins}
 
 {-|
 Break the next piggy-bank in the queue, and fill the coins in return.
@@ -357,7 +358,9 @@ __Note__: This should generate a length check when used!
 @since 1.0.0.0
 -}
 breakPiggy :: Ctx s o a -> (Coins, Ctx s o a)
-breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in (coins, ctx {piggies = piggies'})
+breakPiggy ctx =
+  let (coins, piggies') = dequeue (piggies ctx)
+  in (coins, ctx {piggies = piggies', netWorth = netWorth ctx - willConsume coins})
 
 {-|
 Does the context have coins available?
@@ -373,7 +376,7 @@ Is it the case that there are no coins /and/ no piggy-banks remaining?
 @since 1.0.0.0
 -}
 isBankrupt :: Ctx s o a -> Bool
-isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
+isBankrupt = (== 0) . netWorth--liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
 
 {-|
 Spend a single coin, used when a token is consumed.
@@ -381,7 +384,7 @@ Spend a single coin, used when a token is consumed.
 @since 1.0.0.0
 -}
 spendCoin :: Ctx s o a -> Ctx s o a
-spendCoin ctx = ctx {coins = coins ctx - 1}
+spendCoin ctx = ctx {coins = coins ctx - 1, netWorth = netWorth ctx - 1}
 
 {-|
 Adds coins into the current supply.
@@ -389,7 +392,7 @@ Adds coins into the current supply.
 @since 1.5.0.0
 -}
 giveCoins :: Int -> Ctx s o a -> Ctx s o a
-giveCoins c ctx = ctx {coins = coins ctx + c}
+giveCoins c ctx = ctx {coins = coins ctx + c, netWorth = netWorth ctx + c}
 
 {-|
 Adds coins into the current supply.
@@ -406,7 +409,7 @@ Removes all coins and piggy-banks, such that @isBankrupt == True@.
 @since 1.0.0.0
 -}
 voidCoins :: Ctx s o a -> Ctx s o a
-voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty}
+voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty, netWorth = 0}
 
 {-|
 Asks if the current coin total can afford a charge of \(n\) characters.

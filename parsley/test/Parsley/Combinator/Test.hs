@@ -14,6 +14,7 @@ tests :: TestTree
 tests = testGroup "Combinator" [ eofTests
                                , moreTests
                                , someTillTests
+                               , factoringTests
                                ]
 
 isNull :: String -> Maybe ()
@@ -40,3 +41,16 @@ moreTests = testGroup "more should"
 
 someTillTests :: TestTree
 someTillTests = testGroup "someTill should" []
+
+factoring :: String -> Maybe [String]
+factoring = $$(runParserMocked Parsers.factoring [||Parsers.factoring||])
+
+factoringTests :: TestTree
+factoringTests = testGroup "factoring should"
+  [ testCase "succeed on input" $ factoring "" @?= Just []
+  , testCase "succeed on input" $ factoring "if" @?= Just ["if"]
+  , testCase "succeed on input" $ factoring "continue" @?= Just ["continue"]
+  , testCase "succeed on input" $ factoring "hello!" @?= Just ["hello!"]
+  , testCase "succeed on input" $ factoring "while." @?= Just ["while"]
+  , testCase "succeed on input" $ factoring "coodbye" @?= Nothing
+  ]

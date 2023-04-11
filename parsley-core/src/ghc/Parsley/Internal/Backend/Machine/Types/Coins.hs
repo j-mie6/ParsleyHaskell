@@ -75,10 +75,7 @@ plus1 :: CharPred -> Coins -> Coins
 plus1 p =  zipCoins (+) (++) (one p)
 
 {-|
-Performs the pairwise subtraction of two `Coins` values.
-
 @since 1.5.0.0
 -}
-minus :: Coins -> Coins -> Coins
--- FIXME: just awful lol
-minus = zipCoins (\m n -> max 0 (m - n)) (\cs1 cs2 -> drop (length cs2) cs1)
+minus :: Coins -> Int -> Coins
+minus (Coins n cs) m = Coins (max (n - m) 0) (drop m cs)

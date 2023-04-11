@@ -19,7 +19,6 @@ import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                             _Fmap, _App, _Get, _Put, _Make,
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
-                                            minus, minCoins,
                                             IMVar, IΦVar, MVar(..), ΦVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline, reclaimable)
 import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
@@ -84,12 +83,8 @@ altCompile p q handler post m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (post φ)))
      qc <- freshΦ (runCodeGen q φ)
-     let np = coinsNeeded pc
-     let nq = coinsNeeded qc
-     let min = minCoins np nq
-     let dp = np `minus` min
-     let dq = nq `minus` min
-     return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
+     -- the shared coins are not factored out of the branches, because this is done by the AddCoins evaluation
+     return $! binder (In4 (Catch (addCoinsNeeded pc) (handler (addCoinsNeeded qc))))
 
 deep :: Trace => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
@@ -114,27 +109,21 @@ shallow (LookAhead p) m =
   do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- dodgy hack, but oh well
      -- always refund the input consumed during a lookahead, so it can be reused (lookahead is handlerless)
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
--- FIXME: I think notFollowedBy needs a fence
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
-     let np = coinsNeeded pc
-     let nm = coinsNeeded m
-     -- the minus here is used because the shared coins are propagated out front, neat
-     return $! In4 (Catch (addCoins (np `minus` nm) (In4 (Tell pc))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
+     -- it should never be the case that factored input can commute out of the lookahead
+     return $! In4 (Catch (blockCoins (addCoinsNeeded (In4 (Tell pc)))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
      qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (_App φ)))))
-     let minc = coinsNeeded (In4 (Case pc qc))
-     let dp = coinsNeeded pc `minus` minc
-     let dq = coinsNeeded qc `minus` minc
-     fmap binder (runCodeGen b (In4 (Case (addCoins dp pc) (addCoins dq qc))))
+     -- the shared coins are not factored out of the branches, because this is done by the AddCoins evaluation
+     fmap binder (runCodeGen b (In4 (Case (addCoinsNeeded pc) (addCoinsNeeded qc))))
 shallow (Match p fs qs def) m =
   do (binder, φ) <- makeΦ m
      qcs <- traverse (\q -> freshΦ (runCodeGen q φ)) qs
      defc <- freshΦ (runCodeGen def φ)
-     let minc = coinsNeeded (In4 (Choices (map user fs) qcs defc))
-     let defc':qcs' = map ((`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
+     let defc':qcs' = map addCoinsNeeded (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m
 shallow (Loop body exit)             m =

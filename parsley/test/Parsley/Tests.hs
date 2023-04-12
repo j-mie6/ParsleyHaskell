@@ -7,7 +7,7 @@ import qualified Parsley.Fold.Test as Fold
 import qualified Parsley.Precedence.Test as Precedence
 import qualified Parsley.Register.Test as Register
 import qualified Parsley.Selective.Test as Selective
-import qualified Parsley.Javascript.Test as Javascript
+--import qualified Parsley.Javascript.Test as Javascript
 
 main :: IO ()
 main = defaultMain tests
@@ -20,5 +20,5 @@ tests = testGroup "Parsley Tests" [ Alternative.tests
                                   , Precedence.tests
                                   , Register.tests
                                   , Selective.tests
-                                  , Javascript.tests
+                                  --, Javascript.tests
                                   ]

@@ -27,7 +27,7 @@ import Parsley.Applicative      (pure, (<*>), (<$>), (*>), (<*), (<:>), (<**>), 
 import Parsley.Defunctionalized (Defunc(FLIP, ID, COMPOSE, EMPTY, CONS, CONST), pattern FLIP_H, pattern UNIT)
 import Parsley.Internal         (Parser)
 import Parsley.ParserOps        (ParserOps)
-import Parsley.Register         (get, modify, newRegister, newRegister_)
+import Parsley.Register         (get, modify, newRegister)
 
 import qualified Parsley.Internal as Internal (loop)
 
@@ -49,11 +49,7 @@ primarily used to parse prefix operators in expressions.
 @since 2.0.0.0
 -}
 prefix :: Parser (a -> a) -> Parser a -> Parser a
-prefix op p =
-  newRegister_ ID (\r ->
-    loop (modify r (FLIP_H COMPOSE <$> op))
-         (get r))
-  <*> p
+prefix op p = postfix (pure ID) (FLIP_H COMPOSE <$> op) <*> p
 
 {-|
 This combinator parses repeated applications of an operator to a single initial operand. This is

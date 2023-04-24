@@ -19,7 +19,7 @@ import Control.Monad                        (unless, forM_)
 import Data.Array                           (Array, (!), listArray)
 import Data.Array.MArray                    (readArray, writeArray, newArray)
 import Data.Array.ST                        (runSTUArray)
-import Data.Array.Unboxed                   (assocs)
+import Data.Array.Unboxed                   (UArray, assocs)
 import Data.Dependent.Map                   (DMap)
 import Data.List                            (foldl', partition, sortOn)
 import Data.Map.Strict                      (Map)
@@ -31,10 +31,15 @@ import Parsley.Internal.Core.CombinatorAST  (Combinator(..), traverseCombinator)
 import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), ΣVar, SomeΣVar(..))
 
 import qualified Data.Dependent.Map as DMap (foldrWithKey, filterWithKey)
-import qualified Data.Map.Strict    as Map  ((!), empty, insert, mapMaybeWithKey, findMax, elems, lookup)
-import qualified Data.Set           as Set  (elems, empty, insert)
+import qualified Data.Map.Strict    as Map  ((!), empty, insert, findMax, elems, maxView, fromList, adjust)
+import qualified Data.Set           as Set  (elems, empty, insert, fromDistinctAscList, size, delete)
+import qualified Data.Array.Unboxed as UArray ((!))
 
 type Graph = Array IMVar [IMVar]
+type PQueue k a = Map k a
+
+next :: PQueue k a -> Maybe (a, PQueue k a)
+next = Map.maxView
 
 {-|
 Given a top-level parser and a collection of its let-bound subjects performs the following tasks:
@@ -64,62 +69,61 @@ dependencyAnalysis toplevel μs =
       -- Step 5: construct the seen set (dfnum)
       -- Step 6: dfs from toplevel (via roots) all with same seen set
       -- Step 7: elems of seen set with dfnum 0 are dead, otherwise they are collected into a list in descending order
-      (topo, dead) = topoOrdering roots n graph
-      -- Step 8: perform a dfs on each of the topo, with a new seen set for each,
-      --         building the flattened dependency map. If the current focus has
-      --         already been computed, add all its deps to the seen set and skip.
-      --         The end seen set becomes out flattened deps.
-      trueDeps = flattenDependencies topo (minMax topo) graph
-      -- Step 8: Compute the new registers, and remove dead ones
-      addNewRegs v uses
-        | notMember v dead = let deps = trueDeps Map.! v
-                                 defs = definedRegisters Map.! v
-                                 subUses = foldMap (usedRegisters Map.!) deps
-                                 subDefs = foldMap (definedRegisters Map.!) deps
-                             in Just $ (uses \\ defs) `union` (subUses \\ subDefs)
-        | otherwise        = Nothing
-      trueRegs = Map.mapMaybeWithKey addNewRegs usedRegisters
-  in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, trueRegs)
-
-minMax :: Ord a => [a] -> (a, a)
-minMax []     = error "cannot find minimum or maximum of empty list"
-minMax (x:xs) = foldl' (\(small, big) x -> (min small x, max big x)) (x, x) xs
+      (topo, dfnums, dead) = topoOrdering roots n graph
+      -- the dfnums is a map from IMVar to DFNum, and DFNum's are used as the unique keys to a
+      -- Data.Map priority queue
+      -- this iteratively propagates free registers upwards:
+      regs = propagateRegs topo dfnums usedRegisters definedRegisters immediateDependencies (callerMap topo immediateDependencies)
+  in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, regs)
 
 buildGraph :: IMVar -> Map IMVar (Set IMVar) -> Graph
 buildGraph n = listArray (0, n) . map Set.elems . Map.elems
 
-topoOrdering :: Set IMVar -> IMVar -> Graph -> ([IMVar], Set IMVar)
+type DFNum = Int
+
+topoOrdering :: Set IMVar -> IMVar -> Graph -> ([IMVar], UArray IMVar DFNum, Set IMVar)
 topoOrdering roots n graph =
-  let dfnums = runSTUArray $ do
-        dfnums <- newArray (0, n) (0 :: Int)
+  let dfnums :: UArray IMVar DFNum
+      dfnums = runSTUArray $ do
+        dfnums <- newArray (0, n) 0
         nextDfnum <- newSTRef 1
         let hasSeen v = (/= 0) <$> readArray dfnums v
         let setSeen v = do dfnum <- readSTRef nextDfnum
                            writeArray dfnums v dfnum
                            writeSTRef nextDfnum (dfnum + 1)
+        -- Assign a DFNum to each IMVar
         forM_ roots (dfs hasSeen setSeen graph)
         return dfnums
+      -- if something still has dfnum 0, it was not visited, and is dead
+      lives, deads :: [(IMVar, DFNum)]
       (lives, deads) = partition ((/= 0) . snd) (assocs dfnums)
-  in (reverseMap fst (sortOn snd lives), foldl' (\ds v0 -> Set.insert (fst v0) ds) Set.empty deads)
+      -- The DFNums are unique
+  in (reverseMap fst (sortOn snd lives), dfnums, Set.fromDistinctAscList (map fst deads))
 
 reverseMap :: (a -> b) -> [a] -> [b]
 reverseMap f = foldl' (\xs x -> f x : xs) []
 
-flattenDependencies :: [IMVar] -> (IMVar, IMVar) -> Graph -> Map IMVar (Set IMVar)
-flattenDependencies topo range graph = foldl' reachable Map.empty topo
+propagateRegs :: [IMVar] -> UArray IMVar DFNum -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set IMVar) -> Map IMVar (Set IMVar) -> Map IMVar (Set SomeΣVar)
+propagateRegs vs dfnums uses defs callees callers =
+  go ((Map.fromList (map (\v -> (dfnums UArray.! v, v)) vs)))
+     (Map.fromList (map (\v -> (v, (uses Map.! v) \\ (defs Map.! v))) vs))
   where
-    reachable :: Map IMVar (Set IMVar) -> IMVar -> Map IMVar (Set IMVar)
-    reachable deps root =
-      let seen = runSTUArray $ do
-            seen <- newArray range False
-            let setSeen v = writeArray seen v True
-            let seenOrSkip v = case Map.lookup v deps of
-                  Nothing -> readArray seen v
-                  Just ds -> setSeen v >> forM_ ds setSeen >> return True
-            dfs seenOrSkip setSeen graph root
-            return seen
-          ds = foldl' (\ds (v, b) -> if b then Set.insert v ds else ds) Set.empty (assocs seen)
-      in Map.insert root ds deps
+    go :: PQueue DFNum IMVar -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set SomeΣVar)
+    go pqueue freeRegs = case next pqueue of
+      Nothing -> freeRegs
+      Just (v, q')  ->
+        let frees = freeRegs Map.! v
+            freesCallees = foldMap (freeRegs Map.!) (callees Map.! v)
+            frees' = frees `union` (freesCallees \\ (defs Map.! v))
+        in if Set.size frees /= Set.size frees'
+           then go (foldl' (flip (\caller -> Map.insert (dfnums UArray.! caller) caller)) pqueue (Set.delete v (callers Map.! v))) (Map.insert v frees' freeRegs)
+           else go q' freeRegs
+
+callerMap :: [IMVar] -> Map IMVar (Set IMVar) -> Map IMVar (Set IMVar)
+callerMap lives deps =
+  foldl' (\callers k -> foldl' (flip (Map.adjust (Set.insert k))) callers (deps Map.! k))
+         (Map.fromList (zip lives (repeat Set.empty)))
+         lives
 
 dfs :: Monad m => (IMVar -> m Bool) -> (IMVar -> m ()) -> Graph -> IMVar -> m ()
 dfs hasSeen setSeen graph = go
@@ -177,7 +181,6 @@ freeRegistersAlg :: Combinator FreeRegisters a -> FreeRegisters a
 freeRegistersAlg (GetRegister σ)      = FreeRegisters $ do uses σ
 freeRegistersAlg (PutRegister σ p)    = FreeRegisters $ do uses σ; doFreeRegisters p
 freeRegistersAlg (MakeRegister σ p q) = FreeRegisters $ do defs σ; doFreeRegisters p; doFreeRegisters q
-freeRegistersAlg Let{}                = FreeRegisters $ do return () -- TODO This can be removed when Let doesn't have the body in it...
 freeRegistersAlg p                    = FreeRegisters $ do traverseCombinator (fmap Const1 . doFreeRegisters) p; return ()
 
 uses :: MonadState (Set SomeΣVar, vs) m => ΣVar a -> m ()

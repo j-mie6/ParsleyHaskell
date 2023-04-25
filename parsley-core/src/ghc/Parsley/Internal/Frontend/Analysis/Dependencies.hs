@@ -14,12 +14,13 @@ free-registers.
 -}
 module Parsley.Internal.Frontend.Analysis.Dependencies (dependencyAnalysis) where
 
-import Control.Arrow                        (first, second)
 import Control.Monad                        (unless, forM_)
+import Control.Monad.ST                     (ST)
 import Data.Array                           (Array)
-import Data.Array.MArray                    (readArray, writeArray, newArray)
-import Data.Array.ST                        (runSTUArray, runSTArray)
+import Data.Array.MArray                    (readArray, writeArray, newArray, newArray_)
+import Data.Array.ST                        (STArray, runSTUArray, runSTArray)
 import Data.Array.Unboxed                   (UArray)
+import Data.Bifunctor                       (first, second)
 import Data.Dependent.Map                   (DMap)
 import Data.Foldable                        (foldl')
 import Data.Map.Strict                      (Map)
@@ -31,8 +32,8 @@ import Parsley.Internal.Core.CombinatorAST  (Combinator(..), traverseCombinator)
 import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), ΣVar, SomeΣVar(..))
 
 import qualified Data.Dependent.Map as DMap   (foldrWithKey, filterWithKey)
-import qualified Data.Map.Strict    as Map    ((!), empty, insert, findMax, elems, maxView, fromList, fromAscList)
-import qualified Data.Set           as Set    (toList, insert, union, member, notMember, empty, (\\), fromDistinctAscList, size)
+import qualified Data.Map.Strict    as Map    ((!), empty, insert, findMax, elems, maxView, fromList, fromDistinctAscList)
+import qualified Data.Set           as Set    (toList, insert, union, unions, member, notMember, empty, (\\), fromDistinctAscList, size)
 import qualified Data.Array         as Array  ((!), listArray, bounds, indices)
 import qualified Data.Array.Unboxed as UArray ((!), assocs)
 import qualified Data.List          as List   (partition)
@@ -107,23 +108,30 @@ topoOrdering roots graph =
   in (dfnums, map fst lives, Set.fromDistinctAscList (map fst deads))
 
 propagateRegs :: [IMVar] -> UArray IMVar DFNum -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set SomeΣVar) -> Graph -> Graph -> Map IMVar (Set SomeΣVar)
-propagateRegs reachables dfnums uses defs callees callers =
-  go ((Map.fromList (map (\v -> (dfnums UArray.! v, v)) reachables)))
-     (Map.fromAscList (map (\v -> (v, (uses Map.! v) Set.\\ (defs Map.! v))) reachables))
+propagateRegs reachables dfnums uses defs callees callers = toMap $ runSTArray $
+  do freeRegs <- newArray_ (Array.bounds callees)
+     forM_ reachables $ \v -> writeArray freeRegs v ((uses Map.! v) Set.\\ (defs Map.! v))
+     let worklist = Map.fromList (map (\v -> (dfnums UArray.! v, v)) reachables)
+     maybe (return ()) (unfoldM_ (uncurry (propagate freeRegs))) (Map.maxView worklist)
+     return freeRegs
   where
-    go :: PQueue DFNum IMVar -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set SomeΣVar)
-    go work freeRegs = case Map.maxView work of
-      Nothing         -> freeRegs
-      Just (v, work') ->
-        let !frees        = freeRegs Map.! v
-            !freesCallees = foldMap (freeRegs Map.!) (callees Array.! v)           -- Set.unions (map (freeRegs Map.!) (callees Array.! v))
-            !frees'       = frees `Set.union` (freesCallees Set.\\ (defs Map.! v))
-        in if Set.size frees /= Set.size frees'
-           then go (addWork (callers Array.! v) work) (Map.insert v frees' freeRegs)
-           else go work' freeRegs
+    propagate :: STArray s IMVar (Set SomeΣVar) -> IMVar -> PQueue DFNum IMVar -> ST s (Maybe (IMVar, PQueue DFNum IMVar))
+    propagate freeRegs v work = do
+      !frees        <- readArray freeRegs v
+      !freesCallees <- Set.unions <$> traverse (readArray freeRegs) (callees Array.! v)
+      let !frees'   =  frees `Set.union` (freesCallees Set.\\ (defs Map.! v))
+      if Set.size frees /= Set.size frees' then do
+        writeArray freeRegs v frees'
+        return (Map.maxView (addWork (callers Array.! v) work))
+      else return (Map.maxView work)
 
     addWork :: [IMVar] -> PQueue DFNum IMVar -> PQueue DFNum IMVar
     addWork vs work = foldl' (flip (\v -> Map.insert (dfnums UArray.! v) v)) work vs
+
+    unfoldM_ :: Monad m => (s -> m (Maybe s)) -> s -> m ()
+    unfoldM_ f s = f s >>= mapM_ (unfoldM_ f)
+
+    toMap arr = Map.fromDistinctAscList (map (\v -> (v, arr Array.! v)) reachables)
 
 -- IMMEDIATE DEPENDENCY MAPS
 data DependencyMaps = DependencyMaps {

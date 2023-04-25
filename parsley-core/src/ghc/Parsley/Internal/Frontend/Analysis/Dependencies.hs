@@ -16,30 +16,29 @@ module Parsley.Internal.Frontend.Analysis.Dependencies (dependencyAnalysis) wher
 
 import Control.Arrow                        (first, second)
 import Control.Monad                        (unless, forM_)
-import Data.Array                           (Array, (!), listArray)
+import Data.Array                           (Array)
 import Data.Array.MArray                    (readArray, writeArray, newArray)
-import Data.Array.ST                        (runSTUArray)
-import Data.Array.Unboxed                   (UArray, assocs)
+import Data.Array.ST                        (runSTUArray, runSTArray)
+import Data.Array.Unboxed                   (UArray)
 import Data.Dependent.Map                   (DMap)
-import Data.List                            (foldl', partition, sortOn)
+import Data.Foldable                        (foldl')
 import Data.Map.Strict                      (Map)
-import Data.Set                             (Set, insert, (\\), union, notMember, empty)
+import Data.Set                             (Set)
 import Data.STRef                           (newSTRef, readSTRef, writeSTRef)
 import Parsley.Internal.Common.Indexed      (Fix, cata, Const1(..), (:*:)(..), zipper)
 import Parsley.Internal.Common.State        (State, MonadState, execState, modify')
 import Parsley.Internal.Core.CombinatorAST  (Combinator(..), traverseCombinator)
 import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), ΣVar, SomeΣVar(..))
 
-import qualified Data.Dependent.Map as DMap (foldrWithKey, filterWithKey)
-import qualified Data.Map.Strict    as Map  ((!), empty, insert, findMax, elems, maxView, fromList, adjust)
-import qualified Data.Set           as Set  (elems, empty, insert, fromDistinctAscList, size, delete)
-import qualified Data.Array.Unboxed as UArray ((!))
+import qualified Data.Dependent.Map as DMap   (foldrWithKey, filterWithKey)
+import qualified Data.Map.Strict    as Map    ((!), empty, insert, findMax, elems, maxView, fromList, fromAscList)
+import qualified Data.Set           as Set    (toList, insert, union, member, notMember, empty, (\\), fromDistinctAscList, size)
+import qualified Data.Array         as Array  ((!), listArray, bounds, indices)
+import qualified Data.Array.Unboxed as UArray ((!), assocs)
+import qualified Data.List          as List   (partition)
 
 type Graph = Array IMVar [IMVar]
 type PQueue k a = Map k a
-
-next :: PQueue k a -> Maybe (a, PQueue k a)
-next = Map.maxView
 
 {-|
 Given a top-level parser and a collection of its let-bound subjects performs the following tasks:
@@ -62,82 +61,75 @@ dependencyAnalysis toplevel μs =
       roots = directDependencies toplevel
       -- Step 2: build immediate dependencies
       DependencyMaps{..} = buildDependencyMaps μs
-      -- Step 3: find the largest name
-      n = fst (Map.findMax immediateDependencies)
-      -- Step 4: Build a dependency graph
-      graph = buildGraph n immediateDependencies
-      -- Step 5: construct the seen set (dfnum)
-      -- Step 6: dfs from toplevel (via roots) all with same seen set
-      -- Step 7: elems of seen set with dfnum 0 are dead, otherwise they are collected into a list in descending order
-      (topo, dfnums, dead) = topoOrdering roots n graph
-      -- the dfnums is a map from IMVar to DFNum, and DFNum's are used as the unique keys to a
-      -- Data.Map priority queue
-      -- this iteratively propagates free registers upwards:
-      regs = propagateRegs topo dfnums usedRegisters definedRegisters immediateDependencies (callerMap topo immediateDependencies)
-  in (DMap.filterWithKey (\(MVar v) _ -> notMember v dead) μs, regs)
+      -- Step 3: Build a call graph
+      callees = buildGraph immediateDependencies
+      -- Step 4: traverse the call graph, finding unreachable nodes and establishing a topological dfnum for each node
+      (dfnums, lives, dead) = topoOrdering roots callees
+      -- Step 5: reverse the call graph to make a callers graph
+      callers = invertGraph callers dead
+      -- Step 6: iterate over the live registers, and propagate the free registers until fix-point
+      regs = propagateRegs lives dfnums usedRegisters definedRegisters callees callers
+  in (DMap.filterWithKey (\(MVar v) _ -> Set.notMember v dead) μs, regs)
 
-buildGraph :: IMVar -> Map IMVar (Set IMVar) -> Graph
-buildGraph n = listArray (0, n) . map Set.elems . Map.elems
+buildGraph :: Map IMVar (Set IMVar) -> Graph
+buildGraph deps = Array.listArray (0, fst (Map.findMax deps)) (map Set.toList (Map.elems deps))
+
+invertGraph :: Graph -> Set IMVar -> Graph
+invertGraph g unreachable = runSTArray $ do
+  g' <- newArray (Array.bounds g) []
+  forM_ (Array.indices g) $ \n ->
+    unless (Set.member n unreachable) $
+      forM_ (g Array.! n) $ \s -> do
+        preds <- readArray g' s
+        writeArray g' s (n : preds)
+  return g'
 
 type DFNum = Int
-
-topoOrdering :: Set IMVar -> IMVar -> Graph -> ([IMVar], UArray IMVar DFNum, Set IMVar)
-topoOrdering roots n graph =
+topoOrdering :: Set IMVar -> Graph -> (UArray IMVar DFNum, [IMVar], Set IMVar)
+topoOrdering roots graph =
   let dfnums :: UArray IMVar DFNum
       dfnums = runSTUArray $ do
-        dfnums <- newArray (0, n) 0
+        dfnums <- newArray (Array.bounds graph) 0
         nextDfnum <- newSTRef 1
-        let hasSeen v = (/= 0) <$> readArray dfnums v
-        let setSeen v = do dfnum <- readSTRef nextDfnum
-                           writeArray dfnums v dfnum
-                           writeSTRef nextDfnum (dfnum + 1)
+        let dfs v = do seen <- (/= 0) <$> readArray dfnums v
+                       unless seen $
+                         do dfnum <- readSTRef nextDfnum
+                            writeArray dfnums v dfnum
+                            writeSTRef nextDfnum (dfnum + 1)
+                            forM_ (graph Array.! v) dfs
         -- Assign a DFNum to each IMVar
-        forM_ roots (dfs hasSeen setSeen graph)
+        forM_ roots dfs
         return dfnums
       -- if something still has dfnum 0, it was not visited, and is dead
       lives, deads :: [(IMVar, DFNum)]
-      (lives, deads) = partition ((/= 0) . snd) (assocs dfnums)
+      (lives, deads) = List.partition ((/= 0) . snd) (UArray.assocs dfnums)
       -- The DFNums are unique
-  in (reverseMap fst (sortOn snd lives), dfnums, Set.fromDistinctAscList (map fst deads))
+  in (dfnums, map fst lives, Set.fromDistinctAscList (map fst deads))
 
-reverseMap :: (a -> b) -> [a] -> [b]
-reverseMap f = foldl' (\xs x -> f x : xs) []
-
-propagateRegs :: [IMVar] -> UArray IMVar DFNum -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set IMVar) -> Map IMVar (Set IMVar) -> Map IMVar (Set SomeΣVar)
-propagateRegs vs dfnums uses defs callees callers =
-  go ((Map.fromList (map (\v -> (dfnums UArray.! v, v)) vs)))
-     (Map.fromList (map (\v -> (v, (uses Map.! v) \\ (defs Map.! v))) vs))
+propagateRegs :: [IMVar] -> UArray IMVar DFNum -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set SomeΣVar) -> Graph -> Graph -> Map IMVar (Set SomeΣVar)
+propagateRegs reachables dfnums uses defs callees callers =
+  go ((Map.fromList (map (\v -> (dfnums UArray.! v, v)) reachables)))
+     (Map.fromAscList (map (\v -> (v, (uses Map.! v) Set.\\ (defs Map.! v))) reachables))
   where
     go :: PQueue DFNum IMVar -> Map IMVar (Set SomeΣVar) -> Map IMVar (Set SomeΣVar)
-    go pqueue freeRegs = case next pqueue of
-      Nothing -> freeRegs
-      Just (v, q')  ->
-        let frees = freeRegs Map.! v
-            freesCallees = foldMap (freeRegs Map.!) (callees Map.! v)
-            frees' = frees `union` (freesCallees \\ (defs Map.! v))
+    go work freeRegs = case Map.maxView work of
+      Nothing         -> freeRegs
+      Just (v, work') ->
+        let !frees        = freeRegs Map.! v
+            !freesCallees = foldMap (freeRegs Map.!) (callees Array.! v)           -- Set.unions (map (freeRegs Map.!) (callees Array.! v))
+            !frees'       = frees `Set.union` (freesCallees Set.\\ (defs Map.! v))
         in if Set.size frees /= Set.size frees'
-           then go (foldl' (flip (\caller -> Map.insert (dfnums UArray.! caller) caller)) pqueue (Set.delete v (callers Map.! v))) (Map.insert v frees' freeRegs)
-           else go q' freeRegs
+           then go (addWork (callers Array.! v) work) (Map.insert v frees' freeRegs)
+           else go work' freeRegs
 
-callerMap :: [IMVar] -> Map IMVar (Set IMVar) -> Map IMVar (Set IMVar)
-callerMap lives deps =
-  foldl' (\callers k -> foldl' (flip (Map.adjust (Set.insert k))) callers (deps Map.! k))
-         (Map.fromList (zip lives (repeat Set.empty)))
-         lives
-
-dfs :: Monad m => (IMVar -> m Bool) -> (IMVar -> m ()) -> Graph -> IMVar -> m ()
-dfs hasSeen setSeen graph = go
-  where
-    go v = do seen <- hasSeen v
-              unless seen $
-                do setSeen v
-                   forM_ (graph ! v) go
+    addWork :: [IMVar] -> PQueue DFNum IMVar -> PQueue DFNum IMVar
+    addWork vs work = foldl' (flip (\v -> Map.insert (dfnums UArray.! v) v)) work vs
 
 -- IMMEDIATE DEPENDENCY MAPS
 data DependencyMaps = DependencyMaps {
-  usedRegisters         :: Map IMVar (Set SomeΣVar), -- Leave Lazy
-  immediateDependencies :: Map IMVar (Set IMVar), -- Could be Strict
-  definedRegisters      :: Map IMVar (Set SomeΣVar)
+  usedRegisters         :: !(Map IMVar (Set SomeΣVar)), -- Leave Lazy
+  immediateDependencies :: !(Map IMVar (Set IMVar)), -- Could be Strict
+  definedRegisters      :: !(Map IMVar (Set SomeΣVar))
 }
 
 buildDependencyMaps :: DMap MVar (Fix Combinator) -> DependencyMaps
@@ -157,7 +149,7 @@ freeRegistersAndDependencies v p =
 -- DEPENDENCY ANALYSIS
 newtype Dependencies a = Dependencies { doDependencies :: State (Set IMVar) () }
 runDependencies :: Dependencies a -> Set IMVar
-runDependencies = flip execState empty. doDependencies
+runDependencies = flip execState Set.empty . doDependencies
 
 directDependencies :: Fix Combinator a -> Set IMVar
 directDependencies = runDependencies . cata (dependenciesAlg Nothing)
@@ -169,12 +161,12 @@ dependenciesAlg Nothing  (Let _ μ)          = Dependencies $ do dependsOn μ
 dependenciesAlg _ p                         = Dependencies $ do traverseCombinator (fmap Const1 . doDependencies) p; return ()
 
 dependsOn :: MonadState (Set IMVar) m => MVar a -> m ()
-dependsOn (MVar v) = modify' (insert v)
+dependsOn (MVar v) = modify' (Set.insert v)
 
 -- FREE REGISTER ANALYSIS
 newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: State (Set SomeΣVar, Set SomeΣVar) () }
 runFreeRegisters :: FreeRegisters a -> (Set SomeΣVar, Set SomeΣVar)
-runFreeRegisters = flip execState (empty, empty) . doFreeRegisters
+runFreeRegisters = flip execState (Set.empty, Set.empty) . doFreeRegisters
 
 {-# INLINE freeRegistersAlg #-}
 freeRegistersAlg :: Combinator FreeRegisters a -> FreeRegisters a
@@ -184,7 +176,7 @@ freeRegistersAlg (MakeRegister σ p q) = FreeRegisters $ do defs σ; doFreeRegis
 freeRegistersAlg p                    = FreeRegisters $ do traverseCombinator (fmap Const1 . doFreeRegisters) p; return ()
 
 uses :: MonadState (Set SomeΣVar, vs) m => ΣVar a -> m ()
-uses σ = modify' (first (insert (SomeΣVar σ)))
+uses σ = modify' (first (Set.insert (SomeΣVar σ)))
 
 defs :: MonadState (vs, Set SomeΣVar) m => ΣVar a -> m ()
-defs σ = modify' (second (insert (SomeΣVar σ)))
+defs σ = modify' (second (Set.insert (SomeΣVar σ)))

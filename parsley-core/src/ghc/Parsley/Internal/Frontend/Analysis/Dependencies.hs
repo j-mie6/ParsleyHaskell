@@ -142,17 +142,17 @@ data DependencyMaps = DependencyMaps {
 
 buildDependencyMaps :: DMap MVar (Fix Combinator) -> DependencyMaps
 buildDependencyMaps = DMap.foldrWithKey (\(MVar v) p deps@DependencyMaps{..} ->
-  let (frs, defs, ds) = freeRegistersAndDependencies v p
-  in deps { usedRegisters = Map.insert v frs usedRegisters
+  let (uses, defs, ds) = freeRegistersAndDependencies v p
+  in deps { usedRegisters = Map.insert v uses usedRegisters
           , immediateDependencies = Map.insert v ds immediateDependencies
           , definedRegisters = Map.insert v defs definedRegisters}) (DependencyMaps Map.empty Map.empty Map.empty)
 
 freeRegistersAndDependencies :: IMVar -> Fix Combinator a -> (Set SomeΣVar,  Set SomeΣVar, Set IMVar)
 freeRegistersAndDependencies v p =
   let frsm :*: depsm = zipper freeRegistersAlg (dependenciesAlg (Just v)) p
-      (frs, defs) = runFreeRegisters frsm
+      (uses, defs) = runFreeRegisters frsm
       ds = runDependencies depsm
-  in (frs, defs, ds)
+  in (uses, defs, ds)
 
 -- DEPENDENCY ANALYSIS
 newtype Dependencies a = Dependencies { doDependencies :: State (Set IMVar) () }

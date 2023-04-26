@@ -1,5 +1,9 @@
 # Revision history for `parsley-core`
 
+## 2.2.0.1 -- 2023-04-26
+
+* Improved the free register analysis by reimplementing in terms of lambda-lifting algorithms.
+
 ## 2.2.0.0 -- 2022-08-03
 
 * Removed `RangeSet`, as this now resides in `rangeset`.

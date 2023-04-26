@@ -1,4 +1,4 @@
-# Parsley ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/j-mie6/ParsleyHaskell/ci.yml?branch=master) ![GitHub release](https://img.shields.io/github/v/release/j-mie6/ParsleyHaskell) [![GitHub license](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://github.com/j-mie6/ParsleyHaskell/blob/master/LICENSE) ![GitHub commits since latest release (by SemVer)](https://img.shields.io/github/commits-since/j-mie6/ParsleyHaskell/latest)
+# Parsley ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/j-mie6/ParsleyHaskell/ci.yaml?branch=master) ![GitHub release](https://img.shields.io/github/v/release/j-mie6/ParsleyHaskell) [![GitHub license](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://github.com/j-mie6/ParsleyHaskell/blob/master/LICENSE) ![GitHub commits since latest release (by SemVer)](https://img.shields.io/github/commits-since/j-mie6/ParsleyHaskell/latest)
 
 ## What is Parsley?
 Parsley is a very fast parser combinator library that outperforms the other libraries in both the

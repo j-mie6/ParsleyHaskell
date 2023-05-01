@@ -157,23 +157,20 @@ lamTerm (Ranges rngs) =
     conv c l u lb rb
     --  | l == u = eq c (Var True [||l||]) `or` (lb `or` rb)
     --  | otherwise = (lte (Var True [||l||]) c `and` lte c (Var True [||u||])) `or` (lb `or` rb)
-      | l == u        = eq c (Var True [||l||]) `or` if' (lt c (Var True [||l||])) lb rb
+      | l == u        = eq c (Var True [||l||]) `or` If (lt c (Var True [||l||])) lb rb
       -- the left can be omitted here
       | l == minBound = lte c (Var True [||u||]) `or` rb
       -- the right can be omitted here
       | u == maxBound = lte (Var True [||l||]) c `or` lb
-      | otherwise     = if' (lte (Var True [||l||]) c) (lte c (Var True [||u||]) `or` rb) lb
+      | otherwise     = If (lte (Var True [||l||]) c) (lte c (Var True [||u||]) `or` rb) lb
 
     or = orLam
-    and = andLam
     lte :: Lam Char -> Lam Char -> Lam Bool
     lte = App . App (Var True [||(<=)||])
     lt :: Lam Char -> Lam Char -> Lam Bool
     lt = App . App (Var True [||(<)||])
     eq :: Lam Char -> Lam Char -> Lam Bool
     eq = App . App (Var True [||(==)||])
-    if' x y F = and x y
-    if' c x y = If c x y
 
 instance Show CharPred where
   show (UserPred _ f) = show f
@@ -183,20 +180,10 @@ instance Show CharPred where
 
 
 andLam :: Lam Bool -> Lam Bool -> Lam Bool
-andLam T y = y
-andLam x T = x
-andLam F _ = F
-andLam _ F = F
-andLam x y = App (App (Var True [||(&&)||]) x) y
+andLam x y = If x y F
 
 orLam :: Lam Bool -> Lam Bool -> Lam Bool
-orLam T _ = T
-orLam _ T = T
-orLam F y = y
-orLam y F = y
-orLam x y = App (App (Var True [||(||)||]) x) y
+orLam x = If x T
 
 notLam :: Lam Bool -> Lam Bool
-notLam T = F
-notLam F = T
-notLam x = App (Var True [||not||]) x
+notLam x = If x F T

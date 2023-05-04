@@ -319,7 +319,7 @@ may only exit on failure, which is the case with iterating parsers.
 @since 1.2.0.0
 -}
 noreturn :: StaCont s o a Void
-noreturn = mkStaCont $ \_ _ -> [||error "Return is not permitted here"||]
+noreturn = mkStaCont $ error "Return is not permitted here"
 
 {-|
 Executes a given continuation (which may be a return continuation or a

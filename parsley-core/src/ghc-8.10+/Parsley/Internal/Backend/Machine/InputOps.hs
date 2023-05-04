@@ -18,7 +18,7 @@ parsing machinery to work with input.
 -}
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), LogOps(..),
-    InputOps(..), more, next,
+    InputOps(..), more, next, prepareCPS,
 #if __GLASGOW_HASKELL__ <= 900
     word8ToWord#, word16ToWord#,
 #endif
@@ -74,6 +74,12 @@ type InputDependant (rep :: TYPE r) = (# {-next-} rep -> (# Char, rep #)
                                        , {-more-} rep -> Bool
                                        , {-init-} rep
                                        #)
+
+prepareCPS :: InputPrep input => Code input -> (InputOps (Rep input) -> Code (Rep input) -> Code r) -> Code r
+prepareCPS qinput k = [||
+    let (# next, more, init #) = $$(prepare qinput)
+    in $$(k (InputOps [||more||] [||next||]) [||init||])
+  ||]
 
 {- Typeclasses -}
 {-|

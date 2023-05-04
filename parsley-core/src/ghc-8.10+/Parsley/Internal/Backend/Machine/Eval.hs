@@ -55,13 +55,13 @@ eval :: forall o a. (Trace, Ops o)
      -> LetBinding o a a              -- ^ The binding to be generated.
      -> DMap MVar (LetBinding o a)    -- ^ The map of all other required bindings.
      -> Code (Maybe a)                -- ^ The code for this parser.
-eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
-  do let !(# next, more, offset #) = $$input
-     $$(let ?ops = InputOps [||more||] [||next||]
+eval input binding fs = trace "EVALUATING TOP LEVEL" [||
+    let !(# next, more, offset #) = $$input in
+    runST $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (\names -> run (readyMachine (body binding)) (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil)) (nextUnique (emptyCtx names))))
   ||]
   where
     nameLet :: MVar x -> String

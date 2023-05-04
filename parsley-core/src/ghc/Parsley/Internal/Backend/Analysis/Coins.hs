@@ -84,7 +84,7 @@ alg _     (Catch k h)                            = algCatch (getConst4 k) (algHa
 alg _     (Case p q)                             = algCatch (getConst4 p) (getConst4 q)
 alg _     (Choices _ ks def)                     = foldr (algCatch . getConst4) (getConst4 def) ks
 -- as these coins are refunded in `k`, they should be deducted from the required coins for `k`
-alg _     (MetaInstr (RefundCoins n) (Const4 k)) = first (`minus` n) k
+alg _     (MetaInstr (RefundCoins n) (Const4 k)) = first (`minus` n) k -- TODO: minus could actually keep the predicate knowledge for intersection?
 -- we want these propagated out so that they commute across a factored boundary
 -- FIXME: ideally, they should have no items with them: they cannot be used in the binding, so no point pulling them out
 --       if two branches merge, perhaps [Maybe CharPred] and use zipWith (<|>)?

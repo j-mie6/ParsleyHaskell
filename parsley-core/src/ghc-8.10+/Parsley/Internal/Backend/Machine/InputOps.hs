@@ -59,8 +59,7 @@ word16ToWord# :: Word# -> Word#
 word16ToWord# x = x
 #endif
 
-{- Auxillary Representation -}
-prepare :: InputPrep input => rep ~ Rep input => Code input -> ((?ops :: InputOps rep) => Code rep -> Code r) -> Code r
+prepare :: InputPrep input => Code input -> ((?ops :: InputOps (Rep input)) => Code (Rep input) -> Code r) -> Code r
 prepare qinput k = _prepare qinput (\_ops -> let ?ops = _ops in k)
 
 {- Typeclasses -}
@@ -133,8 +132,8 @@ synthesised and passed around using @ImplicitParams@.
 
 @since 1.0.0.0
 -}
-data InputOps (rep :: TYPE r) = InputOps { _more       :: Code (rep -> Bool)            -- ^ Does the input have any more characters?
-                                         , _next       :: Code (rep -> (# Char, rep #)) -- ^ Read the next character (without checking existence)
+data InputOps (rep :: TYPE r) = InputOps { _more       :: !(Code rep -> Code Bool)                                             -- ^ Does the input have any more characters?
+                                         , _next       :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a) -- ^ Read the next character (without checking existence)
                                          }
 {-|
 Wraps around `InputOps` and `_more`.
@@ -144,7 +143,7 @@ Queries the input to see if another character may be consumed.
 @since 1.4.0.0
 -}
 more :: forall r (rep :: TYPE r). (?ops :: InputOps rep) => Code rep -> Code Bool
-more qo# = [|| $$(_more ?ops) $$(qo#) ||]
+more = _more ?ops
 
 {-|
 Wraps around `InputOps` and `_next`.
@@ -156,7 +155,7 @@ to the continuation.
 @since 1.0.0.0
 -}
 next :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a
-next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
+next = _next ?ops
 
 {- INSTANCES -}
 -- InputPrep Instances
@@ -166,16 +165,18 @@ instance InputPrep [Char] where
 instance InputPrep (UArray Int Char) where
   _prepare qinput k = [||
       let !(UArray _ _ (I# size#) input#) = $$qinput
-          next i# = (# C# (indexWideCharArray# input# i#), i# +# 1# #)
-      in $$(k (InputOps [||\qi -> $$(intLess [||qi||] [||size#||])||] [||next||]) [||0#||])
+      in $$(k (InputOps (\qi -> intLess qi [||size#||])
+                        (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||]))
+              [||0#||])
     ||]
 
 instance InputPrep Text16 where
   _prepare qinput k = [||
       let Text16 (Text arr (I# off#) (I# size#)) = $$qinput
           arr# = aBA arr
-          next i# = (# C# (chr# (word2Int# (word16ToWord# (indexWord16Array# arr# i#)))), i# +# 1# #)
-      in $$(k (InputOps [||\qi -> $$(intLess [||qi||] [||size#||])||] [||next||]) [||off#||])
+      in $$(k (InputOps (\qi -> intLess qi [||size#||])
+                        (\qi k -> k [||C# (chr# (word2Int# (word16ToWord# (indexWord16Array# arr# $$qi))))||] [||$$qi +# 1#||]))
+              [||off#||])
     ||]
 
 instance InputPrep ByteString where
@@ -185,7 +186,9 @@ instance InputPrep ByteString where
             case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of
                 _ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
-      in $$(k (InputOps [||\qi -> $$(intLess [||qi||] [||size#||])||] [||next||]) [||off#||])
+      in $$(k (InputOps (\qi -> intLess qi [||size#||])
+                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
+              [||off#||])
     ||]
 
 instance InputPrep CharList where
@@ -196,14 +199,18 @@ instance InputPrep CharList where
           more :: (# Int#, [Char] #) -> Bool
           more (# _, [] #) = False
           more _           = True
-      in $$(k (InputOps [||more||] [||next||]) (offWith [||input||]))
+      in $$(k (InputOps (\qi -> [||more $$qi||])
+                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
+              (offWith [||input||]))
     ||]
 
 instance InputPrep Text where
   _prepare qinput k = [||
       let next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off + d) (unconsumed - d) #)
           more (Text _ _ unconsumed) = unconsumed > 0
-      in $$(k (InputOps [||more||] [||next||]) qinput)
+      in $$(k (InputOps (\qi -> [||more $$qi||])
+                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
+              qinput)
     ||]
 
 instance InputPrep Lazy.ByteString where
@@ -226,13 +233,17 @@ instance InputPrep Lazy.ByteString where
           initial = case $$qinput of
             Lazy.Chunk (PS (ForeignPtr addr# final) (I# off#) (I# size#)) cs -> (# 0#, addr#, final, off#, size#, cs #)
             Lazy.Empty -> $$(emptyUnpackedLazyByteString [||0#||])
-      in $$(k (InputOps [||more||] [||next||]) [||initial||])
+      in $$(k (InputOps (\qi -> [||more $$qi||])
+                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
+              [||initial||])
     ||]
 
 instance InputPrep Stream where
   _prepare qinput k = [||
       let next (# o#, c :> cs #) = (# c, (# o# +# 1#, cs #) #)
-      in $$(k (InputOps [||\_ -> True||] [||next||]) (offWith qinput))
+      in $$(k (InputOps (const [||True||])
+                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
+              (offWith qinput))
     ||]
 
 shiftRightInt :: Code Int# -> Code Int# -> Code Int#

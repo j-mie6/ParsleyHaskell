@@ -131,6 +131,11 @@ synthesised and passed around using @ImplicitParams@.
 
 @since 1.0.0.0
 -}
+-- TODO: more replaced by `check` which asks for N characters, maybe caching up to M of them (M < N)
+--       idea is that establishing if there are N characters may transitively read (or generate
+--       static expressions for) M characters (N-M we don't ever need and can ask to not have).
+--       If a type of input cannot produce these characters because it would be too expensive, fine
+--       an empty list is returned, and consuming characters must use `next` anyway.
 data InputOps (rep :: TYPE r) = InputOps { _more :: !(Code rep -> Code Bool)                                             -- ^ Does the input have any more characters?
                                          , _next :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a) -- ^ Read the next character (without checking existence)
                                          }

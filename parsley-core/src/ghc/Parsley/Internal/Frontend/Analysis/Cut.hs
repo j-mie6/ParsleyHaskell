@@ -57,7 +57,7 @@ cutAlg (Try p) backtracks =
 -- the length-check (by failing on the free read).
 --
 -- So, how to fix? well, only allowing this if both branches must consume input
--- seems to work ok: this can be done by using the `rcuts` flag
+-- seems to work ok: this can be done by using the `qcuts` flag
 -- TODO: However, this rules out a fully pure branch also working: any branch without /any/ effect could be factored
 cutAlg (p :<|>: q) backtracks =
   let (q', qcuts) = doCut q backtracks

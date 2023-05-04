@@ -75,10 +75,10 @@ type InputDependant (rep :: TYPE r) = (# {-next-} rep -> (# Char, rep #)
                                        , {-init-} rep
                                        #)
 
-prepareCPS :: InputPrep input => Code input -> (InputOps (Rep input) -> Code (Rep input) -> Code r) -> Code r
+prepareCPS :: InputPrep input => Code input -> ((?ops :: InputOps (Rep input)) => Code (Rep input) -> Code r) -> Code r
 prepareCPS qinput k = [||
     let (# next, more, init #) = $$(prepare qinput)
-    in $$(k (InputOps [||more||] [||next||]) [||init||])
+    in $$(let ?ops = InputOps [||more||] [||next||] in k [||init||])
   ||]
 
 {- Typeclasses -}

@@ -185,7 +185,7 @@ instance InputPrep ByteString where
           next i# =
             case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
+                !_ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
       in $$(k (InputOps (\qi -> intLess qi [||size#||])
                         (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
               [||off#||])
@@ -194,13 +194,8 @@ instance InputPrep ByteString where
 instance InputPrep CharList where
   _prepare qinput k =  [||
       let CharList input = $$qinput
-          next :: (# Int#, [Char] #) -> (# Char, (# Int#, [Char] #) #)
-          next (# i#, c:cs #) = (# c, (# i# +# 1#, cs #) #)
-          more :: (# Int#, [Char] #) -> Bool
-          more (# _, [] #) = False
-          more _           = True
-      in $$(k (InputOps (\qi -> [||more $$qi||])
-                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
+      in $$(k (InputOps (\qi -> [||case $$qi of (# _, [] #) -> False; _ -> True||])
+                        (\qi k -> [|| let !(# i#, c:cs #) = $$qi in $$(k [||c||] [||(# i# +# 1#, cs #)||]) ||]))
               (offWith [||input||]))
     ||]
 
@@ -218,7 +213,7 @@ instance InputPrep Lazy.ByteString where
       let next (# i#, addr#, final, off#, size#, cs #) =
             case readWord8OffAddr# addr# off# realWorld# of
               (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# (word8ToWord# x))),
+                !_ -> (# C# (chr# (word2Int# (word8ToWord# x))),
                     if I# size# /= 1 then (# i# +# 1#, addr#, final, off# +# 1#, size# -# 1#, cs #)
                     else case cs of
                       Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->
@@ -239,12 +234,9 @@ instance InputPrep Lazy.ByteString where
     ||]
 
 instance InputPrep Stream where
-  _prepare qinput k = [||
-      let next (# o#, c :> cs #) = (# c, (# o# +# 1#, cs #) #)
-      in $$(k (InputOps (const [||True||])
-                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
-              (offWith qinput))
-    ||]
+  _prepare qinput k = k (InputOps (const [||True||])
+                                  (\qi k -> [|| let !(# o#, c :> cs #) = $$qi in $$(k [||c||] [||(# o# +# 1#, cs #)||]) ||]))
+                        (offWith qinput)
 
 shiftRightInt :: Code Int# -> Code Int# -> Code Int#
 shiftRightInt qo# qi# = [||$$(qo#) +# $$(qi#)||]

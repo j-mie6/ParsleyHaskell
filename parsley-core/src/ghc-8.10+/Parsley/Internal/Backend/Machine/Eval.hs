@@ -40,7 +40,7 @@ import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput,
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
-import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm, optimisePredGiven)
+import Parsley.Internal.Core.CharPred                      (CharPred, pattern Item, lamTerm, optimisePredGiven)
 import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
@@ -262,15 +262,14 @@ withLengthCheckAndCoins :: (?ops::InputOps (Rep o), PositionOps (Rep o)) => Coin
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     let prefetch pred k ctx γ =
           -- input is known to exist
-          -- FIXME: this is broken!
-          -- it seems like prefetching must not move out of the scope of a handler that rolls back (like try)
-          -- It does work, however, if exactly one character is considered (see take 1 below)
+          -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
+          -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
           fetch (input γ) $ \c input' ->
             flip (sat (ap (LAM (lamTerm pred))) c) (raise γ) $ \_ -> -- this character isn't needed
               k (addChar pred c input' ctx) (γ {input = updatePos input' c pred})
         -- ignore the second γ parameter, as to perform a rollback on the input
         remainder γ ctx _ = run (Machine k) γ (giveCoins (willConsume coins) ctx)
-        good = withUpdatedOffset (\γ -> foldr prefetch (remainder γ) (take 1 (knownPreds coins)) ctx γ) γOrig
+        good = withUpdatedOffset (\γ -> foldr prefetch (remainder γ) (take 1 (knownPreds coins) ++ replicate (willConsume coins - 1) Item) ctx γ) γOrig
     in emitLengthCheck (willConsume coins) good (raise γOrig) (off (input γOrig)) offset
 
 state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b

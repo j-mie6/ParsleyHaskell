@@ -39,7 +39,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     in the generated code.
     -}
     textShiftRight, textShiftLeft,
-    byteStringShiftRight, byteStringShiftLeft,
+    byteStringShiftRight, byteStringShiftLeft, byteStringMore, byteStringNext,
     -- * Re-exports
     module Parsley.Internal.Core.InputTypes
   ) where
@@ -49,16 +49,27 @@ import Data.ByteString.Internal          (ByteString(..))
 import Data.Kind                         (Type)
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
-import GHC.Exts                          (Int(..), TYPE, RuntimeRep(..), (==#), (<#), (+#), (-#), isTrue#)
+import GHC.Exts                          (Int(..), Char(..), TYPE, RuntimeRep(..), (==#), (<#), (+#), (-#), isTrue#)
 #if __GLASGOW_HASKELL__ > 900
 import GHC.Exts                          (LiftedRep)
 #endif
 import GHC.ForeignPtr                    (ForeignPtr(..), ForeignPtrContents)
-import GHC.Prim                          (Int#, Addr#, nullAddr#)
+import GHC.Prim                          (Int#, Addr#, nullAddr#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#)
+#if __GLASGOW_HASKELL__ > 900
+import GHC.Prim                          (word8ToWord#)
+#else
+import GHC.Prim                          (Word#)
+#endif
 import Parsley.Internal.Common.Utils     (Code)
 import Parsley.Internal.Core.InputTypes  (Text16(..), CharList(..), Stream(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
+
+#if __GLASGOW_HASKELL__ <= 900
+{-# INLINE word8ToWord# #-}
+word8ToWord# :: Word# -> Word#
+word8ToWord# x = x
+#endif
 
 {- Representation Types -}
 {-|
@@ -242,11 +253,30 @@ textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
 emptyUnpackedLazyByteString' :: Int# -> UnpackedLazyByteString
 emptyUnpackedLazyByteString' i# = (# i#, nullAddr#, error "nullForeignPtr", 0#, 0#, Lazy.Empty #)
 
+{-# INLINABLE byteStringNext #-}
+byteStringNext :: UnpackedLazyByteString -> (# Char, UnpackedLazyByteString #)
+byteStringNext (# i#, addr#, final, off#, size#, cs #) =
+  case readWord8OffAddr# addr# off# realWorld# of
+    (# s', x #) -> case touch# final s' of
+      !_ -> (# C# (chr# (word2Int# (word8ToWord# x))),
+          if I# size# /= 1 then (# i# +# 1#, addr#, final, off# +# 1#, size# -# 1#, cs #)
+          else case cs of
+            Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->
+              (# i# +# 1#, addr'#, final', off'#, size'#, cs' #)
+            Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# 1#)
+        #)
+
+{-# INLINABLE byteStringMore #-}
+byteStringMore :: UnpackedLazyByteString -> Bool
+byteStringMore (# _, _, _, _, 0#, _ #) = False
+byteStringMore (# _, _, _, _, _, _ #) = True
+
 {-|
 Drops tokens off of a lazy `Lazy.ByteString`.
 
 @since 1.0.0.0
 -}
+{-# INLINABLE byteStringShiftRight #-}
 byteStringShiftRight :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
 byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
   | isTrue# (j# <# size#)  = (# i# +# j#, addr#, final, off# +# j#, size# -# j#, cs #)
@@ -259,6 +289,7 @@ Rewinds input consumption on a lazy `Lazy.ByteString` if input is still availabl
 
 @since 1.0.0.0
 -}
+{-# INLINABLE byteStringShiftLeft #-}
 byteStringShiftLeft :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
 byteStringShiftLeft (# i#, addr#, final, off#, size#, cs #) j# =
   let d# = min# off# j#
@@ -269,6 +300,7 @@ Finds the minimum of two `Int#` values.
 
 @since 1.0.0.0
 -}
+{-# INLINABLE min# #-}
 min# :: Int# -> Int# -> Int#
 min# i# j# = case i# <# j# of
   0# -> j#
@@ -279,6 +311,7 @@ Finds the maximum of two `Int#` values.
 
 @since 1.0.0.0
 -}
+{-# INLINABLE max# #-}
 max# :: Int# -> Int# -> Int#
 max# i# j# = case i# <# j# of
   0# -> i#

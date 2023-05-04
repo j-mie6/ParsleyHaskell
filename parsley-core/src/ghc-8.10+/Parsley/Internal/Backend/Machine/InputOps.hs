@@ -42,12 +42,11 @@ import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Te
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
                                                     textShiftRight, textShiftLeft, byteStringShiftRight,
-                                                    byteStringShiftLeft, max#)
+                                                    byteStringShiftLeft, byteStringMore, byteStringNext, max#)
 import Parsley.Internal.Common.Utils               (Code)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 --import qualified Data.Text                     as Text (length, index)
-
 
 #if __GLASGOW_HASKELL__ <= 900
 {-# INLINE word8ToWord# #-}
@@ -132,8 +131,8 @@ synthesised and passed around using @ImplicitParams@.
 
 @since 1.0.0.0
 -}
-data InputOps (rep :: TYPE r) = InputOps { _more       :: !(Code rep -> Code Bool)                                             -- ^ Does the input have any more characters?
-                                         , _next       :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a) -- ^ Read the next character (without checking existence)
+data InputOps (rep :: TYPE r) = InputOps { _more :: !(Code rep -> Code Bool)                                             -- ^ Does the input have any more characters?
+                                         , _next :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a) -- ^ Read the next character (without checking existence)
                                          }
 {-|
 Wraps around `InputOps` and `_more`.
@@ -210,26 +209,12 @@ instance InputPrep Text where
 
 instance InputPrep Lazy.ByteString where
   _prepare qinput k = [||
-      let next (# i#, addr#, final, off#, size#, cs #) =
-            case readWord8OffAddr# addr# off# realWorld# of
-              (# s', x #) -> case touch# final s' of
-                !_ -> (# C# (chr# (word2Int# (word8ToWord# x))),
-                    if I# size# /= 1 then (# i# +# 1#, addr#, final, off# +# 1#, size# -# 1#, cs #)
-                    else case cs of
-                      Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->
-                        (# i# +# 1#, addr'#, final', off'#, size'#, cs' #)
-                      Lazy.Empty -> $$(emptyUnpackedLazyByteString [||i# +# 1#||])
-                  #)
-          more :: UnpackedLazyByteString -> Bool
-          more (# _, _, _, _, 0#, _ #) = False
-          more (# _, _, _, _, _, _ #) = True
-
-          initial :: UnpackedLazyByteString
+      let initial :: UnpackedLazyByteString
           initial = case $$qinput of
             Lazy.Chunk (PS (ForeignPtr addr# final) (I# off#) (I# size#)) cs -> (# 0#, addr#, final, off#, size#, cs #)
             Lazy.Empty -> $$(emptyUnpackedLazyByteString [||0#||])
-      in $$(k (InputOps (\qi -> [||more $$qi||])
-                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]))
+      in $$(k (InputOps (\qi -> [||byteStringMore $$qi||])
+                        (\qi k -> [|| let !(# c, qi' #) = byteStringNext $$qi in $$(k [||c||] [||qi'||]) ||]))
               [||initial||])
     ||]
 

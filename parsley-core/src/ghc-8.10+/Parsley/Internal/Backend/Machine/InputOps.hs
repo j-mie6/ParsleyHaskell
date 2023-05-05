@@ -131,9 +131,9 @@ synthesised and passed around using @ImplicitParams@.
 -}
 data InputOps (rep :: TYPE r) = InputOps { _more :: !(Code rep -> Code Bool)                                                         -- ^ Does the input have any more characters?
                                          , _next :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a)             -- ^ Read the next character (without checking existence)
-                                         , _uncons :: (forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a) -- ^ Read the next character, may check existence
-                                         , _ensureN :: (forall a. Code Int# -> Code rep -> Code a -> Code a -> Code a)              -- ^ Ensure that n characters exist
-                                         , _ensureNIsFast :: !Bool                                                                    -- ^ _ensureN is O(1) and not O(n)
+                                         , _uncons :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a) -- ^ Read the next character, may check existence
+                                         , _ensureN :: !(forall a. Code Int# -> Code rep -> Code a -> Code a -> Code a)              -- ^ Ensure that n characters exist
+                                         , _ensureNIsFast :: !Bool                                                                   -- ^ _ensureN is O(1) and not O(n)
                                          }
 
 checkImpl :: forall r (rep :: TYPE r) a. Bool                                    -- ^ is the ensureN argument O(1)?

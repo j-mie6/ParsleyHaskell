@@ -18,7 +18,7 @@ parsing machinery to work with input.
 -}
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep, PositionOps(..), LogOps(..),
-    InputOps, more, next,
+    InputOps, more, next, check,
 #if __GLASGOW_HASKELL__ <= 900
     word8ToWord#, word16ToWord#,
 #endif
@@ -38,6 +38,7 @@ import GHC.Prim                                    (word16ToWord#, word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
+import Language.Haskell.TH.Syntax                  (liftTyped)
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
@@ -126,7 +127,7 @@ class LogOps (rep :: TYPE r) where
 
 {-|
 This is a psuedo-typeclass, which depends directly on the values obtained from
-`InputDependant`. Because this instance must depend on local information, it is
+`prepare`. Because this instance may depend on local information, it is
 synthesised and passed around using @ImplicitParams@.
 
 @since 1.0.0.0
@@ -139,6 +140,22 @@ synthesised and passed around using @ImplicitParams@.
 data InputOps (rep :: TYPE r) = InputOps { _more :: !(Code rep -> Code Bool)                                             -- ^ Does the input have any more characters?
                                          , _next :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a) -- ^ Read the next character (without checking existence)
                                          }
+
+checkImpl :: forall r (rep :: TYPE r) a. Bool                                    -- ^ is the ensureN argument O(1)?
+          -> (Int -> Code rep -> Code a -> Code a -> Code a)                     -- ^ ensures there are n characters available
+          -> (Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a) -- ^ reads the next character if available
+          -> (Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> Code a) -> Code a -> Code a)
+checkImpl fastEnsureN ensureN uncons n m qi good bad
+  | fastEnsureN = ensureN n qi (go n m qi id) bad
+  | otherwise   = go n m qi id
+  where
+    go :: Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> [(Code Char, Code rep)]) -> Code a
+    go 0 _ _ dcs  = good (dcs [])
+    -- Here, we want no more cached characters, so just verify the remaining with shiftRight
+    go n 0 qi dcs = ensureN n qi (good (dcs [])) bad
+    -- Cached character wanted, so read it
+    go n m qi dcs = uncons qi (\c qi' -> go (n - 1) (m - 1) qi' (dcs . ((c, qi') :))) bad
+
 {-|
 Wraps around `InputOps` and `_more`.
 
@@ -160,6 +177,13 @@ to the continuation.
 -}
 next :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a
 next = _next ?ops
+
+check :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep, PositionOps rep) => Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> Code a) -> Code a -> Code a
+check _ m =
+  checkImpl False (\(I# n) qi good bad -> [|| if $$(more (shiftRight qi (liftTyped (n -# 1#)))) then $$good else $$bad ||])
+                  (\qi good bad -> [|| if $$(more qi) then $$(next qi good) else $$bad ||])
+            m m
+
 
 {- INSTANCES -}
 -- InputPrep Instances

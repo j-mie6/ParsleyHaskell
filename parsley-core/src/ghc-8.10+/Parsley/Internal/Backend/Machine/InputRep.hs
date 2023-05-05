@@ -23,7 +23,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * Representation Type-Families
     Rep, RepKind,
     -- * @Int#@ Operations
-    intSame, intLess, min#, max#,
+    intSame, intLess, intLess', min#, max#,
     -- * @Offwith@ Operations
     OffWith, offWith, offWithSame, offWithShiftRight,
     --OffWithStreamAnd(..),
@@ -38,8 +38,8 @@ module Parsley.Internal.Backend.Machine.InputRep (
     These functions must be exposed, since they can appear
     in the generated code.
     -}
-    textShiftRight, textShiftLeft,
-    byteStringShiftRight, byteStringShiftLeft, byteStringMore, byteStringNext,
+    textShiftRight, textShiftLeft, textEnsureN, textNonEmpty,
+    byteStringShiftRight, byteStringShiftLeft, byteStringMore, byteStringNext, byteStringEnsureN,
     -- * Re-exports
     module Parsley.Internal.Core.InputTypes
   ) where
@@ -126,7 +126,7 @@ type RepKind :: Type -> RuntimeRep
 type family RepKind input where
   RepKind [Char] = IntRep
   RepKind (UArray Int Char) = IntRep
-  RepKind Text16 = IntRep
+  RepKind Text16 = LiftedRep
   RepKind ByteString = IntRep
   RepKind Text = LiftedRep
   RepKind Lazy.ByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
@@ -146,7 +146,7 @@ type Rep :: forall (rep :: Type) -> TYPE (RepKind rep)
 type family Rep input where
   Rep [Char] = Int#
   Rep (UArray Int Char) = Int#
-  Rep Text16 = Int#
+  Rep Text16 = Text
   Rep ByteString = Int#
   Rep Text = Text
   Rep Lazy.ByteString = UnpackedLazyByteString
@@ -171,6 +171,13 @@ Is the first argument is less than the second?
 -}
 intLess :: Code Int# -> Code Int# -> Code Bool
 intLess qi# qj# = [||isTrue# ($$(qi#) <# $$(qj#))||]
+
+intLess' :: Code Int# -> Code Int# -> Code a -> Code a -> Code a
+intLess' qi# qj# yes no = [||
+    case $$(qi#) <# $$(qj#) of
+      1# -> $$yes
+      0# -> $$no
+  ||]
 
 {-|
 Extracts the offset from `Text`.
@@ -227,14 +234,31 @@ Drops tokens off of `Text`.
 
 @since 1.0.0.0
 -}
+{-# INLINABLE textShiftRight #-}
 textShiftRight :: Text -> Int -> Text
-textShiftRight (Text arr off unconsumed) i = go i off unconsumed
+textShiftRight (Text arr off unconsumed) !i = go i arr off unconsumed
   where
-    go 0 off' unconsumed' = Text arr off' unconsumed'
-    go n off' unconsumed'
-      | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0
-                          in go (n - 1) (off' + d) (unconsumed' - d)
-      | otherwise = Text arr off' unconsumed'
+    go 0 !arr !off !unconsumed = Text arr off unconsumed
+    go n !arr !off !unconsumed
+      | unconsumed > 0 = let !d = iter_ (Text arr off unconsumed) 0
+                         in go (n - 1) arr (off + d) (unconsumed - d)
+      | otherwise = Text arr off unconsumed
+
+
+{-# INLINABLE textEnsureN #-}
+textEnsureN :: Int# -> Text -> Bool
+textEnsureN n# (Text arr off unconsumed) = go n# arr off unconsumed
+  where
+    go 0# !_ !_ !_ = True
+    go n arr off unconsumed
+      | unconsumed > 0 = let !d = iter_ (Text arr off unconsumed) 0
+                         in go (n -# 1#) arr (off + d) (unconsumed - d)
+      | otherwise      = False
+
+{-# INLINABLE textNonEmpty #-}
+textNonEmpty :: Text -> Bool
+textNonEmpty (Text _ _ 0) = False
+textNonEmpty _            = True
 
 {-|
 Rewinds input consumption on `Text` where the input is still available (i.e. in the same chunk).
@@ -266,7 +290,7 @@ byteStringNext (# i#, addr#, final, off#, size#, cs #) =
             Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# 1#)
         #)
 
-{-# INLINABLE byteStringMore #-}
+{-# INLINE byteStringMore #-}
 byteStringMore :: UnpackedLazyByteString -> Bool
 byteStringMore (# _, _, _, _, 0#, _ #) = False
 byteStringMore (# _, _, _, _, _, _ #) = True
@@ -283,6 +307,14 @@ byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
   | otherwise = case cs of
     Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
     Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# size#)
+
+{-# INLINABLE byteStringEnsureN #-}
+byteStringEnsureN :: Int# -> UnpackedLazyByteString -> Bool
+byteStringEnsureN j# (# i#, _, _, _, size#, cs #)
+  | isTrue# (j# <# size#)  = True
+  | otherwise = case cs of
+    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringEnsureN (j# -# size#) (# i# +# size#, addr'#, final', off'#, size'#, cs' #)
+    Lazy.Empty -> False
 
 {-|
 Rewinds input consumption on a lazy `Lazy.ByteString` if input is still available (within the same chunk).

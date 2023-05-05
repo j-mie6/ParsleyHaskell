@@ -79,6 +79,9 @@ generate (Abs f)    = [||\x -> $$(normaliseGen (f (Var True [||x||])))||]
 generate (App f x)  = [||$$(generate f) $$(normaliseGen x)||]
 generate (Var _ x)  = x
 -- c has already been reduced, since we only expose `normaliseGen`
+generate (If c T e) = [|| $$(generate c) || $$(normaliseGen e) ||]
+generate (If c t F) = [|| $$(generate c) && $$(normaliseGen t) ||]
+generate (If c F T) = [|| not $$(generate c) ||]
 generate (If c t e) = [||if $$(generate c) then $$(normaliseGen t) else $$(normaliseGen e)||]
 generate (Let b i)  = [||let x = $$(normaliseGen b) in $$(normaliseGen (i (Var True [||x||])))||]
 generate T          = [||True||]

@@ -17,37 +17,34 @@ parsing machinery to work with input.
 @since 1.0.0.0
 -}
 module Parsley.Internal.Backend.Machine.InputOps (
-    InputPrep(..), PositionOps(..), LogOps(..),
-    InputOps(..), more, next,
+    InputPrep, PositionOps(..), LogOps(..),
+    InputOps, more, next, check,
 #if __GLASGOW_HASKELL__ <= 900
     word8ToWord#, word16ToWord#,
 #endif
-    InputDependant
+    prepare
   ) where
 
 import Data.Array.Base                             (UArray(..), listArray)
 import Data.ByteString.Internal                    (ByteString(..))
-import Data.Text.Array                             (aBA{-, empty-})
 import Data.Text.Internal                          (Text(..))
-import Data.Text.Unsafe                            (iter, Iter(..){-, iter_, reverseIter_-})
+import Data.Text.Unsafe                            (iter, Iter(..))
 import GHC.Exts                                    (Int(..), Char(..), TYPE, Int#)
 import GHC.ForeignPtr                              (ForeignPtr(..))
-import GHC.Prim                                    (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
+import GHC.Prim                                    (indexWideCharArray#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
 #if __GLASGOW_HASKELL__ > 900
 import GHC.Prim                                    (word16ToWord#, word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
-                                                    offWith, emptyUnpackedLazyByteString, intSame, intLess,
+                                                    offWith, emptyUnpackedLazyByteString, intSame, intLess, intLess',
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
-                                                    textShiftRight, textShiftLeft, byteStringShiftRight,
-                                                    byteStringShiftLeft, max#)
+                                                    textShiftRight, textShiftLeft, textEnsureN, textNonEmpty, byteStringShiftRight,
+                                                    byteStringShiftLeft, byteStringMore, byteStringNext, byteStringEnsureN, max#)
 import Parsley.Internal.Common.Utils               (Code)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
---import qualified Data.Text                     as Text (length, index)
-
 
 #if __GLASGOW_HASKELL__ <= 900
 {-# INLINE word8ToWord# #-}
@@ -59,21 +56,8 @@ word16ToWord# :: Word# -> Word#
 word16ToWord# x = x
 #endif
 
-{- Auxillary Representation -}
-{-|
-Given some associated representation type, defines the operations
-that work with a /closed over/ instance of that type. These are:
-
-* @next@: extract the next character from the input (existence not included)
-* @more@: query whether another character /can/ be read
-* @init@: the initial state of the input.
-
-@since 1.0.0.0
--}
-type InputDependant (rep :: TYPE r) = (# {-next-} rep -> (# Char, rep #)
-                                       , {-more-} rep -> Bool
-                                       , {-init-} rep
-                                       #)
+prepare :: InputPrep input => Code input -> ((?ops :: InputOps (Rep input)) => Code (Rep input) -> Code r) -> Code r
+prepare qinput k = _prepare qinput (\_ops -> let ?ops = _ops in k)
 
 {- Typeclasses -}
 {-|
@@ -90,7 +74,7 @@ class InputPrep input where
 
   @since 1.0.0.0
   -}
-  prepare :: rep ~ Rep input => Code input -> Code (InputDependant rep)
+  _prepare :: rep ~ Rep input => Code input -> (InputOps rep -> Code rep -> Code r) -> Code r
 
 {-|
 Defines operations for manipulating offsets for regular use. These are not
@@ -140,14 +124,33 @@ class LogOps (rep :: TYPE r) where
 
 {-|
 This is a psuedo-typeclass, which depends directly on the values obtained from
-`InputDependant`. Because this instance must depend on local information, it is
+`prepare`. Because this instance may depend on local information, it is
 synthesised and passed around using @ImplicitParams@.
 
 @since 1.0.0.0
 -}
-data InputOps (rep :: TYPE r) = InputOps { _more       :: Code (rep -> Bool)            -- ^ Does the input have any more characters?
-                                         , _next       :: Code (rep -> (# Char, rep #)) -- ^ Read the next character (without checking existence)
+data InputOps (rep :: TYPE r) = InputOps { _more :: !(Code rep -> Code Bool)                                                         -- ^ Does the input have any more characters?
+                                         , _next :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a)             -- ^ Read the next character (without checking existence)
+                                         , _uncons :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a) -- ^ Read the next character, may check existence
+                                         , _ensureN :: !(forall a. Code Int# -> Code rep -> Code a -> Code a -> Code a)              -- ^ Ensure that n characters exist
+                                         , _ensureNIsFast :: !Bool                                                                   -- ^ _ensureN is O(1) and not O(n)
                                          }
+
+checkImpl :: forall r (rep :: TYPE r) a. Bool                                    -- ^ is the ensureN argument O(1)?
+          -> (Int -> Code rep -> Code a -> Code a -> Code a)                     -- ^ ensures there are n characters available
+          -> (Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a) -- ^ reads the next character if available
+          -> (Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> Code a) -> Code a -> Code a)
+checkImpl fastEnsureN ensureN uncons n m qi good bad
+  | fastEnsureN, n /= 0 = ensureN n qi (go n m qi id) bad
+  | otherwise           = go n m qi id
+  where
+    go :: Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> [(Code Char, Code rep)]) -> Code a
+    go 0 _ _ dcs  = good (dcs [])
+    -- Here, we want no more cached characters, so just verify the remaining with shiftRight
+    go n 0 qi dcs = ensureN n qi (good (dcs [])) bad
+    -- Cached character wanted, so read it
+    go n m qi dcs = uncons qi (\c qi' -> go (n - 1) (m - 1) qi' (dcs . ((c, qi') :))) bad
+
 {-|
 Wraps around `InputOps` and `_more`.
 
@@ -156,7 +159,7 @@ Queries the input to see if another character may be consumed.
 @since 1.4.0.0
 -}
 more :: forall r (rep :: TYPE r). (?ops :: InputOps rep) => Code rep -> Code Bool
-more qo# = [|| $$(_more ?ops) $$(qo#) ||]
+more = _more ?ops
 
 {-|
 Wraps around `InputOps` and `_next`.
@@ -168,84 +171,107 @@ to the continuation.
 @since 1.0.0.0
 -}
 next :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a
-next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||]) ||]
+next = _next ?ops
+
+check :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> Code a) -> Code a -> Code a
+check = checkImpl (_ensureNIsFast ?ops)
+                  (\(I# n) -> _ensureN ?ops [||n||])
+                  (_uncons ?ops)
 
 {- INSTANCES -}
 -- InputPrep Instances
-instance InputPrep [Char] where
-  prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
+instance InputPrep [Char] where _prepare input = _prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 
 instance InputPrep (UArray Int Char) where
-  prepare qinput = [||
+  _prepare qinput k = [||
       let !(UArray _ _ (I# size#) input#) = $$qinput
-          next i# = (# C# (indexWideCharArray# input# i#), i# +# 1# #)
-      in (# next, \qi -> $$(intLess [||qi||] [||size#||]), 0# #)
+      in $$(k (InputOps (\qi -> intLess qi [||size#||])
+                        (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
+                        (\qi k _ -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
+                        (\qn qi -> intLess' [||$$qi +# $$qn||] [||size#||])
+                        True)
+              [||0#||])
     ||]
 
-instance InputPrep Text16 where
-  prepare qinput = [||
-      let Text16 (Text arr (I# off#) (I# size#)) = $$qinput
-          arr# = aBA arr
-          next i# = (# C# (chr# (word2Int# (word16ToWord# (indexWord16Array# arr# i#)))), i# +# 1# #)
-      in (# next, \qi -> $$(intLess [||qi||] [||size#||]), off# #)
-    ||]
+instance InputPrep Text16 where _prepare qinput = _prepare @Text [|| let Text16 t = $$qinput in t ||]
 
 instance InputPrep ByteString where
-  prepare qinput = [||
+  _prepare qinput k = [||
       let PS (ForeignPtr addr# final) (I# off#) (I# size#) = $$qinput
           next i# =
             case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
-      in  (# next, \qi -> $$(intLess [||qi||] [||size#||]), off# #)
+                !_ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
+      in $$(k (InputOps (\qi -> intLess qi [||size#||])
+                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
+                        (\qi k _ -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
+                        (\qn qi -> intLess' [||$$qi +# $$qn||] [||size#||])
+                        True)
+              [||off#||])
     ||]
 
 instance InputPrep CharList where
-  prepare qinput = [||
+  _prepare qinput k =  [||
       let CharList input = $$qinput
-          next :: (# Int#, [Char] #) -> (# Char, (# Int#, [Char] #) #)
-          next (# i#, c:cs #) = (# c, (# i# +# 1#, cs #) #)
-          more :: (# Int#, [Char] #) -> Bool
-          more (# _, [] #) = False
-          more _           = True
-      in (# next, more, $$(offWith [||input||]) #)
+      in $$(k (InputOps (\qi -> [||case $$qi of (# _, [] #) -> False; _ -> True||])
+                        (\qi k -> [|| let !(# i#, c:cs #) = $$qi in $$(k [||c||] [||(# i# +# 1#, cs #)||]) ||])
+                        (\qi good bad -> [||
+                              case $$qi of
+                                (# i#, c : cs #) -> $$(good [||c||] [||(# i# +# 1#, cs #)||])
+                                (# _,  [] #)     -> $$bad
+                            ||])
+                        (\qn qi good bad -> [||
+                              case $$(offWithShiftRight [||drop||] qi qn) of
+                                (# _, [] #) -> $$bad
+                                _           -> $$good
+                            ||])
+                        False)
+              (offWith [||input||]))
     ||]
 
 instance InputPrep Text where
-  prepare qinput = [||
-      let next t@(Text arr off unconsumed) = let !(Iter c d) = iter t 0 in (# c, Text arr (off + d) (unconsumed - d) #)
-          more (Text _ _ unconsumed) = unconsumed > 0
-      in (# next, more, $$qinput #)
-    ||]
+  _prepare qinput k = k (InputOps (\qi -> [||textNonEmpty $$qi||])
+                                  (\qi k -> [||
+                                      let t@(Text arr off unconsumed) = $$qi
+                                          !(Iter c d) = iter t 0
+                                      in $$(k [||c||] [||Text arr (off + d) (unconsumed - d)||]) ||])
+                                  (\qi good bad -> [||
+                                      let t@(Text arr off unconsumed) = $$qi
+                                      in if unconsumed > 0 then
+                                           let !(Iter c d) = iter t 0
+                                           in $$(good [||c||] [||Text arr (off + d) (unconsumed - d)||])
+                                         else $$bad
+                                    ||])
+                                  (\qn qi good bad -> [|| if textEnsureN $$qn $$qi then $$good else $$bad ||])
+                                  False)
+                        qinput
 
 instance InputPrep Lazy.ByteString where
-  prepare qinput = [||
-      let next (# i#, addr#, final, off#, size#, cs #) =
-            case readWord8OffAddr# addr# off# realWorld# of
-              (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# (word8ToWord# x))),
-                    if I# size# /= 1 then (# i# +# 1#, addr#, final, off# +# 1#, size# -# 1#, cs #)
-                    else case cs of
-                      Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->
-                        (# i# +# 1#, addr'#, final', off'#, size'#, cs' #)
-                      Lazy.Empty -> $$(emptyUnpackedLazyByteString [||i# +# 1#||])
-                  #)
-          more :: UnpackedLazyByteString -> Bool
-          more (# _, _, _, _, 0#, _ #) = False
-          more (# _, _, _, _, _, _ #) = True
-
-          initial :: UnpackedLazyByteString
+  _prepare qinput k = [||
+      let initial :: UnpackedLazyByteString
           initial = case $$qinput of
             Lazy.Chunk (PS (ForeignPtr addr# final) (I# off#) (I# size#)) cs -> (# 0#, addr#, final, off#, size#, cs #)
             Lazy.Empty -> $$(emptyUnpackedLazyByteString [||0#||])
-      in (# next, more, initial #)
+      in $$(k (InputOps (\qi -> [||byteStringMore $$qi||])
+                        (\qi k -> [|| let !(# c, qi' #) = byteStringNext $$qi in $$(k [||c||] [||qi'||]) ||])
+                        (\qi good bad -> [||
+                            case $$qi of
+                              (# _, _, _, _, 0#, _ #) -> $$bad
+                              bs                      ->
+                                let !(# c, qi' #) = byteStringNext bs in $$(good [||c||] [||qi'||])
+                          ||])
+                        (\qn qi good bad -> [|| if byteStringEnsureN $$qn $$qi then $$good else $$bad ||])
+                        False)
+              [||initial||])
     ||]
 
 instance InputPrep Stream where
-  prepare qinput = [||
-      let next (# o#, c :> cs #) = (# c, (# o# +# 1#, cs #) #)
-      in (# next, \_ -> True, $$(offWith qinput) #)
-    ||]
+  _prepare qinput k = k (InputOps (const [||True||])
+                                  (\qi k -> [|| let !(# o#, c :> cs #) = $$qi in $$(k [||c||] [||(# o# +# 1#, cs #)||]) ||])
+                                  (\qi k _ -> [|| let !(# o#, c :> cs #) = $$qi in $$(k [||c||] [||(# o# +# 1#, cs #)||]) ||])
+                                  (\_ _ good _ -> good)
+                                  True)
+                        (offWith qinput)
 
 shiftRightInt :: Code Int# -> Code Int# -> Code Int#
 shiftRightInt qo# qi# = [||$$(qo#) +# $$(qi#)||]

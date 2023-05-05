@@ -26,7 +26,7 @@ import Control.Monad.Reader                                (Reader, ask, asks, r
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps           (InputDependant, InputOps(InputOps))
+import Parsley.Internal.Backend.Machine.InputOps           (InputOps)
 import Parsley.Internal.Backend.Machine.InputRep           (Rep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
@@ -51,18 +51,16 @@ This function performs the evaluation on the top-level let-bound parser to conve
 
 @since 1.0.0.0
 -}
-eval :: forall o a. (Trace, Ops o)
-     => Code (InputDependant (Rep o)) -- ^ The input as provided by the user.
-     -> LetBinding o a a              -- ^ The binding to be generated.
+eval :: forall o a. (Trace, Ops o, ?ops :: InputOps (Rep o))
+     => LetBinding o a a              -- ^ The binding to be generated.
      -> DMap MVar (LetBinding o a)    -- ^ The map of all other required bindings.
+     -> Code (Rep o)
      -> Code (Maybe a)                -- ^ The code for this parser.
-eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
-  do let !(# next, more, offset #) = $$input
-     $$(let ?ops = InputOps [||more||] [||next||]
-        in letRec fs
+eval binding fs offset  = trace "EVALUATING TOP LEVEL" [||
+    runST $$(letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
-             (run (readyMachine (body binding)) (Γ Empty halt (mkInput [||offset||] initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty halt (mkInput offset initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String

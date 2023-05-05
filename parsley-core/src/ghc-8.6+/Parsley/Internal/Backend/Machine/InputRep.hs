@@ -52,7 +52,7 @@ emptyUnpackedLazyByteString i = UnpackedLazyByteString i nullAddr# (error "nullF
 type family Rep input where
   Rep [Char] = Int
   Rep (UArray Int Char) = Int
-  Rep Text16 = Int
+  Rep Text16 = Text
   Rep ByteString = Int
   Rep CharList = OffWith String
   Rep Text = Text

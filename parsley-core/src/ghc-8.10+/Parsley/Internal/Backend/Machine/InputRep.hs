@@ -23,7 +23,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * Representation Type-Families
     Rep, RepKind,
     -- * @Int#@ Operations
-    intSame, intLess, min#, max#,
+    intSame, intLess, intLess', min#, max#,
     -- * @Offwith@ Operations
     OffWith, offWith, offWithSame, offWithShiftRight,
     --OffWithStreamAnd(..),
@@ -38,8 +38,8 @@ module Parsley.Internal.Backend.Machine.InputRep (
     These functions must be exposed, since they can appear
     in the generated code.
     -}
-    textShiftRight, textShiftLeft,
-    byteStringShiftRight, byteStringShiftLeft,
+    textShiftRight, textShiftLeft, textEnsureN, textNonEmpty,
+    byteStringShiftRight, byteStringShiftLeft, byteStringMore, byteStringNext, byteStringEnsureN,
     -- * Re-exports
     module Parsley.Internal.Core.InputTypes
   ) where
@@ -49,16 +49,27 @@ import Data.ByteString.Internal          (ByteString(..))
 import Data.Kind                         (Type)
 import Data.Text.Internal                (Text(..))
 import Data.Text.Unsafe                  (iter_, reverseIter_)
-import GHC.Exts                          (Int(..), TYPE, RuntimeRep(..), (==#), (<#), (+#), (-#), isTrue#)
+import GHC.Exts                          (Int(..), Char(..), TYPE, RuntimeRep(..), (==#), (<#), (+#), (-#), isTrue#)
 #if __GLASGOW_HASKELL__ > 900
 import GHC.Exts                          (LiftedRep)
 #endif
 import GHC.ForeignPtr                    (ForeignPtr(..), ForeignPtrContents)
-import GHC.Prim                          (Int#, Addr#, nullAddr#)
+import GHC.Prim                          (Int#, Addr#, nullAddr#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#)
+#if __GLASGOW_HASKELL__ > 900
+import GHC.Prim                          (word8ToWord#)
+#else
+import GHC.Prim                          (Word#)
+#endif
 import Parsley.Internal.Common.Utils     (Code)
 import Parsley.Internal.Core.InputTypes  (Text16(..), CharList(..), Stream(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
+
+#if __GLASGOW_HASKELL__ <= 900
+{-# INLINE word8ToWord# #-}
+word8ToWord# :: Word# -> Word#
+word8ToWord# x = x
+#endif
 
 {- Representation Types -}
 {-|
@@ -115,7 +126,7 @@ type RepKind :: Type -> RuntimeRep
 type family RepKind input where
   RepKind [Char] = IntRep
   RepKind (UArray Int Char) = IntRep
-  RepKind Text16 = IntRep
+  RepKind Text16 = LiftedRep
   RepKind ByteString = IntRep
   RepKind Text = LiftedRep
   RepKind Lazy.ByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
@@ -135,7 +146,7 @@ type Rep :: forall (rep :: Type) -> TYPE (RepKind rep)
 type family Rep input where
   Rep [Char] = Int#
   Rep (UArray Int Char) = Int#
-  Rep Text16 = Int#
+  Rep Text16 = Text
   Rep ByteString = Int#
   Rep Text = Text
   Rep Lazy.ByteString = UnpackedLazyByteString
@@ -160,6 +171,13 @@ Is the first argument is less than the second?
 -}
 intLess :: Code Int# -> Code Int# -> Code Bool
 intLess qi# qj# = [||isTrue# ($$(qi#) <# $$(qj#))||]
+
+intLess' :: Code Int# -> Code Int# -> Code a -> Code a -> Code a
+intLess' qi# qj# yes no = [||
+    case $$(qi#) <# $$(qj#) of
+      1# -> $$yes
+      0# -> $$no
+  ||]
 
 {-|
 Extracts the offset from `Text`.
@@ -216,14 +234,31 @@ Drops tokens off of `Text`.
 
 @since 1.0.0.0
 -}
+{-# INLINABLE textShiftRight #-}
 textShiftRight :: Text -> Int -> Text
-textShiftRight (Text arr off unconsumed) i = go i off unconsumed
+textShiftRight (Text arr off unconsumed) !i = go i arr off unconsumed
   where
-    go 0 off' unconsumed' = Text arr off' unconsumed'
-    go n off' unconsumed'
-      | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0
-                          in go (n - 1) (off' + d) (unconsumed' - d)
-      | otherwise = Text arr off' unconsumed'
+    go 0 !arr !off !unconsumed = Text arr off unconsumed
+    go n !arr !off !unconsumed
+      | unconsumed > 0 = let !d = iter_ (Text arr off unconsumed) 0
+                         in go (n - 1) arr (off + d) (unconsumed - d)
+      | otherwise = Text arr off unconsumed
+
+
+{-# INLINABLE textEnsureN #-}
+textEnsureN :: Int# -> Text -> Bool
+textEnsureN n# (Text arr off unconsumed) = go n# arr off unconsumed
+  where
+    go 0# !_ !_ !_ = True
+    go n arr off unconsumed
+      | unconsumed > 0 = let !d = iter_ (Text arr off unconsumed) 0
+                         in go (n -# 1#) arr (off + d) (unconsumed - d)
+      | otherwise      = False
+
+{-# INLINABLE textNonEmpty #-}
+textNonEmpty :: Text -> Bool
+textNonEmpty (Text _ _ 0) = False
+textNonEmpty _            = True
 
 {-|
 Rewinds input consumption on `Text` where the input is still available (i.e. in the same chunk).
@@ -242,11 +277,30 @@ textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
 emptyUnpackedLazyByteString' :: Int# -> UnpackedLazyByteString
 emptyUnpackedLazyByteString' i# = (# i#, nullAddr#, error "nullForeignPtr", 0#, 0#, Lazy.Empty #)
 
+{-# INLINABLE byteStringNext #-}
+byteStringNext :: UnpackedLazyByteString -> (# Char, UnpackedLazyByteString #)
+byteStringNext (# i#, addr#, final, off#, size#, cs #) =
+  case readWord8OffAddr# addr# off# realWorld# of
+    (# s', x #) -> case touch# final s' of
+      !_ -> (# C# (chr# (word2Int# (word8ToWord# x))),
+          if I# size# /= 1 then (# i# +# 1#, addr#, final, off# +# 1#, size# -# 1#, cs #)
+          else case cs of
+            Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->
+              (# i# +# 1#, addr'#, final', off'#, size'#, cs' #)
+            Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# 1#)
+        #)
+
+{-# INLINE byteStringMore #-}
+byteStringMore :: UnpackedLazyByteString -> Bool
+byteStringMore (# _, _, _, _, 0#, _ #) = False
+byteStringMore (# _, _, _, _, _, _ #) = True
+
 {-|
 Drops tokens off of a lazy `Lazy.ByteString`.
 
 @since 1.0.0.0
 -}
+{-# INLINABLE byteStringShiftRight #-}
 byteStringShiftRight :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
 byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
   | isTrue# (j# <# size#)  = (# i# +# j#, addr#, final, off# +# j#, size# -# j#, cs #)
@@ -254,11 +308,20 @@ byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
     Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
     Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# size#)
 
+{-# INLINABLE byteStringEnsureN #-}
+byteStringEnsureN :: Int# -> UnpackedLazyByteString -> Bool
+byteStringEnsureN j# (# i#, _, _, _, size#, cs #)
+  | isTrue# (j# <# size#)  = True
+  | otherwise = case cs of
+    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringEnsureN (j# -# size#) (# i# +# size#, addr'#, final', off'#, size'#, cs' #)
+    Lazy.Empty -> False
+
 {-|
 Rewinds input consumption on a lazy `Lazy.ByteString` if input is still available (within the same chunk).
 
 @since 1.0.0.0
 -}
+{-# INLINABLE byteStringShiftLeft #-}
 byteStringShiftLeft :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
 byteStringShiftLeft (# i#, addr#, final, off#, size#, cs #) j# =
   let d# = min# off# j#
@@ -269,6 +332,7 @@ Finds the minimum of two `Int#` values.
 
 @since 1.0.0.0
 -}
+{-# INLINABLE min# #-}
 min# :: Int# -> Int# -> Int#
 min# i# j# = case i# <# j# of
   0# -> j#
@@ -279,6 +343,7 @@ Finds the maximum of two `Int#` values.
 
 @since 1.0.0.0
 -}
+{-# INLINABLE max# #-}
 max# :: Int# -> Int# -> Int#
 max# i# j# = case i# <# j# of
   0# -> i#

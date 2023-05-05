@@ -23,7 +23,7 @@ import Data.Dependent.Map                            (DMap)
 import Data.Text                                     (Text)
 import Parsley.Internal.Backend.Machine.Defunc       (user)
 import Parsley.Internal.Backend.Machine.Identifiers
-import Parsley.Internal.Backend.Machine.InputOps     (InputPrep(..))
+import Parsley.Internal.Backend.Machine.InputOps     (InputPrep, prepare)
 import Parsley.Internal.Backend.Machine.Instructions
 import Parsley.Internal.Backend.Machine.LetBindings  (LetBinding, makeLetBinding, newMeta)
 import Parsley.Internal.Backend.Machine.Ops          (Ops)
@@ -42,7 +42,7 @@ for a parser.
 @since 0.1.0.0
 -}
 eval :: forall input a. (Input input, Trace) => Code input -> (LetBinding input a a, DMap MVar (LetBinding input a)) -> Code (Maybe a)
-eval input (toplevel, bindings) = Eval.eval (prepare input) toplevel bindings
+eval input (toplevel, bindings) = prepare input (Eval.eval toplevel bindings)
 
 {-|
 This class is exposed to parsley itself and is used to denote which types may be

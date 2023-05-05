@@ -29,7 +29,6 @@ module Parsley (
 
 import Prelude hiding            (readFile)
 import Data.Text.IO              (readFile)
-import Parsley.InputExtras       (Text16(..))
 import Parsley.Internal          (Input, Trace(trace))
 
 import Parsley.Alternative              as Alternative
@@ -77,7 +76,7 @@ parse = Internal.parse
 
 {-|
 This function generates a function that reads input from a file
-and parses it. The input files contents are treated as `Text16`.
+and parses it. The input files contents are treated as `Text`.
 
 See `parse` for more information.
 
@@ -86,7 +85,7 @@ See `parse` for more information.
 parseFromFile :: Trace
               => Parser a                        -- ^ The parser to be compiled
               -> Code (FilePath -> IO (Maybe a)) -- ^ The generated parsing function
-parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(parse p) (Text16 input))||]
+parseFromFile p = [||\filename -> do input <- readFile filename; return ($$(parse p) input)||]
 
 {-|
 The default instance for `Trace`, which disables all debugging output about the parser compilation

@@ -10,12 +10,11 @@ module Parsley.Internal.Backend.Machine.InputOps (
 
 import Data.Array.Base                           (UArray(..), listArray)
 import Data.ByteString.Internal                  (ByteString(..))
-import Data.Text.Array                           (aBA{-, empty-})
 import Data.Text.Internal                        (Text(..))
 import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, reverseIter_-})
 import GHC.Exts                                  (Int(..), Char(..))
 import GHC.ForeignPtr                            (ForeignPtr(..))
-import GHC.Prim                                  (indexWideCharArray#, indexWord16Array#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
+import GHC.Prim                                  (indexWideCharArray#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
 import Parsley.Internal.Backend.Machine.InputRep
 import Parsley.Internal.Common.Utils             (Code)
 import Parsley.Internal.Core.InputTypes          (Stream((:>)), CharList(..), Text16(..))
@@ -63,13 +62,7 @@ instance InputPrep (UArray Int Char) where
       in InputDependant next (< size) 0
     ||]
 
-instance InputPrep Text16 where
-  prepare qinput = [||
-      let Text16 (Text arr off size) = $$qinput
-          arr# = aBA arr
-          next (I# i#) = (# C# (chr# (word2Int# (indexWord16Array# arr# i#))), I# (i# +# 1#) #)
-      in InputDependant next (< size) off
-    ||]
+instance InputPrep Text16 where prepare qinput = prepare @Text [|| let Text16 t = $$qinput in t ||]
 
 instance InputPrep ByteString where
   prepare qinput = [||

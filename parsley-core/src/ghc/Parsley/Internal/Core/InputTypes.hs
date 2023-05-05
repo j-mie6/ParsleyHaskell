@@ -21,6 +21,7 @@ characters.
 
 @since 0.1.0.0
 -}
+{-# DEPRECATED Text16 "Text16 is not legal with the UTF-8 encoding of Text, use Text instead" #-}
 newtype Text16 = Text16 Text
 
 --newtype CacheText = CacheText Text

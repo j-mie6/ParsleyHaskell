@@ -37,7 +37,6 @@ import GHC.Prim                                    (word16ToWord#, word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
-import Language.Haskell.TH.Syntax                  (liftTyped)
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess, intLess',
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
@@ -174,11 +173,10 @@ to the continuation.
 next :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a
 next = _next ?ops
 
-check :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep, PositionOps rep) => Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> Code a) -> Code a -> Code a
-check _ m =
-  checkImpl False (\(I# n) qi good bad -> [|| if $$(more (shiftRight qi (liftTyped (n -# 1#)))) then $$good else $$bad ||])
-                  (\qi good bad -> [|| if $$(more qi) then $$(next qi good) else $$bad ||])
-            m m
+check :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> Code a) -> Code a -> Code a
+check = checkImpl (_ensureNIsFast ?ops)
+                  (\(I# n) -> _ensureN ?ops [||n||])
+                  (_uncons ?ops)
 
 {- INSTANCES -}
 -- InputPrep Instances

@@ -81,8 +81,6 @@ be used for quicker comparisons.
 -}
 type OffWith ts = (# Int#, ts #)
 
---data OffWithStreamAnd ts = OffWithStreamAnd {-# UNPACK #-} !Int !Stream ts
-
 {-|
 This type unpacks /lazy/ `Lazy.ByteString`s for efficiency.
 
@@ -132,8 +130,6 @@ type family RepKind input where
   RepKind Lazy.ByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
   RepKind CharList = 'TupleRep '[IntRep, LiftedRep]
   RepKind Stream = 'TupleRep '[IntRep, LiftedRep]
-  --RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep] --REMOVE
-  --RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep] --REMOVE
 
 {-|
 This type family relates a user input type with the underlying parsley
@@ -152,8 +148,6 @@ type family Rep input where
   Rep Lazy.ByteString = UnpackedLazyByteString
   Rep CharList = (# Int#, String #)
   Rep Stream = (# Int#, Stream #)
-  --Rep (OffWithStreamAnd ts) = (# Int#, Stream, ts #)
-  --Rep (Text, Stream) = (# Text, Stream #)
 
 {- Generic Representation Operations -}
 {-|
@@ -213,12 +207,6 @@ offWithShiftRight :: Code (Int -> ts -> ts) -- ^ A @drop@ function for underlyin
 offWithShiftRight drop qo# qi# = [||
     case $$(qo#) of (# o#, ts #) -> (# o# +# $$(qi#), $$drop (I# $$(qi#)) ts #)
   ||]
-
-{-offWithStreamAnd :: ts -> OffWithStreamAnd ts
-offWithStreamAnd ts = OffWithStreamAnd 0 nomore ts
-
-offWithStreamAndToInt :: OffWithStreamAnd ts -> Int
-offWithStreamAndToInt (OffWithStreamAnd i _ _) = i-}
 
 {-|
 Drops tokens off of a `Stream`.

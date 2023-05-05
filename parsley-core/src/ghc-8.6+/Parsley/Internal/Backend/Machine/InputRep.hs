@@ -56,9 +56,7 @@ type family Rep input where
   Rep ByteString = Int
   Rep CharList = OffWith String
   Rep Text = Text
-  --Rep CacheText = (Text, Stream)
   Rep Lazy.ByteString = UnpackedLazyByteString
-  --Rep Lazy.ByteString = OffWith Lazy.ByteString
   Rep Stream = OffWith Stream
 
 type family RepKind rep where
@@ -67,7 +65,6 @@ type family RepKind rep where
   RepKind UnpackedLazyByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
   RepKind (OffWith _) = 'TupleRep '[IntRep, LiftedRep]
   RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep]
-  RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep]
 
 type family Unboxed rep = (urep :: TYPE (RepKind rep)) | urep -> rep where
   Unboxed Int = Int#
@@ -75,7 +72,6 @@ type family Unboxed rep = (urep :: TYPE (RepKind rep)) | urep -> rep where
   Unboxed UnpackedLazyByteString = (# Int#, Addr#, ForeignPtrContents, Int#, Int#, Lazy.ByteString #)
   Unboxed (OffWith ts) = (# Int#, ts #)
   Unboxed (OffWithStreamAnd ts) = (# Int#, Stream, ts #)
-  Unboxed (Text, Stream) = (# Text, Stream #)
 
 {- Generic Representation Operations -}
 offWithSame :: Code (OffWith ts -> OffWith ts -> Bool)
@@ -83,18 +79,6 @@ offWithSame = [||\(OffWith i _) (OffWith j _) -> i == j||]
 
 offWithShiftRight :: Code (Int -> ts -> ts) -> Code (OffWith ts -> Int -> OffWith ts)
 offWithShiftRight drop = [||\(OffWith o ts) i -> OffWith (o + i) ($$drop i ts)||]
-
-{-offWithStreamAnd :: ts -> OffWithStreamAnd ts
-offWithStreamAnd ts = OffWithStreamAnd 0 nomore ts
-
-offWithStreamAndBox :: (# Int#, Stream, ts #) -> OffWithStreamAnd ts
-offWithStreamAndBox (# i#, ss, ts #) = OffWithStreamAnd (I# i#) ss ts
-
-offWithStreamAndUnbox :: OffWithStreamAnd ts -> (# Int#, Stream, ts #)
-offWithStreamAndUnbox (OffWithStreamAnd (I# i#) ss ts) = (# i#, ss, ts #)
-
-offWithStreamAndToInt :: OffWithStreamAnd ts -> Int
-offWithStreamAndToInt (OffWithStreamAnd i _ _) = i-}
 
 dropStream :: Int -> Stream -> Stream
 dropStream 0 cs = cs

@@ -148,7 +148,7 @@ common benchmark-common
   other-extensions:    TemplateHaskellQuotes, TemplateHaskell
   other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -pgmP cpphs -optP --cpp
+  ghc-options:         -rtsopts -pgmP cpphs -optP --cpp -ddump-splices -ddump-to-file
   if false && impl(ghc < 9)
     build-depends:     dump-core
     ghc-options:       -fplugin=DumpCore

@@ -79,6 +79,9 @@ generate (Abs f)    = [||\x -> $$(normaliseGen (f (Var True [||x||])))||]
 generate (App f x)  = [||$$(generate f) $$(normaliseGen x)||]
 generate (Var _ x)  = x
 -- c has already been reduced, since we only expose `normaliseGen`
+-- TODO: need to find a better way of doing boolean optimisation
+generate (If _ T T) = [||True||]
+generate (If _ F F) = [||False||]
 generate (If c T e) = [|| $$(generate c) || $$(normaliseGen e) ||]
 generate (If c t F) = [|| $$(generate c) && $$(normaliseGen t) ||]
 generate (If c F T) = [|| not $$(generate c) ||]

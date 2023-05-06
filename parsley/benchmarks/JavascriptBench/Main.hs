@@ -27,23 +27,6 @@ main = do
   print (javascriptParsleyC "function foo(x) { return x; }")
   condensedMain [javascript]
 
-deriving instance Generic JSElement
-deriving instance Generic JSStm
-deriving instance Generic JSVar
-deriving instance Generic JSExpr'
-deriving instance Generic JSUnary
-deriving instance Generic JSMember
-deriving instance Generic JSCons
-deriving instance Generic JSAtom
-deriving instance NFData JSElement
-deriving instance NFData JSStm
-deriving instance NFData JSVar
-deriving instance NFData JSExpr'
-deriving instance NFData JSUnary
-deriving instance NFData JSMember
-deriving instance NFData JSCons
-deriving instance NFData JSAtom
-
 javascriptParsleyS :: String -> Maybe JSProgram
 javascriptParsleyS = $$(Parsley.parse JavascriptBench.Parsley.Parser.javascript)
 

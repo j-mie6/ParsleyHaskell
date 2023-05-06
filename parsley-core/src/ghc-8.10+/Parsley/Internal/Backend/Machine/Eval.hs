@@ -40,7 +40,7 @@ import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput,
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
-import Parsley.Internal.Core.CharPred                      (CharPred, pattern Item, lamTerm, optimisePredGiven)
+import Parsley.Internal.Core.CharPred                      (CharPred(UserPred), pattern Item, lamTerm, optimisePredGiven)
 import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
@@ -267,8 +267,10 @@ withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
               k (addChar pred c input' ctx) (γ {input = updatePos input' c pred})
         -- ignore the second γ parameter, as to perform a rollback on the input
         remainder γ ctx _ = run (Machine k) γ (giveCoins (willConsume coins) ctx)
-        good = withUpdatedOffset (\γ -> foldr prefetch (remainder γ) (take 1 (knownPreds coins) ++ replicate (willConsume coins - 1) Item) ctx γ) γOrig
+        good = withUpdatedOffset (\γ -> foldr prefetch (remainder γ) (take 1 (map onlyStatic (knownPreds coins)) ++ replicate (willConsume coins - 1) Item) ctx γ) γOrig
     in emitLengthCheck (willConsume coins) good (raise γOrig) (off (input γOrig)) offset
+  where onlyStatic UserPred{} = Item
+        onlyStatic p          = p
 
 state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b
 state f k = do

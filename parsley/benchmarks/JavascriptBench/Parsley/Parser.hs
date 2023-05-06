@@ -118,6 +118,7 @@ javascript = whitespace *> many element <* eof
     -- Token Parsers
     space :: Parser ()
     space = void (satisfy QQ(isSpace))
+    -- TODO: This is a great parser to look at in more detail
     whitespace :: Parser ()
     whitespace = skipMany (spaces <|> oneLineComment <|> multiLineComment)
     keyword :: String -> Parser ()

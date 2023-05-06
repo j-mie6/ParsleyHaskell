@@ -256,6 +256,11 @@ evalMeta BlockCoins (Machine k) = k
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
+-- FIXME: the positions are updated during fetch, but will be usually `const True`
+-- When the characters are read they are refined, but the remaining characters in the read queue are
+-- not _rerefined_ with this information: each character in the queue needs to be updated
+-- this needs to happen for refund as well I think, so should happen within the context, going to be
+-- tricky to do though :(
 withLengthCheckAndCoins :: (?ops::InputOps (Rep o), PositionOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     let prefetch pred k ctx γ =

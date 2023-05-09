@@ -11,18 +11,18 @@ module Parsley.Internal.Backend.Machine.Types.State (
     insertSub, insertΦ, insertNewΣ, insertScopedΣ, cacheΣ, concreteΣ, cachedΣ, qSubroutine,
     askSub, askΦ,
     debugUp, debugDown, debugLevel,
-    storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins,
+    storePiggy, breakPiggy, spendCoin, giveCoins, voidCoins, coins, netWorth,
     hasCoin, isBankrupt, canAfford
   ) where
 
 import Control.Exception                            (Exception, throw)
-import Control.Monad                                (liftM2, (<=<))
+import Control.Monad                                ((<=<))
 import Control.Monad.Reader                         (asks, MonadReader, Reader, runReader)
 import Control.Monad.ST                             (ST)
 import Data.STRef                                   (STRef)
 import Data.Dependent.Map                           (DMap)
 import Data.Kind                                    (Type)
-import Data.Maybe                                   (fromMaybe)
+import Data.Maybe                                   (fromMaybe, isNothing)
 import Parsley.Internal.Backend.Machine.Defunc      (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.InputRep    (Unboxed)
@@ -30,7 +30,7 @@ import Parsley.Internal.Backend.Machine.LetBindings (Regs(..), Metadata)
 import Parsley.Internal.Common                      (Queue, enqueue, dequeue, Code, Vec)
 
 import qualified Data.Dependent.Map as DMap             ((!), insert, empty, lookup)
-import qualified Parsley.Internal.Common.Queue as Queue (empty, null)
+import qualified Parsley.Internal.Common.Queue as Queue (empty)
 
 type HandlerStack n s o a = Vec n (Code (Handler s o a))
 type Handler s o a = Unboxed o -> Int -> Int -> ST s (Maybe a)
@@ -72,10 +72,11 @@ data Ctx s o a = Ctx { μs         :: DMap MVar (QSubroutine s o a)
                      , σs         :: DMap ΣVar (Reg s)
                      , debugLevel :: Int
                      , coins      :: Int
-                     , piggies    :: Queue Int }
+                     , piggies    :: Queue Int
+                     , netWorth   :: Int }
 
 emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 Queue.empty 0
 
 insertSub :: MVar x -> Code (Subroutine s o a x) -> Ctx s o a -> Ctx s o a
 insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs) (μs ctx)}
@@ -123,28 +124,32 @@ debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
 -- Piggy bank functions
 storePiggy :: Int -> Ctx s o a -> Ctx s o a
-storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
+storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx), netWorth = netWorth ctx + coins}
 
 breakPiggy :: Ctx s o a -> Ctx s o a
-breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = coins, piggies = piggies'}
+breakPiggy ctx =
+  let (coins, piggies') = dequeue (piggies ctx)
+  in ctx {coins = coins, piggies = piggies', netWorth = netWorth ctx - coins}
 
 hasCoin :: Ctx s o a -> Bool
-hasCoin = canAfford 1
+hasCoin = isNothing . canAfford 1
 
 isBankrupt :: Ctx s o a -> Bool
-isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
+isBankrupt = (== 0) . netWorth
 
 spendCoin :: Ctx s o a -> Ctx s o a
-spendCoin ctx = ctx {coins = coins ctx - 1}
+spendCoin ctx = ctx {coins = coins ctx - 1, netWorth = netWorth ctx - 1}
 
 giveCoins :: Int -> Ctx s o a -> Ctx s o a
-giveCoins c ctx = ctx {coins = coins ctx + c}
+giveCoins c ctx = ctx {coins = coins ctx + c, netWorth = netWorth ctx + c}
 
 voidCoins :: Ctx s o a -> Ctx s o a
-voidCoins ctx = ctx {coins = 0, piggies = Queue.empty}
+voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, netWorth = 0}
 
-canAfford :: Int -> Ctx s o a -> Bool
-canAfford n = (>= n) . coins
+canAfford :: Int -> Ctx s o a -> Maybe Int
+canAfford n ctx
+  | coins ctx >= n = Nothing
+  | otherwise      = Just (n - coins ctx)
 
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar deriving anyclass Exception

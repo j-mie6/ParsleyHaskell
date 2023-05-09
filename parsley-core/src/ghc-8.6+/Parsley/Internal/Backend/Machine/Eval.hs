@@ -192,17 +192,20 @@ evalLogExit name (Machine mk) =
 
 evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins') (Machine k) =
-  do requiresPiggy <- asks hasCoin
+  do --requiresPiggy <- asks hasCoin
+     net <- asks netWorth
+     let requiresPiggy = net /= 0
      let coins = willConsume coins'
-     if requiresPiggy then local (storePiggy coins) k
+     if requiresPiggy then local (storePiggy (coins - net)) k
      else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck coins mk (raise γ) γ
 evalMeta (RefundCoins coins) (Machine k) = local (giveCoins coins) k
 -- FIXME: this can be done better, like the 8.10 version
 evalMeta (DrainCoins coins) (Machine k) =
   -- If there are enough coins left to cover the cost, no length check is required
   -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
-  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck coins mk (raise γ) γ)
-         (asks (canAfford coins))
-         k
+  liftM2 drain (asks (canAfford coins)) k
+  where
+    drain Nothing mk γ = mk γ
+    drain _ mk γ = emitLengthCheck coins mk (raise γ) γ
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
 evalMeta BlockCoins (Machine k) = k

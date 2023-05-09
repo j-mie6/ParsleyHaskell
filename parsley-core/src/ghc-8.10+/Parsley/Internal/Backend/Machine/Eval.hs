@@ -115,7 +115,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: forall s o xs n r a. (?ops :: InputOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p k = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -225,7 +225,7 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
   -- when there are coins available, this cannot be discharged, and will wait until the current amounts
   -- are exhausted. Because it might have been the case that lookahead was performed to refund, the
@@ -256,7 +256,7 @@ evalMeta BlockCoins (Machine k) = k
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
-withLengthCheckAndCoins :: (?ops::InputOps (Rep o), PositionOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+withLengthCheckAndCoins :: (?ops::InputOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     let prefetch pred k ctx γ =
           -- input is known to exist

@@ -39,7 +39,7 @@ import GHC.Prim                                    (Word#)
 #endif
 import Language.Haskell.TH.Syntax                  (liftTyped)
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
-                                                    offWith, emptyUnpackedLazyByteString, intSame, intLess, intLess',
+                                                    offWith, emptyUnpackedLazyByteString, intSame, intLess, intLess', intAdd,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
                                                     textShiftRight, textShiftLeft, textNonEmpty, byteStringShiftRight,
                                                     byteStringShiftLeft, byteStringMore, byteStringNext, max#)
@@ -89,15 +89,6 @@ class PositionOps (rep :: TYPE r) where
   -}
   same :: Code rep -> Code rep -> Code Bool
 
-  {-|
-  Advances the input by several characters at a time (existence not included).
-  This can be used to check if characters exist at a future point in the input
-  in conjunction with `more`.
-
-  @since 1.0.0.0
-  -}
-  shiftRight :: Code rep -> Int -> Code rep
-
 {-|
 Defines operation used for debugging operations.
 
@@ -111,6 +102,15 @@ class LogOps (rep :: TYPE r) where
   @since 1.0.0.0
   -}
   shiftLeft :: Code rep -> Int -> Code rep
+
+  {-|
+  Advances the input by several characters at a time (existence not included).
+  This can be used to check if characters exist at a future point in the input
+  in conjunction with `more`.
+
+  @since 2.3.0.0
+  -}
+  shiftRight :: Code rep -> Int -> Code rep
 
   {-|
   Converts the represention of the input into an @Int@.
@@ -186,7 +186,7 @@ instance InputPrep (UArray Int Char) where
       in $$(k (InputOps (\qi -> intLess qi [||size#||])
                         (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
                         (\qi k _ -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
-                        (\qn qi -> intLess' [||$$qi +# qn||] [||size#||])
+                        (\qn qi -> intLess' (intAdd qi (qn -# 1#)) [||size#||])
                         True)
               [||0#||])
     ||]
@@ -203,7 +203,7 @@ instance InputPrep ByteString where
       in $$(k (InputOps (\qi -> intLess qi [||size#||])
                         (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
                         (\qi k _ -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
-                        (\qn qi -> intLess' [||$$qi +# qn||] [||size#||])
+                        (\qn qi -> intLess' (intAdd qi (qn -# 1#)) [||size#||])
                         True)
               [||off#||])
     ||]
@@ -219,7 +219,7 @@ instance InputPrep CharList where
                                 (# _,  [] #)     -> $$bad
                             ||])
                         (\qn qi good bad -> [||
-                              case $$(offWithShiftRight [||drop||] qi qn) of
+                              case $$(offWithShiftRight [||drop||] qi (qn -# 1#)) of
                                 (# _, [] #) -> $$bad
                                 cs          -> $$(good [||cs||])
                             ||])
@@ -283,43 +283,39 @@ shiftRightInt :: Code Int# -> Int -> Code Int#
 shiftRightInt qo# (I# qi#) = [||$$(qo#) +# qi#||]
 
 -- PositionOps Instances
-instance PositionOps Int# where
-  same = intSame
-  shiftRight = shiftRightInt
-
-instance PositionOps (# Int#, [Char] #) where
-  same = offWithSame
-  shiftRight qo# (I# qi#) = offWithShiftRight [||drop||] qo# qi#
-
-instance PositionOps (# Int#, Stream #) where
-  same = offWithSame
-  shiftRight qo# (I# qi#) = offWithShiftRight [||dropStream||] qo# qi#
-
-instance PositionOps Text where
-  same qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
-  shiftRight qo# (I# qi#) = [||textShiftRight $$(qo#) qi#||]
-
+instance PositionOps Int# where same = intSame
+instance PositionOps (# Int#, [Char] #) where same = offWithSame
+instance PositionOps (# Int#, Stream #) where same = offWithSame
+instance PositionOps Text where same qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
 instance PositionOps UnpackedLazyByteString where
   same qx# qy# = [||
       case $$(qx#) of
         (# i#, _, _, _, _, _ #) -> case $$(qy#) of
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
-  shiftRight qo# (I# qi#) = [||byteStringShiftRight $$(qo#) qi#||]
 
 -- LogOps Instances
 instance LogOps Int# where
   shiftLeft qo# (I# qi#) = [||max# ($$(qo#) -# qi#) 0#||]
+  shiftRight = shiftRightInt
   offToInt qi# = [||I# $$(qi#)||]
 
-instance LogOps (# Int#, ts #) where
+instance LogOps (# Int#, [Char] #) where
   shiftLeft qo# _ = qo#
+  shiftRight qo# (I# qi#) = offWithShiftRight [||drop||] qo# qi#
+  offToInt qo# = [||case $$(qo#) of (# i#, _ #) -> I# i#||]
+
+instance LogOps (# Int#, Stream #) where
+  shiftLeft qo# _ = qo#
+  shiftRight qo# (I# qi#) = offWithShiftRight [||dropStream||] qo# qi#
   offToInt qo# = [||case $$(qo#) of (# i#, _ #) -> I# i#||]
 
 instance LogOps Text where
   shiftLeft qo (I# qi#) = [||textShiftLeft $$qo qi#||]
+  shiftRight qo# (I# qi#) = [||textShiftRight $$(qo#) qi#||]
   offToInt qo = [||case $$qo of Text _ off _ -> div off 2||] -- FIXME: very broken
 
 instance LogOps UnpackedLazyByteString where
   shiftLeft qo# (I# qi#) = [||byteStringShiftLeft $$(qo#) qi#||]
+  shiftRight qo# (I# qi#) = [||byteStringShiftRight $$(qo#) qi#||]
   offToInt qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> I# i# ||]

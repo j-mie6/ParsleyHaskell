@@ -23,7 +23,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * Representation Type-Families
     Rep, RepKind,
     -- * @Int#@ Operations
-    intSame, intLess, intLess', min#, max#,
+    intSame, intLess, intLess', intAdd, min#, max#,
     -- * @Offwith@ Operations
     OffWith, offWith, offWithSame, offWithShiftRight,
     --OffWithStreamAnd(..),
@@ -172,6 +172,10 @@ intLess' qi# qj# yes no = [||
       1# -> $$(yes qi#)
       0# -> $$no
   ||]
+
+intAdd :: Code Int# -> Int# -> Code Int#
+intAdd qx 0# = qx
+intAdd qx qn = [||$$qx +# qn||]
 
 {-|
 Extracts the offset from `Text`.

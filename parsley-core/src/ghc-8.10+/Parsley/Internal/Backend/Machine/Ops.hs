@@ -142,7 +142,7 @@ when the \(n\) characters are available and the @bad@ when they are not.
 
 @since 1.4.0.0
 -}
-emitLengthCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
+emitLengthCheck :: (?ops :: InputOps (Rep o))
                 => Int                    -- ^ The number of required characters \(n\).
                 -> (Offset o -> Code a)   -- ^ The good continuation if \(n\) characters are available.
                 -> Code a                 -- ^ The bad continuation if the characters are unavailable.
@@ -150,14 +150,8 @@ emitLengthCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
                 -> (Offset o -> Code (Rep o))
                 -> Code a
 emitLengthCheck 1 good bad input sel = [|| if $$(more (sel input)) then $$(good (updateDeepestKnown (offset input) input)) else $$bad ||]
--- FIXME: something is broken with this :(
---emitLengthCheck n good bad input sel = check n 0 (sel input) good' bad
---  where good' deepestKnown _cached = good (updateDeepestKnown deepestKnown input)
-emitLengthCheck 0 good _ input _ = good input
-emitLengthCheck n good bad input sel = [||
-  let lookAheadInput = $$(shiftRight (sel input) (n - 1)) in
-  if $$(more [||lookAheadInput||]) then $$(good (updateDeepestKnown [||lookAheadInput||] input))
-  else $$bad ||]
+emitLengthCheck n good bad input sel = check n 0 (sel input) good' bad
+  where good' deepestKnown _cached = good (updateDeepestKnown deepestKnown input)
 
 {- Register Operations -}
 {-|

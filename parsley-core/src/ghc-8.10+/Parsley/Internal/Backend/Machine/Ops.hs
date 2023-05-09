@@ -67,7 +67,6 @@ import Data.STRef                                                 (writeSTRef, r
 import Data.Void                                                  (Void)
 import Debug.Trace                                                (trace)
 import GHC.Exts                                                   (Int(..), (-#))
-import Language.Haskell.TH.Syntax                                 (liftTyped)
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
@@ -153,8 +152,8 @@ emitLengthCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
                 -> Code a
 emitLengthCheck 0 good _ input _ = good input
 emitLengthCheck 1 good bad input sel = [|| if $$(more (sel input)) then $$(good (updateDeepestKnown (offset input) input)) else $$bad ||]
-emitLengthCheck (I# n) good bad input sel = [||
-  let lookAheadInput = $$(shiftRight (sel input) (liftTyped (n -# 1#))) in
+emitLengthCheck n good bad input sel = [||
+  let lookAheadInput = $$(shiftRight (sel input) (n - 1)) in
   if $$(more [||lookAheadInput||]) then $$(good (updateDeepestKnown [||lookAheadInput||] input))
   else $$bad ||]
 
@@ -542,8 +541,8 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
   where
     offset          = Offset.offset (off (input γ))
     indent          = replicate (debugLevel ctx * 2) ' '
-    start           = shiftLeft offset [||5#||]
-    end             = shiftRight offset [||5#||]
+    start           = shiftLeft offset 5
+    end             = shiftRight offset 5
     inputTrace      = [|| let replace '\n' = color Green "↙"
                               replace ' '  = color White "·"
                               replace c    = return c

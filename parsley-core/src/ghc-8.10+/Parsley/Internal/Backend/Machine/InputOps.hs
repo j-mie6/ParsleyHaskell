@@ -38,7 +38,6 @@ import GHC.Prim                                    (word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
-import Language.Haskell.TH.Syntax                  (liftTyped)
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess, intLess', intAdd,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
@@ -243,7 +242,7 @@ instance InputPrep Text where
                                          else $$bad
                                     ||])
                                   (\qn qi good bad -> [||
-                                      case textShiftRight $$qi $$(liftTyped (qn -# 1#)) of
+                                      case $$(textShiftRight qi (qn -# 1#)) of
                                         Text _ _ 0 -> $$bad
                                         t          -> $$(good [||t||])
                                     ||])
@@ -265,7 +264,7 @@ instance InputPrep Lazy.ByteString where
                                 let !(# c, qi' #) = byteStringNext bs in $$(good [||c||] [||qi'||])
                           ||])
                         (\qn qi good bad -> [||
-                            case byteStringShiftRight $$qi $$(liftTyped (qn -# 1#)) of
+                            case $$(byteStringShiftRight qi (qn -# 1#)) of
                               (# _, _, _, _, 0#, _ #) -> $$bad
                               bs                      -> $$(good [||bs||])
                           ||])
@@ -313,11 +312,11 @@ instance LogOps (# Int#, Stream #) where
   offToInt qo# = [||case $$(qo#) of (# i#, _ #) -> I# i#||]
 
 instance LogOps Text where
-  shiftLeft qo (I# qi#) = [||textShiftLeft $$qo qi#||]
-  shiftRight qo# (I# qi#) = [||textShiftRight $$(qo#) qi#||]
-  offToInt qo = [||case $$qo of Text _ off _ -> div off 2||] -- FIXME: very broken
+  shiftLeft qo (I# qi#) = textShiftLeft qo qi#
+  shiftRight qo# (I# qi#) = textShiftRight qo# qi#
+  offToInt = offsetText
 
 instance LogOps UnpackedLazyByteString where
-  shiftLeft qo# (I# qi#) = [||byteStringShiftLeft $$(qo#) qi#||]
-  shiftRight qo# (I# qi#) = [||byteStringShiftRight $$(qo#) qi#||]
+  shiftLeft qo# (I# qi#) = byteStringShiftLeft qo# qi#
+  shiftRight qo# (I# qi#) = byteStringShiftRight qo# qi#
   offToInt qo# = [||case $$(qo#) of (# i#, _, _, _, _, _ #) -> I# i# ||]

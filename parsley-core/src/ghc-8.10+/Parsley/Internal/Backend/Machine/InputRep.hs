@@ -27,20 +27,21 @@ module Parsley.Internal.Backend.Machine.InputRep (
     intSame, intLess, intLess', intAdd, min#, max#,
     -- * @Offwith@ Operations
     OffWith, offWith, offWithSame, offWithShiftRight,
-    --OffWithStreamAnd(..),
     -- * @LazyByteString@ Operations
     UnpackedLazyByteString, emptyUnpackedLazyByteString,
+    byteStringShiftRight, byteStringShiftLeft,
     -- * @Stream@ Operations
     dropStream,
     -- * @Text@ Operations
-    offsetText,
+    offsetText, textShiftRight, textShiftLeft,
     -- * Crucial Exposed Functions
     {- |
     These functions must be exposed, since they can appear
     in the generated code.
     -}
-    textShiftRight, textShiftLeft, {-textEnsureN,-} textNonEmpty,
-    byteStringShiftRight, byteStringShiftLeft, byteStringMore, byteStringNext, --byteStringEnsureN,
+    textNonEmpty,
+    byteStringMore, byteStringNext,
+    textShiftRight#,  textShiftLeft#, byteStringShiftRight#, byteStringShiftLeft#,
     -- * Re-exports
     module Parsley.Internal.Core.InputTypes
   ) where
@@ -183,6 +184,7 @@ Extracts the offset from `Text`.
 
 @since 1.0.0.0
 -}
+-- FIXME: not accurate? this can be slow without consequence
 offsetText :: Code Text -> Code Int
 offsetText qt = [||case $$qt of Text _ off _ -> off||]
 
@@ -209,6 +211,7 @@ offWithShiftRight :: Code (Int -> ts -> ts) -- ^ A @drop@ function for underlyin
                   -> Code (OffWith ts)      -- ^ The `OffWith` to shift.
                   -> Int#                   -- ^ How much to shift by.
                   -> Code (OffWith ts)
+offWithShiftRight _ qo# 0# = qo#
 offWithShiftRight drop qo# qi# = [||
     case $$(qo#) of (# o#, ts #) -> (# o# +# qi#, $$drop (I# qi#) ts #)
   ||]
@@ -225,11 +228,15 @@ dropStream n (_ :> cs) = dropStream (n-1) cs
 {-|
 Drops tokens off of `Text`.
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-{-# INLINABLE textShiftRight #-}
-textShiftRight :: Text -> Int# -> Text
-textShiftRight (Text arr off unconsumed) !i = go i arr off unconsumed
+textShiftRight :: Code Text -> Int# -> Code Text
+textShiftRight t 0# = t
+textShiftRight t n = [||textShiftRight# $$t n||]
+
+{-# INLINABLE textShiftRight# #-}
+textShiftRight# :: Text -> Int# -> Text
+textShiftRight# (Text arr off unconsumed) !i = go i arr off unconsumed
   where
     go 0# !arr !off !unconsumed = Text arr off unconsumed
     go n !arr !off !unconsumed
@@ -245,10 +252,14 @@ textNonEmpty _            = True
 {-|
 Rewinds input consumption on `Text` where the input is still available (i.e. in the same chunk).
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-textShiftLeft :: Text -> Int# -> Text
-textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
+textShiftLeft :: Code Text -> Int# -> Code Text
+textShiftLeft t 0# = t
+textShiftLeft t n = [||textShiftLeft# $$t n||]
+
+textShiftLeft# :: Text -> Int# -> Text
+textShiftLeft# (Text arr off unconsumed) i = go i off unconsumed
   where
     go 0# off' unconsumed' = Text arr off' unconsumed'
     go n off' unconsumed'
@@ -280,24 +291,32 @@ byteStringMore (# _, _, _, _, _, _ #) = True
 {-|
 Drops tokens off of a lazy `Lazy.ByteString`.
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-{-# INLINABLE byteStringShiftRight #-}
-byteStringShiftRight :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
-byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
+byteStringShiftRight :: Code UnpackedLazyByteString -> Int# -> Code UnpackedLazyByteString
+byteStringShiftRight t 0# = t
+byteStringShiftRight t n = [||byteStringShiftRight# $$t n||]
+
+{-# INLINABLE byteStringShiftRight# #-}
+byteStringShiftRight# :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
+byteStringShiftRight# (# i#, addr#, final, off#, size#, cs #) j#
   | isTrue# (j# <# size#)  = (# i# +# j#, addr#, final, off# +# j#, size# -# j#, cs #)
   | otherwise = case cs of
-    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
+    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight# (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
     Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# size#)
 
 {-|
 Rewinds input consumption on a lazy `Lazy.ByteString` if input is still available (within the same chunk).
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-{-# INLINABLE byteStringShiftLeft #-}
-byteStringShiftLeft :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
-byteStringShiftLeft (# i#, addr#, final, off#, size#, cs #) j# =
+byteStringShiftLeft :: Code UnpackedLazyByteString -> Int# -> Code UnpackedLazyByteString
+byteStringShiftLeft t 0# = t
+byteStringShiftLeft t n = [||byteStringShiftLeft# $$t n||]
+
+{-# INLINABLE byteStringShiftLeft# #-}
+byteStringShiftLeft# :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
+byteStringShiftLeft# (# i#, addr#, final, off#, size#, cs #) j# =
   let d# = min# off# j#
   in (# i# -# d#, addr#, final, off# -# d#, size# +# d#, cs #)
 

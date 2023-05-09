@@ -66,11 +66,10 @@ import Control.Monad.ST                                           (ST)
 import Data.STRef                                                 (writeSTRef, readSTRef, newSTRef)
 import Data.Void                                                  (Void)
 import Debug.Trace                                                (trace)
-import GHC.Exts                                                   (Int(..), (-#))
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, more, check)
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
@@ -150,8 +149,11 @@ emitLengthCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
                 -> Offset o               -- ^ The input to test on.
                 -> (Offset o -> Code (Rep o))
                 -> Code a
-emitLengthCheck 0 good _ input _ = good input
 emitLengthCheck 1 good bad input sel = [|| if $$(more (sel input)) then $$(good (updateDeepestKnown (offset input) input)) else $$bad ||]
+-- FIXME: something is broken with this :(
+--emitLengthCheck n good bad input sel = check n 0 (sel input) good' bad
+--  where good' deepestKnown _cached = good (updateDeepestKnown deepestKnown input)
+emitLengthCheck 0 good _ input _ = good input
 emitLengthCheck n good bad input sel = [||
   let lookAheadInput = $$(shiftRight (sel input) (n - 1)) in
   if $$(more [||lookAheadInput||]) then $$(good (updateDeepestKnown [||lookAheadInput||] input))

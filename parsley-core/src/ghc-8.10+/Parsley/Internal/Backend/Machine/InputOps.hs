@@ -138,7 +138,8 @@ checkImpl :: forall r (rep :: TYPE r) a. Bool                                   
           -> (Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a) -- ^ reads the next character if available
           -> (Int -> Int -> Code rep -> (Code rep -> [(Code Char, Code rep)] -> Code a) -> Code a -> Code a)
 checkImpl fastEnsureN ensureN uncons n m qi good bad
-  | fastEnsureN, n /= 0 = ensureN n qi (\_ -> go n m qi id) bad
+  -- TODO: this is fishy, it might double it up for no reason if no caching demanded (thread this through instead, since the char is acquired)!
+  -- | fastEnsureN, n /= 0 = ensureN n qi (\_ -> go n m qi id) bad
   | otherwise           = go n m qi id
   where
     go :: Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> [(Code Char, Code rep)]) -> Code a

@@ -20,7 +20,7 @@ module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep, PositionOps(..), LogOps(..),
     InputOps, more, next, check,
 #if __GLASGOW_HASKELL__ <= 900
-    word8ToWord#, word16ToWord#,
+    word8ToWord#,
 #endif
     prepare
   ) where
@@ -33,7 +33,7 @@ import GHC.Exts                                    (Int(..), Char(..), TYPE, Int
 import GHC.ForeignPtr                              (ForeignPtr(..))
 import GHC.Prim                                    (indexWideCharArray#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
 #if __GLASGOW_HASKELL__ > 900
-import GHC.Prim                                    (word16ToWord#, word8ToWord#)
+import GHC.Prim                                    (word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
@@ -50,10 +50,6 @@ import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
 {-# INLINE word8ToWord# #-}
 word8ToWord# :: Word# -> Word#
 word8ToWord# x = x
-
-{-# INLINE word16ToWord# #-}
-word16ToWord# :: Word# -> Word#
-word16ToWord# x = x
 #endif
 
 prepare :: InputPrep input => Code input -> ((?ops :: InputOps (Rep input)) => Code (Rep input) -> Code r) -> Code r

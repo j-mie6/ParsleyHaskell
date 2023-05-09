@@ -69,7 +69,7 @@ import Debug.Trace                                                (trace)
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, uncons, check, more)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, uncons, check)
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
@@ -532,7 +532,7 @@ preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o)
               -> Ctx s o a
               -> String         -- ^ String that represents the current status
               -> Code String
-preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
+preludeString name dir γ ctx ends = [|| concat [$$prelude, $$inputTrace, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset          = Offset.offset (off (input γ))
     indent          = replicate (debugLevel ctx * 2) ' '
@@ -544,9 +544,8 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
                               go i# = $$(uncons [||i#||] (\qc qi' -> [||
                                   if $$(same [||i#||] end) then []
                                   else replace $$qc ++ go $$qi' ||])
-                                [||[]||])
+                                [||color Red "•"||])
                           in go $$start ||]
-    eof             = more end inputTrace [||$$inputTrace ++ color Red "•" ||]
     prelude         = [|| concat [indent, dir : name, dir : " (", show $$(offToInt offset), "): "] ||]
     caretSpace      = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
 

@@ -19,7 +19,7 @@ parsing machinery to work with input.
 -}
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep, PositionOps(..), LogOps(..),
-    InputOps, next, check, uncons, more,
+    InputOps, next, check, uncons,
 #if __GLASGOW_HASKELL__ <= 900
     word8ToWord#,
 #endif
@@ -148,9 +148,6 @@ checkImpl fastEnsureN ensureN uncons n m qi good bad
     go _ 0 _ dcs (Just furthest) = good furthest (dcs [])
     -- Cached character wanted, so read it
     go n m qi dcs furthest = uncons qi (\c qi' -> go (n - 1) (m - 1) qi' (dcs . ((c, qi') :)) furthest) bad
-
-more :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> Code a -> Code a -> Code a
-more input good = check 1 0 input (\_ _ -> good)
 
 {-|
 Wraps around `InputOps` and `_next`.

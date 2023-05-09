@@ -1,4 +1,5 @@
 {-# OPTIONS_HADDOCK show-extensions #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-# LANGUAGE CPP,
              ImplicitParams,
              MagicHash,
@@ -138,16 +139,17 @@ checkImpl :: forall r (rep :: TYPE r) a. Bool                                   
           -> (Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a) -- ^ reads the next character if available
           -> (Int -> Int -> Code rep -> (Code rep -> [(Code Char, Code rep)] -> Code a) -> Code a -> Code a)
 checkImpl fastEnsureN ensureN uncons n m qi good bad
-  -- TODO: this is fishy, it might double it up for no reason if no caching demanded (thread this through instead, since the char is acquired)!
-  -- | fastEnsureN, n /= 0 = ensureN n qi (\_ -> go n m qi id) bad
-  | otherwise           = go n m qi id
+  | fastEnsureN, n /= 0 = ensureN n qi (go n m qi id . Just) bad
+  | otherwise           = go n m qi id Nothing
   where
-    go :: Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> [(Code Char, Code rep)]) -> Code a
-    go 0 _ qi dcs  = good qi (dcs [])
+    go :: Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> [(Code Char, Code rep)]) -> Maybe (Code rep) -> Code a
+    go 0 _ qi dcs _ = good qi (dcs [])
     -- Here, we want no more cached characters, so just verify the remaining with shiftRight
-    go n 0 qi dcs = ensureN n qi (\qi' -> good qi' (dcs [])) bad
+    go n 0 qi dcs Nothing = ensureN n qi (\qi' -> good qi' (dcs [])) bad
+    -- We've already fastEnsured all the characters, so just feed forward the furthest to fill non-cached
+    go _ 0 _ dcs (Just furthest) = good furthest (dcs [])
     -- Cached character wanted, so read it
-    go n m qi dcs = uncons qi (\c qi' -> go (n - 1) (m - 1) qi' (dcs . ((c, qi') :))) bad
+    go n m qi dcs furthest = uncons qi (\c qi' -> go (n - 1) (m - 1) qi' (dcs . ((c, qi') :)) furthest) bad
 
 {-|
 Wraps around `InputOps` and `_more`.

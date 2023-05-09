@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-|
 Module      : Parsley.InputExtras
 Description : Extra datatypes that can be used to wrap input

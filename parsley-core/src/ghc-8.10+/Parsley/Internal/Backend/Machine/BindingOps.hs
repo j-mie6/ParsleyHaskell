@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-monomorphism-restriction #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-# LANGUAGE AllowAmbiguousTypes,
              CPP,
              MagicHash,

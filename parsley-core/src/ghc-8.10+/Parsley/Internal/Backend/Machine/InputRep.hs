@@ -1,4 +1,5 @@
 {-# OPTIONS_HADDOCK show-extensions #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-# LANGUAGE CPP,
              MagicHash,
              TypeFamilies,
@@ -236,17 +237,6 @@ textShiftRight (Text arr off unconsumed) !i = go i arr off unconsumed
                          in go (n -# 1#) arr (off + d) (unconsumed - d)
       | otherwise = Text arr off unconsumed
 
-
-{-{-# INLINABLE textEnsureN #-}
-textEnsureN :: Int# -> Text -> Bool
-textEnsureN n# (Text arr off unconsumed) = go n# arr off unconsumed
-  where
-    go 0# !_ !_ !_ = True
-    go n arr off unconsumed
-      | unconsumed > 0 = let !d = iter_ (Text arr off unconsumed) 0
-                         in go (n -# 1#) arr (off + d) (unconsumed - d)
-      | otherwise      = False-}
-
 {-# INLINABLE textNonEmpty #-}
 textNonEmpty :: Text -> Bool
 textNonEmpty (Text _ _ 0) = False
@@ -299,14 +289,6 @@ byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
   | otherwise = case cs of
     Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
     Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# size#)
-
-{-{-# INLINABLE byteStringEnsureN #-}
-byteStringEnsureN :: Int# -> UnpackedLazyByteString -> Bool
-byteStringEnsureN j# (# i#, _, _, _, size#, cs #)
-  | isTrue# (j# <# size#)  = True
-  | otherwise = case cs of
-    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringEnsureN (j# -# size#) (# i# +# size#, addr'#, final', off'#, size'#, cs' #)
-    Lazy.Empty -> False-}
 
 {-|
 Rewinds input consumption on a lazy `Lazy.ByteString` if input is still available (within the same chunk).

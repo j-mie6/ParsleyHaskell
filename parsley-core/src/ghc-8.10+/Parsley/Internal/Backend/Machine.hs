@@ -1,4 +1,5 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-|
 Module      : Parsley.Internal.Backend.Machine
 Description : The implementation of the low level parsing machinery is found here

@@ -24,7 +24,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * Representation Type-Families
     Rep, RepKind,
     -- * @Int#@ Operations
-    intSame, intLess, intLess', intAdd, min#, max#,
+    intSame, intLess, intAdd, min#, max#,
     -- * @Offwith@ Operations
     OffWith, offWith, offWithSame, offWithShiftRight,
     -- * @LazyByteString@ Operations
@@ -39,8 +39,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     These functions must be exposed, since they can appear
     in the generated code.
     -}
-    textNonEmpty,
-    byteStringMore, byteStringNext,
+    byteStringNext,
     textShiftRight#,  textShiftLeft#, byteStringShiftRight#, byteStringShiftLeft#,
     -- * Re-exports
     module Parsley.Internal.Core.InputTypes
@@ -163,13 +162,10 @@ intSame qi# qj# = [||isTrue# ($$(qi#) ==# $$(qj#))||]
 {-|
 Is the first argument is less than the second?
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-intLess :: Code Int# -> Code Int# -> Code Bool
-intLess qi# qj# = [||isTrue# ($$(qi#) <# $$(qj#))||]
-
-intLess' :: Code Int# -> Code Int# -> (Code Int# -> Code a) -> Code a -> Code a
-intLess' qi# qj# yes no = [||
+intLess :: Code Int# -> Code Int# -> (Code Int# -> Code a) -> Code a -> Code a
+intLess qi# qj# yes no = [||
     case $$(qi#) <# $$(qj#) of
       1# -> $$(yes qi#)
       0# -> $$no
@@ -242,12 +238,7 @@ textShiftRight# (Text arr off unconsumed) !i = go i arr off unconsumed
     go n !arr !off !unconsumed
       | unconsumed > 0 = let !d = iter_ (Text arr off unconsumed) 0
                          in go (n -# 1#) arr (off + d) (unconsumed - d)
-      | otherwise = Text arr off unconsumed
-
-{-# INLINABLE textNonEmpty #-}
-textNonEmpty :: Text -> Bool
-textNonEmpty (Text _ _ 0) = False
-textNonEmpty _            = True
+      | otherwise = Text arr off 0
 
 {-|
 Rewinds input consumption on `Text` where the input is still available (i.e. in the same chunk).
@@ -264,7 +255,7 @@ textShiftLeft# (Text arr off unconsumed) i = go i off unconsumed
     go 0# off' unconsumed' = Text arr off' unconsumed'
     go n off' unconsumed'
       | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n -# 1#) (off' + d) (unconsumed' - d)
-      | otherwise = Text arr off' unconsumed'
+      | otherwise = Text arr 0 unconsumed'
 
 {-# INLINE emptyUnpackedLazyByteString' #-}
 emptyUnpackedLazyByteString' :: Int# -> UnpackedLazyByteString
@@ -282,11 +273,6 @@ byteStringNext (# i#, addr#, final, off#, size#, cs #) =
               (# i# +# 1#, addr'#, final', off'#, size'#, cs' #)
             Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# 1#)
         #)
-
-{-# INLINE byteStringMore #-}
-byteStringMore :: UnpackedLazyByteString -> Bool
-byteStringMore (# _, _, _, _, 0#, _ #) = False
-byteStringMore (# _, _, _, _, _, _ #) = True
 
 {-|
 Drops tokens off of a lazy `Lazy.ByteString`.

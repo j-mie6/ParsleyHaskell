@@ -69,7 +69,7 @@ import Debug.Trace                                                (trace)
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, more, check)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, uncons, check, more)
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
@@ -149,7 +149,6 @@ emitLengthCheck :: (?ops :: InputOps (Rep o))
                 -> Offset o               -- ^ The input to test on.
                 -> (Offset o -> Code (Rep o))
                 -> Code a
-emitLengthCheck 1 good bad input sel = [|| if $$(more (sel input)) then $$(good (updateDeepestKnown (offset input) input)) else $$bad ||]
 emitLengthCheck n good bad input sel = check n 0 (sel input) good' bad
   where good' deepestKnown _cached = good (updateDeepestKnown deepestKnown input)
 
@@ -542,11 +541,12 @@ preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : 
     inputTrace      = [|| let replace '\n' = color Green "↙"
                               replace ' '  = color White "·"
                               replace c    = return c
-                              go i#
-                                | $$(same [||i#||] end) || not $$(more [||i#||]) = []
-                                | otherwise = $$(next [||i#||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
+                              go i# = $$(uncons [||i#||] (\qc qi' -> [||
+                                  if $$(same [||i#||] end) then []
+                                  else replace $$qc ++ go $$qi' ||])
+                                [||[]||])
                           in go $$start ||]
-    eof             = [|| if $$(more end) then $$inputTrace else $$inputTrace ++ color Red "•" ||]
+    eof             = more end inputTrace [||$$inputTrace ++ color Red "•" ||]
     prelude         = [|| concat [indent, dir : name, dir : " (", show $$(offToInt offset), "): "] ||]
     caretSpace      = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
 

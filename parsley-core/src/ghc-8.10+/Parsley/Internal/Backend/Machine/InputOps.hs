@@ -19,7 +19,7 @@ parsing machinery to work with input.
 -}
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep, PositionOps(..), LogOps(..),
-    InputOps, more, next, check,
+    InputOps, next, check, uncons, more,
 #if __GLASGOW_HASKELL__ <= 900
     word8ToWord#,
 #endif
@@ -39,10 +39,10 @@ import GHC.Prim                                    (word8ToWord#)
 import GHC.Prim                                    (Word#)
 #endif
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
-                                                    offWith, emptyUnpackedLazyByteString, intSame, intLess, intLess', intAdd,
+                                                    offWith, emptyUnpackedLazyByteString, intSame, intLess, intAdd,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
-                                                    textShiftRight, textShiftLeft, textNonEmpty, byteStringShiftRight,
-                                                    byteStringShiftLeft, byteStringMore, byteStringNext, max#)
+                                                    textShiftRight, textShiftLeft, byteStringShiftRight,
+                                                    byteStringShiftLeft, byteStringNext, max#)
 import Parsley.Internal.Common.Utils               (Code)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
@@ -126,8 +126,7 @@ synthesised and passed around using @ImplicitParams@.
 
 @since 1.0.0.0
 -}
-data InputOps (rep :: TYPE r) = InputOps { _more :: !(Code rep -> Code Bool)                                                          -- ^ Does the input have any more characters?
-                                         , _next :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a)              -- ^ Read the next character (without checking existence)
+data InputOps (rep :: TYPE r) = InputOps { _next :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a)              -- ^ Read the next character (without checking existence)
                                          , _uncons :: !(forall a. Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a)  -- ^ Read the next character, may check existence
                                          , _ensureN :: !(forall a. Int# -> Code rep -> (Code rep -> Code a) -> Code a -> Code a)      -- ^ Ensure that n characters exist
                                          , _ensureNIsFast :: !Bool                                                                    -- ^ _ensureN is O(1) and not O(n)
@@ -150,15 +149,8 @@ checkImpl fastEnsureN ensureN uncons n m qi good bad
     -- Cached character wanted, so read it
     go n m qi dcs furthest = uncons qi (\c qi' -> go (n - 1) (m - 1) qi' (dcs . ((c, qi') :)) furthest) bad
 
-{-|
-Wraps around `InputOps` and `_more`.
-
-Queries the input to see if another character may be consumed.
-
-@since 1.4.0.0
--}
-more :: forall r (rep :: TYPE r). (?ops :: InputOps rep) => Code rep -> Code Bool
-more = _more ?ops
+more :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> Code a -> Code a -> Code a
+more input good = check 1 0 input (\_ _ -> good)
 
 {-|
 Wraps around `InputOps` and `_next`.
@@ -172,10 +164,13 @@ to the continuation.
 next :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a
 next = _next ?ops
 
+uncons :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a
+uncons = _uncons ?ops
+
 check :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Int -> Int -> Code rep -> (Code rep -> [(Code Char, Code rep)] -> Code a) -> Code a -> Code a
 check = checkImpl (_ensureNIsFast ?ops)
                   (\(I# n) -> _ensureN ?ops n)
-                  (_uncons ?ops)
+                  uncons
 
 {- INSTANCES -}
 -- InputPrep Instances
@@ -184,10 +179,9 @@ instance InputPrep [Char] where _prepare input = _prepare @(UArray Int Char) [||
 instance InputPrep (UArray Int Char) where
   _prepare qinput k = [||
       let !(UArray _ _ (I# size#) input#) = $$qinput
-      in $$(k (InputOps (\qi -> intLess qi [||size#||])
-                        (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
+      in $$(k (InputOps (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
                         (\qi k _ -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
-                        (\qn qi -> intLess' (intAdd qi (qn -# 1#)) [||size#||])
+                        (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
                         True)
               [||0#||])
     ||]
@@ -201,10 +195,9 @@ instance InputPrep ByteString where
             case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of
                 !_ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
-      in $$(k (InputOps (\qi -> intLess qi [||size#||])
-                        (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
+      in $$(k (InputOps (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
                         (\qi k _ -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
-                        (\qn qi -> intLess' (intAdd qi (qn -# 1#)) [||size#||])
+                        (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
                         True)
               [||off#||])
     ||]
@@ -212,8 +205,7 @@ instance InputPrep ByteString where
 instance InputPrep CharList where
   _prepare qinput k =  [||
       let CharList input = $$qinput
-      in $$(k (InputOps (\qi -> [||case $$qi of (# _, [] #) -> False; _ -> True||])
-                        (\qi k -> [|| let !(# i#, c:cs #) = $$qi in $$(k [||c||] [||(# i# +# 1#, cs #)||]) ||])
+      in $$(k (InputOps (\qi k -> [|| let !(# i#, c:cs #) = $$qi in $$(k [||c||] [||(# i# +# 1#, cs #)||]) ||])
                         (\qi good bad -> [||
                               case $$qi of
                                 (# i#, c : cs #) -> $$(good [||c||] [||(# i# +# 1#, cs #)||])
@@ -229,8 +221,7 @@ instance InputPrep CharList where
     ||]
 
 instance InputPrep Text where
-  _prepare qinput k = k (InputOps (\qi -> [||textNonEmpty $$qi||])
-                                  (\qi k -> [||
+  _prepare qinput k = k (InputOps (\qi k -> [||
                                       let t@(Text arr off unconsumed) = $$qi
                                           !(Iter c d) = iter t 0
                                       in $$(k [||c||] [||Text arr (off + d) (unconsumed - d)||]) ||])
@@ -255,8 +246,7 @@ instance InputPrep Lazy.ByteString where
           initial = case $$qinput of
             Lazy.Chunk (PS (ForeignPtr addr# final) (I# off#) (I# size#)) cs -> (# 0#, addr#, final, off#, size#, cs #)
             Lazy.Empty -> $$(emptyUnpackedLazyByteString [||0#||])
-      in $$(k (InputOps (\qi -> [||byteStringMore $$qi||])
-                        (\qi k -> [|| let !(# c, qi' #) = byteStringNext $$qi in $$(k [||c||] [||qi'||]) ||])
+      in $$(k (InputOps (\qi k -> [|| let !(# c, qi' #) = byteStringNext $$qi in $$(k [||c||] [||qi'||]) ||])
                         (\qi good bad -> [||
                             case $$qi of
                               (# _, _, _, _, 0#, _ #) -> $$bad
@@ -273,8 +263,7 @@ instance InputPrep Lazy.ByteString where
     ||]
 
 instance InputPrep Stream where
-  _prepare qinput k = k (InputOps (const [||True||])
-                                  (\qi k -> [|| let !(# o#, c :> cs #) = $$qi in $$(k [||c||] [||(# o# +# 1#, cs #)||]) ||])
+  _prepare qinput k = k (InputOps (\qi k -> [|| let !(# o#, c :> cs #) = $$qi in $$(k [||c||] [||(# o# +# 1#, cs #)||]) ||])
                                   (\qi k _ -> [|| let !(# o#, c :> cs #) = $$qi in $$(k [||c||] [||(# o# +# 1#, cs #)||]) ||])
                                   (\qn qi good _ -> good (offWithShiftRight [||dropStream||] qi (qn -# 1#)))
                                   True)

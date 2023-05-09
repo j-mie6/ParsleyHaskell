@@ -79,7 +79,8 @@ import Parsley.Internal.Backend.Machine.THUtils                   (eta)
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, consume, chooseInput)
+import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, chooseInput)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset        (moveOne)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
 import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
@@ -133,8 +134,8 @@ Consumes the next character and adjusts the offset to match.
 @since 1.8.0.0
 -}
 fetch :: (?ops :: InputOps (Rep o))
-      => Input o -> (Code Char -> Input o -> Code b) -> Code b
-fetch input k = next (offset (off input)) $ \c offset' -> k c (consume offset' input)
+      => Offset o -> (Code Char -> Offset o -> Code b) -> Code b
+fetch input k = next (offset input) $ \c offset' -> k c (moveOne input offset')
 
 {-|
 Emits a length check for a number of characters \(n\) in the most efficient

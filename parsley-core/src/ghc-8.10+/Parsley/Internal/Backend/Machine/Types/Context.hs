@@ -68,7 +68,7 @@ import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦV
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(willConsume))
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
-import Parsley.Internal.Backend.Machine.Types.Input    (Input)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
 import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
@@ -85,15 +85,15 @@ may form part of the generated code.
 
 @since 1.0.0.0
 -}
-data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))              -- ^ Map of subroutine bindings.
-                     , φs         :: !(DMap ΦVar (QJoin s o a))                    -- ^ Map of join point bindings.
-                     , σs         :: !(DMap ΣVar (Reg s))                          -- ^ Map of available registers.
-                     , debugLevel :: {-# UNPACK #-} !Int                           -- ^ Approximate depth of debug combinator.
-                     , coins      :: {-# UNPACK #-} !Int                           -- ^ Number of tokens free to consume without length check.
-                     , offsetUniq :: {-# UNPACK #-} !Word                          -- ^ Next unique offset identifier.
-                     , piggies    :: !(Queue Coins)                                -- ^ Queue of future length check credit.
-                     , netWorth   :: {-# UNPACK #-} !Int                           -- ^ The sum of the coins and piggies
-                     , knownChars :: !(RewindQueue (Code Char, CharPred, Input o)) -- ^ Characters that can be reclaimed on backtrack.
+data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))               -- ^ Map of subroutine bindings.
+                     , φs         :: !(DMap ΦVar (QJoin s o a))                     -- ^ Map of join point bindings.
+                     , σs         :: !(DMap ΣVar (Reg s))                           -- ^ Map of available registers.
+                     , debugLevel :: {-# UNPACK #-} !Int                            -- ^ Approximate depth of debug combinator.
+                     , coins      :: {-# UNPACK #-} !Int                            -- ^ Number of tokens free to consume without length check.
+                     , offsetUniq :: {-# UNPACK #-} !Word                           -- ^ Next unique offset identifier.
+                     , piggies    :: !(Queue Coins)                                 -- ^ Queue of future length check credit.
+                     , netWorth   :: {-# UNPACK #-} !Int                            -- ^ The sum of the coins and piggies
+                     , knownChars :: !(RewindQueue (Code Char, CharPred, Offset o)) -- ^ Characters that can be reclaimed on backtrack.
                      }
 
 {-|
@@ -431,7 +431,7 @@ can be retrieved later.
 
 @since 1.5.0.0
 -}
-addChar :: CharPred -> Code Char -> Input o -> Ctx s o a -> Ctx s o a
+addChar :: CharPred -> Code Char -> Offset o -> Ctx s o a -> Ctx s o a
 addChar p c o ctx = ctx { knownChars = enqueue (c, p, o) (knownChars ctx) }
 
 {-|
@@ -443,8 +443,8 @@ rewind buffer).
 -}
 readChar :: Ctx s o a                                                             -- ^ The original context.
          -> CharPred                                                              -- ^ The predicate that this character will be tested against
-         -> ((Code Char -> Input o -> Code b) -> Code b)                          -- ^ The fallback source of input.
-         -> (Code Char -> CharPred -> CharPred -> Input o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
+         -> ((Code Char -> Offset o -> Code b) -> Code b)                          -- ^ The fallback source of input.
+         -> (Code Char -> CharPred -> CharPred -> Offset o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
          -> Code b
 readChar ctx pred fallback k
   | reclaimable = unsafeReadChar ctx k

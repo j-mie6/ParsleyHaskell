@@ -125,9 +125,9 @@ evalSat p k = do
   where
     satFetch :: Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     satFetch mk = reader $ \ctx γ ->
-      readChar (spendCoin ctx) p (fetch (input γ)) $ \c staOldPred staPosPred input' ctx' ->
+      readChar (spendCoin ctx) p (fetch (off (input γ))) $ \c staOldPred staPosPred offset' ctx' ->
         let staPredC' = optimisePredGiven p staOldPred
-        in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos input' c staPosPred) ctx')
+        in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos (updateOffset offset' (input γ)) c staPosPred) ctx')
                                                 (raise γ)
 
     emitCheckAndFetch :: Coins -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
@@ -256,20 +256,15 @@ evalMeta BlockCoins (Machine k) = k
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
--- FIXME: the positions are updated during fetch, but will be usually `const True`
--- When the characters are read they are refined, but the remaining characters in the read queue are
--- not _rerefined_ with this information: each character in the queue needs to be updated
--- this needs to happen for refund as well I think, so should happen within the context, going to be
--- tricky to do though :(
 withLengthCheckAndCoins :: (?ops::InputOps (Rep o), PositionOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     let prefetch pred k ctx γ =
           -- input is known to exist
           -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
           -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
-          fetch (input γ) $ \c input' ->
+          fetch (off (input γ)) $ \c offset' ->
             flip (sat (ap (LAM (lamTerm pred))) c) (raise γ) $ \_ -> -- this character isn't needed
-              k (addChar pred c input' ctx) (γ {input = updatePos input' c pred})
+              k (addChar pred c offset' ctx) (γ {input = updatePos (updateOffset offset' (input γ)) c pred})
         -- ignore the second γ parameter, as to perform a rollback on the input
         remainder γ ctx _ = run (Machine k) γ (giveCoins (willConsume coins) ctx)
         good = withUpdatedOffset (\γ -> foldr prefetch (remainder γ) (take 1 (map onlyStatic (knownPreds coins)) ++ replicate (willConsume coins - 1) Item) ctx γ) γOrig

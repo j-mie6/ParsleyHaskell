@@ -14,13 +14,12 @@ for static augmented information, and `Input#` is a raw combination of the two c
 module Parsley.Internal.Backend.Machine.Types.Input (
     Input(off), Input#(..),
     mkInput, fromInput, toInput,
-    consume,
     forcePos, updatePos, updateOffset,
     chooseInput
   ) where
 
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
-import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset(offset), mkOffset, moveOne, moveN)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset(offset), mkOffset, moveN)
 import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPos, toDynPos, fromDynPos, fromStaPos, force, update)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common.Utils                              (Code)
@@ -73,14 +72,6 @@ Given a unique identifier, forms a plainly annotated static combination of posit
 -}
 toInput :: Word -> Input# o -> Input o
 toInput u Input#{..} = Input (mkOffset off# u) (fromDynPos pos#)
-
-{-|
-Register that a character has been consumed on this input, incorporating the new dynamic offset.
-
-@since 2.1.0.0
--}
-consume :: Code (Rep o) -> Input o -> Input o
-consume offset' input = updateOffset (moveOne (off input) offset') input
 
 updateOffset :: Offset o -> Input o -> Input o
 updateOffset off inp = inp { off = off }

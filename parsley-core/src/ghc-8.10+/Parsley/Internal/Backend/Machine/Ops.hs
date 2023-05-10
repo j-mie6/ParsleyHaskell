@@ -71,7 +71,7 @@ import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, uncons, check)
-import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
+import Parsley.Internal.Backend.Machine.InputRep                  (DynRep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
 import Parsley.Internal.Backend.Machine.THUtils                   (eta)
@@ -132,7 +132,7 @@ Consumes the next character and adjusts the offset to match.
 
 @since 1.8.0.0
 -}
-fetch :: (?ops :: InputOps (Rep o))
+fetch :: (?ops :: InputOps (DynRep o))
       => Offset o -> (Code Char -> Offset o -> Code b) -> Code b
 fetch input k = next (offset input) $ \c offset' -> k c (moveOne input offset')
 
@@ -143,14 +143,14 @@ when the \(n\) characters are available and the @bad@ when they are not.
 
 @since 2.3.0.0
 -}
-emitLengthCheck :: (?ops :: InputOps (Rep o))
+emitLengthCheck :: (?ops :: InputOps (DynRep o))
                 => Int                                             -- ^ The number of required characters \(n\).
                 -> Int                                             -- ^ The number of characters to prefetch \(m\).
                 -> Maybe (Code Char -> Code a -> Code a)           -- ^ An optional check for the head character.
                 -> (Offset o -> [(Code Char, Offset o)] -> Code a) -- ^ The good continuation if \(n\) characters are available.
                 -> Code a                                          -- ^ The bad continuation if the characters are unavailable.
                 -> Offset o                                        -- ^ The input to test on.
-                -> (Offset o -> Code (Rep o))
+                -> (Offset o -> Code (DynRep o))
                 -> Code a
 emitLengthCheck n m headCheck good bad input sel = check n m (sel input) headCheck good' bad
   where good' deepestKnown = let input' = updateDeepestKnown deepestKnown input in good input' . feed input'
@@ -283,7 +283,7 @@ where they are unknown (which is defined in terms of the previous two).
 
 @since 2.1.0.0
 -}
-bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (Rep o))
+bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (DynRep o))
                 => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
                 -> Bool                              -- ^ Is a binding required for the matching handler?
                 -> StaYesHandler s o a               -- ^ The handler that handles matching input.
@@ -424,7 +424,7 @@ the same way as `bindSameHandler`.
 
 @since 2.1.0.0
 -}
-bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
+bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (DynRep o))
              => Ctx s o a                  -- ^ The context to store the binding in.
              -> MVar Void                  -- ^ The name of the binding.
              -> Machine s o '[] One Void a -- ^ The loop body.
@@ -518,7 +518,7 @@ having printed the debug information.
 
 @since 1.2.0.0
 -}
-logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
+logHandler :: (?ops :: InputOps (DynRep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
 logHandler name ctx γ u _ = let VCons h _ = handlers γ in fromStaHandler# $ \inp# -> let inp = toInput u inp# in [||
     trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h inp)
   ||]
@@ -529,7 +529,7 @@ string.
 
 @since 1.2.0.0
 -}
-preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o)
+preludeString :: forall s o xs n r a. (?ops :: InputOps (DynRep o), LogHandler o)
               => String         -- ^ The name as per the debug combinator
               -> Char           -- ^ Either @<@ or @>@ depending on whether we are entering or leaving.
               -> Γ s o xs n r a
@@ -563,9 +563,9 @@ type Ops o =
   ( HandlerOps o
   , JoinBuilder o
   , RecBuilder o
-  , PositionOps (Rep o)
+  , PositionOps (DynRep o)
   , MarshalOps o
-  , LogOps (Rep o)
+  , LogOps (DynRep o)
   )
 
 {-|
@@ -573,7 +573,7 @@ The constraints needed to build a `logHandler`.
 
 @since 1.0.0.0
 -}
-type LogHandler o = (PositionOps (Rep o), LogOps (Rep o))
+type LogHandler o = (PositionOps (DynRep o), LogOps (DynRep o))
 
 {-|
 A `StaHandler` that has not yet captured its offset.

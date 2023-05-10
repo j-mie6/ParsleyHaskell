@@ -38,7 +38,7 @@ import GHC.Prim                                    (word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
-import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), Rep, UnpackedLazyByteString,
+import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), DynRep, UnpackedLazyByteString,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess, intAdd,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
                                                     textShiftRight, textShiftLeft, byteStringShiftRight,
@@ -53,7 +53,7 @@ word8ToWord# :: Word# -> Word#
 word8ToWord# x = x
 #endif
 
-prepare :: InputPrep input => Code input -> ((?ops :: InputOps (Rep input)) => Code (Rep input) -> Code r) -> Code r
+prepare :: InputPrep input => Code input -> ((?ops :: InputOps (DynRep input)) => Code (DynRep input) -> Code r) -> Code r
 prepare qinput k = _prepare qinput (\_ops -> let ?ops = _ops in k)
 
 {- Typeclasses -}
@@ -71,7 +71,7 @@ class InputPrep input where
 
   @since 1.0.0.0
   -}
-  _prepare :: rep ~ Rep input => Code input -> (InputOps rep -> Code rep -> Code r) -> Code r
+  _prepare :: rep ~ DynRep input => Code input -> (InputOps rep -> Code rep -> Code r) -> Code r
 
 {-|
 Defines operations for manipulating offsets for regular use. These are not

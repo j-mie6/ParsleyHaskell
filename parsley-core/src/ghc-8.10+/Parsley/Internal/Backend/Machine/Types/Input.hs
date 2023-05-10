@@ -18,7 +18,7 @@ module Parsley.Internal.Backend.Machine.Types.Input (
     chooseInput
   ) where
 
-import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
+import Parsley.Internal.Backend.Machine.InputRep                  (DynRep)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset(offset), mkOffset, moveN)
 import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPos, toDynPos, fromDynPos, fromStaPos, force, update)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
@@ -45,7 +45,7 @@ Packages a dynamic offset with a dynamic position.
 @since 1.8.0.0
 -}
 data Input# o = Input# {
-    off#  :: !(Code (Rep o)),
+    off#  :: !(Code (DynRep o)),
     pos#  :: !DynPos
   }
 
@@ -54,7 +54,7 @@ Constructs an `Input` given a dynamic offset and a static position.
 
 @since 2.1.0.0
 -}
-mkInput :: Code (Rep o) -> (Word, Word) -> Input o
+mkInput :: Code (DynRep o) -> (Word, Word) -> Input o
 mkInput off = Input (mkOffset off 0) . fromStaPos
 
 {-|

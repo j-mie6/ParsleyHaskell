@@ -22,7 +22,7 @@ and potentially the generated code).
 -}
 module Parsley.Internal.Backend.Machine.InputRep (
     -- * Representation Type-Families
-    Rep, RepKind,
+    DynRep, StaRep, RepKind,
     -- * @Int#@ Operations
     intSame, intLess, intAdd, min#, max#,
     -- * @Offwith@ Operations
@@ -139,16 +139,26 @@ Most parts of the machine work with `Rep`.
 
 @since 1.0.0.0
 -}
-type Rep :: forall (rep :: Type) -> TYPE (RepKind rep)
-type family Rep input where
-  Rep String = (# Int#, String #)
-  Rep (UArray Int Char) = Int#
-  Rep Text16 = Text
-  Rep ByteString = Int#
-  Rep Text = Text
-  Rep Lazy.ByteString = UnpackedLazyByteString
-  Rep CharList = (# Int#, String #)
-  Rep Stream = (# Int#, Stream #)
+type DynRep :: forall (rep :: Type) -> TYPE (RepKind rep)
+type family DynRep input where
+  DynRep String = (# Int#, String #)
+  DynRep (UArray Int Char) = Int#
+  DynRep Text16 = Text
+  DynRep ByteString = Int#
+  DynRep Text = Text
+  DynRep Lazy.ByteString = UnpackedLazyByteString
+  DynRep CharList = (# Int#, String #)
+  DynRep Stream = (# Int#, Stream #)
+
+type family StaRep input where
+  StaRep String = (Code Int#, Code String)
+  StaRep (UArray Int Char) = Code Int#
+  StaRep Text16 = (Code Text, Code Int)
+  StaRep ByteString = Code Int#
+  StaRep Text = (Code Text, Code Int)
+  StaRep Lazy.ByteString = Code UnpackedLazyByteString --TODO: could refine
+  StaRep CharList = (Code Int#, Code String)
+  StaRep Stream = (Code Int#, Code Stream)
 
 {- Generic Representation Operations -}
 {-|

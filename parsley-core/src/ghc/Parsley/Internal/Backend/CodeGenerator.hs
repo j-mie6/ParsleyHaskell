@@ -19,7 +19,6 @@ import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
                                             _Fmap, _App, _Get, _Put, _Make,
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
-                                            minus, minCoins, maxCoins, zero,
                                             IMVar, IΦVar, MVar(..), ΦVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline, reclaimable)
 import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFresh, construct, MonadFresh(..), mapVFreshT)
@@ -55,9 +54,8 @@ codeGen letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\
     m = finalise (histo alg p)
     alg :: Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
-    -- It is never safe to add coins to the top of a binding
-    -- This is because we don't know the characteristics of the caller (even the top-level!)
-    finalise cg = runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0
+    -- it is now safe to add coins to the top-level of a binding, because it is always assumed to not cut
+    finalise cg = addCoinsNeeded (runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0)
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
 pattern f :<$>: p <- (_ :< Pure f) :<*>: p
@@ -77,42 +75,22 @@ parsecHandler k = Same (not (shouldInline k)) k False (In4 Empt)
 recoverHandler :: Fix4 (Instr o) xs n r a -> Handler o (Fix4 (Instr o)) (o : xs) n r a
 recoverHandler = Always . not . shouldInline <*> In4 . Seek
 
-altNoCutCompile :: Trace => CodeGen o a y -> CodeGen o a x
-                -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
-                -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a)
-                -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
-altNoCutCompile p q handler post m =
+altCompile :: Trace => CodeGen o a y -> CodeGen o a x
+           -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
+           -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a)
+           -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
+altCompile p q handler post m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (deadCommitOptimisation (post φ)))
      qc <- freshΦ (runCodeGen q φ)
-     let np = coinsNeeded pc
-     let nq = coinsNeeded qc
-     let dp = np `minus` minCoins np nq
-     let dq = nq `minus` minCoins np nq
-     return $! binder (In4 (Catch (addCoins dp pc) (handler (addCoins dq qc))))
-
-loopCompile :: CodeGen o a () -> CodeGen o a x
-            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
-            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a)
-            -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
-loopCompile body exit prebody preExit m =
-  do μ <- askM
-     bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (Jump μ)))))
-     exitc <- freshM (runCodeGen exit m)
-     return $! In4 (Iter μ (prebody bodyc) (parsecHandler (preExit exitc)))
+     -- the shared coins are not factored out of the branches, because this is done by the AddCoins evaluation
+     return $! binder (In4 (Catch (addCoinsNeeded pc) (handler (addCoinsNeeded qc))))
 
 deep :: Trace => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
-deep (TryOrElse p q) = Just $ CodeGen $ altNoCutCompile p q recoverHandler id
-deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q recoverHandler (In4 . Pop . In4 . Push (user x))
-deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altNoCutCompile p q recoverHandler (In4 . _Fmap (user f))
-deep (MetaCombinator RequiresCut (_ :< ((p :< _) :<|>: (q :< _)))) = Just $ CodeGen $ \m ->
-  do (binder, φ) <- makeΦ m
-     pc <- freshΦ (runCodeGen p (deadCommitOptimisation φ))
-     qc <- freshΦ (runCodeGen q φ)
-     return $! binder (In4 (Catch pc (parsecHandler qc)))
-deep (MetaCombinator RequiresCut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit id addCoinsNeeded
-deep (MetaCombinator Cut (_ :< Loop (body :< _) (exit :< _))) = Just $ CodeGen $ loopCompile body exit addCoinsNeeded addCoinsNeeded
+deep (TryOrElse p q) = Just $ CodeGen $ altCompile p q recoverHandler id
+deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . Pop . In4 . Push (user x))
+deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . _Fmap (user f))
 deep _ = Nothing
 
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
@@ -125,41 +103,42 @@ shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf 
 shallow (p :*>: q)    m = do qc <- runCodeGen q m; runCodeGen p (In4 (Pop qc))
 shallow (p :<*: q)    m = do qc <- runCodeGen q (In4 (Pop m)); runCodeGen p qc
 shallow Empty         _ = do return $! In4 Empt
-shallow (p :<|>: q)   m = do altNoCutCompile p q parsecHandler id m
+shallow (p :<|>: q)   m = do altCompile p q parsecHandler id m
 shallow (Try p)       m = do fmap (In4 . flip Catch rollbackHandler) (runCodeGen p (deadCommitOptimisation m))
 shallow (LookAhead p) m =
-  do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- Dodgy hack, but oh well
+  do n <- fmap reclaimable (runCodeGen p (In4 Ret)) -- dodgy hack, but oh well
+     -- always refund the input consumed during a lookahead, so it can be reused (lookahead is handlerless)
      fmap (In4 . Tell) (runCodeGen p (In4 (Swap (In4 (Seek (refundCoins n m))))))
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
-     let np = coinsNeeded pc
-     let nm = coinsNeeded m
-     -- The minus here is used because the shared coins are propagated out front, neat.
-     return $! In4 (Catch (addCoins (maxCoins (np `minus` nm) zero) (In4 (Tell pc))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
+     -- it should never be the case that factored input can commute out of the lookahead
+     return $! In4 (Catch (blockCoins (addCoinsNeeded (In4 (Tell pc)))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
      qc <- freshΦ (runCodeGen q (In4 (Swap (In4 (_App φ)))))
-     let minc = coinsNeeded (In4 (Case pc qc))
-     let dp = maxCoins zero (coinsNeeded pc `minus` minc)
-     let dq = maxCoins zero (coinsNeeded qc `minus` minc)
-     fmap binder (runCodeGen b (In4 (Case (addCoins dp pc) (addCoins dq qc))))
+     -- the shared coins are not factored out of the branches, because this is done by the AddCoins evaluation
+     fmap binder (runCodeGen b (In4 (Case (addCoinsNeeded pc) (addCoinsNeeded qc))))
 shallow (Match p fs qs def) m =
   do (binder, φ) <- makeΦ m
      qcs <- traverse (\q -> freshΦ (runCodeGen q φ)) qs
      defc <- freshΦ (runCodeGen def φ)
-     let minc = coinsNeeded (In4 (Choices (map user fs) qcs defc))
-     let defc':qcs' = map (maxCoins zero . (`minus` minc) . coinsNeeded >>= addCoins) (defc:qcs)
+     let defc':qcs' = map addCoinsNeeded (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
 shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m
-shallow (Loop body exit)             m = do loopCompile body exit addCoinsNeeded id m
+shallow (Loop body exit)             m =
+  do μ <- askM
+     bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (Jump μ)))))
+     exitc <- freshM (runCodeGen exit m)
+     return $! In4 (Iter μ (addCoinsNeeded bodyc) (parsecHandler (addCoinsNeeded exitc)))
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
-shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) m))))
+-- seems effective: blocks upstream coins from commuting down, but allows them to self factor
+shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) (blockCoins m)))))
 shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
-shallow (MetaCombinator Cut p)       m = do blockCoins <$> runCodeGen p (addCoins (coinsNeeded m) m)
-shallow (MetaCombinator CutImmune p) m = do addCoins . coinsNeeded <$> runCodeGen p (In4 Ret) <*> runCodeGen p m
+-- make sure to issue the fence after `p` is generated, to allow for a (safe) single character factor
+shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins (addCoins (coinsNeeded m) m))
 
 tailCallOptimise :: MVar x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 tailCallOptimise μ (In4 Ret) = In4 (Jump μ)

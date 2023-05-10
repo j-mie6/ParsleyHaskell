@@ -13,11 +13,12 @@ a parser as it is evaluated.
 @since 1.8.0.0
 -}
 module Parsley.Internal.Backend.Machine.Types.Input.Offset (
-    Offset, mkOffset, offset, moveOne, moveN, same,
+    Offset, mkOffset, offset, moveOne, moveN, same, updateDeepestKnown, unsafeDeepestKnown
   ) where
 
 import Parsley.Internal.Backend.Machine.InputRep   (Rep)
 import Parsley.Internal.Common.Utils               (Code)
+import Data.Maybe                                  (fromJust)
 
 {-|
 Augments a regular @'Code' ('Rep' o)@ with information about its origins and
@@ -29,14 +30,15 @@ This can be used to statically evaluate handlers (see
 -}
 data Offset o = Offset {
     -- | The underlying code that represents the current offset into the input.
-    offset :: Code (Rep o),
+    offset :: !(Code (Rep o)),
+    deepestKnownChar :: !(Maybe (Code (Rep o))),
     -- | The unique identifier that determines where this offset originated from.
-    unique :: Word,
+    unique :: {-# UNPACK #-} !Word,
     -- | The amount of input that has been consumed on this offset since it was born.
-    moved  :: Amount
+    moved  :: {-# UNPACK #-} !Amount
   }
 
-data Amount = Amount Word {- ^ The multiplicity. -} Word {- ^ The additive offset. -}
+data Amount = Amount {-# UNPACK #-} !Word {- ^ The multiplicity. -} {-# UNPACK #-} !Word {- ^ The additive offset. -}
   deriving stock Eq
 
 {-|
@@ -81,7 +83,13 @@ yet.
 @since 1.4.0.0
 -}
 mkOffset :: Code (Rep o) -> Word -> Offset o
-mkOffset offset unique = Offset offset unique (Amount 0 0)
+mkOffset offset unique = Offset offset Nothing unique (Amount 0 0)
+
+updateDeepestKnown :: Code (Rep o) -> Offset o -> Offset o
+updateDeepestKnown known offset = offset { deepestKnownChar = Just known }
+
+unsafeDeepestKnown :: Offset o -> Code (Rep o)
+unsafeDeepestKnown = fromJust . deepestKnownChar
 
 add :: Amount -> Amount -> Amount
 add a1@(Amount n i) a2@(Amount m j)

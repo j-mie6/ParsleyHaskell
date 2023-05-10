@@ -52,25 +52,25 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- ** Modifiers
     storePiggy, breakPiggy, spendCoin, giveCoins, refundCoins, voidCoins,
     -- ** Getters
-    coins, hasCoin, isBankrupt, canAfford,
+    coins, hasCoin, isBankrupt, canAfford, netWorth,
     -- ** Input Reclamation
     addChar, readChar
   ) where
 
 import Control.Exception                               (Exception, throw)
-import Control.Monad                                   (liftM2, (<=<))
+import Control.Monad                                   ((<=<))
 import Control.Monad.Reader                            (asks, local, MonadReader)
 import Data.STRef                                      (STRef)
 import Data.Dependent.Map                              (DMap)
-import Data.Maybe                                      (fromMaybe)
+import Data.Maybe                                      (fromMaybe, isNothing)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Coins    (Coins, willConsume, canReclaim)
+import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(willConsume))
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
-import Parsley.Internal.Backend.Machine.Types.Input    (Input)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
 import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
@@ -85,14 +85,15 @@ may form part of the generated code.
 
 @since 1.0.0.0
 -}
-data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))              -- ^ Map of subroutine bindings.
-                     , φs         :: !(DMap ΦVar (QJoin s o a))                    -- ^ Map of join point bindings.
-                     , σs         :: !(DMap ΣVar (Reg s))                          -- ^ Map of available registers.
-                     , debugLevel :: {-# UNPACK #-} !Int                           -- ^ Approximate depth of debug combinator.
-                     , coins      :: {-# UNPACK #-} !Int                           -- ^ Number of tokens free to consume without length check.
-                     , offsetUniq :: {-# UNPACK #-} !Word                          -- ^ Next unique offset identifier.
-                     , piggies    :: !(Queue Coins)                                -- ^ Queue of future length check credit.
-                     , knownChars :: !(RewindQueue (Code Char, CharPred, Input o)) -- ^ Characters that can be reclaimed on backtrack.
+data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))               -- ^ Map of subroutine bindings.
+                     , φs         :: !(DMap ΦVar (QJoin s o a))                     -- ^ Map of join point bindings.
+                     , σs         :: !(DMap ΣVar (Reg s))                           -- ^ Map of available registers.
+                     , debugLevel :: {-# UNPACK #-} !Int                            -- ^ Approximate depth of debug combinator.
+                     , coins      :: {-# UNPACK #-} !Int                            -- ^ Number of tokens free to consume without length check.
+                     , offsetUniq :: {-# UNPACK #-} !Word                           -- ^ Next unique offset identifier.
+                     , piggies    :: !(Queue Coins)                                 -- ^ Queue of future length check credit.
+                     , netWorth   :: {-# UNPACK #-} !Int                            -- ^ The sum of the coins and piggies
+                     , knownChars :: !(RewindQueue (Code Char, CharPred, Offset o)) -- ^ Characters that can be reclaimed on backtrack.
                      }
 
 {-|
@@ -110,7 +111,7 @@ bindings: information about their required free-registers is included.
 @since 1.0.0.0
 -}
 emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty 0 Queue.empty
 
 -- Subroutines
 {- $sub-doc
@@ -347,7 +348,7 @@ broken.
 @since 1.5.0.0
 -}
 storePiggy :: Coins -> Ctx s o a -> Ctx s o a
-storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx)}
+storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx), netWorth = netWorth ctx + willConsume coins}
 
 {-|
 Break the next piggy-bank in the queue, and fill the coins in return.
@@ -356,8 +357,10 @@ __Note__: This should generate a length check when used!
 
 @since 1.0.0.0
 -}
-breakPiggy :: Ctx s o a -> Ctx s o a
-breakPiggy ctx = let (coins, piggies') = dequeue (piggies ctx) in ctx {coins = willConsume coins, piggies = piggies'}
+breakPiggy :: Ctx s o a -> (Coins, Ctx s o a)
+breakPiggy ctx =
+  let (coins, piggies') = dequeue (piggies ctx)
+  in (coins, ctx {piggies = piggies', netWorth = netWorth ctx - willConsume coins})
 
 {-|
 Does the context have coins available?
@@ -365,7 +368,7 @@ Does the context have coins available?
 @since 1.0.0.0
 -}
 hasCoin :: Ctx s o a -> Bool
-hasCoin = canAfford 1
+hasCoin = isNothing . canAfford 1
 
 {-|
 Is it the case that there are no coins /and/ no piggy-banks remaining?
@@ -373,7 +376,7 @@ Is it the case that there are no coins /and/ no piggy-banks remaining?
 @since 1.0.0.0
 -}
 isBankrupt :: Ctx s o a -> Bool
-isBankrupt = liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
+isBankrupt = (== 0) . netWorth--liftM2 (&&) (not . hasCoin) (Queue.null . piggies)
 
 {-|
 Spend a single coin, used when a token is consumed.
@@ -381,25 +384,24 @@ Spend a single coin, used when a token is consumed.
 @since 1.0.0.0
 -}
 spendCoin :: Ctx s o a -> Ctx s o a
-spendCoin ctx = ctx {coins = coins ctx - 1}
+spendCoin ctx = ctx {coins = coins ctx - 1, netWorth = netWorth ctx - 1}
 
 {-|
 Adds coins into the current supply.
 
 @since 1.5.0.0
 -}
-giveCoins :: Coins -> Ctx s o a -> Ctx s o a
-giveCoins c ctx = ctx {coins = coins ctx + willConsume c}
+giveCoins :: Int -> Ctx s o a -> Ctx s o a
+giveCoins c ctx = ctx {coins = coins ctx + c, netWorth = netWorth ctx + c}
 
 {-|
 Adds coins into the current supply.
 
 @since 1.5.0.0
 -}
-refundCoins :: Coins -> Ctx s o a -> Ctx s o a
-refundCoins c ctx = ctx { coins = coins ctx + willConsume c
-                        , knownChars = Queue.rewind (canReclaim c) (knownChars ctx)
-                        }
+refundCoins :: Int -> Ctx s o a -> Ctx s o a
+refundCoins c ctx =
+  giveCoins c ctx { knownChars = Queue.rewind c (knownChars ctx) }
 
 {-|
 Removes all coins and piggy-banks, such that @isBankrupt == True@.
@@ -407,7 +409,7 @@ Removes all coins and piggy-banks, such that @isBankrupt == True@.
 @since 1.0.0.0
 -}
 voidCoins :: Ctx s o a -> Ctx s o a
-voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty}
+voidCoins ctx = ctx {coins = 0, piggies = Queue.empty, knownChars = Queue.empty, netWorth = 0}
 
 {-|
 Asks if the current coin total can afford a charge of \(n\) characters.
@@ -417,8 +419,11 @@ of size \(n\) if this quota cannot be reached.
 
 @since 1.5.0.0
 -}
-canAfford :: Int -> Ctx s o a -> Bool
-canAfford n = (>= n) . coins
+--canAfford :: Int -> Ctx s o a -> Bool
+--canAfford n = (>= n) . coins
+
+canAfford :: Int -> Ctx s o a -> Maybe Int
+canAfford n ctx = if coins ctx >= n then Nothing else Just (n - coins ctx)
 
 {-|
 Caches a known character and the next offset into the context so that it
@@ -426,8 +431,8 @@ can be retrieved later.
 
 @since 1.5.0.0
 -}
-addChar :: Code Char -> Input o -> Ctx s o a -> Ctx s o a
-addChar c o ctx = ctx { knownChars = enqueue (c, Item, o) (knownChars ctx) }
+addChar :: CharPred -> Code Char -> Offset o -> Ctx s o a -> Ctx s o a
+addChar p c o ctx = ctx { knownChars = enqueue (c, p, o) (knownChars ctx) }
 
 {-|
 Reads a character from the context's retrieval queue if one exists.
@@ -438,21 +443,19 @@ rewind buffer).
 -}
 readChar :: Ctx s o a                                                             -- ^ The original context.
          -> CharPred                                                              -- ^ The predicate that this character will be tested against
-         -> ((Code Char -> Input o -> Code b) -> Code b)                          -- ^ The fallback source of input.
-         -> (Code Char -> CharPred -> CharPred -> Input o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
+         -> ((Code Char -> Offset o -> Code b) -> Code b)                          -- ^ The fallback source of input.
+         -> (Code Char -> CharPred -> CharPred -> Offset o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
          -> Code b
 readChar ctx pred fallback k
   | reclaimable = unsafeReadChar ctx k
-  | otherwise   = fallback $ \c o -> unsafeReadChar (addChar c o ctx) k
+  | otherwise   = fallback $ \c o -> unsafeReadChar (addChar Item c o ctx) k
   where
     reclaimable = not (Queue.null (knownChars ctx))
     unsafeReadChar ctx k = let -- combine the old information with the new information, refining the predicate
                                -- This works for notFollowedBy at the /moment/ because the predicate does not cross the handler boundary...
                                -- Perhaps any that cross handler boundaries should be complemented if that ever happens.
-                               updateChar (c, p, o) = (c, andPred p pred, o)
-                               ((_, pOld, _), q) = poke updateChar (knownChars ctx)
-                               ((c, p, o), q') = dequeue q
-                           in k c pOld p o (ctx { knownChars = q' })
+                               ((c, oldPred, o), q) = dequeue (knownChars ctx)
+                           in k c oldPred (andPred oldPred pred) o (ctx { knownChars = q })
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

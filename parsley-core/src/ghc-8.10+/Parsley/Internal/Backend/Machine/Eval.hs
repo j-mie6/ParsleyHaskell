@@ -21,8 +21,8 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
 import Data.Void                                           (Void)
-import Control.Monad                                       (forM, liftM2, liftM3, when)
-import Control.Monad.Reader                                (ask, asks, reader, local)
+import Control.Monad                                       (forM, liftM2, liftM3)
+import Control.Monad.Reader                                (Reader, ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
@@ -35,11 +35,12 @@ import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins        (willConsume, int)
-import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos)
+import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(knownPreds, willConsume, willCache), one, minus)
+import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos, updateOffset)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
 import Parsley.Internal.Common                             (Fix4, cata4, One, Code, Vec(..), Nat(..))
-import Parsley.Internal.Core.CharPred                      (CharPred, lamTerm, optimisePredGiven)
+import Parsley.Internal.Core.CharPred                      (CharPred(UserPred), pattern Item, lamTerm, optimisePredGiven)
 import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
@@ -114,28 +115,23 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: forall s o xs n r a. (?ops :: InputOps (Rep o), PositionOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalSat p k@(Machine k') = do
+evalSat :: forall s o xs n r a. (?ops :: InputOps (Rep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat p k = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
-  if | bankrupt -> emitCheckAndFetch 1 k
-     | hasChange -> local spendCoin (satFetch k)
-     | otherwise -> trace "I have a piggy :)" $
-        local breakPiggy $
-          do check <- asks (emitCheckAndFetch . coins)
-             check (Machine (local spendCoin k'))
+  if | bankrupt -> emitCheckAndFetch (one p) k
+     | hasChange -> satFetch k
+     | otherwise -> trace "I have a piggy :)" $ state breakPiggy $ \coins -> emitCheckAndFetch coins k
   where
     satFetch :: Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
     satFetch mk = reader $ \ctx γ ->
-      readChar ctx p (fetch (input γ)) $ \c staOldPred staPosPred input' ctx' ->
+      readChar (spendCoin ctx) p (fetch (off (input γ))) $ \c staOldPred staPosPred offset' ctx' ->
         let staPredC' = optimisePredGiven p staOldPred
-        in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos input' c staPosPred) ctx')
+        in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos (updateOffset offset' (input γ)) c staPosPred) ctx')
                                                 (raise γ)
 
-    emitCheckAndFetch :: Int -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-    emitCheckAndFetch n mk = do
-      sat <- satFetch mk
-      return $ \γ -> emitLengthCheck n (sat γ) (raise γ) (off (input γ))
+    emitCheckAndFetch :: Coins -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+    emitCheckAndFetch coins = withLengthCheckAndCoins coins . satFetch
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
@@ -229,26 +225,53 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps (Rep o), PositionOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps (Rep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
-  do requiresPiggy <- asks hasCoin
-     if requiresPiggy then local (storePiggy coins) k
-     else local (giveCoins coins) k <&> \mk γ -> emitLengthCheck (willConsume coins) (mk γ) (raise γ) (off (input γ))
+  -- when there are coins available, this cannot be discharged, and will wait until the current amounts
+  -- are exhausted. Because it might have been the case that lookahead was performed to refund, the
+  -- over-imbursement cannot be done in advance, and is instead done here, deducting the net-worth
+  -- of the coin count to ensure that only enough to make up the change is put in the piggy-banks
+  do net <- asks netWorth
+     let requiresPiggy = net /= 0
+     if requiresPiggy then local (storePiggy (coins `minus` net)) k
+     else withLengthCheckAndCoins coins k
 evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
-  -- If there are enough coins left to cover the cost, no length check is required
-  -- Otherwise, the full length check is required (partial doesn't work until the right offset is reached)
-  liftM2 (\canAfford mk γ -> if canAfford then mk γ else emitLengthCheck (willConsume coins) (mk γ) (raise γ) (off (input γ)))
-         (asks (canAfford (willConsume coins)))
+  liftM3 drain
+         (asks isBankrupt)
+         (asks (canAfford coins))
          k
-evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
-evalMeta (PrefetchChar check) k =
-  do bankrupt <- asks isBankrupt
-     when (not bankrupt && check) (error "must be bankrupt to generate a prefetch check")
-     mkCheck check (reader $ \ctx γ -> prefetch (input γ) ctx (run k γ))
   where
-    mkCheck True  k = local (giveCoins (int 1)) k <&> \mk γ -> emitLengthCheck 1 (mk γ) (raise γ) (off (input γ))
-    mkCheck False k = k
-    prefetch o ctx k = fetch o (\c o' -> k (addChar c o' ctx))
+    -- there are enough coins to pay in full
+    drain _ Nothing mk γ = mk γ
+    drain bankrupt ~(Just m) mk γ
+      -- full length check required
+      | bankrupt = emitLengthCheck coins 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) offset
+      -- can be partially paid from last known deepest offset
+      | otherwise = emitLengthCheck (m + 1) 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) unsafeDeepestKnown
+evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
 evalMeta BlockCoins (Machine k) = k
+
+withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
+withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
+
+withLengthCheckAndCoins :: (?ops::InputOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
+    -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
+    -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
+    let prefetch ((c, offset'), pred) k = k . addChar pred c offset'
+        remainder deepest ctx = withUpdatedOffset (flip (run (Machine k)) (giveCoins (willConsume coins) ctx)) γOrig deepest
+        staPred = knownPreds coins >>= onlyStatic
+        preds = maybe id (:) staPred (repeat Item) -- these are fed in to ensure the right checked pred is accounted for
+        headCheck = staPred <&> \pred c good -> sat (ap (LAM (lamTerm pred))) c (const good) (raise γOrig)
+        good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx
+    in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise γOrig) (off (input γOrig)) offset
+        -- this is needed because a cached predicate cannot be compared for equality if it's user-pred, and it'll duplicate!
+  where onlyStatic UserPred{} = Nothing
+        onlyStatic p          = Just p
+
+state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b
+state f k = do
+  (x, r) <- asks f
+  local (const r) (k x)

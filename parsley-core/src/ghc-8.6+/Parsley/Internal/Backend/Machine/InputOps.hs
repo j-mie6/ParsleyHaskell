@@ -2,6 +2,7 @@
              MagicHash,
              TypeApplications,
              UnboxedTuples #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), BoxOps(..), LogOps(..),
     InputOps(..), more, next,
@@ -11,7 +12,7 @@ module Parsley.Internal.Backend.Machine.InputOps (
 import Data.Array.Base                           (UArray(..), listArray)
 import Data.ByteString.Internal                  (ByteString(..))
 import Data.Text.Internal                        (Text(..))
-import Data.Text.Unsafe                          (iter, Iter(..){-, iter_, reverseIter_-})
+import Data.Text.Unsafe                          (iter, Iter(..))
 import GHC.Exts                                  (Int(..), Char(..))
 import GHC.ForeignPtr                            (ForeignPtr(..))
 import GHC.Prim                                  (indexWideCharArray#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#))
@@ -20,7 +21,6 @@ import Parsley.Internal.Common.Utils             (Code)
 import Parsley.Internal.Core.InputTypes          (Stream((:>)), CharList(..), Text16(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
---import qualified Data.Text                     as Text (length, index)
 
 data InputDependant rep = InputDependant {-next-} (rep -> (# Char, rep #))
                                          {-more-} (rep -> Bool)
@@ -52,8 +52,8 @@ next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||
 
 {- INSTANCES -}
 -- InputPrep Instances
-instance InputPrep [Char] where
-  prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
+--instance InputPrep [Char] where
+--  prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 
 instance InputPrep (UArray Int Char) where
   prepare qinput = [||
@@ -63,6 +63,7 @@ instance InputPrep (UArray Int Char) where
     ||]
 
 instance InputPrep Text16 where prepare qinput = prepare @Text [|| let Text16 t = $$qinput in t ||]
+instance InputPrep CharList where prepare qinput = prepare @String [|| let CharList cs = $$qinput in cs ||]
 
 instance InputPrep ByteString where
   prepare qinput = [||
@@ -74,13 +75,12 @@ instance InputPrep ByteString where
       in InputDependant next (< size) off
     ||]
 
-instance InputPrep CharList where
+instance InputPrep String where
   prepare qinput = [||
-      let CharList input = $$qinput
-          next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
+      let next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
           more (OffWith _ []) = False
           more _              = True
-      in InputDependant next more ($$offWith input)
+      in InputDependant next more ($$offWith $$qinput)
     ||]
 
 instance InputPrep Text where
@@ -169,52 +169,3 @@ instance LogOps Text where
 instance LogOps UnpackedLazyByteString where
   shiftLeft = [||byteStringShiftLeft||]
   offToInt = [||\(UnpackedLazyByteString i _ _ _ _ _) -> i||]
-
-{- Old Instances -}
-{-instance Input CacheText (Text, Stream) where
-  prepare qinput = [||
-      let (CacheText input) = $$qinput
-          next (t@(Text arr off unconsumed), _) = let !(Iter c d) = iter t 0 in (# c, (Text arr (off+d) (unconsumed-d), nomore) #)
-          more (Text _ _ unconsumed, _) = unconsumed > 0
-          same (Text _ i _, _) (Text _ j _, _) = i == j
-          (Text arr off unconsumed, _) << i = go i off unconsumed
-            where
-              go 0 off' unconsumed' = (Text arr off' unconsumed', nomore)
-              go n off' unconsumed'
-                | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
-                | otherwise = (Text arr off' unconsumed', nomore)
-          (Text arr off unconsumed, _) >> i = go i off unconsumed
-            where
-              go 0 off' unconsumed' = (Text arr off' unconsumed', nomore)
-              go n off' unconsumed'
-                | unconsumed' > 0 = let !d = iter_ (Text arr off' unconsumed') 0 in go (n-1) (off'+d) (unconsumed'-d)
-                | otherwise = (Text arr off' unconsumed', nomore)
-          toInt (Text arr off unconsumed, _) = div off 2
-          box (# text, cache #) = (text, cache)
-          unbox (text, cache) = (# text, cache #)
-          newCRef (Text _ i _, _) = newSTRefU i
-          readCRef ref = fmap (\i -> (Text empty i 0, nomore)) (readSTRefU ref)
-          writeCRef ref (Text _ i _, _) = writeSTRefU ref i
-      in PreparedInput next more same (input, nomore) box unbox newCRef readCRef writeCRef s(<<) (>>) toInt
-    ||]
-
-instance Input Lazy.ByteString (OffWith Lazy.ByteString) where
-  prepare qinput = [||
-      let next (OffWith i (Lazy.Chunk (PS ptr@(ForeignPtr addr# final) off@(I# off#) size) cs)) =
-            case readWord8OffAddr# addr# off# realWorld# of
-              (# s', x #) -> case touch# final s' of
-                _ -> (# C# (chr# (word2Int# x)), OffWith (i+1) (if size == 1 then cs
-                                                                else Lazy.Chunk (PS ptr (off+1) (size-1)) cs) #)
-          more (OffWith _ Lazy.Empty) = False
-          more _ = True
-          ow@(OffWith _ (Lazy.Empty)) << _ = ow
-          OffWith o (Lazy.Chunk (PS ptr off size) cs) << i =
-            let d = min off i
-            in OffWith (o - d) (Lazy.Chunk (PS ptr (off - d) (size + d)) cs)
-          ow@(OffWith _ Lazy.Empty) >> _ = ow
-          OffWith o (Lazy.Chunk (PS ptr off size) cs) >> i
-            | i < size  = OffWith (o + i) (Lazy.Chunk (PS ptr (off + i) (size - i)) cs)
-            | otherwise = OffWith (o + size) cs >> (i - size)
-          readCRef ref = fmap (\i -> OffWith i Lazy.Empty) (readSTRefU ref)
-      in PreparedInput next more offWithSame (offWith $$qinput) offWithBox offWithUnbox offWithNewORef readCRef offWithWriteORef (<<) (>>) offWithToInt
-    ||]-}

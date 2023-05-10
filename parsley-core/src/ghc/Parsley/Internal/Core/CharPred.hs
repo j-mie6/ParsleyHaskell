@@ -13,7 +13,7 @@ This can be used to efficiently query for character class membership.
 -}
 module Parsley.Internal.Core.CharPred (
     CharPred(..), pattern Item, pattern Specific,
-    apply, andPred, orPred, diffPred, optimisePredGiven,
+    apply, andPred, orPred, diffPred, optimisePredGiven, mergePreds,
     members, nonMembers,
     lamTerm
   ) where
@@ -100,6 +100,12 @@ optimisePredGiven (Ranges pred) (Ranges given)
     inter = intersection given pred
 optimisePredGiven p _ = p
 
+mergePreds :: CharPred -> CharPred -> CharPred
+mergePreds (Ranges p1) (Ranges p2)
+  | isSubsetOf p1 p2 = Ranges p2
+  | isSubsetOf p2 p1 = Ranges p1
+mergePreds _ _ = Item
+
 {-|
 Merges two predicates by creating one which only returns true when a character
 is in either of the original predicates.
@@ -146,6 +152,7 @@ be optimised.
 
 @since 2.1.0.0
 -}
+-- TODO: Something to optimise /= or noneOf?
 lamTerm :: CharPred -> Lam (Char -> Bool)
 lamTerm (UserPred _ t) = t
 lamTerm Item = Abs (const T)

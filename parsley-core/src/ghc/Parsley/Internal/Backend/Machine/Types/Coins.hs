@@ -1,4 +1,4 @@
-{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingStrategies, PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Coins
 Description : Meta-data associated with input consumption optimisations.
@@ -14,11 +14,13 @@ reads (in the case of lookahead).
 -}
 module Parsley.Internal.Backend.Machine.Types.Coins (
     Coins(..),
-    int, zero,
-    minCoins, maxCoins,
-    plus1, plus, minus,
-    plusNotReclaim,
+    minCoins,
+    plus1, minus, canReclaim,
+    pattern Zero, one, items
   ) where
+
+import Control.Applicative (liftA2)
+import Parsley.Internal.Core.CharPred (CharPred, mergePreds)
 
 {-|
 Packages together the known input that can be consumed after a length-check with the number of
@@ -28,29 +30,34 @@ characters that can be rewound on a lookahead backtrack.
 -}
 data Coins = Coins {
     -- | The number of tokens we know must be consumed along the path to succeed.
-    willConsume :: Int,
-    -- | The number of tokens we can reclaim if the parser backtracks.
-    canReclaim :: Int
+    willConsume :: {-# UNPACK #-} !Int,
+    willCache   :: {-# UNPACK #-} !Int,
+    knownPreds  :: !(Maybe CharPred)
   } deriving stock Show
 
-{-|
-Makes a `Coins` value with equal quantities of coins and characters.
-
-@since 1.5.0.0
--}
-int :: Int -> Coins
-int n = Coins n n
+canReclaim :: Coins -> Int
+canReclaim = willConsume
 
 {-|
 Makes a `Coins` value of 0.
 
 @since 1.5.0.0
 -}
-zero :: Coins
-zero = int 0
+pattern Zero :: Coins
+pattern Zero = Coins 0 0 Nothing
 
-zipCoins :: (Int -> Int -> Int) -> Coins -> Coins -> Coins
-zipCoins f (Coins k1 r1) (Coins k2 r2) = Coins (f k1 k2) (f r1 r2)
+one :: CharPred -> Coins
+one p = Coins 1 1 (Just p)
+
+items :: Int -> Coins
+items n = Coins n 0 Nothing
+
+zipCoins :: (Int -> Int -> Int) -> (Int -> Int -> Int) -> (Maybe CharPred -> Maybe CharPred -> Maybe CharPred) -> Coins -> Coins -> Coins
+zipCoins f g h (Coins k1 c1 cs1) (Coins k2 c2 cs2) = Coins k' c' cs'
+  where
+    k' = f k1 k2
+    c' = g c1 c2
+    cs' = h cs1 cs2
 
 {-|
 Takes the pairwise min of two `Coins` values.
@@ -58,44 +65,19 @@ Takes the pairwise min of two `Coins` values.
 @since 1.5.0.0
 -}
 minCoins :: Coins -> Coins -> Coins
-minCoins = zipCoins min
-
-{-|
-Takes the pairwise max of two `Coins` values.
-
-@since 1.5.0.0
--}
-maxCoins :: Coins -> Coins -> Coins
-maxCoins = zipCoins max
+minCoins = zipCoins min min (liftA2 mergePreds)
 
 {-|
 Adds 1 to all the `Coins` values.
 
 @since 1.5.0.0
 -}
-plus1 :: Coins -> Coins
-plus1 = plus (Coins 1 1)
+plus1 :: CharPred -> Coins -> Coins
+plus1 p =  zipCoins (+) (+) const (one p)
 
 {-|
-Performs the pairwise addition of two `Coins` values.
-
 @since 1.5.0.0
 -}
-plus :: Coins -> Coins -> Coins
-plus = zipCoins (+)
-
-{-|
-Performs the pairwise subtraction of two `Coins` values.
-
-@since 1.5.0.0
--}
-minus :: Coins -> Coins -> Coins
-minus = zipCoins (-)
-
-{-|
-A verson of plus where the reclaim value remains constant.
-
-@since 1.5.0.0
--}
-plusNotReclaim :: Coins -> Int -> Coins
-plusNotReclaim (Coins k r) n = Coins (k + n) r
+minus :: Coins -> Int -> Coins
+minus c 0 = c
+minus (Coins n c _) m = Coins (max (n - m) 0) (max (c - m) 0) Nothing

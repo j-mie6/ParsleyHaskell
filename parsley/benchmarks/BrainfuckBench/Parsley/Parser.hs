@@ -24,14 +24,9 @@ deriving instance Lift BrainFuckOp
 brainfuck :: Parser [BrainFuckOp]
 brainfuck = whitespace *> bf <* eof
   where
-    leqdot = RANGES True [('\NUL', '.')]
-    leqgreat = RANGES True [('\NUL', '>')]
-    leqcomma = RANGES True [('\NUL', ',')]
-
     whitespace = skipMany (noneOf "<>+-[],.")
     lexeme p = p <* whitespace
-    -- This implementation is back on top: the `more` can help eliminate the shared character read!
-    bf = many ( more *> lexeme ((token ">" $> QQ(RightPointer))
+    bf = many ( lexeme ((token ">" $> QQ(RightPointer))
                             <|> (token "<" $> QQ(LeftPointer))
                             <|> (token "+" $> QQ(Increment))
                             <|> (token "-" $> QQ(Decrement))

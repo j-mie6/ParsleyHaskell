@@ -63,15 +63,14 @@ module Parsley.Internal.Backend.Machine.Ops (
 import Control.Monad                                              (liftM2)
 import Control.Monad.Reader                                       (ask, local)
 import Control.Monad.ST                                           (ST)
+import Data.List                                                  (mapAccumL)
 import Data.STRef                                                 (writeSTRef, readSTRef, newSTRef)
 import Data.Void                                                  (Void)
 import Debug.Trace                                                (trace)
-import GHC.Exts                                                   (Int(..), (-#))
-import Language.Haskell.TH.Syntax                                 (liftTyped)
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, more)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, uncons, check)
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
@@ -79,14 +78,15 @@ import Parsley.Internal.Backend.Machine.THUtils                   (eta)
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
-import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, consume, chooseInput)
+import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, chooseInput)
+import Parsley.Internal.Backend.Machine.Types.Input.Offset        (moveOne)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
 import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                                    (One, Code, Vec(..), Nat(..))
 import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
-import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..))
+import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), updateDeepestKnown)
 
 {- General Operations -}
 {-|
@@ -133,27 +133,28 @@ Consumes the next character and adjusts the offset to match.
 @since 1.8.0.0
 -}
 fetch :: (?ops :: InputOps (Rep o))
-      => Input o -> (Code Char -> Input o -> Code b) -> Code b
-fetch input k = next (offset (off input)) $ \c offset' -> k c (consume offset' input)
+      => Offset o -> (Code Char -> Offset o -> Code b) -> Code b
+fetch input k = next (offset input) $ \c offset' -> k c (moveOne input offset')
 
 {-|
 Emits a length check for a number of characters \(n\) in the most efficient
 way it can. It takes two continuations a @good@ and a @bad@: the @good@ is used
 when the \(n\) characters are available and the @bad@ when they are not.
 
-@since 1.4.0.0
+@since 2.3.0.0
 -}
-emitLengthCheck :: (?ops :: InputOps (Rep o), PositionOps (Rep o))
-                => Int      -- ^ The number of required characters \(n\).
-                -> Code a   -- ^ The good continuation if \(n\) characters are available.
-                -> Code a   -- ^ The bad continuation if the characters are unavailable.
-                -> Offset o -- ^ The input to test on.
+emitLengthCheck :: (?ops :: InputOps (Rep o))
+                => Int                                             -- ^ The number of required characters \(n\).
+                -> Int                                             -- ^ The number of characters to prefetch \(m\).
+                -> Maybe (Code Char -> Code a -> Code a)           -- ^ An optional check for the head character.
+                -> (Offset o -> [(Code Char, Offset o)] -> Code a) -- ^ The good continuation if \(n\) characters are available.
+                -> Code a                                          -- ^ The bad continuation if the characters are unavailable.
+                -> Offset o                                        -- ^ The input to test on.
+                -> (Offset o -> Code (Rep o))
                 -> Code a
-emitLengthCheck 0 good _ _   = good
-emitLengthCheck 1 good bad input = [|| if $$(more (offset input)) then $$good else $$bad ||]
-emitLengthCheck (I# n) good bad input = [||
-  if $$(more (shiftRight (offset input) (liftTyped (n -# 1#)))) then $$good
-  else $$bad ||]
+emitLengthCheck n m headCheck good bad input sel = check n m (sel input) headCheck good' bad
+  where good' deepestKnown = let input' = updateDeepestKnown deepestKnown input in good input' . feed input'
+        feed input' = snd . mapAccumL (\off (c, rep) -> let off' = moveOne off rep in (off', (c, off'))) input'
 
 {- Register Operations -}
 {-|
@@ -317,7 +318,7 @@ may only exit on failure, which is the case with iterating parsers.
 @since 1.2.0.0
 -}
 noreturn :: StaCont s o a Void
-noreturn = mkStaCont $ \_ _ -> [||error "Return is not permitted here"||]
+noreturn = mkStaCont $ error "Return is not permitted here"
 
 {-|
 Executes a given continuation (which may be a return continuation or a
@@ -535,20 +536,20 @@ preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o)
               -> Ctx s o a
               -> String         -- ^ String that represents the current status
               -> Code String
-preludeString name dir γ ctx ends = [|| concat [$$prelude, $$eof, ends, '\n' : $$caretSpace, color Blue "^"] ||]
+preludeString name dir γ ctx ends = [|| concat [$$prelude, $$inputTrace, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
     offset          = Offset.offset (off (input γ))
     indent          = replicate (debugLevel ctx * 2) ' '
-    start           = shiftLeft offset [||5#||]
-    end             = shiftRight offset [||5#||]
+    start           = shiftLeft offset 5
+    end             = shiftRight offset 5
     inputTrace      = [|| let replace '\n' = color Green "↙"
                               replace ' '  = color White "·"
                               replace c    = return c
-                              go i#
-                                | $$(same [||i#||] end) || not $$(more [||i#||]) = []
-                                | otherwise = $$(next [||i#||] (\qc qi' -> [||replace $$qc ++ go $$qi'||]))
+                              go i# = $$(uncons [||i#||] (\qc qi' -> [||
+                                  if $$(same [||i#||] end) then []
+                                  else replace $$qc ++ go $$qi' ||])
+                                [||color Red "•"||])
                           in go $$start ||]
-    eof             = [|| if $$(more end) then $$inputTrace else $$inputTrace ++ color Red "•" ||]
     prelude         = [|| concat [indent, dir : name, dir : " (", show $$(offToInt offset), "): "] ||]
     caretSpace      = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
 

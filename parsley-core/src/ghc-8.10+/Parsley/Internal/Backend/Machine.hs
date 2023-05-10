@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-|
 Module      : Parsley.Internal.Backend.Machine
 Description : The implementation of the low level parsing machinery is found here
@@ -26,7 +28,7 @@ import Parsley.Internal.Backend.Machine.InputOps     (InputPrep, prepare)
 import Parsley.Internal.Backend.Machine.Instructions
 import Parsley.Internal.Backend.Machine.LetBindings  (LetBinding, makeLetBinding, newMeta)
 import Parsley.Internal.Backend.Machine.Ops          (Ops)
-import Parsley.Internal.Backend.Machine.Types.Coins  (Coins(..), zero, minCoins, maxCoins, plus, plus1, minus, plusNotReclaim)
+import Parsley.Internal.Backend.Machine.Types.Coins  (Coins(..), minCoins, plus1, minus, pattern Zero, items)
 import Parsley.Internal.Common.Utils                 (Code)
 import Parsley.Internal.Core.InputTypes
 import Parsley.Internal.Trace                        (Trace)
@@ -50,13 +52,11 @@ used as input for a parser.
 @since 0.1.0.0
 -}
 class (InputPrep input, Ops input) => Input input
-instance Input [Char]
+instance Input String
 instance Input (UArray Int Char)
 instance Input Text16
 instance Input ByteString
 instance Input CharList
 instance Input Text
---instance Input CacheText
 instance Input Lazy.ByteString
---instance Input Lazy.ByteString
 instance Input Stream

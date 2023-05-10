@@ -112,7 +112,7 @@ update pos c p = pos { contributing = StaChar c p : contributing pos }
 -- Data
 
 -- TODO: This could be more fine-grained, for instance a partially static position.
-data Pos = Static {-# UNPACK #-} !Word {-# UNPACK #-} !Word | Dynamic DynPos
+data Pos = Static {-# UNPACK #-} !Word {-# UNPACK #-} !Word | Dynamic !DynPos
 
 data Alignment = Unknown | Unaligned {-# UNPACK #-} !Word
 

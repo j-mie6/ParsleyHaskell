@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-monomorphism-restriction #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-# LANGUAGE AllowAmbiguousTypes,
              CPP,
              MagicHash,
@@ -38,7 +39,7 @@ import Parsley.Internal.Core.InputTypes                (Text16, CharList, Stream
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString)
 
 #define inputInstances(derivation) \
-derivation([Char])                 \
+derivation(String)                 \
 derivation((UArray Int Char))      \
 derivation(Text16)                 \
 derivation(ByteString)             \

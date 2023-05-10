@@ -1,4 +1,5 @@
 {-# OPTIONS_HADDOCK show-extensions #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-# LANGUAGE CPP,
              MagicHash,
              TypeFamilies,
@@ -23,23 +24,23 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * Representation Type-Families
     Rep, RepKind,
     -- * @Int#@ Operations
-    intSame, intLess, intLess', min#, max#,
+    intSame, intLess, intAdd, min#, max#,
     -- * @Offwith@ Operations
     OffWith, offWith, offWithSame, offWithShiftRight,
-    --OffWithStreamAnd(..),
     -- * @LazyByteString@ Operations
     UnpackedLazyByteString, emptyUnpackedLazyByteString,
+    byteStringShiftRight, byteStringShiftLeft,
     -- * @Stream@ Operations
     dropStream,
     -- * @Text@ Operations
-    offsetText,
+    offsetText, textShiftRight, textShiftLeft,
     -- * Crucial Exposed Functions
     {- |
     These functions must be exposed, since they can appear
     in the generated code.
     -}
-    textShiftRight, textShiftLeft, textEnsureN, textNonEmpty,
-    byteStringShiftRight, byteStringShiftLeft, byteStringMore, byteStringNext, byteStringEnsureN,
+    byteStringNext,
+    textShiftRight#,  textShiftLeft#, byteStringShiftRight#, byteStringShiftLeft#,
     -- * Re-exports
     module Parsley.Internal.Core.InputTypes
   ) where
@@ -80,8 +81,6 @@ be used for quicker comparisons.
 @since 1.0.0.0
 -}
 type OffWith ts = (# Int#, ts #)
-
---data OffWithStreamAnd ts = OffWithStreamAnd {-# UNPACK #-} !Int !Stream ts
 
 {-|
 This type unpacks /lazy/ `Lazy.ByteString`s for efficiency.
@@ -124,7 +123,7 @@ representation of an input with the correct kind, this type family must be used.
 -}
 type RepKind :: Type -> RuntimeRep
 type family RepKind input where
-  RepKind [Char] = IntRep
+  RepKind String = 'TupleRep '[IntRep, LiftedRep]
   RepKind (UArray Int Char) = IntRep
   RepKind Text16 = LiftedRep
   RepKind ByteString = IntRep
@@ -132,8 +131,6 @@ type family RepKind input where
   RepKind Lazy.ByteString = 'TupleRep '[IntRep, AddrRep, LiftedRep, IntRep, IntRep, LiftedRep]
   RepKind CharList = 'TupleRep '[IntRep, LiftedRep]
   RepKind Stream = 'TupleRep '[IntRep, LiftedRep]
-  --RepKind (OffWithStreamAnd _) = 'TupleRep '[IntRep, LiftedRep, LiftedRep] --REMOVE
-  --RepKind (Text, Stream) = 'TupleRep '[LiftedRep, LiftedRep] --REMOVE
 
 {-|
 This type family relates a user input type with the underlying parsley
@@ -144,7 +141,7 @@ Most parts of the machine work with `Rep`.
 -}
 type Rep :: forall (rep :: Type) -> TYPE (RepKind rep)
 type family Rep input where
-  Rep [Char] = Int#
+  Rep String = (# Int#, String #)
   Rep (UArray Int Char) = Int#
   Rep Text16 = Text
   Rep ByteString = Int#
@@ -152,8 +149,6 @@ type family Rep input where
   Rep Lazy.ByteString = UnpackedLazyByteString
   Rep CharList = (# Int#, String #)
   Rep Stream = (# Int#, Stream #)
-  --Rep (OffWithStreamAnd ts) = (# Int#, Stream, ts #)
-  --Rep (Text, Stream) = (# Text, Stream #)
 
 {- Generic Representation Operations -}
 {-|
@@ -167,23 +162,25 @@ intSame qi# qj# = [||isTrue# ($$(qi#) ==# $$(qj#))||]
 {-|
 Is the first argument is less than the second?
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-intLess :: Code Int# -> Code Int# -> Code Bool
-intLess qi# qj# = [||isTrue# ($$(qi#) <# $$(qj#))||]
-
-intLess' :: Code Int# -> Code Int# -> Code a -> Code a -> Code a
-intLess' qi# qj# yes no = [||
+intLess :: Code Int# -> Code Int# -> (Code Int# -> Code a) -> Code a -> Code a
+intLess qi# qj# yes no = [||
     case $$(qi#) <# $$(qj#) of
-      1# -> $$yes
+      1# -> $$(yes qi#)
       0# -> $$no
   ||]
+
+intAdd :: Code Int# -> Int# -> Code Int#
+intAdd qx 0# = qx
+intAdd qx qn = [||$$qx +# qn||]
 
 {-|
 Extracts the offset from `Text`.
 
 @since 1.0.0.0
 -}
+-- FIXME: not accurate? this can be slow without consequence
 offsetText :: Code Text -> Code Int
 offsetText qt = [||case $$qt of Text _ off _ -> off||]
 
@@ -208,17 +205,12 @@ companion input.
 -}
 offWithShiftRight :: Code (Int -> ts -> ts) -- ^ A @drop@ function for underlying input.
                   -> Code (OffWith ts)      -- ^ The `OffWith` to shift.
-                  -> Code Int#              -- ^ How much to shift by.
+                  -> Int#                   -- ^ How much to shift by.
                   -> Code (OffWith ts)
+offWithShiftRight _ qo# 0# = qo#
 offWithShiftRight drop qo# qi# = [||
-    case $$(qo#) of (# o#, ts #) -> (# o# +# $$(qi#), $$drop (I# $$(qi#)) ts #)
+    case $$(qo#) of (# o#, ts #) -> (# o# +# qi#, $$drop (I# qi#) ts #)
   ||]
-
-{-offWithStreamAnd :: ts -> OffWithStreamAnd ts
-offWithStreamAnd ts = OffWithStreamAnd 0 nomore ts
-
-offWithStreamAndToInt :: OffWithStreamAnd ts -> Int
-offWithStreamAndToInt (OffWithStreamAnd i _ _) = i-}
 
 {-|
 Drops tokens off of a `Stream`.
@@ -232,46 +224,38 @@ dropStream n (_ :> cs) = dropStream (n-1) cs
 {-|
 Drops tokens off of `Text`.
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-{-# INLINABLE textShiftRight #-}
-textShiftRight :: Text -> Int -> Text
-textShiftRight (Text arr off unconsumed) !i = go i arr off unconsumed
+textShiftRight :: Code Text -> Int# -> Code Text
+textShiftRight t 0# = t
+textShiftRight t n = [||textShiftRight# $$t n||]
+
+{-# INLINABLE textShiftRight# #-}
+textShiftRight# :: Text -> Int# -> Text
+textShiftRight# (Text arr off unconsumed) !i = go i arr off unconsumed
   where
-    go 0 !arr !off !unconsumed = Text arr off unconsumed
+    go 0# !arr !off !unconsumed = Text arr off unconsumed
     go n !arr !off !unconsumed
       | unconsumed > 0 = let !d = iter_ (Text arr off unconsumed) 0
-                         in go (n - 1) arr (off + d) (unconsumed - d)
-      | otherwise = Text arr off unconsumed
-
-
-{-# INLINABLE textEnsureN #-}
-textEnsureN :: Int# -> Text -> Bool
-textEnsureN n# (Text arr off unconsumed) = go n# arr off unconsumed
-  where
-    go 0# !_ !_ !_ = True
-    go n arr off unconsumed
-      | unconsumed > 0 = let !d = iter_ (Text arr off unconsumed) 0
                          in go (n -# 1#) arr (off + d) (unconsumed - d)
-      | otherwise      = False
-
-{-# INLINABLE textNonEmpty #-}
-textNonEmpty :: Text -> Bool
-textNonEmpty (Text _ _ 0) = False
-textNonEmpty _            = True
+      | otherwise = Text arr off 0
 
 {-|
 Rewinds input consumption on `Text` where the input is still available (i.e. in the same chunk).
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-textShiftLeft :: Text -> Int -> Text
-textShiftLeft (Text arr off unconsumed) i = go i off unconsumed
+textShiftLeft :: Code Text -> Int# -> Code Text
+textShiftLeft t 0# = t
+textShiftLeft t n = [||textShiftLeft# $$t n||]
+
+textShiftLeft# :: Text -> Int# -> Text
+textShiftLeft# (Text arr off unconsumed) i = go i off unconsumed
   where
-    go 0 off' unconsumed' = Text arr off' unconsumed'
+    go 0# off' unconsumed' = Text arr off' unconsumed'
     go n off' unconsumed'
-      | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n - 1) (off' + d) (unconsumed' - d)
-      | otherwise = Text arr off' unconsumed'
+      | off' > 0 = let !d = reverseIter_ (Text arr off' unconsumed') 0 in go (n -# 1#) (off' + d) (unconsumed' - d)
+      | otherwise = Text arr 0 unconsumed'
 
 {-# INLINE emptyUnpackedLazyByteString' #-}
 emptyUnpackedLazyByteString' :: Int# -> UnpackedLazyByteString
@@ -290,40 +274,35 @@ byteStringNext (# i#, addr#, final, off#, size#, cs #) =
             Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# 1#)
         #)
 
-{-# INLINE byteStringMore #-}
-byteStringMore :: UnpackedLazyByteString -> Bool
-byteStringMore (# _, _, _, _, 0#, _ #) = False
-byteStringMore (# _, _, _, _, _, _ #) = True
-
 {-|
 Drops tokens off of a lazy `Lazy.ByteString`.
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-{-# INLINABLE byteStringShiftRight #-}
-byteStringShiftRight :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
-byteStringShiftRight (# i#, addr#, final, off#, size#, cs #) j#
+byteStringShiftRight :: Code UnpackedLazyByteString -> Int# -> Code UnpackedLazyByteString
+byteStringShiftRight t 0# = t
+byteStringShiftRight t n = [||byteStringShiftRight# $$t n||]
+
+{-# INLINABLE byteStringShiftRight# #-}
+byteStringShiftRight# :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
+byteStringShiftRight# (# i#, addr#, final, off#, size#, cs #) j#
   | isTrue# (j# <# size#)  = (# i# +# j#, addr#, final, off# +# j#, size# -# j#, cs #)
   | otherwise = case cs of
-    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
+    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringShiftRight# (# i# +# size#, addr'#, final', off'#, size'#, cs' #) (j# -# size#)
     Lazy.Empty -> emptyUnpackedLazyByteString' (i# +# size#)
-
-{-# INLINABLE byteStringEnsureN #-}
-byteStringEnsureN :: Int# -> UnpackedLazyByteString -> Bool
-byteStringEnsureN j# (# i#, _, _, _, size#, cs #)
-  | isTrue# (j# <# size#)  = True
-  | otherwise = case cs of
-    Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' -> byteStringEnsureN (j# -# size#) (# i# +# size#, addr'#, final', off'#, size'#, cs' #)
-    Lazy.Empty -> False
 
 {-|
 Rewinds input consumption on a lazy `Lazy.ByteString` if input is still available (within the same chunk).
 
-@since 1.0.0.0
+@since 2.3.0.0
 -}
-{-# INLINABLE byteStringShiftLeft #-}
-byteStringShiftLeft :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
-byteStringShiftLeft (# i#, addr#, final, off#, size#, cs #) j# =
+byteStringShiftLeft :: Code UnpackedLazyByteString -> Int# -> Code UnpackedLazyByteString
+byteStringShiftLeft t 0# = t
+byteStringShiftLeft t n = [||byteStringShiftLeft# $$t n||]
+
+{-# INLINABLE byteStringShiftLeft# #-}
+byteStringShiftLeft# :: UnpackedLazyByteString -> Int# -> UnpackedLazyByteString
+byteStringShiftLeft# (# i#, addr#, final, off#, size#, cs #) j# =
   let d# = min# off# j#
   in (# i# -# d#, addr#, final, off# -# d#, size# +# d#, cs #)
 

@@ -24,7 +24,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
     -- * Smart Instructions
     _App, _Fmap, _Modify, _Make, _Put, _Get,
     -- * Smart Meta-Instructions
-    addCoins, refundCoins, drainCoins, giveBursary, prefetchChar, blockCoins,
+    addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
     -- * Re-exports
     PosSelector(..)
   ) where
@@ -32,13 +32,15 @@ module Parsley.Internal.Backend.Machine.Instructions (
 import Data.Kind                                    (Type)
 import Data.Void                                    (Void)
 import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.Types.Coins (Coins(Coins))
+import Parsley.Internal.Backend.Machine.Types.Coins (Coins(willConsume))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))
 import Parsley.Internal.Core.CharPred               (CharPred)
 
 import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
 import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
+
+import qualified Parsley.Internal.Backend.Machine.Types.Coins as Coins (pattern Zero)
 
 {-|
 This represents the instructions of the machine, in CPS form as an indexed functor.
@@ -249,26 +251,20 @@ data MetaInstr (n :: Nat) where
       This always happens for free, and is added straight to the coins.
 
   @since 1.5.0.0 -}
-  RefundCoins :: Coins -> MetaInstr n
+  RefundCoins :: Int -> MetaInstr n
   {-| Remove coins from piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information)
       This is used to pay for more expensive calls to bindings with known required input.
 
       A handler is required, as there may not be enough coins to pay the cost and a length check causes a failure.
 
   @since 1.5.0.0 -}
-  DrainCoins  :: Coins -> MetaInstr (Succ n)
+  DrainCoins  :: Int -> MetaInstr (Succ n)
   {-| Refunds to the piggy-bank system (see "Parsley.Internal.Backend.Machine.Types.Context" for more information).
       This always happens for free, and is added straight to the coins. Unlike `RefundCoins` this cannot reclaim
       input, nor is is subtractive in the analysis.
 
   @since 1.5.0.0 -}
-  GiveBursary :: Coins -> MetaInstr n
-  {-| Fetches a character to read in advance. This is used to factor out a common token from alternatives.
-      The boolean argument represents whether or not the read is covered by a factored length check, or
-      requires its own.
-
-  @since 1.5.0.0 -}
-  PrefetchChar :: Bool -> MetaInstr (Succ n)
+  GiveBursary :: Int -> MetaInstr n
   {-|
   True meta instruction: does /nothing/ except for reset coin count during coin analysis.
 
@@ -277,7 +273,7 @@ data MetaInstr (n :: Nat) where
   BlockCoins :: MetaInstr n
 
 mkCoin :: (Coins -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-mkCoin _    (Coins 0 0) = id
+mkCoin _    Coins.Zero  = id
 mkCoin meta n           = In4 . MetaInstr (meta n)
 
 {-|
@@ -286,8 +282,7 @@ Smart-constuctor around `AddCoins`.
 @since 1.5.0.0
 -}
 addCoins :: Coins -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
-addCoins (Coins 1 1) = id
-addCoins coins       = mkCoin AddCoins coins
+addCoins = mkCoin AddCoins
 
 {-|
 Smart-constuctor around `RefundCoins`.
@@ -295,7 +290,7 @@ Smart-constuctor around `RefundCoins`.
 @since 1.5.0.0
 -}
 refundCoins :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-refundCoins = mkCoin RefundCoins
+refundCoins = mkCoin (RefundCoins . willConsume)
 
 {-|
 Smart-constuctor around `DrainCoins`.
@@ -303,7 +298,7 @@ Smart-constuctor around `DrainCoins`.
 @since 1.5.0.0
 -}
 drainCoins :: Coins -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
-drainCoins = mkCoin DrainCoins
+drainCoins = mkCoin (DrainCoins . willConsume)
 
 {-|
 Smart-constuctor around `RefundCoins`.
@@ -311,15 +306,7 @@ Smart-constuctor around `RefundCoins`.
 @since 1.5.0.0
 -}
 giveBursary :: Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-giveBursary = mkCoin GiveBursary
-
-{-|
-Smart-constructor around `PrefetchChar`.
-
-@since 1.5.0.0
--}
-prefetchChar :: Bool -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
-prefetchChar check = In4 . MetaInstr (PrefetchChar check)
+giveBursary = mkCoin (GiveBursary . willConsume)
 
 {-|
 Smart-constructor around `BlockCoins`.
@@ -452,5 +439,4 @@ instance Show (MetaInstr n) where
   show (RefundCoins n)  = "Refund " ++ show n ++ " coins"
   show (DrainCoins n)   = "Using " ++ show n ++ " coins"
   show (GiveBursary n)  = "Bursary of " ++ show n ++ " coins"
-  show (PrefetchChar b) = "Prefetch character " ++ (if b then "with" else "without") ++ " length-check"
   show BlockCoins       = ""

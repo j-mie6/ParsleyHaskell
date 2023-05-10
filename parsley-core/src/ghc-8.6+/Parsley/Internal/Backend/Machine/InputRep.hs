@@ -51,7 +51,7 @@ emptyUnpackedLazyByteString i = UnpackedLazyByteString i nullAddr# (error "nullF
 {- Representation Mappings -}
 -- When a new input type is added here, it needs an Input instance in Parsley.Backend.Machine
 type family Rep input where
-  Rep [Char] = Int
+  Rep [Char] = OffWith String
   Rep (UArray Int Char) = Int
   Rep Text16 = Text
   Rep ByteString = Int

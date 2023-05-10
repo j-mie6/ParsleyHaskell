@@ -52,8 +52,8 @@ next ts k = [|| let !(# t, ts' #) = $$(_next ?ops) $$ts in $$(k [||t||] [||ts'||
 
 {- INSTANCES -}
 -- InputPrep Instances
-instance InputPrep [Char] where
-  prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
+--instance InputPrep [Char] where
+--  prepare input = prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 
 instance InputPrep (UArray Int Char) where
   prepare qinput = [||
@@ -63,6 +63,7 @@ instance InputPrep (UArray Int Char) where
     ||]
 
 instance InputPrep Text16 where prepare qinput = prepare @Text [|| let Text16 t = $$qinput in t ||]
+instance InputPrep CharList where prepare qinput = prepare @String [|| let CharList cs = $$qinput in cs ||]
 
 instance InputPrep ByteString where
   prepare qinput = [||
@@ -74,13 +75,12 @@ instance InputPrep ByteString where
       in InputDependant next (< size) off
     ||]
 
-instance InputPrep CharList where
+instance InputPrep String where
   prepare qinput = [||
-      let CharList input = $$qinput
-          next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
+      let next (OffWith i (c:cs)) = (# c, OffWith (i+1) cs #)
           more (OffWith _ []) = False
           more _              = True
-      in InputDependant next more ($$offWith input)
+      in InputDependant next more ($$offWith $$qinput)
     ||]
 
 instance InputPrep Text where

@@ -123,7 +123,7 @@ representation of an input with the correct kind, this type family must be used.
 -}
 type RepKind :: Type -> RuntimeRep
 type family RepKind input where
-  RepKind [Char] = IntRep
+  RepKind String = 'TupleRep '[IntRep, LiftedRep]
   RepKind (UArray Int Char) = IntRep
   RepKind Text16 = LiftedRep
   RepKind ByteString = IntRep
@@ -141,7 +141,7 @@ Most parts of the machine work with `Rep`.
 -}
 type Rep :: forall (rep :: Type) -> TYPE (RepKind rep)
 type family Rep input where
-  Rep [Char] = Int#
+  Rep String = (# Int#, String #)
   Rep (UArray Int Char) = Int#
   Rep Text16 = Text
   Rep ByteString = Int#

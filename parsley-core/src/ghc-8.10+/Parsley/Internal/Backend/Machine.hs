@@ -52,7 +52,7 @@ used as input for a parser.
 @since 0.1.0.0
 -}
 class (InputPrep input, Ops input) => Input input
-instance Input [Char]
+instance Input String
 instance Input (UArray Int Char)
 instance Input Text16
 instance Input ByteString

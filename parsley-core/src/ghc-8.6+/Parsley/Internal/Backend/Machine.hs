@@ -41,7 +41,7 @@ eval :: forall input a. (Input input, Trace) => Code input -> (LetBinding (Rep i
 eval input (toplevel, bindings) = Eval.eval (prepare input) toplevel bindings
 
 class (InputPrep input, Ops (Rep input)) => Input input
-instance Input [Char]
+instance Input String
 instance Input (UArray Int Char)
 instance Input Text16
 instance Input ByteString

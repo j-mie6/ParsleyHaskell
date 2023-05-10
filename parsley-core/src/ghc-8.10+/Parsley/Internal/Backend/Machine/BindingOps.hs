@@ -39,7 +39,7 @@ import Parsley.Internal.Core.InputTypes                (Text16, CharList, Stream
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString)
 
 #define inputInstances(derivation) \
-derivation([Char])                 \
+derivation(String)                 \
 derivation((UArray Int Char))      \
 derivation(Text16)                 \
 derivation(ByteString)             \

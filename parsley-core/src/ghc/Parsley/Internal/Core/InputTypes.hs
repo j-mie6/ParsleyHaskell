@@ -32,6 +32,7 @@ an array of characters, instead using regular pattern matching for the implement
 
 @since 0.1.0.0
 -}
+{-# DEPRECATED CharList "CharList is no longer necessary, use String directly instead" #-}
 newtype CharList = CharList String
 
 {-|

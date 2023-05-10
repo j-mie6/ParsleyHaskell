@@ -26,7 +26,7 @@ module Parsley.Internal.Backend.Machine.InputOps (
     prepare
   ) where
 
-import Data.Array.Base                             (UArray(..), listArray)
+import Data.Array.Base                             (UArray(..){-, listArray-})
 import Data.ByteString.Internal                    (ByteString(..))
 import Data.Text.Internal                          (Text(..))
 import Data.Text.Unsafe                            (iter, Iter(..))
@@ -173,19 +173,20 @@ check = checkImpl (_ensureNIsFast ?ops)
 
 {- INSTANCES -}
 -- InputPrep Instances
-instance InputPrep [Char] where _prepare input = _prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
-
-instance InputPrep (UArray Int Char) where
-  _prepare qinput k = [||
-      let !(UArray _ _ (I# size#) input#) = $$qinput
-      in $$(k (InputOps (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
-                        (\qi k _ -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
-                        (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
-                        True)
-              [||0#||])
-    ||]
-
-instance InputPrep Text16 where _prepare qinput = _prepare @Text [|| let Text16 t = $$qinput in t ||]
+instance InputPrep String where
+  _prepare qinput k = k (InputOps (\qi k -> [|| let !(# i#, c:cs #) = $$qi in $$(k [||c||] [||(# i# +# 1#, cs #)||]) ||])
+                                  (\qi good bad -> [||
+                                        case $$qi of
+                                          (# i#, c : cs #) -> $$(good [||c||] [||(# i# +# 1#, cs #)||])
+                                          (# _,  [] #)     -> $$bad
+                                      ||])
+                                  (\qn qi good bad -> [||
+                                        case $$(offWithShiftRight [||drop||] qi (qn -# 1#)) of
+                                          (# _, [] #) -> $$bad
+                                          cs          -> $$(good [||cs||])
+                                      ||])
+                                  False)
+                        (offWith qinput)
 
 instance InputPrep ByteString where
   _prepare qinput k = [||
@@ -199,24 +200,6 @@ instance InputPrep ByteString where
                         (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
                         True)
               [||off#||])
-    ||]
-
-instance InputPrep CharList where
-  _prepare qinput k =  [||
-      let CharList input = $$qinput
-      in $$(k (InputOps (\qi k -> [|| let !(# i#, c:cs #) = $$qi in $$(k [||c||] [||(# i# +# 1#, cs #)||]) ||])
-                        (\qi good bad -> [||
-                              case $$qi of
-                                (# i#, c : cs #) -> $$(good [||c||] [||(# i# +# 1#, cs #)||])
-                                (# _,  [] #)     -> $$bad
-                            ||])
-                        (\qn qi good bad -> [||
-                              case $$(offWithShiftRight [||drop||] qi (qn -# 1#)) of
-                                (# _, [] #) -> $$bad
-                                cs          -> $$(good [||cs||])
-                            ||])
-                        False)
-              (offWith [||input||]))
     ||]
 
 instance InputPrep Text where
@@ -238,6 +221,17 @@ instance InputPrep Text where
                                     ||])
                                   False)
                         qinput
+
+--instance InputPrep String where _prepare input = _prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
+instance InputPrep (UArray Int Char) where
+  _prepare qinput k = [||
+      let !(UArray _ _ (I# size#) input#) = $$qinput
+      in $$(k (InputOps (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
+                        (\qi k _ -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
+                        (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
+                        True)
+              [||0#||])
+    ||]
 
 instance InputPrep Lazy.ByteString where
   _prepare qinput k = [||
@@ -268,12 +262,15 @@ instance InputPrep Stream where
                                   True)
                         (offWith qinput)
 
+instance InputPrep Text16 where _prepare qinput = _prepare @Text [|| let Text16 t = $$qinput in t ||]
+instance InputPrep CharList where _prepare qinput = _prepare @String [|| let CharList cs = $$qinput in cs ||]
+
 shiftRightInt :: Code Int# -> Int -> Code Int#
 shiftRightInt qo# (I# qi#) = [||$$(qo#) +# qi#||]
 
 -- PositionOps Instances
 instance PositionOps Int# where same = intSame
-instance PositionOps (# Int#, [Char] #) where same = offWithSame
+instance PositionOps (# Int#, String #) where same = offWithSame
 instance PositionOps (# Int#, Stream #) where same = offWithSame
 instance PositionOps Text where same qt1 qt2 = [||$$(offsetText qt1) == $$(offsetText qt2)||]
 instance PositionOps UnpackedLazyByteString where
@@ -289,7 +286,7 @@ instance LogOps Int# where
   shiftRight = shiftRightInt
   offToInt qi# = [||I# $$(qi#)||]
 
-instance LogOps (# Int#, [Char] #) where
+instance LogOps (# Int#, String #) where
   shiftLeft qo# _ = qo#
   shiftRight qo# (I# qi#) = offWithShiftRight [||drop||] qo# qi#
   offToInt qo# = [||case $$(qo#) of (# i#, _ #) -> I# i#||]

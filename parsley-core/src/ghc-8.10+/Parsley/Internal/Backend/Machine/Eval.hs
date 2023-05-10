@@ -20,7 +20,6 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 
 import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
-import Data.Maybe                                          (listToMaybe)
 import Data.Void                                           (Void)
 import Control.Monad                                       (forM, liftM2, liftM3)
 import Control.Monad.Reader                                (Reader, ask, asks, reader, local)
@@ -36,7 +35,7 @@ import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(knownPreds, willConsume), one, minus)
+import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(knownPreds, willConsume, willCache), one, minus)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos, updateOffset)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
 import Parsley.Internal.Backend.Machine.Types.State        (Γ(..), OpStack(..))
@@ -263,13 +262,14 @@ withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
     let prefetch ((c, offset'), pred) k = k . addChar pred c offset'
         remainder deepest ctx = withUpdatedOffset (flip (run (Machine k)) (giveCoins (willConsume coins) ctx)) γOrig deepest
-        staPred = listToMaybe (map onlyStatic (knownPreds coins))
+        staPred = knownPreds coins >>= onlyStatic
         preds = maybe id (:) staPred (repeat Item) -- these are fed in to ensure the right checked pred is accounted for
         headCheck = staPred <&> \pred c good -> sat (ap (LAM (lamTerm pred))) c (const good) (raise γOrig)
         good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx
-    in emitLengthCheck (willConsume coins) (willConsume coins){- TODO: nonDrain coins -} headCheck good (raise γOrig) (off (input γOrig)) offset
-  where onlyStatic UserPred{} = Item
-        onlyStatic p          = p
+    in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise γOrig) (off (input γOrig)) offset
+        -- this is needed because a cached predicate cannot be compared for equality if it's user-pred, and it'll duplicate!
+  where onlyStatic UserPred{} = Nothing
+        onlyStatic p          = Just p
 
 state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b
 state f k = do

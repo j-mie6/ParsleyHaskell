@@ -47,6 +47,7 @@ algHandler :: Handler o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)
 algHandler (Same _ yes _ no) = algCatch (getConst4 yes) (getConst4 no)
 algHandler (Always _ k) = getConst4 k
 
+-- TODO: make the number of cached chars smaller!
 -- Bool represents if an empty is found in a branch (of a Catch)
 -- This helps to get rid of `min` being used for `Try` where min is always 0
 -- (The input is needed to /succeed/, so if one branch is doomed to fail it doesn't care about coins)

@@ -247,9 +247,9 @@ evalMeta (DrainCoins coins) (Machine k) =
     drain _ Nothing mk γ = mk γ
     drain bankrupt ~(Just m) mk γ
       -- full length check required
-      | bankrupt = emitLengthCheck coins (withUpdatedOffset mk γ) (raise γ) (off (input γ)) offset
+      | bankrupt = emitLengthCheck coins 0 (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) offset
       -- can be partially paid from last known deepest offset
-      | otherwise = emitLengthCheck (m + 1) (withUpdatedOffset mk γ) (raise γ) (off (input γ)) unsafeDeepestKnown
+      | otherwise = emitLengthCheck (m + 1) 0 (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) unsafeDeepestKnown
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
 evalMeta BlockCoins (Machine k) = k
 
@@ -258,17 +258,16 @@ withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
 withLengthCheckAndCoins :: (?ops::InputOps (Rep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
-    let prefetch pred k ctx γ =
-          -- input is known to exist
-          -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
-          -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
-          fetch (off (input γ)) $ \c offset' ->
-            flip (sat (ap (LAM (lamTerm pred))) c) (raise γ) $ \_ -> -- this character isn't needed
-              k (addChar pred c offset' ctx) (γ {input = updatePos (updateOffset offset' (input γ)) c pred})
+    -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
+    -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
+    let prefetch ((c, offset'), pred) k ctx γ =
+          flip (sat (ap (LAM (lamTerm pred))) c) (raise γ) $ \_ -> -- this character isn't needed
+            k (addChar pred c offset' ctx) (γ {input = updatePos (updateOffset offset' (input γ)) c pred})
         -- ignore the second γ parameter, as to perform a rollback on the input
-        remainder γ ctx _ = run (Machine k) γ (giveCoins (willConsume coins) ctx)
-        good = withUpdatedOffset (\γ -> foldr prefetch (remainder γ) (take 1 (map onlyStatic (knownPreds coins)) ++ replicate (willConsume coins - 1) Item) ctx γ) γOrig
-    in emitLengthCheck (willConsume coins) good (raise γOrig) (off (input γOrig)) offset
+        remainder deepest ctx _ = withUpdatedOffset (flip (run (Machine k)) (giveCoins (willConsume coins) ctx)) γOrig deepest
+        preds = take 1 (map onlyStatic (knownPreds coins)) ++ replicate (willConsume coins - 1) Item
+        good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx γOrig
+    in emitLengthCheck (willConsume coins) (willConsume coins){- TODO: nonDrain coins -} good (raise γOrig) (off (input γOrig)) offset
   where onlyStatic UserPred{} = Item
         onlyStatic p          = p
 

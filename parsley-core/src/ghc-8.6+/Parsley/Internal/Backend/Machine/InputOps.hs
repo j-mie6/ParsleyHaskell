@@ -2,6 +2,7 @@
              MagicHash,
              TypeApplications,
              UnboxedTuples #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 module Parsley.Internal.Backend.Machine.InputOps (
     InputPrep(..), PositionOps(..), BoxOps(..), LogOps(..),
     InputOps(..), more, next,

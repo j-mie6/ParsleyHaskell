@@ -63,6 +63,7 @@ module Parsley.Internal.Backend.Machine.Ops (
 import Control.Monad                                              (liftM2)
 import Control.Monad.Reader                                       (ask, local)
 import Control.Monad.ST                                           (ST)
+import Data.List                                                  (mapAccumL)
 import Data.STRef                                                 (writeSTRef, readSTRef, newSTRef)
 import Data.Void                                                  (Void)
 import Debug.Trace                                                (trace)
@@ -140,17 +141,19 @@ Emits a length check for a number of characters \(n\) in the most efficient
 way it can. It takes two continuations a @good@ and a @bad@: the @good@ is used
 when the \(n\) characters are available and the @bad@ when they are not.
 
-@since 1.4.0.0
+@since 2.3.0.0
 -}
 emitLengthCheck :: (?ops :: InputOps (Rep o))
-                => Int                    -- ^ The number of required characters \(n\).
-                -> (Offset o -> Code a)   -- ^ The good continuation if \(n\) characters are available.
-                -> Code a                 -- ^ The bad continuation if the characters are unavailable.
-                -> Offset o               -- ^ The input to test on.
+                => Int                                             -- ^ The number of required characters \(n\).
+                -> Int                                             -- ^ The number of characters to prefetch \(m\).
+                -> (Offset o -> [(Code Char, Offset o)] -> Code a) -- ^ The good continuation if \(n\) characters are available.
+                -> Code a                                          -- ^ The bad continuation if the characters are unavailable.
+                -> Offset o                                        -- ^ The input to test on.
                 -> (Offset o -> Code (Rep o))
                 -> Code a
-emitLengthCheck n good bad input sel = check n 0 (sel input) good' bad
-  where good' deepestKnown _cached = good (updateDeepestKnown deepestKnown input)
+emitLengthCheck n m good bad input sel = check n m (sel input) good' bad
+  where good' deepestKnown = let input' = updateDeepestKnown deepestKnown input in good input' . feed input'
+        feed input' = snd . mapAccumL (\off (c, rep) -> let off' = moveOne off rep in (off', (c, off'))) input'
 
 {- Register Operations -}
 {-|

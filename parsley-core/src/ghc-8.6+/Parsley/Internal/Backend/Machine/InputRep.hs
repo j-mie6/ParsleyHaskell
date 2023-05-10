@@ -1,6 +1,7 @@
 {-# LANGUAGE MagicHash,
              TypeFamilyDependencies,
              UnboxedTuples #-}
+{-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 module Parsley.Internal.Backend.Machine.InputRep (
     Unboxed, Rep,
     OffWith(..), offWith, offWithSame, offWithShiftRight,

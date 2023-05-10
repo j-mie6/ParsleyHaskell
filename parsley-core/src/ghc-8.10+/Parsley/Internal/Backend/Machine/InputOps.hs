@@ -147,6 +147,7 @@ checkImpl fastEnsureN ensureN uncons n m qi good bad
     -- We've already fastEnsured all the characters, so just feed forward the furthest to fill non-cached
     go _ 0 _ dcs (Just furthest) = good furthest (dcs [])
     -- Cached character wanted, so read it
+    -- TODO: the first one can be subject to a sat if we wanted!
     go n m qi dcs furthest = uncons qi (\c qi' -> go (n - 1) (m - 1) qi' (dcs . ((c, qi') :)) furthest) bad
 
 {-|

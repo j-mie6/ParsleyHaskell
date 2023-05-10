@@ -135,20 +135,21 @@ data InputOps (rep :: TYPE r) = InputOps { _next :: !(forall a. Code rep -> (Cod
 checkImpl :: forall r (rep :: TYPE r) a. Bool                                    -- ^ is the ensureN argument O(1)?
           -> (Int -> Code rep -> (Code rep -> Code a) -> Code a -> Code a)       -- ^ ensures there are n characters available
           -> (Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a) -- ^ reads the next character if available
-          -> (Int -> Int -> Code rep -> (Code rep -> [(Code Char, Code rep)] -> Code a) -> Code a -> Code a)
-checkImpl fastEnsureN ensureN uncons n m qi good bad
-  | fastEnsureN, n /= 0 = ensureN n qi (go n m qi id . Just) bad
-  | otherwise           = go n m qi id Nothing
+          -> (Int -> Int -> Code rep -> Maybe (Code Char -> Code a -> Code a) -> (Code rep -> [(Code Char, Code rep)] -> Code a) -> Code a -> Code a)
+checkImpl fastEnsureN ensureN uncons n m qi headCheck good bad
+  | fastEnsureN, n /= 0 = ensureN n qi (go n m qi id headCheck . Just) bad
+  | otherwise           = go n m qi id headCheck Nothing
   where
-    go :: Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> [(Code Char, Code rep)]) -> Maybe (Code rep) -> Code a
-    go 0 _ qi dcs _ = good qi (dcs [])
+    go :: Int -> Int -> Code rep -> ([(Code Char, Code rep)] -> [(Code Char, Code rep)]) -> Maybe (Code Char -> Code a -> Code a) -> Maybe (Code rep) -> Code a
+    go 0 _ qi dcs _ _ = good qi (dcs [])
     -- Here, we want no more cached characters, so just verify the remaining with shiftRight
-    go n 0 qi dcs Nothing = ensureN n qi (\qi' -> good qi' (dcs [])) bad
+    go n 0 qi dcs _ Nothing = ensureN n qi (\qi' -> good qi' (dcs [])) bad
     -- We've already fastEnsured all the characters, so just feed forward the furthest to fill non-cached
-    go _ 0 _ dcs (Just furthest) = good furthest (dcs [])
+    go _ 0 _ dcs _ (Just furthest) = good furthest (dcs [])
     -- Cached character wanted, so read it
-    -- TODO: the first one can be subject to a sat if we wanted!
-    go n m qi dcs furthest = uncons qi (\c qi' -> go (n - 1) (m - 1) qi' (dcs . ((c, qi') :)) furthest) bad
+    go n m qi dcs headCheck furthest = flip (uncons qi) bad $ \c qi' ->
+      maybe id ($ c) headCheck $ -- if there is a headCheck available, perform it here DON'T pass it on
+      go (n - 1) (m - 1) qi' (dcs . ((c, qi') :)) Nothing furthest
 
 {-|
 Wraps around `InputOps` and `_next`.
@@ -165,7 +166,7 @@ next = _next ?ops
 uncons :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Code rep -> (Code Char -> Code rep -> Code a) -> Code a -> Code a
 uncons = _uncons ?ops
 
-check :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Int -> Int -> Code rep -> (Code rep -> [(Code Char, Code rep)] -> Code a) -> Code a -> Code a
+check :: forall r (rep :: TYPE r) a. (?ops :: InputOps rep) => Int -> Int -> Code rep -> Maybe (Code Char -> Code a -> Code a) -> (Code rep -> [(Code Char, Code rep)] -> Code a) -> Code a -> Code a
 check = checkImpl (_ensureNIsFast ?ops)
                   (\(I# n) -> _ensureN ?ops n)
                   uncons

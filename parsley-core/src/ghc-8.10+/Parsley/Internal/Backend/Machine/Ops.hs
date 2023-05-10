@@ -146,12 +146,13 @@ when the \(n\) characters are available and the @bad@ when they are not.
 emitLengthCheck :: (?ops :: InputOps (Rep o))
                 => Int                                             -- ^ The number of required characters \(n\).
                 -> Int                                             -- ^ The number of characters to prefetch \(m\).
+                -> Maybe (Code Char -> Code a -> Code a)           -- ^ An optional check for the head character.
                 -> (Offset o -> [(Code Char, Offset o)] -> Code a) -- ^ The good continuation if \(n\) characters are available.
                 -> Code a                                          -- ^ The bad continuation if the characters are unavailable.
                 -> Offset o                                        -- ^ The input to test on.
                 -> (Offset o -> Code (Rep o))
                 -> Code a
-emitLengthCheck n m good bad input sel = check n m (sel input) good' bad
+emitLengthCheck n m headCheck good bad input sel = check n m (sel input) headCheck good' bad
   where good' deepestKnown = let input' = updateDeepestKnown deepestKnown input in good input' . feed input'
         feed input' = snd . mapAccumL (\off (c, rep) -> let off' = moveOne off rep in (off', (c, off'))) input'
 

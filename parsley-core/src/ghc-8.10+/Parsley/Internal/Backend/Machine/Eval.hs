@@ -20,6 +20,7 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 
 import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
+import Data.Maybe                                          (listToMaybe)
 import Data.Void                                           (Void)
 import Control.Monad                                       (forM, liftM2, liftM3)
 import Control.Monad.Reader                                (Reader, ask, asks, reader, local)
@@ -247,9 +248,9 @@ evalMeta (DrainCoins coins) (Machine k) =
     drain _ Nothing mk γ = mk γ
     drain bankrupt ~(Just m) mk γ
       -- full length check required
-      | bankrupt = emitLengthCheck coins 0 (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) offset
+      | bankrupt = emitLengthCheck coins 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) offset
       -- can be partially paid from last known deepest offset
-      | otherwise = emitLengthCheck (m + 1) 0 (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) unsafeDeepestKnown
+      | otherwise = emitLengthCheck (m + 1) 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) unsafeDeepestKnown
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
 evalMeta BlockCoins (Machine k) = k
 
@@ -260,14 +261,13 @@ withLengthCheckAndCoins :: (?ops::InputOps (Rep o)) => Coins -> MachineMonad s o
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
     -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
-    let prefetch ((c, offset'), pred) k ctx γ =
-          flip (sat (ap (LAM (lamTerm pred))) c) (raise γ) $ \_ -> -- this character isn't needed
-            k (addChar pred c offset' ctx) (γ {input = updatePos (updateOffset offset' (input γ)) c pred})
-        -- ignore the second γ parameter, as to perform a rollback on the input
-        remainder deepest ctx _ = withUpdatedOffset (flip (run (Machine k)) (giveCoins (willConsume coins) ctx)) γOrig deepest
-        preds = take 1 (map onlyStatic (knownPreds coins)) ++ replicate (willConsume coins - 1) Item
-        good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx γOrig
-    in emitLengthCheck (willConsume coins) (willConsume coins){- TODO: nonDrain coins -} good (raise γOrig) (off (input γOrig)) offset
+    let prefetch ((c, offset'), pred) k = k . addChar pred c offset'
+        remainder deepest ctx = withUpdatedOffset (flip (run (Machine k)) (giveCoins (willConsume coins) ctx)) γOrig deepest
+        staPred = listToMaybe (map onlyStatic (knownPreds coins))
+        preds = maybe id (:) staPred (repeat Item) -- these are fed in to ensure the right checked pred is accounted for
+        headCheck = staPred <&> \pred c good -> sat (ap (LAM (lamTerm pred))) c (const good) (raise γOrig)
+        good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx
+    in emitLengthCheck (willConsume coins) (willConsume coins){- TODO: nonDrain coins -} headCheck good (raise γOrig) (off (input γOrig)) offset
   where onlyStatic UserPred{} = Item
         onlyStatic p          = p
 

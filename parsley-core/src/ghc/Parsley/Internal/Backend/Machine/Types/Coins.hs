@@ -50,7 +50,7 @@ one :: CharPred -> Coins
 one p = Coins 1 1 (Just p)
 
 items :: Int -> Coins
-items n = Coins n n Nothing
+items n = Coins n 0 Nothing
 
 zipCoins :: (Int -> Int -> Int) -> (Int -> Int -> Int) -> (Maybe CharPred -> Maybe CharPred -> Maybe CharPred) -> Coins -> Coins -> Coins
 zipCoins f g h (Coins k1 c1 cs1) (Coins k2 c2 cs2) = Coins k' c' cs'

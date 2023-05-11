@@ -33,7 +33,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * @Stream@ Operations
     dropStream,
     -- * @Text@ Operations
-    offsetText, textShiftRight, textShiftLeft,
+    StaText(..), offsetText, textShiftRight, textShiftLeft,
     -- * Crucial Exposed Functions
     {- |
     These functions must be exposed, since they can appear
@@ -65,6 +65,7 @@ import Parsley.Internal.Common.Utils     (Code)
 import Parsley.Internal.Core.InputTypes  (Text16(..), CharList(..), Stream(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
+import qualified Data.Text.Array               as Text (Array)
 
 #if __GLASGOW_HASKELL__ <= 900
 {-# INLINE word8ToWord# #-}
@@ -95,6 +96,13 @@ type UnpackedLazyByteString = (#
     Int#,
     Lazy.ByteString
   #)
+
+data StaText = StaText {
+  origText       :: Code Text,
+  arrText        :: Code Text.Array,
+  offText        :: Code Int,
+  unconsumedText :: Code Int
+}
 
 {-|
 Initialises an `OffWith` type, with a starting offset of @0@.
@@ -153,9 +161,9 @@ type family DynRep input where
 type family StaRep input where
   StaRep String = (Code Int#, Code String)
   StaRep (UArray Int Char) = Code Int#
-  StaRep Text16 = (Code Text, Code Int)
+  StaRep Text16 = StaText
   StaRep ByteString = Code Int#
-  StaRep Text = (Code Text, Code Int)
+  StaRep Text = StaText
   StaRep Lazy.ByteString = Code UnpackedLazyByteString --TODO: could refine
   StaRep CharList = (Code Int#, Code String)
   StaRep Stream = (Code Int#, Code Stream)

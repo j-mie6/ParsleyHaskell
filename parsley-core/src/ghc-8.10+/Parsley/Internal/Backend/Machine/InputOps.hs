@@ -1,10 +1,12 @@
 {-# OPTIONS_HADDOCK show-extensions #-}
 {-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-# LANGUAGE CPP,
+             FunctionalDependencies,
              ImplicitParams,
              MagicHash,
              TypeApplications,
              UnboxedTuples #-}
+{-# LANGUAGE InstanceSigs #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.InputOps
 Description : Primitive operations for working with input.
@@ -18,7 +20,7 @@ parsing machinery to work with input.
 @since 1.0.0.0
 -}
 module Parsley.Internal.Backend.Machine.InputOps (
-    InputPrep, PositionOps(..), LogOps(..),
+    InputPrep, PositionOps(..), LogOps(..), DynOps(..),
     InputOps, next, check, uncons,
 #if __GLASGOW_HASKELL__ <= 900
     word8ToWord#,
@@ -38,7 +40,7 @@ import GHC.Prim                                    (word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
-import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), DynRep, UnpackedLazyByteString,
+import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), DynRep, UnpackedLazyByteString, StaText(..),
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess, intAdd,
                                                     offsetText, offWithSame, offWithShiftRight, dropStream,
                                                     textShiftRight, textShiftLeft, byteStringShiftRight,
@@ -88,6 +90,10 @@ class PositionOps (rep :: TYPE r) where
   @since 1.0.0.0
   -}
   same :: Code rep -> Code rep -> Code Bool
+
+class DynOps (dynrep :: TYPE r) starep | dynrep -> starep, starep -> dynrep where
+  asDyn :: starep -> Code dynrep
+  asSta :: Code dynrep -> (starep -> Code a) -> Code a
 
 {-|
 Defines operation used for debugging operations.
@@ -196,7 +202,7 @@ instance InputPrep ByteString where
               (# s', x #) -> case touch# final s' of
                 !_ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
       in $$(k (InputOps (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
-                        (\qi k _ -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
+                        (\qi k _ -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]) -- always guarded by fastEnsureN
                         (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
                         True)
               [||off#||])
@@ -204,11 +210,11 @@ instance InputPrep ByteString where
 
 instance InputPrep Text where
   _prepare qinput k = k (InputOps (\qi k -> [||
-                                      let t@(Text arr off unconsumed) = $$qi
+                                      let !t@(Text arr off unconsumed) = $$qi
                                           !(Iter c d) = iter t 0
                                       in $$(k [||c||] [||Text arr (off + d) (unconsumed - d)||]) ||])
                                   (\qi good bad -> [||
-                                      let t@(Text arr off unconsumed) = $$qi
+                                      let !t@(Text arr off unconsumed) = $$qi
                                       in if unconsumed > 0 then
                                            let !(Iter c d) = iter t 0
                                            in $$(good [||c||] [||Text arr (off + d) (unconsumed - d)||])
@@ -227,7 +233,7 @@ instance InputPrep (UArray Int Char) where
   _prepare qinput k = [||
       let !(UArray _ _ (I# size#) input#) = $$qinput
       in $$(k (InputOps (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
-                        (\qi k _ -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
+                        (\qi k _ -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||]) -- always guarded by fastEnsureN
                         (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
                         True)
               [||0#||])
@@ -279,6 +285,25 @@ instance PositionOps UnpackedLazyByteString where
         (# i#, _, _, _, _, _ #) -> case $$(qy#) of
           (# j#, _, _, _, _, _ #) -> $$(intSame [||i#||] [||j#||])
     ||]
+
+-- DynOps Instances
+instance DynOps Int# (Code Int#) where
+  asDyn = id
+  asSta :: Code Int# -> (Code Int# -> Code a) -> Code a
+  asSta = flip ($)
+
+instance DynOps (# Int#, ts #) (Code Int#, Code ts) where
+  asDyn (qo, qcs) = [||(# $$qo, $$qcs #)||]
+  asSta qi k = [|| let (# o, cs #) = $$qi in $$(k ([||o||], [||cs||])) ||]
+
+instance DynOps Text StaText where
+  asDyn = origText
+  asSta qt k = [|| let !t@(Text arr off unconsumed) = $$qt
+                   in $$(k (StaText [||t||] [||arr||] [||off||] [||unconsumed||])) ||]
+
+instance DynOps UnpackedLazyByteString (Code UnpackedLazyByteString) where
+  asDyn = id
+  asSta = flip ($)
 
 -- LogOps Instances
 instance LogOps Int# where

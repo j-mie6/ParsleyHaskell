@@ -74,7 +74,6 @@ import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(.
 import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
-import Parsley.Internal.Backend.Machine.THUtils                   (eta)
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
@@ -84,6 +83,7 @@ import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacte
 import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                                    (One, Code, Vec(..), Nat(..))
+import Parsley.Internal.Common.THUtils                            (eta)
 import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
 import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), updateDeepestKnown)

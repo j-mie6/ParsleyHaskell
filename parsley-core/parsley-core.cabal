@@ -47,6 +47,7 @@ library
                        Parsley.Internal.Common.Indexed,
                        Parsley.Internal.Common.QueueLike,
                        Parsley.Internal.Common.State,
+                       Parsley.Internal.Common.THUtils,
                        Parsley.Internal.Common.Utils,
                        Parsley.Internal.Common.Vec,
 
@@ -94,7 +95,6 @@ library
                        Parsley.Internal.Backend.Machine.InputRep,
                        Parsley.Internal.Backend.Machine.Instructions,
                        Parsley.Internal.Backend.Machine.Ops,
-                       Parsley.Internal.Backend.Machine.THUtils,
 
                        Parsley.Internal.Backend.Machine.Types,
                        Parsley.Internal.Backend.Machine.Types.Coins,
@@ -144,6 +144,7 @@ library
                        -- Not sure about this one, 0.11.0.0 introduced a type synonym for PS, so it _should_ work
                        bytestring           >= 0.10.8  && < 0.12,
                        rangeset             >= 0.0.1   && < 0.2,
+                       syb                  >= 0.1     && < 0.8,
   build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   hs-source-dirs:      src/ghc
   if impl(ghc >= 8.10)

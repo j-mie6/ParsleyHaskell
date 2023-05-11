@@ -26,7 +26,8 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * @Int#@ Operations
     intSame, intLess, intAdd, min#, max#,
     -- * @Offwith@ Operations
-    OffWith, offWith, offWithShiftRight,
+    OffWith, offWithShiftRight,
+    PartialStaOffWith(..), staOffWith,
     -- * @LazyByteString@ Operations
     UnpackedLazyByteString, emptyUnpackedLazyByteString,
     byteStringShiftRight, byteStringShiftLeft,
@@ -83,6 +84,12 @@ be used for quicker comparisons.
 -}
 type OffWith ts = (# Int#, ts #)
 
+data PartialStaOffWith ts = StaOW !(Code Int#) !(Code ts) | DynOW !(Code (OffWith ts))
+
+staOffWith :: PartialStaOffWith ts -> (Code Int# -> Code ts -> Code a) -> Code a
+staOffWith (StaOW qo qts) k = k qo qts
+staOffWith (DynOW qots) k = [|| let (# o, cs #) = $$qots in $$(k [||o||] [||cs||]) ||]
+
 {-|
 This type unpacks /lazy/ `Lazy.ByteString`s for efficiency.
 
@@ -97,7 +104,7 @@ type UnpackedLazyByteString = (#
     Lazy.ByteString
   #)
 
-data PartialStaText = StaT !StaText | DynT !(Code Text)
+data PartialStaText = StaT {-# UNPACK #-} !StaText | DynT !(Code Text)
 
 staText :: PartialStaText -> (StaText -> Code a) -> Code a
 staText (StaT t) k = k t
@@ -112,14 +119,6 @@ data StaText = StaText {
   offText        :: !(Code Int),
   unconsumedText :: !(Code Int)
 }
-
-{-|
-Initialises an `OffWith` type, with a starting offset of @0@.
-
-@since 1.0.0.0
--}
-offWith :: Code ts -> Code (OffWith ts)
-offWith qts = [||(# 0#, $$qts #)||]
 
 {-|
 Initialises an `UnpackedLazyByteString` with a specified offset.
@@ -168,14 +167,14 @@ type family DynRep input where
   DynRep Stream = (# Int#, Stream #)
 
 type family StaRep input where
-  StaRep String = (Code Int#, Code String)
+  StaRep String = PartialStaOffWith String
   StaRep (UArray Int Char) = Code Int#
   StaRep Text16 = PartialStaText
   StaRep ByteString = Code Int#
   StaRep Text = PartialStaText
   StaRep Lazy.ByteString = Code UnpackedLazyByteString --TODO: could refine
-  StaRep CharList = (Code Int#, Code String)
-  StaRep Stream = (Code Int#, Code Stream)
+  StaRep CharList = PartialStaOffWith String
+  StaRep Stream = PartialStaOffWith Stream
 
 {- Generic Representation Operations -}
 {-|
@@ -218,11 +217,11 @@ companion input.
 @since 1.0.0.0
 -}
 offWithShiftRight :: Code (Int -> ts -> ts) -- ^ A @drop@ function for underlying input.
-                  -> (Code Int#, Code ts)   -- ^ The `OffWith` to shift.
+                  -> Code Int# -> Code ts   -- ^ The `OffWith` to shift.
                   -> Int#                   -- ^ How much to shift by.
                   -> (Code Int#, Code ts)
-offWithShiftRight _ qo# 0# = qo#
-offWithShiftRight drop (qo, qts) qi# = ([||$$qo +# qi#||], [|| $$drop (I# qi#) $$qts ||])
+offWithShiftRight _ qo qcs 0# = (qo, qcs)
+offWithShiftRight drop qo qts qi# = ([||$$qo +# qi#||], [|| $$drop (I# qi#) $$qts ||])
 
 {-|
 Drops tokens off of a `Stream`.

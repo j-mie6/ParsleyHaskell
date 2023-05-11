@@ -33,7 +33,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * @Stream@ Operations
     dropStream,
     -- * @Text@ Operations
-    StaText(..), offsetText, textShiftRight, textShiftLeft,
+    StaText(..), PartialStaText(..), staText, offsetText, textShiftRight, textShiftLeft,
     -- * Crucial Exposed Functions
     {- |
     These functions must be exposed, since they can appear
@@ -97,11 +97,20 @@ type UnpackedLazyByteString = (#
     Lazy.ByteString
   #)
 
+data PartialStaText = StaT !StaText | DynT !(Code Text)
+
+staText :: PartialStaText -> (StaText -> Code a) -> Code a
+staText (StaT t) k = k t
+staText (DynT qt) k = [||
+    let !t@(Text arr off unconsumed) = $$qt
+    in $$(k (StaText [||t||] [||arr||] [||off||] [||unconsumed||]))
+  ||]
+
 data StaText = StaText {
-  origText       :: Code Text,
-  arrText        :: Code Text.Array,
-  offText        :: Code Int,
-  unconsumedText :: Code Int
+  origText       :: !(Code Text),
+  arrText        :: !(Code Text.Array),
+  offText        :: !(Code Int),
+  unconsumedText :: !(Code Int)
 }
 
 {-|
@@ -161,9 +170,9 @@ type family DynRep input where
 type family StaRep input where
   StaRep String = (Code Int#, Code String)
   StaRep (UArray Int Char) = Code Int#
-  StaRep Text16 = StaText
+  StaRep Text16 = PartialStaText
   StaRep ByteString = Code Int#
-  StaRep Text = StaText
+  StaRep Text = PartialStaText
   StaRep Lazy.ByteString = Code UnpackedLazyByteString --TODO: could refine
   StaRep CharList = (Code Int#, Code String)
   StaRep Stream = (Code Int#, Code Stream)

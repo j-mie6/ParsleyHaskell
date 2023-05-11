@@ -43,7 +43,8 @@ import GHC.Prim                                    (word8ToWord#)
 #else
 import GHC.Prim                                    (Word#)
 #endif
-import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), DynRep, StaRep, UnpackedLazyByteString, StaText(..),
+import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), DynRep, StaRep, UnpackedLazyByteString,
+                                                    StaText(..), PartialStaText(..), staText,
                                                     offWith, emptyUnpackedLazyByteString, intSame, intLess, intAdd,
                                                     offWithShiftRight, dropStream,
                                                     textShiftRight, textShiftLeft, byteStringShiftRight,
@@ -157,7 +158,7 @@ checkImpl fastEnsureN ensureN uncons n m qi headCheck good bad
   | fastEnsureN, n /= 0 = ensureN n qi (go n m qi id headCheck . Just) bad
   | otherwise           = go n m qi id headCheck Nothing
   where
-    go :: Int -> Int -> rep -> ([(Code Char, rep)] -> [(Code Char, rep)]) -> Maybe (Code Char -> Code a -> Code a) -> Maybe (rep) -> Code a
+    go :: Int -> Int -> rep -> ([(Code Char, rep)] -> [(Code Char, rep)]) -> Maybe (Code Char -> Code a -> Code a) -> Maybe rep -> Code a
     go 0 _ qi dcs _ _ = good qi (dcs [])
     -- Here, we want no more cached characters, so just verify the remaining with shiftRight
     go n 0 qi dcs _ Nothing = ensureN n qi (\qi' -> good qi' (dcs [])) bad
@@ -221,27 +222,27 @@ instance InputPrep ByteString where
 
 instance InputPrep Text where
   _prepare qinput k = _asSta qinput $
-    k (InputOps (\t@StaText{..} k -> [||
+    k (InputOps (\pt k -> staText pt $ \t@StaText{..} -> [||
                     let !(Iter c d) = iter $$origText 0
                         !unconsumed' = $$unconsumedText - d
                         !off'        = $$offText + d
-                    in $$(k [||c||] (t {origText = [||Text $$arrText off' unconsumed'||],
-                                        offText = [||off'||],
-                                        unconsumedText = [||unconsumed'||]})) ||])
-                (\t@StaText{..} good bad -> [||
+                    in $$(k [||c||] (StaT $ t {origText = [||Text $$arrText off' unconsumed'||],
+                                               offText = [||off'||],
+                                               unconsumedText = [||unconsumed'||]})) ||])
+                (\pt good bad -> staText pt $ \t@StaText{..} -> [||
                     if $$unconsumedText > 0 then
                       let !(Iter c d) = iter $$origText 0
                           !unconsumed' = $$unconsumedText - d
                           !off'        = $$offText + d
-                      in $$(good [||c||] (t {origText = [||Text $$arrText off' unconsumed'||],
-                                             offText = [||off'||],
-                                             unconsumedText = [||unconsumed'||]}))
+                      in $$(good [||c||] (StaT $ t {origText = [||Text $$arrText off' unconsumed'||],
+                                                    offText = [||off'||],
+                                                    unconsumedText = [||unconsumed'||]}))
                     else $$bad
                   ||])
-                (\qn StaText{..} good bad -> [|| -- could be improved, I guess?
+                (\qn pt good bad -> staText pt $ \StaText{..} -> [|| -- could be improved, I guess?
                     case $$(textShiftRight origText (qn -# 1#)) of
                       Text _ _ 0                -> $$bad
-                      t@(Text _ off unconsumed) -> $$(good (StaText [||t||] arrText [||off||] [||unconsumed||]))
+                      t@(Text _ off unconsumed) -> $$(good (StaT $ StaText [||t||] arrText [||off||] [||unconsumed||]))
                   ||])
                 False)
 
@@ -296,7 +297,8 @@ shiftRightInt qo# (I# qi#) = [||$$(qo#) +# qi#||]
 instance PositionOps (Code Int#) where same = intSame
 instance PositionOps (Code Int#, ts) where same (o1, _) (o2, _) = intSame o1 o2
 --instance PositionOps (Code Int#, Code Stream) where same = offWithSame
-instance PositionOps StaText where same qt1 qt2 = [||$$(offText qt1) == $$(offText qt2)||]
+instance PositionOps PartialStaText where
+  same pt1 pt2 = staText pt1 $ \qt1 -> staText pt2 $ \qt2 -> [||$$(offText qt1) == $$(offText qt2)||]
 instance PositionOps (Code UnpackedLazyByteString) where
   same qx# qy# = [||
       case $$(qx#) of
@@ -313,10 +315,10 @@ instance DynOps_ (# Int#, ts #) (Code Int#, Code ts) where
   _asDyn (qo, qcs) = [||(# $$qo, $$qcs #)||]
   _asSta qi k = [|| let (# o, cs #) = $$qi in $$(k ([||o||], [||cs||])) ||]
 
-instance DynOps_ Text StaText where
-  _asDyn = origText
-  _asSta qt k = [|| let !t@(Text arr off unconsumed) = $$qt
-                    in $$(k (StaText [||t||] [||arr||] [||off||] [||unconsumed||])) ||]
+instance DynOps_ Text PartialStaText where
+  _asDyn (StaT t) = origText t
+  _asDyn (DynT t) = t
+  _asSta qt k = k (DynT qt)
 
 instance DynOps_ UnpackedLazyByteString (Code UnpackedLazyByteString) where
   _asDyn = id
@@ -338,10 +340,10 @@ instance LogOps (Code Int#, Code Stream) where
   shiftRight qinput (I# qi#) k = k (offWithShiftRight [||dropStream||] qinput qi#)
   offToInt (qo, _) = [||I# $$qo||]
 
-instance LogOps StaText where
-  shiftLeft StaText{..} (I# qi#) = _asSta (textShiftLeft origText qi#)
-  shiftRight StaText{..} (I# qi#) = _asSta (textShiftRight origText qi#)
-  offToInt = offText
+instance LogOps PartialStaText where
+  shiftLeft pt (I# qi#) k = staText pt $ \StaText{..} -> k (DynT (textShiftLeft origText qi#))
+  shiftRight pt (I# qi#) k = staText pt $ \StaText{..} -> k (DynT (textShiftRight origText qi#))
+  offToInt pt = staText pt offText
 
 instance LogOps (Code UnpackedLazyByteString) where
   shiftLeft qo# (I# qi#) k = k (byteStringShiftLeft qo# qi#)

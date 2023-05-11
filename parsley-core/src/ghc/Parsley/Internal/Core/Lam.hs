@@ -15,7 +15,8 @@ of values.
 -}
 module Parsley.Internal.Core.Lam (normaliseGen, normalise, Lam(..)) where
 
-import Parsley.Internal.Common.Utils (Code)
+import Parsley.Internal.Common.Utils   (Code)
+import Parsley.Internal.Common.THUtils (eta)
 
 {-|
 Defunctionalised lambda calculus in HOAS form. Supports basic inspection
@@ -97,7 +98,7 @@ term is minimal.
 @since 1.0.1.0
 -}
 normaliseGen :: Lam a -> Code a
-normaliseGen = generate . normalise
+normaliseGen = eta . generate . normalise
 
 instance Show (Lam a) where
   show = show' . normalise

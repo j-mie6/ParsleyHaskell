@@ -98,13 +98,13 @@ readyMachine = cata4 (Machine . alg)
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
 
-evalRet :: MachineMonad s o (x : xs) n x a
+evalRet :: DynOps o => MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
-evalCall :: forall s o a x xs n r. MarshalOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalCall :: forall s o a x xs n r. (MarshalOps o, DynOps o) => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
 
-evalJump :: forall s o a x n. MarshalOps o => MVar x -> MachineMonad s o '[] (Succ n) x a
+evalJump :: forall s o a x n. (MarshalOps o, DynOps o) => MVar x -> MachineMonad s o '[] (Succ n) x a
 evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
@@ -116,7 +116,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: forall s o xs n r a. (?ops :: InputOps (StaRep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: forall s o xs n r a. (?ops :: InputOps (StaRep o), DynOps o, Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p k = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -136,13 +136,13 @@ evalSat p k = do
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
-evalEmpt :: MachineMonad s o xs (Succ n) r a
+evalEmpt :: DynOps o => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
 
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
-evalCatch :: (PositionOps (StaRep o), HandlerOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
+evalCatch :: (PositionOps (StaRep o), HandlerOps o, DynOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) h = freshUnique $ \u -> case h of
   Always gh (Machine h) ->
     liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
@@ -170,7 +170,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go x (f:fs) (mk:mks) def γ = _if (ap f x) (mk γ) (go x fs mks def γ)
     go _ _      _        def γ = def γ
 
-evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o)
+evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o, DynOps o)
          => MVar Void -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
          -> MachineMonad s o xs n r a
 evalIter μ l h =
@@ -182,10 +182,10 @@ evalIter μ l h =
         Same gyes (Machine yes) gno (Machine no) ->
           liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
 
-evalJoin :: ΦVar x -> MachineMonad s o (x : xs) n r a
+evalJoin :: DynOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume
 
-evalMkJoin :: JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMkJoin :: DynOps o => JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMkJoin = setupJoinPoint
 
 evalSwap :: Machine s o (x : y : xs) n r a -> MachineMonad s o (y : x : xs) n r a
@@ -226,7 +226,7 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps (StaRep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps (StaRep o), DynOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
   -- when there are coins available, this cannot be discharged, and will wait until the current amounts
   -- are exhausted. Because it might have been the case that lookahead was performed to refund, the
@@ -257,7 +257,7 @@ evalMeta BlockCoins (Machine k) = k
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
-withLengthCheckAndCoins :: (?ops::InputOps (StaRep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+withLengthCheckAndCoins :: (?ops::InputOps (StaRep o), DynOps o) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
     -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail

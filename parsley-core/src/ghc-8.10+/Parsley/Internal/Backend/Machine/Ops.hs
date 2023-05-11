@@ -215,7 +215,7 @@ about the state of the input (since 1.4.0.0).
 
 @since 1.0.0.0
 -}
-raise :: Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
+raise :: DynOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
 raise γ = let VCons h _ = handlers γ in staHandlerEval h (input γ)
 
 -- Handler preparation
@@ -227,7 +227,8 @@ which takes the captured offset as the first argument.
 
 @since 1.2.0.0
 -}
-buildHandler :: Γ s o xs n r a                                  -- ^ State to execute the handler with.
+buildHandler :: DynOps o
+             => Γ s o xs n r a                                  -- ^ State to execute the handler with.
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a))) -- ^ Partial parser accepting the modified state.
              -> Word                                            -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o a
@@ -252,7 +253,8 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 
 @since 2.1.0.0
 -}
-buildIterYesHandler :: Γ s o xs n r a
+buildIterYesHandler :: DynOps o
+                    => Γ s o xs n r a
                     -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
                     -> Word
                     -> StaHandler s o a
@@ -283,7 +285,7 @@ where they are unknown (which is defined in terms of the previous two).
 
 @since 2.1.0.0
 -}
-bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (StaRep o))
+bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (StaRep o), DynOps o)
                 => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
                 -> Bool                              -- ^ Is a binding required for the matching handler?
                 -> StaYesHandler s o a               -- ^ The handler that handles matching input.
@@ -294,7 +296,7 @@ bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (StaRep o))
 bindSameHandler γ yesNeeded yes noNeeded no k =
   bindYesInline# yesNeeded (yes (input γ)) $ \qyes ->
     bindHandlerInline# noNeeded (staHandler# (no (input γ))) $ \qno ->
-      let handler inp = [||if $$(same (offset (off (input γ))) (off# inp)) then $$qyes else $$(staHandler# qno inp)||]
+      let handler inp = [||if $$(same (offset (off (input γ))) (asSta @o (off# inp))) then $$qyes else $$(staHandler# qno inp)||]
       in bindHandlerInline# @o True handler $ \qhandler ->
           k (γ {handlers = VCons (augmentHandlerFull (input γ) qhandler qyes qno) (handlers γ)})
 
@@ -326,7 +328,7 @@ join point) taking the required components from the state `Γ`.
 
 @since 1.2.0.0
 -}
-resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
+resume :: DynOps o => StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
 resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (fromInput (input γ))
 
 {-|
@@ -336,7 +338,7 @@ previous return continuation in the case of a tail call.
 
 @since 1.8.0.0
 -}
-callWithContinuation :: MarshalOps o
+callWithContinuation :: (MarshalOps o, DynOps o)
                      => StaSubroutine s o a x           -- ^ The subroutine @sub@ that will be called.
                      -> StaCont s o a x                 -- ^ The return continuation for the subroutine.
                      -> Input o                         -- ^ The input to feed to @sub@.
@@ -363,7 +365,7 @@ an optimisation on the offset if the subroutine has known input characteristics.
 
 @since 1.5.0.0
 -}
-callCC :: forall s o xs n r a x. MarshalOps o
+callCC :: forall s o xs n r a x. (MarshalOps o, DynOps o)
        => Word                                                   --
        -> StaSubroutine s o a x                                  -- ^ The subroutine @sub@ that will be called.
        -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
@@ -381,7 +383,7 @@ into the `Ctx`.
 
 @since 1.4.0.0
 -}
-setupJoinPoint :: forall s o xs n r a x. JoinBuilder o
+setupJoinPoint :: forall s o xs n r a x. (JoinBuilder o, DynOps o)
                => ΦVar x                     -- ^ The name of the binding.
                -> Machine s o (x : xs) n r a -- ^ The definition of the binding.
                -> Machine s o xs n r a       -- ^ The scope within which the binding is valid.
@@ -402,7 +404,7 @@ the loop consumed input in its final iteration.
 
 @since 1.8.0.0
 -}
-bindIterAlways :: forall s o a. RecBuilder o
+bindIterAlways :: forall s o a. (RecBuilder o, DynOps o)
                => Ctx s o a                  -- ^ The context to keep the binding
                -> MVar Void                  -- ^ The name of the binding.
                -> Machine s o '[] One Void a -- ^ The body of the loop.
@@ -416,7 +418,7 @@ bindIterAlways ctx μ l needed h inp u =
     bindIter# @o (fromInput inp) $ \qloop inp# ->
       let inp = toInput u inp#
       in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
-               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(asDyn @o (off# inp)) ||]) ctx))
+               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
 
 {-|
 Similar to `bindIterAlways`, but builds a handler that performs in
@@ -424,7 +426,7 @@ the same way as `bindSameHandler`.
 
 @since 2.1.0.0
 -}
-bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (StaRep o))
+bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (StaRep o), DynOps o)
              => Ctx s o a                  -- ^ The context to store the binding in.
              -> MVar Void                  -- ^ The name of the binding.
              -> Machine s o '[] One Void a -- ^ The loop body.
@@ -438,12 +440,12 @@ bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (StaRep o
 bindIterSame ctx μ l neededYes yes neededNo no inp u =
   bindHandlerInline# @o neededYes (staHandler# yes) $ \qyes ->
     bindIterHandlerInline# neededNo (staHandler# . no . toInput u) $ \qno ->
-      let handler inpc inpo = [||if $$(same (off# inpc) (off# inpo)) then $$(staHandler# qyes inpc) else $$(staHandler# (qno inpc) inpo)||]
+      let handler inpc inpo = [||if $$(same (asSta @o (off# inpc)) (asSta @o (off# inpo))) then $$(staHandler# qyes inpc) else $$(staHandler# (qno inpc) inpo)||]
       in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (fromInput inp) $ \qloop inp# ->
           let off = toInput u inp#
           in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil))
-                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(asDyn @o (off# inp)) ||]) ctx))
+                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
 
 {- Recursion Operations -}
 {-|
@@ -454,7 +456,7 @@ each time round.
 
 @since 1.5.0.0
 -}
-buildRec :: forall rs s o a r. RecBuilder o
+buildRec :: forall rs s o a r. (RecBuilder o, DynOps o)
          => MVar r                  -- ^ The name of the binding.
          -> Regs rs                 -- ^ The registered required by the binding.
          -> Ctx s o a               -- ^ The context to re-insert the register-less binding
@@ -465,7 +467,7 @@ buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qh inp ->
       run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil))
-            (insertSub μ (mkStaSubroutineMeta meta $ \k h inp -> [|| $$qself $$k $$h $$(pos# inp) $$(asDyn @o (off# inp)) ||]) (nextUnique ctx))
+            (insertSub μ (mkStaSubroutineMeta meta $ \k h inp -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) ||]) (nextUnique ctx))
 
 {- Binding Operations -}
 bindHandlerInline# :: forall o s a b. HandlerOps o
@@ -485,7 +487,7 @@ bindIterHandlerInline# :: forall o s a b. RecBuilder o
                        -> (Input# o -> StaHandler# s o a)
                        -> ((Input# o -> StaHandler s o a) -> Code b)
                        -> Code b
-bindIterHandlerInline# True  h k = bindIterHandler# @o h $ \qh -> k (\inp -> fromDynHandler [||$$qh $$(pos# inp) $$(asDyn @o (off# inp))||])
+bindIterHandlerInline# True  h k = bindIterHandler# @o h $ \qh -> k (\inp -> fromDynHandler [||$$qh $$(pos# inp) $$(off# inp)||])
 bindIterHandlerInline# False h k = k (fromStaHandler# . h)
 
 {- Marshalling Operations -}
@@ -543,8 +545,8 @@ preludeString name dir γ ctx ends =
           inputTrace      = [|| let replace '\n' = color Green "↙"
                                     replace ' '  = color White "·"
                                     replace c    = return c
-                                    go i# = $$(asSta @o [||i#||] $ \qi -> uncons qi (\qc qi' -> [||
-                                        if $$(same qi end) then []
+                                    go i# = $$(uncons (asSta @o [||i#||]) (\qc qi' -> [||
+                                        if $$(same (asSta @o [||i#||]) end) then []
                                         else replace $$qc ++ go $$(asDyn @o qi') ||])
                                       [||color Red "•"||])
                                 in go $$(asDyn @o start) ||]

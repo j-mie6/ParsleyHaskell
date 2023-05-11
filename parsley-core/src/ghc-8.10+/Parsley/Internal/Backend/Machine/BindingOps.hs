@@ -29,7 +29,6 @@ import Control.Monad.ST                                (ST)
 import Data.Array.Unboxed                              (UArray)
 import Data.ByteString.Internal                        (ByteString)
 import Data.Text                                       (Text)
-import Parsley.Internal.Backend.Machine.InputOps       (DynOps, asSta, asDyn)
 import Parsley.Internal.Backend.Machine.InputRep       (DynRep)
 import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler)
@@ -55,7 +54,7 @@ Used to generate a binding for a handler.
 
 @since 1.4.0.0
 -}
-class DynOps o => HandlerOps o where
+class HandlerOps o where
   {-|
   Generate a let-bound handler and provide it to another continuation.
 
@@ -65,14 +64,13 @@ class DynOps o => HandlerOps o where
                -> (DynHandler s o a -> Code b) -- ^ The continuation that expects the bound handler
                -> Code b
 
-#define deriveHandlerOps(_o)                                    \
-instance HandlerOps _o where                                    \
-{                                                               \
-  bindHandler# h k = [||                                        \
-    let handler (pos :: Pos) (o# :: DynRep _o) =                \
-          $$(asSta @_o [||o#||] (\o -> h (Input# o [||pos||]))) \
-    in $$(k [||handler||])                                      \
-  ||];                                                          \
+#define deriveHandlerOps(_o)                                                       \
+instance HandlerOps _o where                                                       \
+{                                                                                  \
+  bindHandler# h k = [||                                                           \
+    let handler (pos :: Pos) (o# :: DynRep _o) = $$(h (Input# [||o#||] [||pos||])) \
+    in $$(k [||handler||])                                                         \
+  ||];                                                                             \
 };
 inputInstances(deriveHandlerOps)
 
@@ -81,7 +79,7 @@ Generates join-point bindings.
 
 @since 1.4.0.0
 -}
-class DynOps o => JoinBuilder o where
+class JoinBuilder o where
   {-|
   Generate a let-bound join point and provide it to another continuation.
 
@@ -91,12 +89,12 @@ class DynOps o => JoinBuilder o where
                   -> (DynCont s o a x -> Code b) -- ^ The continuation that expects the bound join point
                   -> Code b
 
-#define deriveJoinBuilder(_o)                                                                             \
-instance JoinBuilder _o where                                                                             \
-{                                                                                                         \
-  setupJoinPoint# binding k =                                                                             \
-    [|| let join x (pos :: Pos) !(o# :: DynRep _o) =                                                      \
-              $$(asSta @_o [||o#||] (\o -> binding [||x||] (Input# o [||pos||]))) in $$(k [||join||]) ||] \
+#define deriveJoinBuilder(_o)                                                         \
+instance JoinBuilder _o where                                                         \
+{                                                                                     \
+  setupJoinPoint# binding k =                                                         \
+    [|| let join x (pos :: Pos) !(o# :: DynRep _o) =                                  \
+              $$(binding [||x||] (Input# [||o#||] [||pos||])) in $$(k [||join||]) ||] \
 };
 inputInstances(deriveJoinBuilder)
 
@@ -105,7 +103,7 @@ Various functions for creating bindings for recursive parsers.
 
 @since 1.4.0.0
 -}
-class DynOps o => RecBuilder o where
+class RecBuilder o where
   {-|
   Create a binder for specialist iterating handlers: these have two arguments,
   one for the current captured offset and then the second for the offset at
@@ -139,20 +137,16 @@ instance RecBuilder _o where                                                    
 {                                                                                                   \
   bindIterHandler# h k = [||                                                                        \
       let handler (posc :: Pos) (c# :: DynRep _o) (poso :: Pos) (o# :: DynRep _o) =                 \
-            $$(asSta @_o [||c#||] $ \c ->                                                           \
-                 asSta @_o [||o#||] $ \o ->                                                         \
-                  h (Input# c [||posc||]) (Input# o [||poso||])) in $$(k [||handler||])             \
+            $$(h (Input# [||c#||] [||posc||]) (Input# [||o#||] [||poso||])) in $$(k [||handler||])  \
     ||];                                                                                            \
   bindIter# inp l = [||                                                                             \
-      let loop (pos :: Pos) !(o# :: DynRep _o) =                                                    \
-            $$(asSta @_o [||o#||] $ \o -> l [||loop||] (Input# o [||pos||]))                        \
-      in loop $$(pos# inp) $$(asDyn @_o (off# inp))                                                 \
+      let loop (pos :: Pos) !(o# :: DynRep _o) = $$(l [||loop||] (Input# [||o#||] [||pos||]))       \
+      in loop $$(pos# inp) $$(off# inp)                                                             \
     ||];                                                                                            \
   bindRec# binding =                                                                                \
     {- The idea here is to try and reduce the number of times registers have to be passed around -} \
     [|| let self ret h (pos :: Pos) !(o# :: DynRep _o) =                                            \
-              $$(asSta @_o [||o#||] $ \o ->                                                         \
-                  binding [||self||] [||ret||] [||h||] (Input# o [||pos||])) in self ||]            \
+              $$(binding [||self||] [||ret||] [||h||] (Input# [||o#||] [||pos||])) in self ||]      \
 };
 inputInstances(deriveRecBuilder)
 
@@ -164,7 +158,7 @@ at runtime.
 
 @since 1.4.0.0
 -}
-class DynOps o => MarshalOps o where
+class MarshalOps o where
   {-|
   Converts a static handler into a dynamic one (represented as a lambda)
 
@@ -179,11 +173,10 @@ class DynOps o => MarshalOps o where
   -}
   dynCont# :: StaCont# s o a x -> DynCont s o a x
 
--- FIXME: eta won't work on these, because it will marshal from dynamic to static and back...
-#define deriveMarshalOps(_o)                                                                                                 \
-instance MarshalOps _o where                                                                                                 \
-{                                                                                                                            \
-  dynHandler# sh = [||\ (pos :: Pos) (o# :: DynRep _o) -> $$(asSta @_o [||o#||] $ \o -> sh (Input# o [||pos||])) ||];        \
-  dynCont# sk = [||\ x (pos :: Pos) (o# :: DynRep _o) -> $$(asSta @_o [||o#||] $ \o -> sk [||x||] (Input# o [||pos||])) ||]; \
+#define deriveMarshalOps(_o)                                                                             \
+instance MarshalOps _o where                                                                             \
+{                                                                                                        \
+  dynHandler# sh = [||\ (pos :: Pos) (o# :: DynRep _o) -> $$(sh (Input# [||o#||] [||pos||])) ||];        \
+  dynCont# sk = [||\ x (pos :: Pos) (o# :: DynRep _o) -> $$(sk [||x||] (Input# [||o#||] [||pos||])) ||]; \
 };
 inputInstances(deriveMarshalOps)

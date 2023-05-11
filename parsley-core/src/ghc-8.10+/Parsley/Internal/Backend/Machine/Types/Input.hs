@@ -18,7 +18,8 @@ module Parsley.Internal.Backend.Machine.Types.Input (
     chooseInput
   ) where
 
-import Parsley.Internal.Backend.Machine.InputRep                  (StaRep)
+import Parsley.Internal.Backend.Machine.InputRep                  (StaRep, DynRep)
+import Parsley.Internal.Backend.Machine.InputOps                  (DynOps, asSta, asDyn)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset(offset), mkOffset, moveN)
 import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPos, toDynPos, fromDynPos, fromStaPos, force, update)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
@@ -45,7 +46,7 @@ Packages a dynamic offset with a dynamic position.
 @since 1.8.0.0
 -}
 data Input# o = Input# {
-    off#  :: !(StaRep o),
+    off#  :: !(Code (DynRep o)),
     pos#  :: !DynPos
   }
 
@@ -62,16 +63,16 @@ Strips away static information, returning the raw dynamic components.
 
 @since 1.8.0.0
 -}
-fromInput :: Input o -> Input# o
-fromInput Input{..} = Input# (offset off) (toDynPos pos)
+fromInput :: forall o. DynOps o => Input o -> Input# o
+fromInput Input{..} = Input# (asDyn @o (offset off)) (toDynPos pos)
 
 {-|
 Given a unique identifier, forms a plainly annotated static combination of position and offset.
 
 @since 1.8.0.0
 -}
-toInput :: Word -> Input# o -> Input o
-toInput u Input#{..} = Input (mkOffset off# u) (fromDynPos pos#)
+toInput :: forall o. DynOps o => Word -> Input# o -> Input o
+toInput u Input#{..} = Input (mkOffset (asSta @o off#) u) (fromDynPos pos#)
 
 updateOffset :: Offset o -> Input o -> Input o
 updateOffset off inp = inp { off = off }
@@ -102,8 +103,8 @@ the input using statically acquired knowledge.
 @since 2.1.0.0
 -}
 -- TODO: In future, we could adjust InputCharacteristic to provide information about the static behaviours of the positions too...
-chooseInput :: InputCharacteristic -> Word -> Input o -> Input# o -> Input o
-chooseInput (AlwaysConsumes n) _ inp  inp#  = inp { off = moveN n (off inp) (off# inp#), pos = fromDynPos (pos# inp#) }
+chooseInput :: forall o. DynOps o => InputCharacteristic -> Word -> Input o -> Input# o -> Input o
+chooseInput (AlwaysConsumes n) _ inp  inp#  = inp { off = moveN n (off inp) (asSta @o (off# inp#)), pos = fromDynPos (pos# inp#) }
 -- Technically, in this case, we know the whole input is unchanged. This essentially ignores the continuation arguments
 -- hopefully GHC could optimise this better?
 chooseInput NeverConsumes      _ inp  _inp# = inp -- { off = (off inp) {offset = off# inp# }, pos = pos# inp# }

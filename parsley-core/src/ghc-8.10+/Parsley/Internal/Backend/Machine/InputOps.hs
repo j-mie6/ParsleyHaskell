@@ -100,12 +100,12 @@ type DynOps o = DynOps_ (DynRep o) (StaRep o)
 asDyn :: forall input. DynOps input => StaRep input -> Code (DynRep input)
 asDyn = _asDyn
 
-asSta :: forall input a. DynOps input => Code (DynRep input) -> (StaRep input -> Code a) -> Code a
+asSta :: forall input. DynOps input => Code (DynRep input) -> StaRep input
 asSta = _asSta
 
 class DynOps_ (dynrep :: TYPE r) starep | dynrep -> starep, starep -> dynrep where
   _asDyn :: starep -> Code dynrep
-  _asSta :: Code dynrep -> (starep -> Code a) -> Code a
+  _asSta :: Code dynrep -> starep
 
 {-|
 Defines operation used for debugging operations.
@@ -222,7 +222,7 @@ instance InputPrep ByteString where
     ||]
 
 instance InputPrep Text where
-  _prepare qinput k = _asSta qinput $
+  _prepare qinput k =
     k (InputOps (\pt k -> staText pt $ \t@StaText{..} -> [||
                     let !(Iter c d) = iter $$origText 0
                         !unconsumed' = $$unconsumedText - d
@@ -246,6 +246,7 @@ instance InputPrep Text where
                       t@(Text _ off unconsumed) -> $$(good (StaT $ StaText [||t||] arrText [||off||] [||unconsumed||]))
                   ||])
                 False)
+      (DynT qinput)
 
 --instance InputPrep String where _prepare input = _prepare @(UArray Int Char) [||listArray (0, length $$input-1) $$input||]
 instance InputPrep (UArray Int Char) where
@@ -312,21 +313,21 @@ instance PositionOps (Code UnpackedLazyByteString) where
 -- DynOps Instances
 instance DynOps_ Int# (Code Int#) where
   _asDyn = id
-  _asSta = flip ($)
+  _asSta = id
 
 instance DynOps_ (# Int#, ts #) (PartialStaOffWith ts) where
   _asDyn (StaOW qo qcs) = [||(# $$qo, $$qcs #)||]
   _asDyn (DynOW qocs) = qocs
-  _asSta qocs k = k (DynOW qocs)
+  _asSta = DynOW
 
 instance DynOps_ Text PartialStaText where
   _asDyn (StaT t) = origText t
   _asDyn (DynT t) = t
-  _asSta qt k = k (DynT qt)
+  _asSta = DynT
 
 instance DynOps_ UnpackedLazyByteString (Code UnpackedLazyByteString) where
   _asDyn = id
-  _asSta = flip ($)
+  _asSta = id
 
 -- LogOps Instances
 instance LogOps (Code Int#) where

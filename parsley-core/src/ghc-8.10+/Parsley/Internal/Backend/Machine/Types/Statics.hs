@@ -51,6 +51,7 @@ import Data.STRef                                                 (STRef)
 import Data.Kind                                                  (Type)
 import Data.Maybe                                                 (fromMaybe)
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata, newMeta)
+import Parsley.Internal.Backend.Machine.InputOps                  (DynOps, asDyn)
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), fromInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
@@ -67,8 +68,8 @@ on handlers, a simple form of inlining optimisation.
 -}
 type StaHandler# s o a = Input# o -> Code (ST s (Maybe a))
 
-mkStaHandler# :: forall o s a. DynHandler s o a -> StaHandler# s o a
-mkStaHandler# dh inp = [||$$dh $$(pos# inp) $$(off# inp)||]
+mkStaHandler# :: forall o s a. DynOps o => DynHandler s o a -> StaHandler# s o a
+mkStaHandler# dh inp = [||$$dh $$(pos# inp) $$(asDyn @o (off# inp))||]
 
 {-|
 Encapsulates a static handler with its possible dynamic origin for costless conversion.
@@ -101,7 +102,7 @@ Builds a `StaHandler` out of a `DynHandler`, which is converted in the process.
 
 @since 1.7.0.0
 -}
-fromDynHandler :: forall s o a. DynHandler s o a -> StaHandler s o a
+fromDynHandler :: forall s o a. DynOps o => DynHandler s o a -> StaHandler s o a
 fromDynHandler h = StaHandler (mkStaHandler# @o h) (Just h)
 
 {-|
@@ -136,7 +137,7 @@ if it is converted back the conversion is free.
 
 @since 1.7.0.0
 -}
-augmentHandlerDyn :: forall s o a. Maybe (Input o) -> DynHandler s o a -> AugmentedStaHandler s o a
+augmentHandlerDyn :: forall s o a. DynOps o => Maybe (Input o) -> DynHandler s o a -> AugmentedStaHandler s o a
 augmentHandlerDyn c = augmentHandler c . fromDynHandler
 
 {-|
@@ -265,8 +266,8 @@ if it is converted back the conversion is free.
 
 @since 1.4.0.0
 -}
-mkStaContDyn :: DynCont s o a x -> StaCont s o a x
-mkStaContDyn dk = StaCont (\x inp -> [|| $$dk $$x $$(pos# inp) $$(off# inp) ||]) (Just dk)
+mkStaContDyn :: forall o s a x. DynOps o => DynCont s o a x -> StaCont s o a x
+mkStaContDyn dk = StaCont (\x inp -> [|| $$dk $$x $$(pos# inp) $$(asDyn @o (off# inp)) ||]) (Just dk)
 
 {-|
 Given a static continuation, extracts the underlying continuation which
@@ -351,9 +352,9 @@ existentially bounds to the function.
 
 @since 1.5.0.0
 -}
-qSubroutine :: forall s o a x rs. DynFunc rs s o a x -> Regs rs -> Metadata -> QSubroutine s o a x
+qSubroutine :: forall s o a x rs. DynOps o => DynFunc rs s o a x -> Regs rs -> Metadata -> QSubroutine s o a x
 qSubroutine func frees meta = QSubroutine (staFunc frees func) frees
   where
     staFunc :: forall rs. Regs rs -> DynFunc rs s o a x -> StaFunc rs s o a x
-    staFunc NoRegs func = StaSubroutine (\dk dh inp -> [|| $$func $$dk $$dh $$(pos# inp) $$(off# inp) ||]) meta
+    staFunc NoRegs func = StaSubroutine (\dk dh inp -> [|| $$func $$dk $$dh $$(pos# inp) $$(asDyn @o (off# inp)) ||]) meta
     staFunc (FreeReg _ witness) func = \r -> staFunc witness [|| $$func $$r ||]

@@ -70,8 +70,8 @@ import Debug.Trace                                                (trace)
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, uncons, check)
-import Parsley.Internal.Backend.Machine.InputRep                  (DynRep)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, DynOps, next, uncons, check, asDyn, asSta)
+import Parsley.Internal.Backend.Machine.InputRep                  (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
 import Parsley.Internal.Backend.Machine.THUtils                   (eta)
@@ -132,7 +132,7 @@ Consumes the next character and adjusts the offset to match.
 
 @since 1.8.0.0
 -}
-fetch :: (?ops :: InputOps (DynRep o))
+fetch :: (?ops :: InputOps (StaRep o))
       => Offset o -> (Code Char -> Offset o -> Code b) -> Code b
 fetch input k = next (offset input) $ \c offset' -> k c (moveOne input offset')
 
@@ -143,14 +143,14 @@ when the \(n\) characters are available and the @bad@ when they are not.
 
 @since 2.3.0.0
 -}
-emitLengthCheck :: (?ops :: InputOps (DynRep o))
+emitLengthCheck :: (?ops :: InputOps (StaRep o))
                 => Int                                             -- ^ The number of required characters \(n\).
                 -> Int                                             -- ^ The number of characters to prefetch \(m\).
                 -> Maybe (Code Char -> Code a -> Code a)           -- ^ An optional check for the head character.
                 -> (Offset o -> [(Code Char, Offset o)] -> Code a) -- ^ The good continuation if \(n\) characters are available.
                 -> Code a                                          -- ^ The bad continuation if the characters are unavailable.
                 -> Offset o                                        -- ^ The input to test on.
-                -> (Offset o -> Code (DynRep o))
+                -> (Offset o -> StaRep o)
                 -> Code a
 emitLengthCheck n m headCheck good bad input sel = check n m (sel input) headCheck good' bad
   where good' deepestKnown = let input' = updateDeepestKnown deepestKnown input in good input' . feed input'
@@ -283,7 +283,7 @@ where they are unknown (which is defined in terms of the previous two).
 
 @since 2.1.0.0
 -}
-bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (DynRep o))
+bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (StaRep o))
                 => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
                 -> Bool                              -- ^ Is a binding required for the matching handler?
                 -> StaYesHandler s o a               -- ^ The handler that handles matching input.
@@ -416,7 +416,7 @@ bindIterAlways ctx μ l needed h inp u =
     bindIter# @o (fromInput inp) $ \qloop inp# ->
       let inp = toInput u inp#
       in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
-               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
+               (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(asDyn @o (off# inp)) ||]) ctx))
 
 {-|
 Similar to `bindIterAlways`, but builds a handler that performs in
@@ -424,7 +424,7 @@ the same way as `bindSameHandler`.
 
 @since 2.1.0.0
 -}
-bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (DynRep o))
+bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (StaRep o))
              => Ctx s o a                  -- ^ The context to store the binding in.
              -> MVar Void                  -- ^ The name of the binding.
              -> Machine s o '[] One Void a -- ^ The loop body.
@@ -443,7 +443,7 @@ bindIterSame ctx μ l neededYes yes neededNo no inp u =
         bindIter# @o (fromInput inp) $ \qloop inp# ->
           let off = toInput u inp#
           in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil))
-                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
+                   (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(asDyn @o (off# inp)) ||]) ctx))
 
 {- Recursion Operations -}
 {-|
@@ -465,7 +465,7 @@ buildRec μ rs ctx k meta =
   takeFreeRegisters rs ctx $ \ctx ->
     bindRec# @o $ \qself qret qh inp ->
       run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (augmentHandlerDyn Nothing qh) VNil))
-            (insertSub μ (mkStaSubroutineMeta meta $ \k h inp -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) ||]) (nextUnique ctx))
+            (insertSub μ (mkStaSubroutineMeta meta $ \k h inp -> [|| $$qself $$k $$h $$(pos# inp) $$(asDyn @o (off# inp)) ||]) (nextUnique ctx))
 
 {- Binding Operations -}
 bindHandlerInline# :: forall o s a b. HandlerOps o
@@ -485,7 +485,7 @@ bindIterHandlerInline# :: forall o s a b. RecBuilder o
                        -> (Input# o -> StaHandler# s o a)
                        -> ((Input# o -> StaHandler s o a) -> Code b)
                        -> Code b
-bindIterHandlerInline# True  h k = bindIterHandler# @o h $ \qh -> k (\inp -> fromDynHandler [||$$qh $$(pos# inp) $$(off# inp)||])
+bindIterHandlerInline# True  h k = bindIterHandler# @o h $ \qh -> k (\inp -> fromDynHandler [||$$qh $$(pos# inp) $$(asDyn @o (off# inp))||])
 bindIterHandlerInline# False h k = k (fromStaHandler# . h)
 
 {- Marshalling Operations -}
@@ -518,7 +518,7 @@ having printed the debug information.
 
 @since 1.2.0.0
 -}
-logHandler :: (?ops :: InputOps (DynRep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
+logHandler :: (?ops :: InputOps (StaRep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
 logHandler name ctx γ u _ = let VCons h _ = handlers γ in fromStaHandler# $ \inp# -> let inp = toInput u inp# in [||
     trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h inp)
   ||]
@@ -529,29 +529,31 @@ string.
 
 @since 1.2.0.0
 -}
-preludeString :: forall s o xs n r a. (?ops :: InputOps (DynRep o), LogHandler o)
+preludeString :: forall s o xs n r a. (?ops :: InputOps (StaRep o), LogHandler o)
               => String         -- ^ The name as per the debug combinator
               -> Char           -- ^ Either @<@ or @>@ depending on whether we are entering or leaving.
               -> Γ s o xs n r a
               -> Ctx s o a
               -> String         -- ^ String that represents the current status
               -> Code String
-preludeString name dir γ ctx ends = [|| concat [$$prelude, $$inputTrace, ends, '\n' : $$caretSpace, color Blue "^"] ||]
+preludeString name dir γ ctx ends =
+  shiftLeft offset 5 $ \start ->
+    shiftRight offset 5 $ \end ->
+      let indent          = replicate (debugLevel ctx * 2) ' '
+          inputTrace      = [|| let replace '\n' = color Green "↙"
+                                    replace ' '  = color White "·"
+                                    replace c    = return c
+                                    go i# = $$(asSta @o [||i#||] $ \qi -> uncons qi (\qc qi' -> [||
+                                        if $$(same qi end) then []
+                                        else replace $$qc ++ go $$(asDyn @o qi') ||])
+                                      [||color Red "•"||])
+                                in go $$(asDyn @o start) ||]
+          prelude         = [|| concat [indent, dir : name, dir : " (", show $$(offToInt offset), "): "] ||]
+          caretSpace      = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
+      in [|| concat [$$prelude, $$inputTrace, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    offset          = Offset.offset (off (input γ))
-    indent          = replicate (debugLevel ctx * 2) ' '
-    start           = shiftLeft offset 5
-    end             = shiftRight offset 5
-    inputTrace      = [|| let replace '\n' = color Green "↙"
-                              replace ' '  = color White "·"
-                              replace c    = return c
-                              go i# = $$(uncons [||i#||] (\qc qi' -> [||
-                                  if $$(same [||i#||] end) then []
-                                  else replace $$qc ++ go $$qi' ||])
-                                [||color Red "•"||])
-                          in go $$start ||]
-    prelude         = [|| concat [indent, dir : name, dir : " (", show $$(offToInt offset), "): "] ||]
-    caretSpace      = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
+    offset = Offset.offset (off (input γ))
+
 
 {- Convenience Types -}
 {-|
@@ -563,9 +565,10 @@ type Ops o =
   ( HandlerOps o
   , JoinBuilder o
   , RecBuilder o
-  , PositionOps (DynRep o)
+  , PositionOps (StaRep o)
   , MarshalOps o
-  , LogOps (DynRep o)
+  , LogOps (StaRep o)
+  , DynOps o
   )
 
 {-|
@@ -573,7 +576,7 @@ The constraints needed to build a `logHandler`.
 
 @since 1.0.0.0
 -}
-type LogHandler o = (PositionOps (DynRep o), LogOps (DynRep o))
+type LogHandler o = (PositionOps (StaRep o), LogOps (StaRep o), DynOps o)
 
 {-|
 A `StaHandler` that has not yet captured its offset.

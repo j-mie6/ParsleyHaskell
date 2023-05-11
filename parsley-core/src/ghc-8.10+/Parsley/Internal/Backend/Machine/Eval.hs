@@ -26,13 +26,13 @@ import Control.Monad.Reader                                (Reader, ask, asks, r
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
 import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps           (InputOps)
-import Parsley.Internal.Backend.Machine.InputRep           (DynRep)
+import Parsley.Internal.Backend.Machine.InputOps           (InputOps, DynOps)
+import Parsley.Internal.Backend.Machine.InputRep           (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
 import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
-import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run, qSubroutine)
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(knownPreds, willConsume, willCache), one, minus)
@@ -51,25 +51,26 @@ This function performs the evaluation on the top-level let-bound parser to conve
 
 @since 1.0.0.0
 -}
-eval :: forall o a. (Trace, Ops o, ?ops :: InputOps (DynRep o))
+eval :: forall o a. (Trace, Ops o, ?ops :: InputOps (StaRep o))
      => LetBinding o a a              -- ^ The binding to be generated.
      -> DMap MVar (LetBinding o a)    -- ^ The map of all other required bindings.
-     -> Code (DynRep o)
+     -> StaRep o
      -> Code (Maybe a)                -- ^ The code for this parser.
 eval binding fs offset  = trace "EVALUATING TOP LEVEL" [||
     runST $$(letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
+             qSubroutine
              (run (readyMachine (body binding)) (Γ Empty halt (mkInput offset initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
     nameLet (MVar i) = "sub" ++ show i
 
-readyMachine :: (?ops :: InputOps (DynRep o), Ops o, Trace) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
+readyMachine :: (?ops :: InputOps (StaRep o), Ops o, Trace) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
 readyMachine = cata4 (Machine . alg)
   where
-    alg :: (?ops :: InputOps (DynRep o), Ops o) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
+    alg :: (?ops :: InputOps (StaRep o), Ops o) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = evalRet
     alg (Call μ k)          = evalCall μ k
     alg (Jump μ)            = evalJump μ
@@ -115,7 +116,7 @@ evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ
 evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: forall s o xs n r a. (?ops :: InputOps (DynRep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: forall s o xs n r a. (?ops :: InputOps (StaRep o), Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p k = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -141,7 +142,7 @@ evalEmpt = return $! raise
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
-evalCatch :: (PositionOps (DynRep o), HandlerOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
+evalCatch :: (PositionOps (StaRep o), HandlerOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) h = freshUnique $ \u -> case h of
   Always gh (Machine h) ->
     liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
@@ -169,7 +170,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go x (f:fs) (mk:mks) def γ = _if (ap f x) (mk γ) (go x fs mks def γ)
     go _ _      _        def γ = def γ
 
-evalIter :: (RecBuilder o, PositionOps (DynRep o), HandlerOps o)
+evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o)
          => MVar Void -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
          -> MachineMonad s o xs n r a
 evalIter μ l h =
@@ -212,20 +213,20 @@ evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o
 evalSelectPos sel (Machine k) = k <&> \m γ -> forcePos (input γ) sel $ \component input' ->
   m (γ {operands = Op (FREEVAR component) (operands γ), input = input'})
 
-evalLogEnter :: (?ops :: InputOps (DynRep o), LogHandler o, HandlerOps o)
+evalLogEnter :: (?ops :: InputOps (StaRep o), LogHandler o, HandlerOps o)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) = freshUnique $ \u ->
   liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindAlwaysHandler γ True (logHandler name ctx γ u) k)||])
     (local debugUp mk)
     ask
 
-evalLogExit :: (?ops :: InputOps (DynRep o), PositionOps (DynRep o), LogOps (DynRep o)) => String -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalLogExit :: (?ops :: InputOps (StaRep o), PositionOps (StaRep o), LogOps (StaRep o), DynOps o) => String -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalLogExit name (Machine mk) =
   liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '<' γ (debugDown ctx) (color Green " Good")) $$(k γ) ||])
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps (DynRep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps (StaRep o)) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMeta (AddCoins coins) (Machine k) =
   -- when there are coins available, this cannot be discharged, and will wait until the current amounts
   -- are exhausted. Because it might have been the case that lookahead was performed to refund, the
@@ -256,7 +257,7 @@ evalMeta BlockCoins (Machine k) = k
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
-withLengthCheckAndCoins :: (?ops::InputOps (DynRep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+withLengthCheckAndCoins :: (?ops::InputOps (StaRep o)) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
     -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
     -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail

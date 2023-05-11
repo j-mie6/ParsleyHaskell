@@ -21,7 +21,7 @@ import Language.Haskell.TH                          (newName, Name)
 import Language.Haskell.TH.Syntax                   (Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Metadata, Binding, Regs)
 import Parsley.Internal.Backend.Machine.THUtils     (unsafeCodeCoerce, unTypeCode)
-import Parsley.Internal.Backend.Machine.Types       (QSubroutine, qSubroutine, Func)
+import Parsley.Internal.Backend.Machine.Types       (Func)
 import Parsley.Internal.Common.Utils                (Code)
 
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
@@ -32,15 +32,16 @@ refer to every other. These are then in scope for the top-level parser.
 
 @since 1.5.0.0
 -}
-letRec :: GCompare key
-       => {-bindings-}  DMap key (LetBinding o a)   -- ^ The bindings that should form part of the recursive group
-      -> {-nameof-}     (forall x. key x -> String) -- ^ A function which can give a name to a key in the map
-      -> {-genBinding-} (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (QSubroutine s o a) -> Metadata -> Code (Func rs s o a x))
+letRec :: forall key binding s o a b. GCompare key
+       => {-bindings-}   DMap key (LetBinding o a)   -- ^ The bindings that should form part of the recursive group
+      -> {-nameof-}      (forall x. key x -> String) -- ^ A function which can give a name to a key in the map
+      -> {-genBinding-}  (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (binding s o a) -> Metadata -> Code (Func rs s o a x))
+      -> {-wrapBinding-} (forall x rs. Code (Func rs s o a x) -> Regs rs -> Metadata -> binding s o a x)
       -- ^ How a binding - and their free registers - should be converted into code
-      -> {-expr-}       (DMap key (QSubroutine s o a) -> Code b)
+      -> {-expr-}        (DMap key (binding s o a) -> Code b)
       -- ^ How to produce the top-level binding given the compiled bindings, i.e. the @in@ for the @let@
       -> Code b
-letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
+letRec bindings nameOf genBinding wrapBinding expr = unsafeCodeCoerce $
   do -- Make a bunch of names
      names <- traverseWithKey (\k (LetBinding _ rs meta) -> Const . (, rs, meta) <$> newName (nameOf k)) bindings
      -- Wrap them up so that they are valid typed template haskell names
@@ -56,5 +57,5 @@ letRec bindings nameOf genBinding expr = unsafeCodeCoerce $
      -- Construct the let expression
      return (LetE decls exp)
   where
-     makeTypedName :: Const (Name, Some Regs, Metadata) x -> QSubroutine s o a x
-     makeTypedName (Const (name, Some frees, meta)) = qSubroutine (unsafeCodeCoerce (return (VarE name))) frees meta
+     makeTypedName :: Const (Name, Some Regs, Metadata) x -> binding s o a x
+     makeTypedName (Const (name, Some frees, meta)) = wrapBinding (unsafeCodeCoerce (return (VarE name))) frees meta

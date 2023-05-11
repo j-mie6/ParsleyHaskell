@@ -26,7 +26,7 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * @Int#@ Operations
     intSame, intLess, intAdd, min#, max#,
     -- * @Offwith@ Operations
-    OffWith, offWith, offWithSame, offWithShiftRight,
+    OffWith, offWith, offWithShiftRight,
     -- * @LazyByteString@ Operations
     UnpackedLazyByteString, emptyUnpackedLazyByteString,
     byteStringShiftRight, byteStringShiftLeft,
@@ -203,32 +203,17 @@ offsetText :: Code Text -> Code Int
 offsetText qt = [||case $$qt of Text _ off _ -> off||]
 
 {-|
-Compares the bundled offsets of two `OffWith`s are equal: does not
-need to inspect the corresponding input.
-
-@since 1.0.0.0
--}
-offWithSame :: Code (OffWith ts) -> Code (OffWith ts) -> Code Bool
-offWithSame qi# qj# = [||
-    case $$(qi#) of
-      (# i#, _ #) -> case $$(qj#) of
-        (# j#, _ #) -> $$(intSame [||i#||] [||j#||])
-  ||]
-
-{-|
 Shifts an `OffWith` to the right, taking care to also drop tokens from the
 companion input.
 
 @since 1.0.0.0
 -}
 offWithShiftRight :: Code (Int -> ts -> ts) -- ^ A @drop@ function for underlying input.
-                  -> Code (OffWith ts)      -- ^ The `OffWith` to shift.
+                  -> (Code Int#, Code ts)   -- ^ The `OffWith` to shift.
                   -> Int#                   -- ^ How much to shift by.
-                  -> Code (OffWith ts)
+                  -> (Code Int#, Code ts)
 offWithShiftRight _ qo# 0# = qo#
-offWithShiftRight drop qo# qi# = [||
-    case $$(qo#) of (# o#, ts #) -> (# o# +# qi#, $$drop (I# qi#) ts #)
-  ||]
+offWithShiftRight drop (qo, qts) qi# = ([||$$qo +# qi#||], [|| $$drop (I# qi#) $$qts ||])
 
 {-|
 Drops tokens off of a `Stream`.

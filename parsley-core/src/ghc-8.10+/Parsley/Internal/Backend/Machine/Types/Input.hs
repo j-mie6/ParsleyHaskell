@@ -1,4 +1,4 @@
-{-# LANGUAGE UnboxedTuples, MagicHash, RecordWildCards #-}
+{-# LANGUAGE UnboxedTuples, MagicHash, RecordWildCards, TypeApplications #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Input
 Description : Packaging of offsets and positions.
@@ -18,7 +18,7 @@ module Parsley.Internal.Backend.Machine.Types.Input (
     chooseInput
   ) where
 
-import Parsley.Internal.Backend.Machine.InputRep                  (DynRep)
+import Parsley.Internal.Backend.Machine.InputRep                  (StaRep)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset(offset), mkOffset, moveN)
 import Parsley.Internal.Backend.Machine.Types.Input.Pos           (StaPos, DynPos, toDynPos, fromDynPos, fromStaPos, force, update)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
@@ -45,7 +45,7 @@ Packages a dynamic offset with a dynamic position.
 @since 1.8.0.0
 -}
 data Input# o = Input# {
-    off#  :: !(Code (DynRep o)),
+    off#  :: !(StaRep o),
     pos#  :: !DynPos
   }
 
@@ -54,7 +54,7 @@ Constructs an `Input` given a dynamic offset and a static position.
 
 @since 2.1.0.0
 -}
-mkInput :: Code (DynRep o) -> (Word, Word) -> Input o
+mkInput :: StaRep o -> (Word, Word) -> Input o
 mkInput off = Input (mkOffset off 0) . fromStaPos
 
 {-|

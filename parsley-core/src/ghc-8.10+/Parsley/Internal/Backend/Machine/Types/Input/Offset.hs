@@ -16,8 +16,7 @@ module Parsley.Internal.Backend.Machine.Types.Input.Offset (
     Offset, mkOffset, offset, moveOne, moveN, same, updateDeepestKnown, unsafeDeepestKnown
   ) where
 
-import Parsley.Internal.Backend.Machine.InputRep   (DynRep)
-import Parsley.Internal.Common.Utils               (Code)
+import Parsley.Internal.Backend.Machine.InputRep   (StaRep)
 import Data.Maybe                                  (fromJust)
 
 {-|
@@ -30,8 +29,8 @@ This can be used to statically evaluate handlers (see
 -}
 data Offset o = Offset {
     -- | The underlying code that represents the current offset into the input.
-    offset :: !(Code (DynRep o)),
-    deepestKnownChar :: !(Maybe (Code (DynRep o))),
+    offset :: !(StaRep o),
+    deepestKnownChar :: !(Maybe (StaRep o)),
     -- | The unique identifier that determines where this offset originated from.
     unique :: {-# UNPACK #-} !Word,
     -- | The amount of input that has been consumed on this offset since it was born.
@@ -59,7 +58,7 @@ runtime offset and records that another character has been consumed.
 
 @since 1.4.0.0
 -}
-moveOne :: Offset o -> Code (DynRep o) -> Offset o
+moveOne :: Offset o -> StaRep o -> Offset o
 moveOne = moveN (Just 1)
 
 {-|
@@ -69,7 +68,7 @@ Here, `Nothing` represents an unknown but non-zero amount of characters.
 
 @since 1.5.0.0
 -}
-moveN :: Maybe Word -> Offset o -> Code (DynRep o) -> Offset o
+moveN :: Maybe Word -> Offset o -> StaRep o -> Offset o
 moveN n off o = off { offset = o, moved = moved off `add` toAmount n }
   where
     toAmount :: Maybe Word -> Amount
@@ -82,13 +81,13 @@ yet.
 
 @since 1.4.0.0
 -}
-mkOffset :: Code (DynRep o) -> Word -> Offset o
+mkOffset :: StaRep o -> Word -> Offset o
 mkOffset offset unique = Offset offset Nothing unique (Amount 0 0)
 
-updateDeepestKnown :: Code (DynRep o) -> Offset o -> Offset o
+updateDeepestKnown :: StaRep o -> Offset o -> Offset o
 updateDeepestKnown known offset = offset { deepestKnownChar = Just known }
 
-unsafeDeepestKnown :: Offset o -> Code (DynRep o)
+unsafeDeepestKnown :: Offset o -> StaRep o
 unsafeDeepestKnown = fromJust . deepestKnownChar
 
 add :: Amount -> Amount -> Amount

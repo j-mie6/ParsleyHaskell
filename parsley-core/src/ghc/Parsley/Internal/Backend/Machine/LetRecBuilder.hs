@@ -20,9 +20,9 @@ import Data.Some                                    (Some(Some))
 import Language.Haskell.TH                          (newName, Name)
 import Language.Haskell.TH.Syntax                   (Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
 import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Metadata, Binding, Regs)
-import Parsley.Internal.Backend.Machine.THUtils     (unsafeCodeCoerce, unTypeCode)
 import Parsley.Internal.Backend.Machine.Types       (Func)
 import Parsley.Internal.Common.Utils                (Code)
+import Parsley.Internal.Common.THUtils              (unsafeCodeCoerce, unTypeCode)
 
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
 

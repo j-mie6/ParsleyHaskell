@@ -45,10 +45,11 @@ import GHC.Prim                                    (Word#)
 #endif
 import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Text16(..), DynRep, StaRep, UnpackedLazyByteString,
                                                     StaText(..), PartialStaText(..), staText, PartialStaOffWith(..), staOffWith,
-                                                    emptyUnpackedLazyByteString, intSame, intLess, intAdd,
+                                                    PartialStaOffset(..), dynOffset,
+                                                    emptyUnpackedLazyByteString, intSame, intLess, intAdd, intSubNonNeg,
                                                     offWithShiftRight, dropStream,
                                                     textShiftRight, textShiftLeft, byteStringShiftRight,
-                                                    byteStringShiftLeft, byteStringNext, max#)
+                                                    byteStringShiftLeft, byteStringNext)
 import Parsley.Internal.Common.Utils               (Code)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
@@ -146,7 +147,7 @@ synthesised and passed around using @ImplicitParams@.
 -}
 data InputOps rep = InputOps { _next :: !(forall a. rep -> (Code Char -> rep -> Code a) -> Code a)              -- ^ Read the next character (without checking existence)
                              , _uncons :: !(forall a. rep -> (Code Char -> rep -> Code a) -> Code a -> Code a)  -- ^ Read the next character, may check existence
-                             , _ensureN :: !(forall a. Int# -> rep -> (rep -> Code a) -> Code a -> Code a)      -- ^ Ensure that n characters exist
+                             , _ensureN :: !(forall a. Int -> rep -> (rep -> Code a) -> Code a -> Code a)      -- ^ Ensure that n characters exist
                              , _ensureNIsFast :: !Bool                                                                    -- ^ _ensureN is O(1) and not O(n)
                              }
 
@@ -186,7 +187,7 @@ uncons = _uncons ?ops
 
 check :: forall rep a. (?ops :: InputOps rep) => Int -> Int -> rep -> Maybe (Code Char -> Code a -> Code a) -> (rep -> [(Code Char, rep)] -> Code a) -> Code a -> Code a
 check = checkImpl (_ensureNIsFast ?ops)
-                  (\(I# n) -> _ensureN ?ops n)
+                  (_ensureN ?ops)
                   uncons
 
 {- INSTANCES -}
@@ -199,7 +200,7 @@ instance InputPrep String where
                         c : cs' -> $$(good [||c||] (StaOW [||$$qo +# 1#||] [||cs'||]))
                         []     -> $$bad
                     ||])
-                (\qn pocs good bad -> staOffWith pocs $ \qo qcs -> let (qo', qcs') = offWithShiftRight [||drop||] qo qcs (qn -# 1#) in [||
+                (\n pocs good bad -> staOffWith pocs $ \qo qcs -> let (qo', qcs') = offWithShiftRight [||drop||] qo qcs (n - 1) in [||
                       case $$qcs' of
                         [] -> $$bad
                         cs -> $$(good (StaOW qo' [||cs||]))
@@ -213,12 +214,12 @@ instance InputPrep ByteString where
           next i# =
             case readWord8OffAddr# (addr# `plusAddr#` i#) 0# realWorld# of
               (# s', x #) -> case touch# final s' of
-                !_ -> (# C# (chr# (word2Int# (word8ToWord# x))), i# +# 1# #)
-      in $$(k (InputOps (\qi k -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||])
-                        (\qi k _ -> [|| let !(# c, qi' #) = next $$qi in $$(k [||c||] [||qi'||]) ||]) -- always guarded by fastEnsureN
-                        (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
+                !_ -> chr# (word2Int# (word8ToWord# x))
+      in $$(k (InputOps (\qi k -> [|| let !c# = next $$(dynOffset qi) in $$(k [||C# c#||] (intAdd qi 1)) ||])
+                        (\qi k _ -> [|| let !c# = next $$(dynOffset qi) in $$(k [||C# c#||] (intAdd qi 1)) ||]) -- always guarded by fastEnsureN
+                        (\n qi k -> intLess (dynOffset (intAdd qi (n - 1))) [||size#||] (k qi))
                         True)
-              [||off#||])
+              (_asSta [||off#||]))
     ||]
 
 instance InputPrep Text where
@@ -240,8 +241,8 @@ instance InputPrep Text where
                                                     unconsumedText = [||unconsumed'||]}))
                     else $$bad
                   ||])
-                (\qn pt good bad -> staText pt $ \StaText{..} -> [|| -- could be improved, I guess?
-                    case $$(textShiftRight origText (qn -# 1#)) of
+                (\(I# n) pt good bad -> staText pt $ \StaText{..} -> [|| -- could be improved, I guess?
+                    case $$(textShiftRight origText (n -# 1#)) of
                       Text _ _ 0                -> $$bad
                       t@(Text _ off unconsumed) -> $$(good (StaT $ StaText [||t||] arrText [||off||] [||unconsumed||]))
                   ||])
@@ -252,11 +253,11 @@ instance InputPrep Text where
 instance InputPrep (UArray Int Char) where
   _prepare qinput k = [||
       let !(UArray _ _ (I# size#) input#) = $$qinput
-      in $$(k (InputOps (\qi k -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||])
-                        (\qi k _ -> k [||C# (indexWideCharArray# input# $$qi)||] [||$$qi +# 1#||]) -- always guarded by fastEnsureN
-                        (\qn qi -> intLess (intAdd qi (qn -# 1#)) [||size#||])
+      in $$(k (InputOps (\qi k -> k [||C# (indexWideCharArray# input# $$(dynOffset qi))||] (intAdd qi 1))
+                        (\qi k _ -> k [||C# (indexWideCharArray# input# $$(dynOffset qi))||] (intAdd qi 1)) -- always guarded by fastEnsureN
+                        (\n qi k -> intLess (dynOffset (intAdd qi (n - 1))) [||size#||] (k qi))
                         True)
-              [||0#||])
+              (_asSta [||0#||]))
     ||]
 
 instance InputPrep Lazy.ByteString where
@@ -272,8 +273,8 @@ instance InputPrep Lazy.ByteString where
                               bs                      ->
                                 let !(# c, qi' #) = byteStringNext bs in $$(good [||c||] [||qi'||])
                           ||])
-                        (\qn qi good bad -> [||
-                            case $$(byteStringShiftRight qi (qn -# 1#)) of
+                        (\(I# n) qi good bad -> [||
+                            case $$(byteStringShiftRight qi (n -# 1#)) of
                               (# _, _, _, _, 0#, _ #) -> $$bad
                               bs                      -> $$(good [||bs||])
                           ||])
@@ -285,7 +286,7 @@ instance InputPrep Stream where
   _prepare qinput k =
     k (InputOps (\pocs k -> staOffWith pocs $ \qo qcs -> [|| let c :> cs' = $$qcs in $$(k [||c||] (StaOW [||$$qo +# 1#||] [||cs'||])) ||])
                 (\pocs k _ -> staOffWith pocs $ \qo qcs -> [|| let c :> cs' = $$qcs in $$(k [||c||] (StaOW [||$$qo +# 1#||] [||cs'||])) ||])
-                (\qn pocs good _ -> staOffWith pocs $ \qo qcs -> good (uncurry StaOW $ offWithShiftRight [||dropStream||] qo qcs (qn -# 1#)))
+                (\n pocs good _ -> staOffWith pocs $ \qo qcs -> good (uncurry StaOW $ offWithShiftRight [||dropStream||] qo qcs (n - 1)))
                 True)
       (StaOW [||0#||] qinput)
 
@@ -293,11 +294,8 @@ instance InputPrep Stream where
 instance InputPrep Text16 where _prepare qinput = _prepare @Text [|| let Text16 t = $$qinput in t ||]
 instance InputPrep CharList where _prepare qinput = _prepare @String [|| let CharList cs = $$qinput in cs ||]
 
-shiftRightInt :: Code Int# -> Int -> Code Int#
-shiftRightInt qo# (I# qi#) = [||$$(qo#) +# qi#||]
-
 -- PositionOps Instances
-instance PositionOps (Code Int#) where same = intSame
+instance PositionOps PartialStaOffset where same po (StaO qo' n) = intSame (dynOffset (intAdd po (negate n))) qo'
 instance PositionOps (PartialStaOffWith ts) where
   same pocs1 pocs2 = staOffWith pocs1 $ \o1 _ -> staOffWith pocs2 $ \o2 _ -> intSame o1 o2
 --instance PositionOps (Code Int#, Code Stream) where same = offWithSame
@@ -311,9 +309,9 @@ instance PositionOps (Code UnpackedLazyByteString) where
     ||]
 
 -- DynOps Instances
-instance DynOps_ Int# (Code Int#) where
-  _asDyn = id
-  _asSta = id
+instance DynOps_ Int# PartialStaOffset where
+  _asDyn = dynOffset
+  _asSta = flip StaO 0
 
 instance DynOps_ (# Int#, ts #) (PartialStaOffWith ts) where
   _asDyn (StaOW qo qcs) = [||(# $$qo, $$qcs #)||]
@@ -330,24 +328,24 @@ instance DynOps_ UnpackedLazyByteString (Code UnpackedLazyByteString) where
   _asSta = id
 
 -- LogOps Instances
-instance LogOps (Code Int#) where
-  shiftLeft qo# (I# qi#) k = k [||max# ($$(qo#) -# qi#) 0#||]
-  shiftRight qo# qi# k = k (shiftRightInt qo# qi#)
-  offToInt qi# = [||I# $$(qi#)||]
+instance LogOps PartialStaOffset where
+  shiftLeft po n k = k (intSubNonNeg po n)
+  shiftRight po n k = k (intAdd po n)
+  offToInt pi = [||I# $$(dynOffset pi)||]
 
 instance LogOps (PartialStaOffWith String) where
   shiftLeft pocs _ k = k pocs
-  shiftRight pocs (I# qi#) k = staOffWith pocs $ \qo qcs -> k (uncurry StaOW $ offWithShiftRight [||drop||] qo qcs qi#)
+  shiftRight pocs n k = staOffWith pocs $ \qo qcs -> k (uncurry StaOW $ offWithShiftRight [||drop||] qo qcs n)
   offToInt pocs = staOffWith pocs $ \qo _ -> [||I# $$qo||]
 
 instance LogOps (PartialStaOffWith Stream) where
   shiftLeft pocs _ k = k pocs
-  shiftRight pocs (I# qi#) k = staOffWith pocs $ \qo qcs -> k (uncurry StaOW $ offWithShiftRight [||dropStream||] qo qcs qi#)
+  shiftRight pocs n k = staOffWith pocs $ \qo qcs -> k (uncurry StaOW $ offWithShiftRight [||dropStream||] qo qcs n)
   offToInt pocs = staOffWith pocs $ \qo _ -> [||I# $$qo||]
 
 instance LogOps PartialStaText where
   shiftLeft pt (I# qi#) k = staText pt $ \StaText{..} -> k (DynT (textShiftLeft origText qi#))
-  shiftRight pt (I# qi#) k = staText pt $ \StaText{..} -> k (DynT (textShiftRight origText qi#))
+  shiftRight pt (I# n#) k = staText pt $ \StaText{..} -> k (DynT (textShiftRight origText n#))
   offToInt pt = staText pt offText
 
 instance LogOps (Code UnpackedLazyByteString) where

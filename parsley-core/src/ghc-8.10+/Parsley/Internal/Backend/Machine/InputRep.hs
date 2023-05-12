@@ -24,7 +24,8 @@ module Parsley.Internal.Backend.Machine.InputRep (
     -- * Representation Type-Families
     DynRep, StaRep, RepKind,
     -- * @Int#@ Operations
-    intSame, intLess, intAdd, min#, max#,
+    PartialStaOffset(..), dynOffset,
+    intSame, intLess, intAdd, intSubNonNeg, min#, max#,
     -- * @Offwith@ Operations
     OffWith, offWithShiftRight,
     PartialStaOffWith(..), staOffWith,
@@ -120,6 +121,14 @@ data StaText = StaText {
   unconsumedText :: !(Code Int)
 }
 
+data PartialStaOffset = StaO !(Code Int#) {-# UNPACK #-} !Int
+
+dynOffset :: PartialStaOffset -> Code Int#
+dynOffset (StaO qi 0) = qi
+dynOffset (StaO qi n)
+ | n > 0 = let !(I# n#) = n in [||$$qi +# n#||]
+ | otherwise = let !(I# m#) = negate n in [||$$qi -# m#||]
+
 {-|
 Initialises an `UnpackedLazyByteString` with a specified offset.
 This offset varies as each lazy chunk is consumed.
@@ -168,9 +177,9 @@ type family DynRep input where
 
 type family StaRep input where
   StaRep String = PartialStaOffWith String
-  StaRep (UArray Int Char) = Code Int#
+  StaRep (UArray Int Char) = PartialStaOffset
   StaRep Text16 = PartialStaText
-  StaRep ByteString = Code Int#
+  StaRep ByteString = PartialStaOffset
   StaRep Text = PartialStaText
   StaRep Lazy.ByteString = Code UnpackedLazyByteString --TODO: could refine
   StaRep CharList = PartialStaOffWith String
@@ -190,16 +199,20 @@ Is the first argument is less than the second?
 
 @since 2.3.0.0
 -}
-intLess :: Code Int# -> Code Int# -> (Code Int# -> Code a) -> Code a -> Code a
+intLess :: Code Int# -> Code Int# -> Code a -> Code a -> Code a
 intLess qi# qj# yes no = [||
     case $$(qi#) <# $$(qj#) of
-      1# -> $$(yes qi#)
+      1# -> $$yes
       0# -> $$no
   ||]
 
-intAdd :: Code Int# -> Int# -> Code Int#
-intAdd qx 0# = qx
-intAdd qx qn = [||$$qx +# qn||]
+intAdd ::  PartialStaOffset -> Int -> PartialStaOffset
+intAdd (StaO qo n) i = StaO qo (n + i)
+
+intSubNonNeg ::  PartialStaOffset -> Int -> PartialStaOffset
+intSubNonNeg (StaO qo n) i
+  | n >= i = StaO qo (n - i)
+  | otherwise = let !(I# m#) = negate (n - i) in StaO [||max# ($$qo -# m#) 0#||] 0
 
 {-|
 Extracts the offset from `Text`.
@@ -218,10 +231,10 @@ companion input.
 -}
 offWithShiftRight :: Code (Int -> ts -> ts) -- ^ A @drop@ function for underlying input.
                   -> Code Int# -> Code ts   -- ^ The `OffWith` to shift.
-                  -> Int#                   -- ^ How much to shift by.
+                  -> Int                    -- ^ How much to shift by.
                   -> (Code Int#, Code ts)
-offWithShiftRight _ qo qcs 0# = (qo, qcs)
-offWithShiftRight drop qo qts qi# = ([||$$qo +# qi#||], [|| $$drop (I# qi#) $$qts ||])
+offWithShiftRight _ qo qcs 0 = (qo, qcs)
+offWithShiftRight drop qo qts qi@(I# qi#) = ([||$$qo +# qi#||], [|| $$drop qi $$qts ||])
 
 {-|
 Drops tokens off of a `Stream`.

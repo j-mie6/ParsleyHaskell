@@ -22,7 +22,7 @@ import Control.Monad.ST                          (ST)
 import Data.STRef                                (STRef)
 import Data.Kind                                 (Type)
 import GHC.Prim                                  (Word#)
-import Parsley.Internal.Backend.Machine.InputRep (Rep)
+import Parsley.Internal.Backend.Machine.InputRep (DynRep)
 
 #include "MachDeps.h"
 #if WORD_SIZE_IN_BITS < 64
@@ -49,7 +49,7 @@ but @Handler#@ is used at the boundaries, such as for recursion.
 @since 1.4.0.0
 -}
 type Handler# s o a =  Pos            -- ^ The current position
-                    -> Rep o          -- ^ The current input on failure
+                    -> DynRep o       -- ^ The current input on failure
                     -> ST s (Maybe a)
 
 {-|
@@ -60,7 +60,7 @@ feed back their result @x@ back to the caller as well as the updated input.
 -}
 type Cont# s o a x =  x              -- ^ The value to be returned to the caller
                    -> Pos            -- ^ The current position
-                   -> Rep o          -- ^ The new input after the call is executed
+                   -> DynRep o       -- ^ The new input after the call is executed
                    -> ST s (Maybe a)
 
 {-|
@@ -72,7 +72,7 @@ input, an error handler in order to produce (or contribute to) a result of type 
 type Subroutine# s o a x =  Cont# s o a x  -- ^ What to do when this parser returns
                          -> Handler# s o a -- ^ How to handle failure within the call
                          -> Pos            -- ^ The current position
-                         -> Rep o          -- ^ The input on entry to the call
+                         -> DynRep o       -- ^ The input on entry to the call
                          -> ST s (Maybe a)
 
 {-|

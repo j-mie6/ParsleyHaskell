@@ -18,6 +18,7 @@ import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..),
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
 import Parsley.Internal.Backend.Machine.Ops
+import Parsley.Internal.Backend.Machine.Types         (qSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume)
 import Parsley.Internal.Backend.Machine.Types.State
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -37,6 +38,7 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
         in letRec fs
              nameLet
              (\μ exp rs names _meta -> buildRec μ rs (emptyCtx names) (readyMachine exp))
+             qSubroutine
              (run (readyMachine (body binding)) (Γ Empty (halt @o) [||offset||] Nothing ([||1||], [||1||]) (VCons (fatal @o) VNil)) . emptyCtx))
   ||]
   where

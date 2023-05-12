@@ -67,13 +67,13 @@ data Metadata = Metadata {
 
     @since 1.5.0.0
     -}
-    successInputCharacteristic :: InputCharacteristic,
+    successInputCharacteristic :: !InputCharacteristic,
     {- |
     Characterises the way that a binding consumes input on failure.
 
     @since 1.5.0.0
     -}
-    failureInputCharacteristic :: InputCharacteristic
+    failureInputCharacteristic :: !InputCharacteristic
   }
 
 {-|

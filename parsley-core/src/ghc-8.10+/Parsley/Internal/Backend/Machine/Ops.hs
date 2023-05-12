@@ -70,8 +70,8 @@ import Debug.Trace                                                (trace)
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, next, uncons, check)
-import Parsley.Internal.Backend.Machine.InputRep                  (Rep)
+import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, DynOps, next, uncons, check, asDyn, asSta)
+import Parsley.Internal.Backend.Machine.InputRep                  (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
@@ -132,7 +132,7 @@ Consumes the next character and adjusts the offset to match.
 
 @since 1.8.0.0
 -}
-fetch :: (?ops :: InputOps (Rep o))
+fetch :: (?ops :: InputOps (StaRep o))
       => Offset o -> (Code Char -> Offset o -> Code b) -> Code b
 fetch input k = next (offset input) $ \c offset' -> k c (moveOne input offset')
 
@@ -143,14 +143,14 @@ when the \(n\) characters are available and the @bad@ when they are not.
 
 @since 2.3.0.0
 -}
-emitLengthCheck :: (?ops :: InputOps (Rep o))
+emitLengthCheck :: (?ops :: InputOps (StaRep o))
                 => Int                                             -- ^ The number of required characters \(n\).
                 -> Int                                             -- ^ The number of characters to prefetch \(m\).
                 -> Maybe (Code Char -> Code a -> Code a)           -- ^ An optional check for the head character.
                 -> (Offset o -> [(Code Char, Offset o)] -> Code a) -- ^ The good continuation if \(n\) characters are available.
                 -> Code a                                          -- ^ The bad continuation if the characters are unavailable.
                 -> Offset o                                        -- ^ The input to test on.
-                -> (Offset o -> Code (Rep o))
+                -> (Offset o -> StaRep o)
                 -> Code a
 emitLengthCheck n m headCheck good bad input sel = check n m (sel input) headCheck good' bad
   where good' deepestKnown = let input' = updateDeepestKnown deepestKnown input in good input' . feed input'
@@ -215,7 +215,7 @@ about the state of the input (since 1.4.0.0).
 
 @since 1.0.0.0
 -}
-raise :: Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
+raise :: DynOps o => Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
 raise γ = let VCons h _ = handlers γ in staHandlerEval h (input γ)
 
 -- Handler preparation
@@ -227,7 +227,8 @@ which takes the captured offset as the first argument.
 
 @since 1.2.0.0
 -}
-buildHandler :: Γ s o xs n r a                                  -- ^ State to execute the handler with.
+buildHandler :: DynOps o
+             => Γ s o xs n r a                                  -- ^ State to execute the handler with.
              -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a))) -- ^ Partial parser accepting the modified state.
              -> Word                                            -- ^ The unique identifier for the offset on failure.
              -> StaHandlerBuilder s o a
@@ -252,7 +253,8 @@ both a captured and a current offset. Otherwise, is similar to `buildHandler`.
 
 @since 2.1.0.0
 -}
-buildIterYesHandler :: Γ s o xs n r a
+buildIterYesHandler :: DynOps o
+                    => Γ s o xs n r a
                     -> (Γ s o xs n r a -> Code (ST s (Maybe a)))
                     -> Word
                     -> StaHandler s o a
@@ -283,7 +285,7 @@ where they are unknown (which is defined in terms of the previous two).
 
 @since 2.1.0.0
 -}
-bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (Rep o))
+bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (StaRep o), DynOps o)
                 => Γ s o xs n r a                    -- ^ The state from which to capture the offset.
                 -> Bool                              -- ^ Is a binding required for the matching handler?
                 -> StaYesHandler s o a               -- ^ The handler that handles matching input.
@@ -294,7 +296,7 @@ bindSameHandler :: forall s o xs n r a b. (HandlerOps o, PositionOps (Rep o))
 bindSameHandler γ yesNeeded yes noNeeded no k =
   bindYesInline# yesNeeded (yes (input γ)) $ \qyes ->
     bindHandlerInline# noNeeded (staHandler# (no (input γ))) $ \qno ->
-      let handler inp = [||if $$(same (offset (off (input γ))) (off# inp)) then $$qyes else $$(staHandler# qno inp)||]
+      let handler inp = [||if $$(same (offset (off (input γ))) (asSta @o (off# inp))) then $$qyes else $$(staHandler# qno inp)||]
       in bindHandlerInline# @o True handler $ \qhandler ->
           k (γ {handlers = VCons (augmentHandlerFull (input γ) qhandler qyes qno) (handlers γ)})
 
@@ -326,7 +328,7 @@ join point) taking the required components from the state `Γ`.
 
 @since 1.2.0.0
 -}
-resume :: StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
+resume :: DynOps o => StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
 resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (fromInput (input γ))
 
 {-|
@@ -336,7 +338,7 @@ previous return continuation in the case of a tail call.
 
 @since 1.8.0.0
 -}
-callWithContinuation :: MarshalOps o
+callWithContinuation :: (MarshalOps o, DynOps o)
                      => StaSubroutine s o a x           -- ^ The subroutine @sub@ that will be called.
                      -> StaCont s o a x                 -- ^ The return continuation for the subroutine.
                      -> Input o                         -- ^ The input to feed to @sub@.
@@ -363,7 +365,7 @@ an optimisation on the offset if the subroutine has known input characteristics.
 
 @since 1.5.0.0
 -}
-callCC :: forall s o xs n r a x. MarshalOps o
+callCC :: forall s o xs n r a x. (MarshalOps o, DynOps o)
        => Word                                                   --
        -> StaSubroutine s o a x                                  -- ^ The subroutine @sub@ that will be called.
        -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
@@ -381,7 +383,7 @@ into the `Ctx`.
 
 @since 1.4.0.0
 -}
-setupJoinPoint :: forall s o xs n r a x. JoinBuilder o
+setupJoinPoint :: forall s o xs n r a x. (JoinBuilder o, DynOps o)
                => ΦVar x                     -- ^ The name of the binding.
                -> Machine s o (x : xs) n r a -- ^ The definition of the binding.
                -> Machine s o xs n r a       -- ^ The scope within which the binding is valid.
@@ -402,7 +404,7 @@ the loop consumed input in its final iteration.
 
 @since 1.8.0.0
 -}
-bindIterAlways :: forall s o a. RecBuilder o
+bindIterAlways :: forall s o a. (RecBuilder o, DynOps o)
                => Ctx s o a                  -- ^ The context to keep the binding
                -> MVar Void                  -- ^ The name of the binding.
                -> Machine s o '[] One Void a -- ^ The body of the loop.
@@ -424,7 +426,7 @@ the same way as `bindSameHandler`.
 
 @since 2.1.0.0
 -}
-bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
+bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (StaRep o), DynOps o)
              => Ctx s o a                  -- ^ The context to store the binding in.
              -> MVar Void                  -- ^ The name of the binding.
              -> Machine s o '[] One Void a -- ^ The loop body.
@@ -438,7 +440,7 @@ bindIterSame :: forall s o a. (RecBuilder o, HandlerOps o, PositionOps (Rep o))
 bindIterSame ctx μ l neededYes yes neededNo no inp u =
   bindHandlerInline# @o neededYes (staHandler# yes) $ \qyes ->
     bindIterHandlerInline# neededNo (staHandler# . no . toInput u) $ \qno ->
-      let handler inpc inpo = [||if $$(same (off# inpc) (off# inpo)) then $$(staHandler# qyes inpc) else $$(staHandler# (qno inpc) inpo)||]
+      let handler inpc inpo = [||if $$(same (asSta @o (off# inpc)) (asSta @o (off# inpo))) then $$(staHandler# qyes inpc) else $$(staHandler# (qno inpc) inpo)||]
       in bindIterHandlerInline# @o True handler $ \qhandler ->
         bindIter# @o (fromInput inp) $ \qloop inp# ->
           let off = toInput u inp#
@@ -454,7 +456,7 @@ each time round.
 
 @since 1.5.0.0
 -}
-buildRec :: forall rs s o a r. RecBuilder o
+buildRec :: forall rs s o a r. (RecBuilder o, DynOps o)
          => MVar r                  -- ^ The name of the binding.
          -> Regs rs                 -- ^ The registered required by the binding.
          -> Ctx s o a               -- ^ The context to re-insert the register-less binding
@@ -518,7 +520,7 @@ having printed the debug information.
 
 @since 1.2.0.0
 -}
-logHandler :: (?ops :: InputOps (Rep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
+logHandler :: (?ops :: InputOps (StaRep o), LogHandler o) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder s o a
 logHandler name ctx γ u _ = let VCons h _ = handlers γ in fromStaHandler# $ \inp# -> let inp = toInput u inp# in [||
     trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h inp)
   ||]
@@ -529,29 +531,31 @@ string.
 
 @since 1.2.0.0
 -}
-preludeString :: forall s o xs n r a. (?ops :: InputOps (Rep o), LogHandler o)
+preludeString :: forall s o xs n r a. (?ops :: InputOps (StaRep o), LogHandler o)
               => String         -- ^ The name as per the debug combinator
               -> Char           -- ^ Either @<@ or @>@ depending on whether we are entering or leaving.
               -> Γ s o xs n r a
               -> Ctx s o a
               -> String         -- ^ String that represents the current status
               -> Code String
-preludeString name dir γ ctx ends = [|| concat [$$prelude, $$inputTrace, ends, '\n' : $$caretSpace, color Blue "^"] ||]
+preludeString name dir γ ctx ends =
+  shiftLeft offset 5 $ \start ->
+    shiftRight offset 5 $ \end ->
+      let indent          = replicate (debugLevel ctx * 2) ' '
+          inputTrace      = [|| let replace '\n' = color Green "↙"
+                                    replace ' '  = color White "·"
+                                    replace c    = return c
+                                    go i# = $$(uncons (asSta @o [||i#||]) (\qc qi' -> [||
+                                        if $$(same (asSta @o [||i#||]) end) then []
+                                        else replace $$qc ++ go $$(asDyn @o qi') ||])
+                                      [||color Red "•"||])
+                                in go $$(asDyn @o start) ||]
+          prelude         = [|| concat [indent, dir : name, dir : " (", show $$(offToInt offset), "): "] ||]
+          caretSpace      = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
+      in [|| concat [$$prelude, $$inputTrace, ends, '\n' : $$caretSpace, color Blue "^"] ||]
   where
-    offset          = Offset.offset (off (input γ))
-    indent          = replicate (debugLevel ctx * 2) ' '
-    start           = shiftLeft offset 5
-    end             = shiftRight offset 5
-    inputTrace      = [|| let replace '\n' = color Green "↙"
-                              replace ' '  = color White "·"
-                              replace c    = return c
-                              go i# = $$(uncons [||i#||] (\qc qi' -> [||
-                                  if $$(same [||i#||] end) then []
-                                  else replace $$qc ++ go $$qi' ||])
-                                [||color Red "•"||])
-                          in go $$start ||]
-    prelude         = [|| concat [indent, dir : name, dir : " (", show $$(offToInt offset), "): "] ||]
-    caretSpace      = [|| replicate (length $$prelude + $$(offToInt offset) - $$(offToInt start)) ' ' ||]
+    offset = Offset.offset (off (input γ))
+
 
 {- Convenience Types -}
 {-|
@@ -563,9 +567,10 @@ type Ops o =
   ( HandlerOps o
   , JoinBuilder o
   , RecBuilder o
-  , PositionOps (Rep o)
+  , PositionOps (StaRep o)
   , MarshalOps o
-  , LogOps (Rep o)
+  , LogOps (StaRep o)
+  , DynOps o
   )
 
 {-|
@@ -573,7 +578,7 @@ The constraints needed to build a `logHandler`.
 
 @since 1.0.0.0
 -}
-type LogHandler o = (PositionOps (Rep o), LogOps (Rep o))
+type LogHandler o = (PositionOps (StaRep o), LogOps (StaRep o), DynOps o)
 
 {-|
 A `StaHandler` that has not yet captured its offset.

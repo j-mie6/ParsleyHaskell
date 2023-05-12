@@ -22,18 +22,20 @@ and potentially the generated code).
 -}
 module Parsley.Internal.Backend.Machine.InputRep (
     -- * Representation Type-Families
-    Rep, RepKind,
+    DynRep, StaRep, RepKind,
     -- * @Int#@ Operations
-    intSame, intLess, intAdd, min#, max#,
+    PartialStaOffset(..), dynOffset,
+    intSame, intLess, intAdd, intSubNonNeg, min#, max#,
     -- * @Offwith@ Operations
-    OffWith, offWith, offWithSame, offWithShiftRight,
+    OffWith, offWithShiftRight,
+    PartialStaOffWith(..), staOffWith,
     -- * @LazyByteString@ Operations
     UnpackedLazyByteString, emptyUnpackedLazyByteString,
     byteStringShiftRight, byteStringShiftLeft,
     -- * @Stream@ Operations
     dropStream,
     -- * @Text@ Operations
-    offsetText, textShiftRight, textShiftLeft,
+    StaText(..), PartialStaText(..), staText, offsetText, textShiftRight, textShiftLeft,
     -- * Crucial Exposed Functions
     {- |
     These functions must be exposed, since they can appear
@@ -65,6 +67,7 @@ import Parsley.Internal.Common.Utils     (Code)
 import Parsley.Internal.Core.InputTypes  (Text16(..), CharList(..), Stream(..))
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString(..))
+import qualified Data.Text.Array               as Text (Array)
 
 #if __GLASGOW_HASKELL__ <= 900
 {-# INLINE word8ToWord# #-}
@@ -82,6 +85,12 @@ be used for quicker comparisons.
 -}
 type OffWith ts = (# Int#, ts #)
 
+data PartialStaOffWith ts = StaOW !PartialStaOffset !(Code ts) | DynOW !(Code (OffWith ts))
+
+staOffWith :: PartialStaOffWith ts -> (PartialStaOffset -> Code ts -> Code a) -> Code a
+staOffWith (StaOW po qts) k = k po qts
+staOffWith (DynOW qots) k = [|| let (# o, cs #) = $$qots in $$(k (StaO [||o||] 0) [||cs||]) ||]
+
 {-|
 This type unpacks /lazy/ `Lazy.ByteString`s for efficiency.
 
@@ -96,13 +105,29 @@ type UnpackedLazyByteString = (#
     Lazy.ByteString
   #)
 
-{-|
-Initialises an `OffWith` type, with a starting offset of @0@.
+data PartialStaText = StaT {-# UNPACK #-} !StaText | DynT !(Code Text)
 
-@since 1.0.0.0
--}
-offWith :: Code ts -> Code (OffWith ts)
-offWith qts = [||(# 0#, $$qts #)||]
+staText :: PartialStaText -> (StaText -> Code a) -> Code a
+staText (StaT t) k = k t
+staText (DynT qt) k = [||
+    let !t@(Text arr off unconsumed) = $$qt
+    in $$(k (StaText [||t||] [||arr||] [||off||] [||unconsumed||]))
+  ||]
+
+data StaText = StaText {
+  origText       :: !(Code Text),
+  arrText        :: !(Code Text.Array),
+  offText        :: !(Code Int),
+  unconsumedText :: !(Code Int)
+}
+
+data PartialStaOffset = StaO !(Code Int#) {-# UNPACK #-} !Int
+
+dynOffset :: PartialStaOffset -> Code Int#
+dynOffset (StaO qi 0) = qi
+dynOffset (StaO qi n)
+ | n > 0 = let !(I# n#) = n in [||$$qi +# n#||]
+ | otherwise = let !(I# m#) = negate n in [||$$qi -# m#||]
 
 {-|
 Initialises an `UnpackedLazyByteString` with a specified offset.
@@ -139,16 +164,26 @@ Most parts of the machine work with `Rep`.
 
 @since 1.0.0.0
 -}
-type Rep :: forall (rep :: Type) -> TYPE (RepKind rep)
-type family Rep input where
-  Rep String = (# Int#, String #)
-  Rep (UArray Int Char) = Int#
-  Rep Text16 = Text
-  Rep ByteString = Int#
-  Rep Text = Text
-  Rep Lazy.ByteString = UnpackedLazyByteString
-  Rep CharList = (# Int#, String #)
-  Rep Stream = (# Int#, Stream #)
+type DynRep :: forall (rep :: Type) -> TYPE (RepKind rep)
+type family DynRep input where
+  DynRep String = (# Int#, String #)
+  DynRep (UArray Int Char) = Int#
+  DynRep Text16 = Text
+  DynRep ByteString = Int#
+  DynRep Text = Text
+  DynRep Lazy.ByteString = UnpackedLazyByteString
+  DynRep CharList = (# Int#, String #)
+  DynRep Stream = (# Int#, Stream #)
+
+type family StaRep input where
+  StaRep String = PartialStaOffWith String
+  StaRep (UArray Int Char) = PartialStaOffset
+  StaRep Text16 = PartialStaText
+  StaRep ByteString = PartialStaOffset
+  StaRep Text = PartialStaText
+  StaRep Lazy.ByteString = Code UnpackedLazyByteString --TODO: could refine
+  StaRep CharList = PartialStaOffWith String
+  StaRep Stream = PartialStaOffWith Stream
 
 {- Generic Representation Operations -}
 {-|
@@ -164,16 +199,20 @@ Is the first argument is less than the second?
 
 @since 2.3.0.0
 -}
-intLess :: Code Int# -> Code Int# -> (Code Int# -> Code a) -> Code a -> Code a
+intLess :: Code Int# -> Code Int# -> Code a -> Code a -> Code a
 intLess qi# qj# yes no = [||
     case $$(qi#) <# $$(qj#) of
-      1# -> $$(yes qi#)
+      1# -> $$yes
       0# -> $$no
   ||]
 
-intAdd :: Code Int# -> Int# -> Code Int#
-intAdd qx 0# = qx
-intAdd qx qn = [||$$qx +# qn||]
+intAdd ::  PartialStaOffset -> Int -> PartialStaOffset
+intAdd (StaO qo n) i = StaO qo (n + i)
+
+intSubNonNeg ::  PartialStaOffset -> Int -> PartialStaOffset
+intSubNonNeg (StaO qo n) i
+  | n >= i = StaO qo (n - i)
+  | otherwise = let !(I# m#) = negate (n - i) in StaO [||max# ($$qo -# m#) 0#||] 0
 
 {-|
 Extracts the offset from `Text`.
@@ -181,21 +220,8 @@ Extracts the offset from `Text`.
 @since 1.0.0.0
 -}
 -- FIXME: not accurate? this can be slow without consequence
-offsetText :: Code Text -> Code Int
-offsetText qt = [||case $$qt of Text _ off _ -> off||]
-
-{-|
-Compares the bundled offsets of two `OffWith`s are equal: does not
-need to inspect the corresponding input.
-
-@since 1.0.0.0
--}
-offWithSame :: Code (OffWith ts) -> Code (OffWith ts) -> Code Bool
-offWithSame qi# qj# = [||
-    case $$(qi#) of
-      (# i#, _ #) -> case $$(qj#) of
-        (# j#, _ #) -> $$(intSame [||i#||] [||j#||])
-  ||]
+offsetText :: PartialStaText -> Code Int
+offsetText pt = staText pt offText
 
 {-|
 Shifts an `OffWith` to the right, taking care to also drop tokens from the
@@ -203,14 +229,11 @@ companion input.
 
 @since 1.0.0.0
 -}
-offWithShiftRight :: Code (Int -> ts -> ts) -- ^ A @drop@ function for underlying input.
-                  -> Code (OffWith ts)      -- ^ The `OffWith` to shift.
-                  -> Int#                   -- ^ How much to shift by.
-                  -> Code (OffWith ts)
-offWithShiftRight _ qo# 0# = qo#
-offWithShiftRight drop qo# qi# = [||
-    case $$(qo#) of (# o#, ts #) -> (# o# +# qi#, $$drop (I# qi#) ts #)
-  ||]
+offWithShiftRight :: Code (Int -> ts -> ts)        -- ^ A @drop@ function for underlying input.
+                  -> PartialStaOffset -> Code ts   -- ^ The `OffWith` to shift.
+                  -> Int                           -- ^ How much to shift by.
+                  -> (PartialStaOffset, Code ts)
+offWithShiftRight drop po qts n = (intAdd po n, [|| $$drop n $$qts ||])
 
 {-|
 Drops tokens off of a `Stream`.

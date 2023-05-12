@@ -37,7 +37,7 @@ import Data.Text.Internal                          (Text(..))
 import Data.Text.Unsafe                            (iter, Iter(..))
 import GHC.Exts                                    (Int(..), Char(..), TYPE, Int#)
 import GHC.ForeignPtr                              (ForeignPtr(..))
-import GHC.Prim                                    (indexWideCharArray#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (+#), (-#))
+import GHC.Prim                                    (indexWideCharArray#, readWord8OffAddr#, word2Int#, chr#, touch#, realWorld#, plusAddr#, (-#))
 #if __GLASGOW_HASKELL__ > 900
 import GHC.Prim                                    (word8ToWord#)
 #else
@@ -48,7 +48,7 @@ import Parsley.Internal.Backend.Machine.InputRep   (Stream(..), CharList(..), Te
                                                     PartialStaOffset(..), dynOffset,
                                                     emptyUnpackedLazyByteString, intSame, intLess, intAdd, intSubNonNeg,
                                                     offWithShiftRight, dropStream,
-                                                    textShiftRight, textShiftLeft, byteStringShiftRight,
+                                                    textShiftRight, textShiftLeft, byteStringShiftRight, offsetText,
                                                     byteStringShiftLeft, byteStringNext)
 import Parsley.Internal.Common.Utils               (Code)
 
@@ -194,10 +194,10 @@ check = checkImpl (_ensureNIsFast ?ops)
 -- InputPrep Instances
 instance InputPrep String where
   _prepare qinput k =
-    k (InputOps (\pocs k -> staOffWith pocs $ \qo qcs -> [|| let c:cs' = $$qcs in $$(k [||c||] (StaOW [||$$qo +# 1#||] [||cs'||])) ||])
-                (\pocs good bad -> staOffWith pocs $ \qo qcs -> [||
+    k (InputOps (\pocs k -> staOffWith pocs $ \po qcs -> [|| let c:cs' = $$qcs in $$(k [||c||] (StaOW (intAdd po 1) [||cs'||])) ||])
+                (\pocs good bad -> staOffWith pocs $ \po qcs -> [||
                       case $$qcs of
-                        c : cs' -> $$(good [||c||] (StaOW [||$$qo +# 1#||] [||cs'||]))
+                        c : cs' -> $$(good [||c||] (StaOW (intAdd po 1) [||cs'||]))
                         []     -> $$bad
                     ||])
                 (\n pocs good bad -> staOffWith pocs $ \qo qcs -> let (qo', qcs') = offWithShiftRight [||drop||] qo qcs (n - 1) in [||
@@ -206,7 +206,7 @@ instance InputPrep String where
                         cs -> $$(good (StaOW qo' [||cs||]))
                     ||])
                 False)
-      (StaOW [||0#||] qinput)
+      (StaOW (_asSta [||0#||]) qinput)
 
 instance InputPrep ByteString where
   _prepare qinput k = [||
@@ -284,11 +284,11 @@ instance InputPrep Lazy.ByteString where
 
 instance InputPrep Stream where
   _prepare qinput k =
-    k (InputOps (\pocs k -> staOffWith pocs $ \qo qcs -> [|| let c :> cs' = $$qcs in $$(k [||c||] (StaOW [||$$qo +# 1#||] [||cs'||])) ||])
-                (\pocs k _ -> staOffWith pocs $ \qo qcs -> [|| let c :> cs' = $$qcs in $$(k [||c||] (StaOW [||$$qo +# 1#||] [||cs'||])) ||])
+    k (InputOps (\pocs k -> staOffWith pocs $ \po qcs -> [|| let c :> cs' = $$qcs in $$(k [||c||] (StaOW (intAdd po 1) [||cs'||])) ||])
+                (\pocs k _ -> staOffWith pocs $ \po qcs -> [|| let c :> cs' = $$qcs in $$(k [||c||] (StaOW (intAdd po 1) [||cs'||])) ||])
                 (\n pocs good _ -> staOffWith pocs $ \qo qcs -> good (uncurry StaOW $ offWithShiftRight [||dropStream||] qo qcs (n - 1)))
                 True)
-      (StaOW [||0#||] qinput)
+      (StaOW (_asSta [||0#||]) qinput)
 
 
 instance InputPrep Text16 where _prepare qinput = _prepare @Text [|| let Text16 t = $$qinput in t ||]
@@ -297,7 +297,7 @@ instance InputPrep CharList where _prepare qinput = _prepare @String [|| let Cha
 -- PositionOps Instances
 instance PositionOps PartialStaOffset where same po (StaO qo' n) = intSame (dynOffset (intAdd po (negate n))) qo'
 instance PositionOps (PartialStaOffWith ts) where
-  same pocs1 pocs2 = staOffWith pocs1 $ \o1 _ -> staOffWith pocs2 $ \o2 _ -> intSame o1 o2
+  same pocs1 pocs2 = staOffWith pocs1 $ \po _ -> staOffWith pocs2 $ \po' _ -> same po po'
 --instance PositionOps (Code Int#, Code Stream) where same = offWithSame
 instance PositionOps PartialStaText where
   same pt1 pt2 = staText pt1 $ \qt1 -> staText pt2 $ \qt2 -> [||$$(offText qt1) == $$(offText qt2)||]
@@ -314,7 +314,7 @@ instance DynOps_ Int# PartialStaOffset where
   _asSta = flip StaO 0
 
 instance DynOps_ (# Int#, ts #) (PartialStaOffWith ts) where
-  _asDyn (StaOW qo qcs) = [||(# $$qo, $$qcs #)||]
+  _asDyn (StaOW qo qcs) = [||(# $$(dynOffset qo), $$qcs #)||]
   _asDyn (DynOW qocs) = qocs
   _asSta = DynOW
 
@@ -336,17 +336,17 @@ instance LogOps PartialStaOffset where
 instance LogOps (PartialStaOffWith String) where
   shiftLeft pocs _ k = k pocs
   shiftRight pocs n k = staOffWith pocs $ \qo qcs -> k (uncurry StaOW $ offWithShiftRight [||drop||] qo qcs n)
-  offToInt pocs = staOffWith pocs $ \qo _ -> [||I# $$qo||]
+  offToInt pocs = staOffWith pocs $ \qo _ -> [||I# $$(dynOffset qo)||]
 
 instance LogOps (PartialStaOffWith Stream) where
   shiftLeft pocs _ k = k pocs
   shiftRight pocs n k = staOffWith pocs $ \qo qcs -> k (uncurry StaOW $ offWithShiftRight [||dropStream||] qo qcs n)
-  offToInt pocs = staOffWith pocs $ \qo _ -> [||I# $$qo||]
+  offToInt pocs = staOffWith pocs $ \qo _ -> [||I# $$(dynOffset qo)||]
 
 instance LogOps PartialStaText where
   shiftLeft pt (I# qi#) k = staText pt $ \StaText{..} -> k (DynT (textShiftLeft origText qi#))
   shiftRight pt (I# n#) k = staText pt $ \StaText{..} -> k (DynT (textShiftRight origText n#))
-  offToInt pt = staText pt offText
+  offToInt = offsetText
 
 instance LogOps (Code UnpackedLazyByteString) where
   shiftLeft qo# (I# qi#) k = k (byteStringShiftLeft qo# qi#)

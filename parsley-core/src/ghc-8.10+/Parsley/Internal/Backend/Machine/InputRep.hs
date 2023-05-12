@@ -85,11 +85,11 @@ be used for quicker comparisons.
 -}
 type OffWith ts = (# Int#, ts #)
 
-data PartialStaOffWith ts = StaOW !(Code Int#) !(Code ts) | DynOW !(Code (OffWith ts))
+data PartialStaOffWith ts = StaOW !PartialStaOffset !(Code ts) | DynOW !(Code (OffWith ts))
 
-staOffWith :: PartialStaOffWith ts -> (Code Int# -> Code ts -> Code a) -> Code a
-staOffWith (StaOW qo qts) k = k qo qts
-staOffWith (DynOW qots) k = [|| let (# o, cs #) = $$qots in $$(k [||o||] [||cs||]) ||]
+staOffWith :: PartialStaOffWith ts -> (PartialStaOffset -> Code ts -> Code a) -> Code a
+staOffWith (StaOW po qts) k = k po qts
+staOffWith (DynOW qots) k = [|| let (# o, cs #) = $$qots in $$(k (StaO [||o||] 0) [||cs||]) ||]
 
 {-|
 This type unpacks /lazy/ `Lazy.ByteString`s for efficiency.
@@ -220,8 +220,8 @@ Extracts the offset from `Text`.
 @since 1.0.0.0
 -}
 -- FIXME: not accurate? this can be slow without consequence
-offsetText :: Code Text -> Code Int
-offsetText qt = [||case $$qt of Text _ off _ -> off||]
+offsetText :: PartialStaText -> Code Int
+offsetText pt = staText pt offText
 
 {-|
 Shifts an `OffWith` to the right, taking care to also drop tokens from the
@@ -229,12 +229,11 @@ companion input.
 
 @since 1.0.0.0
 -}
-offWithShiftRight :: Code (Int -> ts -> ts) -- ^ A @drop@ function for underlying input.
-                  -> Code Int# -> Code ts   -- ^ The `OffWith` to shift.
-                  -> Int                    -- ^ How much to shift by.
-                  -> (Code Int#, Code ts)
-offWithShiftRight _ qo qcs 0 = (qo, qcs)
-offWithShiftRight drop qo qts qi@(I# qi#) = ([||$$qo +# qi#||], [|| $$drop qi $$qts ||])
+offWithShiftRight :: Code (Int -> ts -> ts)        -- ^ A @drop@ function for underlying input.
+                  -> PartialStaOffset -> Code ts   -- ^ The `OffWith` to shift.
+                  -> Int                           -- ^ How much to shift by.
+                  -> (PartialStaOffset, Code ts)
+offWithShiftRight drop po qts n = (intAdd po n, [|| $$drop n $$qts ||])
 
 {-|
 Drops tokens off of a `Stream`.

@@ -15,7 +15,6 @@ information lost in the machine.
 -}
 module Parsley.Internal.Frontend.Analysis.Cut (cutAnalysis) where
 
-import Data.Kind                           (Type)
 import Parsley.Internal.Common.Indexed     (Fix(..), cata)
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 import Data.Bifunctor (first)
@@ -28,7 +27,6 @@ Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
 cutAnalysis :: Fix Combinator a -> Fix Combinator a
 cutAnalysis = fst . ($ True) . doCut . cata (CutAnalysis . cutAlg)
 
-data Compliance (k :: Type) = DomComp | NonComp | Comp | FullPure deriving stock (Show, Eq)
 newtype CutAnalysis a = CutAnalysis { doCut :: Bool -> (Fix Combinator a, Bool) }
 
 cutAlg :: Combinator CutAnalysis a -> Bool -> (Fix Combinator a, Bool)

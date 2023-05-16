@@ -56,7 +56,7 @@ ex2_p :: Fix Combinator String
 ex2_p = toAST $ try $ try (string "123") <|> string "45"
 
 test2 :: Assertion
-test2 = leadingCoinsUnderCatch (codeGen' (cutAnalysis ex2_p)) @?= Just 2
+test2 = leadingCoins (codeGen' (cutAnalysis ex2_p)) @?= Just 2
 
 {- Example 3 -}
 desc3 = "max 1 coins should be factored without try"
@@ -117,12 +117,12 @@ test8 = leadingCoinsUnderCatch (codeGen' (cutAnalysis ex8_p)) @?= Nothing
 
 tests :: TestTree
 tests = testGroup "#27 Input checks in `Frontend` and `Backend` are not properly respecting cuts"
-  [ {-testCase desc1 test1
+  [ testCase desc1 test1
   , testCase desc2 test2
-  , testCase desc3 test3
-  , testCase desc4 test4
-  , -}testCase desc5 test5
-  {-, testCase desc6 test6
+  --, testCase desc3 test3
+  --, testCase desc4 test4
+  , testCase desc5 test5
+  , testCase desc6 test6
   , testCase desc7 test7
-  , testCase desc8 test8-}
+  , testCase desc8 test8
   ]

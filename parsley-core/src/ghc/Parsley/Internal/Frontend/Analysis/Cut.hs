@@ -15,9 +15,11 @@ information lost in the machine.
 -}
 module Parsley.Internal.Frontend.Analysis.Cut (cutAnalysis) where
 
-import Parsley.Internal.Common.Indexed     (Fix(..), cata)
+import Parsley.Internal.Common.Indexed     (Fix(..), zygo, (:*:)(..))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 import Data.Bifunctor (first)
+import Data.Coerce (coerce)
+import Data.Kind (Type)
 
 {-|
 Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
@@ -25,11 +27,51 @@ Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
 @since 1.5.0.0
 -}
 cutAnalysis :: Fix Combinator a -> Fix Combinator a
-cutAnalysis = fst . ($ True) . doCut . cata (CutAnalysis . cutAlg)
+cutAnalysis = fst . ($ True) . doCut . zygo (CutAnalysis . cutAlg) guardednessAlg
 
 newtype CutAnalysis a = CutAnalysis { doCut :: Bool -> (Fix Combinator a, Bool) }
+data Guardedness (a :: Type) = Guarded | UnguardedEffect | NoEffect deriving stock Eq
 
-cutAlg :: Combinator CutAnalysis a -> Bool -> (Fix Combinator a, Bool)
+guardednessAlg :: Combinator Guardedness a -> Guardedness a
+guardednessAlg Pure{} = NoEffect
+guardednessAlg Satisfy{} = Guarded
+guardednessAlg Empty = NoEffect
+-- We don't know anything about the binding, so must assume the worst
+guardednessAlg Let{} = UnguardedEffect
+guardednessAlg (Try p) = p
+guardednessAlg (p :<|>: q) = altGuardedness p q
+guardednessAlg (l :<*>: r) = seqGuardedness l r
+guardednessAlg (l :<*: r) = seqGuardedness l r
+guardednessAlg (l :*>: r) = seqGuardedness l r
+-- lookahead rolls back input and so is not a reliable guard, but it can be unguarded
+guardednessAlg (LookAhead UnguardedEffect) = UnguardedEffect
+guardednessAlg LookAhead{} = NoEffect
+guardednessAlg (NotFollowedBy UnguardedEffect) = UnguardedEffect
+guardednessAlg NotFollowedBy{} = NoEffect
+guardednessAlg (Debug _ p) = p
+guardednessAlg (Loop UnguardedEffect _) = UnguardedEffect
+guardednessAlg (Loop _ exit) = exit
+guardednessAlg (Branch b p q) = seqGuardedness b (altGuardedness p q)
+guardednessAlg (Match p _ qs def) = seqGuardedness p (foldr altGuardedness def qs)
+guardednessAlg (MakeRegister _ l r) = seqGuardedness l r
+guardednessAlg GetRegister{} = NoEffect
+guardednessAlg PutRegister{} = UnguardedEffect
+guardednessAlg Position{} = NoEffect
+guardednessAlg (MetaCombinator _ p) = p
+
+seqGuardedness :: Guardedness a -> Guardedness b -> Guardedness c
+seqGuardedness Guarded _ = Guarded
+seqGuardedness UnguardedEffect _ = UnguardedEffect
+seqGuardedness NoEffect guardedness = coerce guardedness
+
+-- Unguarded effects conservatively dominate, otherwise both must be guarded to be guarded
+altGuardedness :: Guardedness a -> Guardedness b -> Guardedness c
+altGuardedness Guarded Guarded   = Guarded
+altGuardedness UnguardedEffect _ = UnguardedEffect
+altGuardedness _ UnguardedEffect = UnguardedEffect
+altGuardedness _ _               = NoEffect
+
+cutAlg :: Combinator (CutAnalysis :*: Guardedness) a -> Bool -> (Fix Combinator a, Bool)
 cutAlg (Pure x) _ = (In (Pure x), False)
 -- if a cut is required, a `Satsify` is responsible for providing it but otherwise always handles
 -- the cut: this is useful for allowing a `Try` to deal with a cut
@@ -41,7 +83,7 @@ cutAlg Empty _ = (In Empty, False)
 cutAlg (Let r μ) _ = (In (Let r μ), False)
 -- obviously does not demand cuts for its children, however success of p may cause a cut
 -- for the whole try - just as long as `p` itself cuts
-cutAlg (Try p) backtracks =
+cutAlg (Try (p :*: _)) backtracks =
   let (p', cuts) = doCut p True
   in (mkCut (cuts && not backtracks) (In (Try p')), cuts)
 -- cannot pass `backtracks` directly to `p` because it prevents a cut being issued on the <|>
@@ -52,44 +94,41 @@ cutAlg (Try p) backtracks =
 -- out, even if it is just one -- this means that the first input read of
 -- the <|> is guarded: even if there is internal factoring, it cannot backtrack
 -- to the right branch if it didn't enter the branch to begin with or didn't discharge
--- the length-check (by failing on the free read).
+-- the length-check (by failing on the free read). (we are talking about factoring solely on the p here fyi)
 --
--- So, how to fix? well, only allowing this if both branches must consume input
--- seems to work ok: this can be done by using the `qcuts` flag
--- TODO: However, this rules out a fully pure branch also working: any branch without /any/ effect could be factored
-cutAlg (p :<|>: q) backtracks =
-  let (q', qcuts) = doCut q backtracks
-      -- if the right-hand branch cuts it is guaranteed to consume input
-      (p', pcuts) = doCut p (False {-backtracks && qcuts-})
+-- So, how to fix? well, only allowing this if the right-hand branch does not have an unguarded effect, like put
+cutAlg ((p :*: _) :<|>: (q :*: guardedness)) backtracks =
+  let (p', pcuts) = doCut p (backtracks && guardedness /= UnguardedEffect)
+      (q', qcuts) = doCut q backtracks
   in (In (p' :<|>: q'), pcuts && qcuts)
-cutAlg (l :<*>: r) backtracks = seqCutAlg (:<*>:) backtracks l r
-cutAlg (l :<*: r) backtracks = seqCutAlg (:<*:) backtracks l r
-cutAlg (l :*>: r) backtracks = seqCutAlg (:*>:) backtracks l r
+cutAlg ((l :*: _) :<*>: (r :*: _)) backtracks = seqCutAlg (:<*>:) backtracks l r
+cutAlg ((l :*: _) :<*: (r :*: _)) backtracks = seqCutAlg (:<*:) backtracks l r
+cutAlg ((l :*: _) :*>: (r :*: _)) backtracks = seqCutAlg (:*>:) backtracks l r
 -- it may seems like a lookahead gaurantees the existence of some input, so can satisfy a cut
 -- but this is not the case, because the consumed cutting character is rolled back: this means
 -- the cut is only guaranteed to occur for a weaker predicate in whatever follows
-cutAlg (LookAhead p) backtracks = False <$ rewrap LookAhead backtracks p
+cutAlg (LookAhead (p :*: _)) backtracks = False <$ rewrap LookAhead backtracks p
 -- this can never satisfy a cut, because its unknown how or if it does so
-cutAlg (NotFollowedBy p) _ = False <$ rewrap NotFollowedBy True p
-cutAlg (Debug msg p) backtracks = rewrap (Debug msg) backtracks p
-cutAlg (Loop body exit) backtracks =
+cutAlg (NotFollowedBy (p :*: _)) _ = False <$ rewrap NotFollowedBy True p
+cutAlg (Debug msg (p :*: _)) backtracks = rewrap (Debug msg) backtracks p
+cutAlg (Loop (body :*: _) (exit :*: _)) backtracks =
   let (body', _) = doCut body False
   in rewrap (Loop body') backtracks exit
-cutAlg (Branch b p q) backtracks =
+cutAlg (Branch (b :*: _) (p :*: _) (q :*: _)) backtracks =
   let (b', bcuts) = doCut b backtracks
       (p', pcuts) = doCut p (backtracks || bcuts)
       (q', qcuts) = doCut q (backtracks || bcuts)
   in (In (Branch b' p' q'), bcuts || (pcuts && qcuts))
-cutAlg (Match p f qs def) backtracks =
+cutAlg (Match (p :*: _) f qs (def :*: _)) backtracks =
   let (p', pcuts) = doCut p backtracks
       (def', defcuts) = doCut def (backtracks || pcuts)
-      (qs', allcut) = foldr (\q -> biliftA2 (:) (&&) (doCut q (backtracks || pcuts))) ([], defcuts) qs
+      (qs', allcut) = foldr (\(q :*: _) -> biliftA2 (:) (&&) (doCut q (backtracks || pcuts))) ([], defcuts) qs
   in (In (Match p' f qs' def'), pcuts || allcut)
-cutAlg (MakeRegister σ l r) backtracks = seqCutAlg (MakeRegister σ) backtracks l r
+cutAlg (MakeRegister σ (l :*: _) (r :*: _)) backtracks = seqCutAlg (MakeRegister σ) backtracks l r
 cutAlg (GetRegister σ) _ = (In (GetRegister σ), False)
-cutAlg (PutRegister σ p) backtracks = rewrap (PutRegister σ) backtracks p
+cutAlg (PutRegister σ (p :*: _)) backtracks = rewrap (PutRegister σ) backtracks p
 cutAlg (Position sel) _ = (In (Position sel), False)
-cutAlg (MetaCombinator m p) backtracks = rewrap (MetaCombinator m) backtracks p
+cutAlg (MetaCombinator m (p :*: _)) backtracks = rewrap (MetaCombinator m) backtracks p
 
 seqCutAlg :: (Fix Combinator a -> Fix Combinator b -> Combinator (Fix Combinator) c) -> Bool -> CutAnalysis a -> CutAnalysis b -> (Fix Combinator c, Bool)
 seqCutAlg con backtracks l r =

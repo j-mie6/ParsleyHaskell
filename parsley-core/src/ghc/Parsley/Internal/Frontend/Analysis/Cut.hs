@@ -98,9 +98,9 @@ cutAlg (Try (p :*: _)) backtracks =
 -- to the right branch if it didn't enter the branch to begin with or didn't discharge
 -- the length-check (by failing on the free read). (we are talking about factoring solely on the p here fyi)
 --
--- So, how to fix? well, only allowing this if the right-hand branch does not have an unguarded effect, like put
+-- So, how to fix? well, only allowing this if the right-hand branch is guarded by input consumption that we know will be factored
 cutAlg ((p :*: _) :<|>: (q :*: guardedness)) backtracks =
-  let (p', pcuts) = doCut p (backtracks && guardedness /= UnguardedEffect)
+  let (p', pcuts) = doCut p (backtracks && guardedness == Guarded)
       (q', qcuts) = doCut q backtracks
   in (In (p' :<|>: q'), pcuts && qcuts)
 cutAlg ((l :*: _) :<*>: (r :*: _)) backtracks = seqCutAlg (:<*>:) backtracks l r
@@ -114,6 +114,7 @@ cutAlg (LookAhead (p :*: _)) backtracks = False <$ rewrap LookAhead backtracks p
 cutAlg (NotFollowedBy (p :*: _)) _ = False <$ rewrap NotFollowedBy True p
 cutAlg (Debug msg (p :*: _)) backtracks = rewrap (Debug msg) backtracks p
 cutAlg (Loop (body :*: _) (exit :*: _)) backtracks =
+  -- cannot pull same trick with guardedness, because input cannot factor out of a loop!
   let (body', _) = doCut body False
   in rewrap (Loop body') backtracks exit
 cutAlg (Branch (b :*: _) (p :*: _) (q :*: _)) backtracks =

@@ -39,7 +39,7 @@ prefixTests = testGroup "prefix should"
       plusOne "1" @?= Just 1
       plusOne "" @?= Nothing
       plusOnePure "" @?= Just 1
-  , testCase "parser all operators that precede" $ do
+  , testCase "parse all operators that precede" $ do
       plusOne "++++1" @?= Just 3
       plusOne' "++++1" @?= Just 3
       plusOnePure "+" @?= Just 0

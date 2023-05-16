@@ -30,13 +30,14 @@ cutAnalysis :: Fix Combinator a -> Fix Combinator a
 cutAnalysis = fst . ($ True) . doCut . zygo (CutAnalysis . cutAlg) guardednessAlg
 
 newtype CutAnalysis a = CutAnalysis { doCut :: Bool -> (Fix Combinator a, Bool) }
+-- TODO: UnguardedEffects should track a set of registers
 data Guardedness (a :: Type) = Guarded | UnguardedEffect | NoEffect deriving stock Eq
 
 guardednessAlg :: Combinator Guardedness a -> Guardedness a
 guardednessAlg Pure{} = NoEffect
 guardednessAlg Satisfy{} = Guarded
 guardednessAlg Empty = NoEffect
--- We don't know anything about the binding, so must assume the worst
+-- We don't know anything about the binding, so must assume the worst (TODO: could just raise for free-regs)
 guardednessAlg Let{} = UnguardedEffect
 guardednessAlg (Try p) = p
 guardednessAlg (p :<|>: q) = altGuardedness p q
@@ -53,6 +54,7 @@ guardednessAlg (Loop UnguardedEffect _) = UnguardedEffect
 guardednessAlg (Loop _ exit) = exit
 guardednessAlg (Branch b p q) = seqGuardedness b (altGuardedness p q)
 guardednessAlg (Match p _ qs def) = seqGuardedness p (foldr altGuardedness def qs)
+-- TODO: removes unguardedness of corresponding register in r
 guardednessAlg (MakeRegister _ l r) = seqGuardedness l r
 guardednessAlg GetRegister{} = NoEffect
 guardednessAlg PutRegister{} = UnguardedEffect

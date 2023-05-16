@@ -31,6 +31,10 @@ issue41 = testGroup "#41 Length-factoring can cross `put` but shouldn't"
   , testCase "it should prevent factoring" $ issue41_ex2 "b" @?= Just True
   , testCase "it should prevent factoring" $ issue41_ex2 "ab" @?= Just False
   , testCase "it should prevent factoring" $ issue41_ex2 "abc" @?= Just False
+  , testCase "it should prevent factoring" $ issue41_ex3 "a" @?= Just False
+  , testCase "it should prevent factoring" $ issue41_ex3 "b" @?= Just True
+  , testCase "it should prevent factoring" $ issue41_ex3 "ab" @?= Just False
+  , testCase "it should prevent factoring" $ issue41_ex3 "abc" @?= Just False
   ]
 
 issue26_ex1 :: String -> Maybe ()
@@ -44,3 +48,6 @@ issue41_ex1 = $$(Parsley.parse Parsers.issue41_ex1)
 
 issue41_ex2 :: String -> Maybe Bool
 issue41_ex2 = $$(Parsley.parse Parsers.issue41_ex2)
+
+issue41_ex3 :: String -> Maybe Bool
+issue41_ex3 = $$(Parsley.parse Parsers.issue41_ex3)

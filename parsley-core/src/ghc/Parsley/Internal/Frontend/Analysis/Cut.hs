@@ -60,7 +60,7 @@ cutAlg (Try p) backtracks =
 cutAlg (p :<|>: q) backtracks =
   let (q', qcuts) = doCut q backtracks
       -- if the right-hand branch cuts it is guaranteed to consume input
-      (p', pcuts) = doCut p ({- false -} backtracks && qcuts)
+      (p', pcuts) = doCut p (False {-backtracks && qcuts-})
   in (In (p' :<|>: q'), pcuts && qcuts)
 cutAlg (l :<*>: r) backtracks = seqCutAlg (:<*>:) backtracks l r
 cutAlg (l :<*: r) backtracks = seqCutAlg (:<*:) backtracks l r

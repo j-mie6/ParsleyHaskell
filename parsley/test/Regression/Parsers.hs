@@ -18,4 +18,7 @@ issue41_ex1 :: Parser Bool
 issue41_ex1 = newRegister_ (LIFTED False) $ \reg -> optional (try (char 'a' *> put_ reg (LIFTED True) *> char 'b')) *> get reg
 
 issue41_ex2 :: Parser Bool
-issue41_ex2 = newRegister_ (LIFTED False) $ \reg -> try ((string "abc" *> get reg) <|> put_ reg (LIFTED True) *> get reg) <|> get reg
+issue41_ex2 = newRegister_ (LIFTED False) $ \reg -> try ((string "abc" *> get reg) <|> (put_ reg (LIFTED True) *> get reg)) <|> get reg
+
+issue41_ex3 :: Parser Bool
+issue41_ex3 = newRegister_ (LIFTED False) $ \reg -> try ((string "abc" *> get reg) <|> (put_ reg (LIFTED True) *> item *> get reg)) <|> get reg

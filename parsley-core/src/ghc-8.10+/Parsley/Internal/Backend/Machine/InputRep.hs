@@ -89,7 +89,7 @@ data PartialStaOffWith ts = StaOW !PartialStaOffset !(Code ts) | DynOW !(Code (O
 
 staOffWith :: PartialStaOffWith ts -> (PartialStaOffset -> Code ts -> Code a) -> Code a
 staOffWith (StaOW po qts) k = k po qts
-staOffWith (DynOW qots) k = [|| let (# o, cs #) = $$qots in $$(k (StaO [||o||] 0) [||cs||]) ||]
+staOffWith (DynOW qots) k = [|| let !(# o, cs #) = $$qots in $$(k (StaO [||o||] 0) [||cs||]) ||]
 
 {-|
 This type unpacks /lazy/ `Lazy.ByteString`s for efficiency.

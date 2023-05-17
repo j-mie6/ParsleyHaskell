@@ -37,9 +37,8 @@ reclaimable = fst . getConst4 . cata4 (Const4 . alg False)
 
 algCatch :: (Coins, Bool) -> (Coins, Bool) -> (Coins, Bool)
 -- if either of the two halves have an empty, then skip it
--- TODO: perhaps this should be checked to ensure it is 0 as well?
-algCatch k (_, True) = k
-algCatch (_, True) k = k
+algCatch k (Zero, True) = k
+algCatch (Zero, True) k = k
 -- take the smaller of the two branches
 algCatch (k1, _) (k2, _) = (minCoins k1 k2, False)
 

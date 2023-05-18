@@ -17,7 +17,7 @@ module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 import Data.Set                            (Set, elems)
 import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
-                                            _Fmap, _App, _Get, _Put, _Make,
+                                            _Fmap, _App, _Get, _Put, _Make, _Jump,
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
                                             IMVar, IΦVar, MVar(..), ΦVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline, reclaimable)
@@ -125,10 +125,10 @@ shallow (Match p fs qs def) m =
      defc <- freshΦ (runCodeGen def φ)
      let defc':qcs' = map addCoinsNeeded (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
-shallow (Let _ μ)                    m = do return $! tailCallOptimise μ m
+shallow (Let _ μ)                    m = do return $! In4 (Call μ m)
 shallow (Loop body exit)             m =
   do μ <- askM
-     bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (Jump μ)))))
+     bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (_Jump μ)))))
      exitc <- freshM (runCodeGen exit m)
      return $! In4 (Iter μ (addCoinsNeeded bodyc) (parsecHandler (addCoinsNeeded exitc)))
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
@@ -138,11 +138,7 @@ shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Pu
 shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 -- make sure to issue the fence after `p` is generated, to allow for a (safe) single character factor
-shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins (addCoins (coinsNeeded m) m))
-
-tailCallOptimise :: MVar x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
-tailCallOptimise μ (In4 Ret) = In4 (Jump μ)
-tailCallOptimise μ k         = In4 (Call μ k)
+shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins (addCoinsNeeded m))
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret
 -- However, I'm not yet sure about the interactions with try yet...

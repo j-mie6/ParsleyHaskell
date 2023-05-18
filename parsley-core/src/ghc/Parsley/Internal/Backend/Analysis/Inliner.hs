@@ -37,7 +37,6 @@ alg (Pop k)            = 0 + getWeight k
 alg (Lift2 _ k)        = 1 % 5 + getWeight k
 alg (Sat _ k)          = 1 + getWeight k
 alg (Call _ k)         = 2 % 3 + getWeight k
-alg (Jump _)           = 0
 alg Empt               = 0
 alg (Commit k)         = 0 + getWeight k
 alg (Catch k h)        = (if handlerInlined h then 0 else 1 % 4) + getWeight k + algHandler h

@@ -54,7 +54,6 @@ alg :: Bool -> Instr o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)
 -- input across them, return or not: the properties of the foreign call are not known.
 alg _     Ret                                    = (Zero, False)
 alg _     Call{}                                 = (Zero, False)
-alg _     Jump{}                                 = (Zero, False)
 alg _     Iter{}                                 = (Zero, False)
 alg _     Join{}                                 = (Zero, False) -- this is zero because a DrainCoins is generated just in front!
 alg _     Empt                                   = (Zero, True)

@@ -22,7 +22,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
     Access(..),
     MetaInstr(..),
     -- * Smart Instructions
-    _App, _Fmap, _Modify, _Make, _Put, _Get,
+    _App, _Fmap, _Modify, _Make, _Put, _Get, _Jump,
     -- * Smart Meta-Instructions
     addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
     -- * Re-exports
@@ -86,10 +86,6 @@ data Instr (o :: Type)                                  -- The FIXED input type
   Call      :: MVar x                  {- ^ The binding to invoke. -}
             -> k (x : xs) (Succ n) r a {- ^ Continuation to do after the call. -}
             -> Instr o k xs (Succ n) r a
-  {-| Jumps to another let-bound parser tail-recursively.
-
-  @since 1.0.0.0 -}
-  Jump      :: MVar x {- ^ The binding to jump to. -} -> Instr o k '[] (Succ n) x a
   {-| Fails unconditionally.
 
   @since 1.0.0.0 -}
@@ -364,6 +360,9 @@ Smart-instruction for `Get` that uses a `Hard` access.
 _Get :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
 _Get σ = Get σ Hard
 
+_Jump :: MVar x -> Instr o (Fix4 (Instr o)) '[] (Succ n) x a
+_Jump = flip Call (In4 Ret)
+
 -- Instances
 instance IFunctor4 (Instr o) where
   imap4 _ Ret                 = Ret
@@ -372,7 +371,6 @@ instance IFunctor4 (Instr o) where
   imap4 f (Lift2 g k)         = Lift2 g (f k)
   imap4 f (Sat g k)           = Sat g (f k)
   imap4 f (Call μ k)          = Call μ (f k)
-  imap4 _ (Jump μ)            = Jump μ
   imap4 _ Empt                = Empt
   imap4 f (Commit k)          = Commit (f k)
   imap4 f (Catch p h)         = Catch (f p) (imap4 f h)
@@ -403,7 +401,6 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg :: forall xs n r a. Instr o (Const4 (String -> String)) xs n r a -> String -> String
       alg Ret                      = "Ret"
       alg (Call μ k)               = "(Call " . shows μ . " " . getConst4 k . ")"
-      alg (Jump μ)                 = "(Jump " . shows μ . ")"
       alg (Push x k)               = "(Push " . shows x . " " . getConst4 k . ")"
       alg (Pop k)                  = "(Pop " . getConst4 k . ")"
       alg (Lift2 f k)              = "(Lift2 " . shows f . " " . getConst4 k . ")"

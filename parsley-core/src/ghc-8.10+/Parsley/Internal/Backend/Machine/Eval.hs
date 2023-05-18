@@ -73,7 +73,6 @@ readyMachine = cata4 (Machine . alg)
     alg :: (?ops :: InputOps (StaRep o), Ops o) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = evalRet
     alg (Call μ k)          = evalCall μ k
-    alg (Jump μ)            = evalJump μ
     alg (Push x k)          = evalPush x k
     alg (Pop k)             = evalPop k
     alg (Lift2 f k)         = evalLift2 f k
@@ -103,9 +102,6 @@ evalRet = return $! retCont >>= resume
 
 evalCall :: forall s o a x xs n r. (MarshalOps o, DynOps o) => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
-
-evalJump :: forall s o a x n. (MarshalOps o, DynOps o) => MVar x -> MachineMonad s o '[] (Succ n) x a
-evalJump μ = askSub μ <&> \sub Γ{..} -> callWithContinuation @o sub retCont input handlers
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})

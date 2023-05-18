@@ -206,4 +206,4 @@ evalMeta (DrainCoins coins) (Machine k) =
     drain Nothing mk γ = mk γ
     drain _ mk γ = emitLengthCheck coins mk (raise γ) γ
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
-evalMeta BlockCoins (Machine k) = k
+evalMeta BlockCoins{} (Machine k) = k

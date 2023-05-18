@@ -112,7 +112,7 @@ shallow (LookAhead p) m =
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      -- it should never be the case that factored input can commute out of the lookahead
-     return $! In4 (Catch (blockCoins (addCoinsNeeded (In4 (Tell pc)))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
+     return $! In4 (Catch (blockCoins True (addCoinsNeeded (In4 (Tell pc)))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
@@ -134,11 +134,11 @@ shallow (Loop body exit)             m =
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
 -- seems effective: blocks upstream coins from commuting down, but allows them to self factor
-shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) (blockCoins m)))))
+shallow (PutRegister σ p)            m = do runCodeGen p (In4 (_Put σ (In4 (Push (user UNIT) (blockCoins False m)))))
 shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 -- make sure to issue the fence after `p` is generated, to allow for a (safe) single character factor
-shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins (addCoinsNeeded m))
+shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins False (addCoinsNeeded m))
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret
 -- However, I'm not yet sure about the interactions with try yet...

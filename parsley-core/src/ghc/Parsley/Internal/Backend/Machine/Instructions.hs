@@ -266,7 +266,7 @@ data MetaInstr (n :: Nat) where
 
   @since 1.6.0.0
   -}
-  BlockCoins :: MetaInstr n
+  BlockCoins :: Bool -> MetaInstr n
 
 mkCoin :: (Coins -> MetaInstr n) -> Coins -> Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
 mkCoin _    Coins.Zero  = id
@@ -309,8 +309,8 @@ Smart-constructor around `BlockCoins`.
 
 @since 1.6.0.0
 -}
-blockCoins :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
-blockCoins = In4 . MetaInstr BlockCoins
+blockCoins :: Bool -> Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
+blockCoins strong = In4 . MetaInstr (BlockCoins strong)
 
 {-|
 Applies a value on the top of the stack to a function on the second-most top of the stack.
@@ -399,41 +399,41 @@ instance Show (Fix4 (Instr o) xs n r a) where
   show = ($ "") . getConst4 . cata4 (Const4 . alg)
     where
       alg :: forall xs n r a. Instr o (Const4 (String -> String)) xs n r a -> String -> String
-      alg Ret                      = "Ret"
-      alg (Call μ k)               = "(Call " . shows μ . " " . getConst4 k . ")"
-      alg (Push x k)               = "(Push " . shows x . " " . getConst4 k . ")"
-      alg (Pop k)                  = "(Pop " . getConst4 k . ")"
-      alg (Lift2 f k)              = "(Lift2 " . shows f . " " . getConst4 k . ")"
-      alg (Sat f k)                = "(Sat " . shows f . " " . getConst4 k . ")"
-      alg Empt                     = "Empt"
-      alg (Commit k)               = "(Commit " . getConst4 k . ")"
-      alg (Catch p h)              = "(Catch " . getConst4 p . " " . shows h . ")"
-      alg (Tell k)                 = "(Tell " . getConst4 k . ")"
-      alg (Seek k)                 = "(Seek " . getConst4 k . ")"
-      alg (Case p q)               = "(Case " . getConst4 p . " " . getConst4 q . ")"
-      alg (Choices fs ks def)      = "(Choices " . shows fs . " [" . intercalateDiff ", " (map getConst4 ks) . "] " . getConst4 def . ")"
-      alg (Iter μ l h)             = "{Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
-      alg (Join φ)                 = shows φ
-      alg (MkJoin φ p k)           = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
-      alg (Swap k)                 = "(Swap " . getConst4 k . ")"
-      alg (Dup k)                  = "(Dup " . getConst4 k . ")"
-      alg (Make σ a k)             = "(Make " . shows σ . " " . shows a . " " . getConst4 k . ")"
-      alg (Get σ a k)              = "(Get " . shows σ . " " . shows a . " " . getConst4 k . ")"
-      alg (Put σ a k)              = "(Put " . shows σ . " " . shows a . " " . getConst4 k . ")"
-      alg (SelectPos Line k)       = "(Line " . getConst4 k . ")"
-      alg (SelectPos Col k)        = "(Col " . getConst4 k . ")"
-      alg (LogEnter _ k)           = getConst4 k
-      alg (LogExit _ k)            = getConst4 k
-      alg (MetaInstr BlockCoins k) = getConst4 k
-      alg (MetaInstr m k)          = "[" . shows m . "] " . getConst4 k
+      alg Ret                        = "Ret"
+      alg (Call μ k)                 = "(Call " . shows μ . " " . getConst4 k . ")"
+      alg (Push x k)                 = "(Push " . shows x . " " . getConst4 k . ")"
+      alg (Pop k)                    = "(Pop " . getConst4 k . ")"
+      alg (Lift2 f k)                = "(Lift2 " . shows f . " " . getConst4 k . ")"
+      alg (Sat f k)                  = "(Sat " . shows f . " " . getConst4 k . ")"
+      alg Empt                       = "Empt"
+      alg (Commit k)                 = "(Commit " . getConst4 k . ")"
+      alg (Catch p h)                = "(Catch " . getConst4 p . " " . shows h . ")"
+      alg (Tell k)                   = "(Tell " . getConst4 k . ")"
+      alg (Seek k)                   = "(Seek " . getConst4 k . ")"
+      alg (Case p q)                 = "(Case " . getConst4 p . " " . getConst4 q . ")"
+      alg (Choices fs ks def)        = "(Choices " . shows fs . " [" . intercalateDiff ", " (map getConst4 ks) . "] " . getConst4 def . ")"
+      alg (Iter μ l h)               = "{Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
+      alg (Join φ)                   = shows φ
+      alg (MkJoin φ p k)             = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
+      alg (Swap k)                   = "(Swap " . getConst4 k . ")"
+      alg (Dup k)                    = "(Dup " . getConst4 k . ")"
+      alg (Make σ a k)               = "(Make " . shows σ . " " . shows a . " " . getConst4 k . ")"
+      alg (Get σ a k)                = "(Get " . shows σ . " " . shows a . " " . getConst4 k . ")"
+      alg (Put σ a k)                = "(Put " . shows σ . " " . shows a . " " . getConst4 k . ")"
+      alg (SelectPos Line k)         = "(Line " . getConst4 k . ")"
+      alg (SelectPos Col k)          = "(Col " . getConst4 k . ")"
+      alg (LogEnter _ k)             = getConst4 k
+      alg (LogExit _ k)              = getConst4 k
+      alg (MetaInstr BlockCoins{} k) = getConst4 k
+      alg (MetaInstr m k)            = "[" . shows m . "] " . getConst4 k
 
 instance Show (Handler o (Const4 (String -> String)) (o : xs) n r a) where
   show (Same _ yes _ no) = "(Dup (Tell (Lift2 same (If " (getConst4 yes (" " (getConst4 no "))))")))
   show (Always _ k)      = getConst4 k ""
 
 instance Show (MetaInstr n) where
-  show (AddCoins n)     = "Add " ++ show n ++ " coins"
-  show (RefundCoins n)  = "Refund " ++ show n ++ " coins"
-  show (DrainCoins n)   = "Using " ++ show n ++ " coins"
-  show (GiveBursary n)  = "Bursary of " ++ show n ++ " coins"
-  show BlockCoins       = ""
+  show (AddCoins n)    = "Add " ++ show n ++ " coins"
+  show (RefundCoins n) = "Refund " ++ show n ++ " coins"
+  show (DrainCoins n)  = "Using " ++ show n ++ " coins"
+  show (GiveBursary n) = "Bursary of " ++ show n ++ " coins"
+  show BlockCoins{}    = ""

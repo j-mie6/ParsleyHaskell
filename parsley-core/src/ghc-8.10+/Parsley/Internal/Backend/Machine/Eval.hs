@@ -248,7 +248,7 @@ evalMeta (DrainCoins coins) (Machine k) =
       -- can be partially paid from last known deepest offset
       | otherwise = emitLengthCheck (m + 1) 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) unsafeDeepestKnown
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
-evalMeta BlockCoins (Machine k) = k
+evalMeta BlockCoins{} (Machine k) = k
 
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})

@@ -254,16 +254,16 @@ withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
 withLengthCheckAndCoins :: (?ops::InputOps (StaRep o), DynOps o) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-withLengthCheckAndCoins coins k = reader $ \ctx γOrig ->
+withLengthCheckAndCoins coins k = reader $ \ctx γ ->
     -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
     -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
     let prefetch ((c, offset'), pred) k = k . addChar pred c offset'
-        remainder deepest ctx = withUpdatedOffset (flip (run (Machine k)) (giveCoins (willConsume coins) ctx)) γOrig deepest
+        remainder deepest ctx = withUpdatedOffset (flip (run (Machine k)) (giveCoins (willConsume coins) ctx)) γ deepest
         staPred = knownPreds coins >>= onlyStatic
         preds = maybe id (:) staPred (repeat Item) -- these are fed in to ensure the right checked pred is accounted for
-        headCheck = staPred <&> \pred c good -> sat (ap (LAM (lamTerm pred))) c (const good) (raise γOrig)
+        headCheck = staPred <&> \pred c good -> sat (ap (LAM (lamTerm pred))) c (const good) (raise γ)
         good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx
-    in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise γOrig) (off (input γOrig)) offset
+    in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise γ) (off (input γ)) offset
         -- this is needed because a cached predicate cannot be compared for equality if it's user-pred, and it'll duplicate!
   where onlyStatic UserPred{} = Nothing
         onlyStatic p          = Just p

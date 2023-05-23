@@ -441,8 +441,8 @@ rewind buffer).
 
 @since 2.1.0.0
 -}
-readChar :: Ctx s o a                                                             -- ^ The original context.
-         -> CharPred                                                              -- ^ The predicate that this character will be tested against
+readChar :: Ctx s o a                                                              -- ^ The original context.
+         -> CharPred                                                               -- ^ The predicate that this character will be tested against
          -> ((Code Char -> Offset o -> Code b) -> Code b)                          -- ^ The fallback source of input.
          -> (Code Char -> CharPred -> CharPred -> Offset o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
          -> Code b

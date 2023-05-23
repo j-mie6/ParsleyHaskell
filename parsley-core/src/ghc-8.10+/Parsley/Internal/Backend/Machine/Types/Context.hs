@@ -447,15 +447,16 @@ readChar :: Ctx s o a                                                           
          -> (Code Char -> CharPred -> CharPred -> Offset o -> Ctx s o a -> Code b) -- ^ The continuation that needs the read characters and updated context.
          -> Code b
 readChar ctx pred fallback k
-  | reclaimable = unsafeReadChar ctx k
-  | otherwise   = fallback $ \c o -> unsafeReadChar (addChar Item c o ctx) k
+  | reclaimable = unsafeReadChar ctx
+  | otherwise   = fallback $ \c o -> unsafeReadChar (addChar Item c o ctx)
   where
     reclaimable = not (Queue.null (knownChars ctx))
-    unsafeReadChar ctx k = let -- combine the old information with the new information, refining the predicate
-                               -- This works for notFollowedBy at the /moment/ because the predicate does not cross the handler boundary...
-                               -- Perhaps any that cross handler boundaries should be complemented if that ever happens.
-                               ((c, oldPred, o), q) = dequeue (knownChars ctx)
-                           in k c oldPred (andPred oldPred pred) o (ctx { knownChars = q })
+    unsafeReadChar ctx = let -- combine the old information with the new information, refining the predicate
+                             -- This works for notFollowedBy at the /moment/ because the predicate does not cross the handler boundary...
+                             -- Perhaps any that cross handler boundaries should be complemented if that ever happens.
+                             ((c, oldPred, o), q) = dequeue (knownChars ctx)
+                             -- FIXME: this actually needs to be pushed back on the queue for it to rewind properly!
+                          in k c oldPred (andPred oldPred pred) o (ctx { knownChars = q })
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

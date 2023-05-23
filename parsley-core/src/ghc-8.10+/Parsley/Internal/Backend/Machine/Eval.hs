@@ -113,22 +113,19 @@ evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad 
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
 evalSat :: forall s o xs n r a. (?ops :: InputOps (StaRep o), DynOps o, Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalSat p k = do
+evalSat p mk = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
-  if | bankrupt -> emitCheckAndFetch (one p) k
-     | hasChange -> satFetch k
-     | otherwise -> trace "I have a piggy :)" $ state breakPiggy $ \coins -> emitCheckAndFetch coins k
+  if | bankrupt -> withLengthCheckAndCoins (one p) satFetch
+     | hasChange -> satFetch
+     | otherwise -> trace "I have a piggy :)" $ state breakPiggy $ \coins -> withLengthCheckAndCoins coins satFetch
   where
-    satFetch :: Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-    satFetch mk = reader $ \ctx γ ->
+    satFetch :: MachineMonad s o xs (Succ n) r a
+    satFetch = reader $ \ctx γ ->
       readChar (spendCoin ctx) p (fetch (off (input γ))) $ \c staOldPred staPosPred offset' ctx' ->
         let staPredC' = optimisePredGiven p staOldPred
         in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos (updateOffset offset' (input γ)) c staPosPred) ctx')
                                                 (raise γ)
-
-    emitCheckAndFetch :: Coins -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-    emitCheckAndFetch coins = withLengthCheckAndCoins coins . satFetch
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 

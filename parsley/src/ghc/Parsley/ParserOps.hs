@@ -60,7 +60,7 @@ This is the default representation used for user-level functions and values: pla
 
 @since 0.1.0.0
 -}
-instance ParserOps WQ where
+instance {-# INCOHERENT #-} x ~ WQ => ParserOps x where
   pure = pure . BLACK
   satisfy = satisfy . BLACK
   conditional = conditional . map (first BLACK)
@@ -71,7 +71,7 @@ directly as an argument to relevant combinators.
 
 @since 0.1.0.0
 -}
-instance {-# INCOHERENT #-} x ~ Defunc => ParserOps x where
+instance ParserOps Defunc where
   pure = Internal.pure
   satisfy = Internal.satisfy
   conditional = Internal.conditional

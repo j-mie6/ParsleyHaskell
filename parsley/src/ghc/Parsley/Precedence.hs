@@ -155,7 +155,7 @@ This is the default representation used for user-level functions and values: pla
 
 @since 2.0.0.0
 -}
-instance GOps WQ where
+instance {-# INCOHERENT #-} x ~ WQ => GOps x where
   gops fixity ps = gops fixity ps . BLACK
 
 {-|
@@ -164,7 +164,7 @@ directly as an argument to relevant combinators.
 
 @since 2.0.0.0
 -}
-instance {-# INCOHERENT #-} x ~ Defunc => GOps x where
+instance GOps Defunc where
   gops fixity ps = Op fixity (choice ps)
 
 {-|

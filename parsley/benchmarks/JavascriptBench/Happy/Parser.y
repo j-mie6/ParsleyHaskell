@@ -1,5 +1,5 @@
 {
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralisedNewtypeDeriving #-}
 module JavascriptBench.Happy.Parser where
 import JavascriptBench.Shared
 import Control.Monad.Reader

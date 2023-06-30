@@ -104,8 +104,10 @@ the input using statically acquired knowledge.
 -}
 -- TODO: In future, we could adjust InputCharacteristic to provide information about the static behaviours of the positions too...
 chooseInput :: forall o. DynOps o => InputCharacteristic -> Word -> Input o -> Input# o -> Input o
-chooseInput (AlwaysConsumes n) _ inp  inp#  = inp { off = moveN n (off inp) (asSta @o (off# inp#)), pos = fromDynPos (pos# inp#) }
+chooseInput (AlwaysConsumes (Just n)) _ inp  inp#  = inp { off = moveN n (off inp) (asSta @o (off# inp#)), pos = fromDynPos (pos# inp#) }
 -- Technically, in this case, we know the whole input is unchanged. This essentially ignores the continuation arguments
 -- hopefully GHC could optimise this better?
 chooseInput NeverConsumes      _ inp  _inp# = inp -- { off = (off inp) {offset = off# inp# }, pos = pos# inp# }
-chooseInput MayConsume         u _inp inp#  = toInput u inp#
+-- This is safer right now, since we never need information about input greater than another
+chooseInput (AlwaysConsumes Nothing) u _inp inp#  = toInput u inp#
+chooseInput MayConsume               u _inp inp#  = toInput u inp#

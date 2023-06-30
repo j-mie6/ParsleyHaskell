@@ -1,6 +1,5 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
-{-# LANGUAGE DerivingStrategies,
-             GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DerivingStrategies, GeneralisedNewtypeDeriving #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Identifiers
 Description : frontend specific identifiers.

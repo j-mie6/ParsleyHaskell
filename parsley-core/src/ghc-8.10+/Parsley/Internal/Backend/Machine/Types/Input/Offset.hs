@@ -1,4 +1,4 @@
-{-# LANGUAGE DerivingStrategies, UnboxedTuples #-}
+{-# LANGUAGE DerivingStrategies, GeneralisedNewtypeDeriving, UnboxedTuples #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Input.Offset
 Description : Statically refined offsets.
@@ -37,8 +37,7 @@ data Offset o = Offset {
     moved  :: {-# UNPACK #-} !Amount
   }
 
-data Amount = Amount {-# UNPACK #-} !Word {- ^ The multiplicity. -} {-# UNPACK #-} !Word {- ^ The additive offset. -}
-  deriving stock Eq
+newtype Amount = Amount Word {- ^ The additive offset. -} deriving newtype (Eq, Num, Show)
 
 {-|
 Given two `Offset`s, this determines whether or not they represent the same
@@ -59,7 +58,7 @@ runtime offset and records that another character has been consumed.
 @since 1.4.0.0
 -}
 moveOne :: Offset o -> StaRep o -> Offset o
-moveOne = moveN (Just 1)
+moveOne = moveN 1
 
 {-|
 Updates an `Offset` with its new underlying representation of a real
@@ -68,12 +67,8 @@ Here, `Nothing` represents an unknown but non-zero amount of characters.
 
 @since 1.5.0.0
 -}
-moveN :: Maybe Word -> Offset o -> StaRep o -> Offset o
-moveN n off o = off { offset = o, moved = moved off `add` toAmount n }
-  where
-    toAmount :: Maybe Word -> Amount
-    toAmount Nothing = Amount 1 0
-    toAmount (Just n) = Amount 0 n
+moveN :: Word -> Offset o -> StaRep o -> Offset o
+moveN n off o = off { offset = o, moved = moved off + Amount n }
 
 {-|
 Makes a fresh `Offset` that has not had any input consumed off of it
@@ -82,7 +77,7 @@ yet.
 @since 1.4.0.0
 -}
 mkOffset :: StaRep o -> Word -> Offset o
-mkOffset offset unique = Offset offset Nothing unique (Amount 0 0)
+mkOffset offset unique = Offset offset Nothing unique 0
 
 updateDeepestKnown :: StaRep o -> Offset o -> Offset o
 updateDeepestKnown known offset = offset { deepestKnownChar = Just known }
@@ -90,6 +85,7 @@ updateDeepestKnown known offset = offset { deepestKnownChar = Just known }
 unsafeDeepestKnown :: Offset o -> StaRep o
 unsafeDeepestKnown = fromJust . deepestKnownChar
 
+{-
 add :: Amount -> Amount -> Amount
 add a1@(Amount n i) a2@(Amount m j)
   -- If the multiplicites don't match then this is _even_ more unknowable
@@ -98,10 +94,13 @@ add a1@(Amount n i) a2@(Amount m j)
   | n /= 0, m /= 0         = error ("adding " ++ show a1 ++ " and " ++ show a2 ++ " makes no sense?")
   -- If one of the multiplicites is 0 then the offset can be added
   | otherwise              = Amount (max n m) (i + j)
+-}
 
 -- Instances
 instance Show (Offset o) where
   show o = show (unique o) ++ "+" ++ show (moved o)
 
+{-
 instance Show Amount where
   show (Amount n m) = show n ++ "*n+" ++ show m
+-}

@@ -70,7 +70,7 @@ import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(willConsume))
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, Code, RewindQueue)
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
 import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
@@ -454,9 +454,11 @@ readChar ctx pred fallback k
     unsafeReadChar ctx = let -- combine the old information with the new information, refining the predicate
                              -- This works for notFollowedBy at the /moment/ because the predicate does not cross the handler boundary...
                              -- Perhaps any that cross handler boundaries should be complemented if that ever happens.
-                             ((c, oldPred, o), q) = dequeue (knownChars ctx)
-                             -- FIXME: this actually needs to be pushed back on the queue for it to rewind properly!
-                          in k c oldPred (andPred oldPred pred) o (ctx { knownChars = q })
+                             updateChar (c, oldPred, o) = (c, andPred oldPred pred, o)
+                             -- this is a poke to put the optimised pred into the rewind queue
+                             ((_, oldPred, _), q) = poke updateChar (knownChars ctx)
+                             ((c, optPred, o), q') = dequeue q
+                          in k c oldPred optPred o (ctx { knownChars = q' })
 
 -- Exceptions
 newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception

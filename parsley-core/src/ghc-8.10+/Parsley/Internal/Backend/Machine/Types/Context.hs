@@ -454,9 +454,9 @@ readChar ctx pred fallback k
     unsafeReadChar ctx = let -- combine the old information with the new information, refining the predicate
                              -- This works for notFollowedBy at the /moment/ because the predicate does not cross the handler boundary...
                              -- Perhaps any that cross handler boundaries should be complemented if that ever happens.
-                             updateChar (c, oldPred, o) = (c, andPred oldPred pred, o)
+                             optimisePred (c, oldPred, o) = (c, andPred oldPred pred, o)
                              -- this is a poke to put the optimised pred into the rewind queue
-                             ((_, oldPred, _), q) = poke updateChar (knownChars ctx)
+                             ((_, oldPred, _), q) = poke optimisePred (knownChars ctx)
                              ((c, optPred, o), q') = dequeue q
                           in k c oldPred optPred o (ctx { knownChars = q' })
 

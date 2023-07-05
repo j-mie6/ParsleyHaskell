@@ -35,9 +35,9 @@ Packages known static information about offsets (via `Offset`) with static infor
 -}
 data Input o = Input {
     -- | The offset contained within the input
-    off  :: !(Offset o),
+    off :: {-# UNPACK #-} !(Offset o),
     -- | The position contained within the input
-    pos :: !StaPos
+    pos :: {-# UNPACK #-} !StaPos
   }
 
 {-|

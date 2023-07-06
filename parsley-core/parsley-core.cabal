@@ -41,6 +41,7 @@ library
   exposed-modules:     Parsley.Internal,
                        Parsley.Internal.Trace,
                        Parsley.Internal.Verbose,
+                       Parsley.Internal.Opt,
 
                        Parsley.Internal.Common,
                        Parsley.Internal.Common.Fresh,

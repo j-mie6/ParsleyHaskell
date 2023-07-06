@@ -17,7 +17,7 @@ module Parsley.Internal (
     module THUtils,
     module Trace,
     module Backend,
-    parse
+    parse, parseWithOpts
   ) where
 
 import Parsley.Internal.Backend  (codeGen, eval)
@@ -40,5 +40,10 @@ import Parsley.Internal.Core.Primitives as Primitives (
 import Parsley.Internal.Common.Utils    as THUtils    (Quapplicative(..), WQ, Code, makeQ)
 import Parsley.Internal.Trace           as Trace      (Trace(trace))
 
+import qualified Parsley.Internal.Opt   as Opt
+
 parse :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
-parse p = [||\input -> $$(eval [||input||] (compile (try p) codeGen))||]
+parse = parseWithOpts Opt.full
+
+parseWithOpts :: (Trace, Input input) => Opt.Flags -> Parser a -> Code (input -> Maybe a)
+parseWithOpts _flags p = [||\input -> $$(eval [||input||] (compile (try p) codeGen))||]

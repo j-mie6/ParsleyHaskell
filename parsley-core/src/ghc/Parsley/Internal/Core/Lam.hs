@@ -86,18 +86,18 @@ normalise x = if normal x then x else reduce x
     normal _ = True
 
 generate :: Lam a -> Code a
-generate (Abs f)    = [||\x -> $$(normaliseGen (f (Var True [||x||])))||]
+generate (Abs f)    = [|| \x -> $$(normaliseGen (f (Var True [||x||]))) ||]
 -- f has already been reduced, since we only expose `normaliseGen`
-generate (App f x)  = [||$$(generate f) $$(normaliseGen x)||]
+generate (App f x)  = [|| $$(generate f) $$(normaliseGen x) ||]
 generate (Var _ x)  = x
 -- all parts are reduced
 generate (If c T e) = [|| $$(generate c) || $$(generate e) ||]
 generate (If c t F) = [|| $$(generate c) && $$(generate t) ||]
 generate (If c F T) = [|| not $$(generate c) ||]
-generate (If c t e) = [||if $$(generate c) then $$(generate t) else $$(generate e)||]
-generate (Let b i)  = [||let x = $$(normaliseGen b) in $$(normaliseGen (i (Var True [||x||])))||]
-generate T          = [||True||]
-generate F          = [||False||]
+generate (If c t e) = [|| if $$(generate c) then $$(generate t) else $$(generate e) ||]
+generate (Let b i)  = [|| let x = $$(normaliseGen b) in $$(normaliseGen (i (Var True [||x||]))) ||]
+generate T          = [|| True ||]
+generate F          = [|| False ||]
 
 {-|
 Generates Haskell code that represents a `Lam` value, but normalising it first to ensure the

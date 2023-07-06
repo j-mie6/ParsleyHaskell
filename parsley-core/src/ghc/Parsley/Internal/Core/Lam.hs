@@ -60,8 +60,8 @@ normalise x = if normal x then x else reduce x
     reduce :: Lam a -> Lam a
     reduce (App (Abs f) x) = normalise (f x)
     reduce (App f x) = case reduce f of
-      f@(Abs _) -> reduce (App f x)
-      f         -> App f x
+      f@Abs{} -> reduce (App f x)
+      f       -> App f x
     reduce (If T t _) = normalise t
     reduce (If F _ f) = normalise f
     reduce (If _ T T) = T

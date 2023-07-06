@@ -1,8 +1,54 @@
-module Parsley.Internal.Opt where
+module Parsley.Internal.Opt (module Parsley.Internal.Opt) where
 
-data Flags = Flags {
-  
-}
+import Data.Ratio ((%))
 
-none = Flags
-full = Flags
+on, off :: Bool
+on = True
+off = False
+
+defaultInlineThreshold :: Maybe Rational
+defaultInlineThreshold = Just (13 % 10)
+
+data Flags = Flags { lawBasedOptimisations :: Bool
+                   , fullyStaticPredicates :: Bool
+                   , termNormalisation     :: Bool
+                   , inlineThreshold       :: Maybe Rational
+                   -- TODO: merge these together
+                   , lengthCheckFactoring  :: Bool
+                   , leadCharFactoring     :: Bool
+                   , factorAheadOfJoins    :: Bool
+                   , reclaimInput          :: Bool
+                   , closeFreeRegisters    :: Bool
+                   }
+
+none, fast, full :: Flags
+none = Flags { lawBasedOptimisations = off
+             , fullyStaticPredicates = off
+             , termNormalisation     = off
+             , inlineThreshold       = Nothing
+             , lengthCheckFactoring  = off
+             , leadCharFactoring     = off
+             , factorAheadOfJoins    = off
+             , reclaimInput          = off
+             , closeFreeRegisters    = off
+             }
+fast = Flags { lawBasedOptimisations = on
+             , fullyStaticPredicates = off
+             , termNormalisation     = on
+             , inlineThreshold       = defaultInlineThreshold
+             , lengthCheckFactoring  = on
+             , leadCharFactoring     = on
+             , factorAheadOfJoins    = on
+             , reclaimInput          = on
+             , closeFreeRegisters    = on
+             }
+full = Flags { lawBasedOptimisations = on
+             , fullyStaticPredicates = on
+             , termNormalisation     = on
+             , inlineThreshold       = defaultInlineThreshold
+             , lengthCheckFactoring  = on
+             , leadCharFactoring     = on
+             , factorAheadOfJoins    = on
+             , reclaimInput          = on
+             , closeFreeRegisters    = on
+             }

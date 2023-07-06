@@ -43,7 +43,7 @@ import Parsley.Internal.Trace           as Trace      (Trace(trace))
 import qualified Parsley.Internal.Opt   as Opt
 
 parse :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
-parse = parseWithOpts Opt.full
+parse = parseWithOpts Opt.fast
 
 parseWithOpts :: (Trace, Input input) => Opt.Flags -> Parser a -> Code (input -> Maybe a)
 parseWithOpts _flags p = [||\input -> $$(eval [||input||] (compile (try p) codeGen))||]

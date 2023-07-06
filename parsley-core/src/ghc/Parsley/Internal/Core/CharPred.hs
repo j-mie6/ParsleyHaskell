@@ -21,7 +21,7 @@ module Parsley.Internal.Core.CharPred (
 import Prelude hiding (null)
 
 import Data.RangeSet             (RangeSet, elems, unelems, fromRanges, full, member, fold, null, union, extractSingle, singleton, intersection, difference, isSubsetOf, sizeRanges)
-import Parsley.Internal.Core.Lam (Lam(Abs, App, Var, T, F, If))
+import Parsley.Internal.Core.Lam (Lam(Abs, App, Var, T, F, If), andLam, notLam, orLam)
 
 {-|
 Represents @Char -> Bool@ functions, potentially in a more inspectable way.
@@ -184,13 +184,3 @@ instance Show CharPred where
   show Item = "const True"
   show (Specific c) = concat ["(== ", show c, ")"]
   show (Ranges rngs) = "elem " ++ show rngs
-
-
-andLam :: Lam Bool -> Lam Bool -> Lam Bool
-andLam x y = If x y F
-
-orLam :: Lam Bool -> Lam Bool -> Lam Bool
-orLam x = If x T
-
-notLam :: Lam Bool -> Lam Bool
-notLam x = If x F T

@@ -13,7 +13,7 @@ of values.
 
 @since 1.0.1.0
 -}
-module Parsley.Internal.Core.Lam (normaliseGen, normalise, Lam(..)) where
+module Parsley.Internal.Core.Lam (normaliseGen, normalise, Lam(..), andLam, orLam, notLam) where
 
 import Parsley.Internal.Common.Utils   (Code)
 import Parsley.Internal.Common.THUtils (eta)
@@ -40,6 +40,15 @@ data Lam a where
     -- | Value representing false.
     F   :: Lam Bool
 
+andLam :: Lam Bool -> Lam Bool -> Lam Bool
+andLam x y = If x y F
+
+orLam :: Lam Bool -> Lam Bool -> Lam Bool
+orLam x = If x T
+
+notLam :: Lam Bool -> Lam Bool
+notLam x = If x F T
+
 {-|
 Optimises a `Lam` expression, reducing it until the outmost lambda, let, or if statement.
 
@@ -49,20 +58,19 @@ normalise :: Lam a -> Lam a
 normalise x = if normal x then x else reduce x
   where
     reduce :: Lam a -> Lam a
-    reduce (App (Abs f) x) = case f x of
-      x | normal x -> x
-      x            -> reduce x
+    reduce (App (Abs f) x) = normalise (f x)
     reduce (App f x) = case reduce f of
       f@(Abs _) -> reduce (App f x)
       f         -> App f x
-    reduce (If c x y) = case reduce c of
-      T -> x
-      F -> y
-      c -> If c x y
+    reduce (If T t _) = normalise t
+    reduce (If F _ f) = normalise f
+    reduce (If _ T T) = T
+    reduce (If _ F F) = F
+    reduce (If c T F) = normalise c
+    -- one of them must be not in normal form
+    reduce (If c t f) = normalise (If (normalise c) (normalise t) (normalise f))
     -- Reduction rule found courtesy of David Davies, forever immortalised
-    reduce (Let v@(Var True _) f) = case f v of
-      x | normal x -> x
-      x            -> reduce x
+    reduce (Let v@(Var True _) f) = normalise (f v)
     reduce x = x
 
     normal :: Lam a -> Bool
@@ -70,7 +78,10 @@ normalise x = if normal x then x else reduce x
     normal (App f _) = normal f
     normal (If T _ _) = False
     normal (If F _ _) = False
-    normal (If x _ _) = normal x
+    normal (If _ T T) = False
+    normal (If _ F F) = False
+    normal (If _ T F) = False
+    normal (If c t f) = normal c && normal t && normal f
     normal (Let (Var True _) _) = False
     normal _ = True
 
@@ -79,14 +90,11 @@ generate (Abs f)    = [||\x -> $$(normaliseGen (f (Var True [||x||])))||]
 -- f has already been reduced, since we only expose `normaliseGen`
 generate (App f x)  = [||$$(generate f) $$(normaliseGen x)||]
 generate (Var _ x)  = x
--- c has already been reduced, since we only expose `normaliseGen`
--- TODO: need to find a better way of doing boolean optimisation
-generate (If _ T T) = [||True||]
-generate (If _ F F) = [||False||]
-generate (If c T e) = [|| $$(generate c) || $$(normaliseGen e) ||]
-generate (If c t F) = [|| $$(generate c) && $$(normaliseGen t) ||]
+-- all parts are reduced
+generate (If c T e) = [|| $$(generate c) || $$(generate e) ||]
+generate (If c t F) = [|| $$(generate c) && $$(generate t) ||]
 generate (If c F T) = [|| not $$(generate c) ||]
-generate (If c t e) = [||if $$(generate c) then $$(normaliseGen t) else $$(normaliseGen e)||]
+generate (If c t e) = [||if $$(generate c) then $$(generate t) else $$(generate e)||]
 generate (Let b i)  = [||let x = $$(normaliseGen b) in $$(normaliseGen (i (Var True [||x||])))||]
 generate T          = [||True||]
 generate F          = [||False||]

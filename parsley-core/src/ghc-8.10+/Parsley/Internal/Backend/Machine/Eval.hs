@@ -131,7 +131,7 @@ evalSat p mk = do
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
-evalEmpt :: DynOps o => MachineMonad s o xs (Succ n) r a
+evalEmpt :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
 
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
@@ -208,7 +208,7 @@ evalSelectPos :: (?flags :: Opt.Flags) => PosSelector -> Machine s o (Int : xs) 
 evalSelectPos sel (Machine k) = k <&> \m γ -> forcePos (input γ) sel $ \component input' ->
   m (γ {operands = Op (FREEVAR component) (operands γ), input = input'})
 
-evalLogEnter :: (?ops :: InputOps (StaRep o), LogHandler o, HandlerOps o)
+evalLogEnter :: (?ops :: InputOps (StaRep o), LogHandler o, HandlerOps o, ?flags :: Opt.Flags)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) = freshUnique $ \u ->
   liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindAlwaysHandler γ True (logHandler name ctx γ u) k)||])

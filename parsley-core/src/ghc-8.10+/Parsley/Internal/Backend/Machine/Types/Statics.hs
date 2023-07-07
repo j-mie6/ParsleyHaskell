@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes,
+             ImplicitParams,
              MagicHash,
              RecordWildCards,
              TypeApplications,
@@ -57,6 +58,8 @@ import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), In
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common.Utils                              (Code)
+
+import qualified Parsley.Internal.Opt as Opt
 
 -- Handlers
 {-|
@@ -182,10 +185,12 @@ which can be used to refine the outcome of the execution of the handler as follo
 
 @since 1.7.0.0
 -}
-staHandlerEval :: DynOps o => AugmentedStaHandler s o a -> Input o -> Code (ST s (Maybe a))
+staHandlerEval :: (DynOps o, ?flags :: Opt.Flags) => AugmentedStaHandler s o a -> Input o -> Code (ST s (Maybe a))
 staHandlerEval (AugmentedStaHandler (Just c) sh) inp
-  | Just True <- same c (off inp)             = maybe (staHandler# (unknown sh)) const (yesSame sh) (fromInput inp)
-  | Just False <- same c (off inp)            = staHandler# (fromMaybe (unknown sh) (notSame sh)) (fromInput inp)
+  | Opt.deduceFailPath ?flags
+  , Just True <- same c (off inp)             = maybe (staHandler# (unknown sh)) const (yesSame sh) (fromInput inp)
+  | Opt.deduceFailPath ?flags
+  , Just False <- same c (off inp)            = staHandler# (fromMaybe (unknown sh) (notSame sh)) (fromInput inp)
 staHandlerEval (AugmentedStaHandler _ sh) inp = staHandler# (unknown sh) (fromInput inp)
 
 {-|

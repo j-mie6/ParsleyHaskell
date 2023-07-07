@@ -10,7 +10,6 @@ defaultInlineThreshold :: Maybe Rational
 defaultInlineThreshold = Just (13 % 10)
 
 data Flags = Flags { lawBasedOptimisations :: Bool
-                   , fullyStaticPredicates :: Bool -- TODO:
                    , termNormalisation     :: Bool -- TODO:
                    , inlineThreshold       :: Maybe Rational
                    -- TODO: merge these together
@@ -23,7 +22,6 @@ data Flags = Flags { lawBasedOptimisations :: Bool
 
 none, fast, full :: Flags
 none = Flags { lawBasedOptimisations = off
-             , fullyStaticPredicates = off
              , termNormalisation     = off
              , inlineThreshold       = Nothing
              , lengthCheckFactoring  = off
@@ -32,18 +30,8 @@ none = Flags { lawBasedOptimisations = off
              , reclaimInput          = off
              , closeFreeRegisters    = off
              }
-fast = Flags { lawBasedOptimisations = on
-             , fullyStaticPredicates = off
-             , termNormalisation     = on
-             , inlineThreshold       = defaultInlineThreshold
-             , lengthCheckFactoring  = on
-             , leadCharFactoring     = on
-             , factorAheadOfJoins    = on
-             , reclaimInput          = on
-             , closeFreeRegisters    = on
-             }
+fast = full  --{ }
 full = Flags { lawBasedOptimisations = on
-             , fullyStaticPredicates = on
              , termNormalisation     = on
              , inlineThreshold       = defaultInlineThreshold
              , lengthCheckFactoring  = on

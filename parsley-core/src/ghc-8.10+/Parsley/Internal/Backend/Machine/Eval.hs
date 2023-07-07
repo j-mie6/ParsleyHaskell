@@ -231,7 +231,9 @@ evalMeta (AddCoins coins) (Machine k) =
      let requiresPiggy = net /= 0
      if requiresPiggy then local (storePiggy (coins `minus` net)) k
      else withLengthCheckAndCoins coins k
-evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
+evalMeta (RefundCoins coins) (Machine k)
+  | Opt.reclaimInput ?flags = local (refundCoins coins) k
+  | otherwise               = local (giveCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
   liftM3 drain

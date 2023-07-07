@@ -16,7 +16,7 @@ data Flags = Flags { lawBasedOptimisations :: Bool
                    , lengthCheckFactoring  :: Bool -- TODO:
                    , leadCharFactoring     :: Bool
                    , factorAheadOfJoins    :: Bool -- TODO:
-                   , reclaimInput          :: Bool -- TODO:
+                   , reclaimInput          :: Bool
                    --, closeFreeRegisters    :: Bool
                    }
 

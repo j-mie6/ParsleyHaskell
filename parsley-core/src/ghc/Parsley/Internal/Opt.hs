@@ -10,7 +10,7 @@ defaultInlineThreshold :: Maybe Rational
 defaultInlineThreshold = Just (13 % 10)
 
 data Flags = Flags { lawBasedOptimisations :: Bool
-                   , termNormalisation     :: Bool -- TODO:
+                   , termNormalisation     :: Bool
                    , inlineThreshold       :: Maybe Rational
                    -- TODO: merge these together
                    , lengthCheckFactoring  :: Bool -- TODO:

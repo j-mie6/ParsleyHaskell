@@ -87,6 +87,7 @@ import Parsley.Internal.Common.THUtils                            (eta)
 import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
 import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), updateDeepestKnown)
+import qualified Parsley.Internal.Opt   as Opt
 
 {- General Operations -}
 {-|
@@ -95,7 +96,7 @@ used multiple times without re-computation.
 
 @since 1.0.0.0
 -}
-dup :: Defunc x -> (Defunc x -> Code r) -> Code r
+dup :: (?flags :: Opt.Flags) => Defunc x -> (Defunc x -> Code r) -> Code r
 dup (FREEVAR x) k = k (FREEVAR x)
 dup (INPUT o) k = k (INPUT o)
 dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
@@ -120,7 +121,8 @@ exist or does not match.
 
 @since 2.1.0.0
 -}
-sat :: (Defunc Char -> Defunc Bool)                        -- ^ Predicate to test the character with.
+sat :: (?flags :: Opt.Flags)
+    => (Defunc Char -> Defunc Bool)                        -- ^ Predicate to test the character with.
     -> Code Char                                           -- ^ The character to test against.
     -> (Defunc Char -> Code b)                             -- ^ Code to execute on success.
     -> Code b                                              -- ^ Code to execute on failure.
@@ -164,7 +166,7 @@ that in the `Ctx` cache.
 
 @since 1.0.0.0
 -}
-newΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
+newΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 newΣ σ Soft x k ctx = dup x $ \dupx -> k (insertNewΣ σ Nothing dupx ctx)
 newΣ σ Hard x k ctx = dup x $ \dupx -> [||
     do ref <- newSTRef $$(genDefunc dupx)
@@ -177,7 +179,7 @@ Depending on the access type, either generates the code for a write to a registe
 
 @since 1.0.0.0
 -}
-writeΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
+writeΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$(genDefunc dupx)
@@ -190,7 +192,7 @@ the value from the cache and feeds it to a continuation.
 
 @since 1.0.0.0
 -}
-readΣ :: ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
+readΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
@@ -328,7 +330,7 @@ join point) taking the required components from the state `Γ`.
 
 @since 1.2.0.0
 -}
-resume :: DynOps o => StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
+resume :: (DynOps o, ?flags :: Opt.Flags) => StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
 resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (fromInput (input γ))
 
 {-|
@@ -353,7 +355,8 @@ to `buildHandler`.
 
 @since 1.8.0.0
 -}
-suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -- ^ The partial parser to turn into a return continuation.
+suspend :: (?flags :: Opt.Flags)
+        => (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -- ^ The partial parser to turn into a return continuation.
         -> Γ s o xs n r a                                  -- ^ The state to execute the continuation with.
         -> (Input# o -> Input o)                           -- ^ Function used to generate the offset
         -> StaCont s o a x
@@ -365,7 +368,7 @@ an optimisation on the offset if the subroutine has known input characteristics.
 
 @since 1.5.0.0
 -}
-callCC :: forall s o xs n r a x. (MarshalOps o, DynOps o)
+callCC :: forall s o xs n r a x. (MarshalOps o, DynOps o, ?flags :: Opt.Flags)
        => Word                                                   --
        -> StaSubroutine s o a x                                  -- ^ The subroutine @sub@ that will be called.
        -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
@@ -383,7 +386,7 @@ into the `Ctx`.
 
 @since 1.4.0.0
 -}
-setupJoinPoint :: forall s o xs n r a x. (JoinBuilder o, DynOps o)
+setupJoinPoint :: forall s o xs n r a x. (JoinBuilder o, DynOps o, ?flags :: Opt.Flags)
                => ΦVar x                     -- ^ The name of the binding.
                -> Machine s o (x : xs) n r a -- ^ The definition of the binding.
                -> Machine s o xs n r a       -- ^ The scope within which the binding is valid.

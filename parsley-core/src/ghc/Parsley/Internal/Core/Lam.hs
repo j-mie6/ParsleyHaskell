@@ -1,3 +1,4 @@
+{-# LANGUAGE ImplicitParams #-}
 {-|
 Module      : Parsley.Internal.Core.Lam
 Description : Generic defunctionalised abstraction.
@@ -17,6 +18,8 @@ module Parsley.Internal.Core.Lam (normaliseGen, normalise, Lam(..), andLam, orLa
 
 import Parsley.Internal.Common.Utils   (Code)
 import Parsley.Internal.Common.THUtils (eta)
+
+import qualified Parsley.Internal.Opt   as Opt
 
 {-|
 Defunctionalised lambda calculus in HOAS form. Supports basic inspection
@@ -54,8 +57,8 @@ Optimises a `Lam` expression, reducing it until the outmost lambda, let, or if s
 
 @since 1.0.1.0
 -}
-normalise :: Lam a -> Lam a
-normalise x = if normal x then x else reduce x
+normalise :: (?flags :: Opt.Flags) => Lam a -> Lam a
+normalise x = if normal x || not (Opt.termNormalisation ?flags) then x else reduce x
   where
     reduce :: Lam a -> Lam a
     reduce (App (Abs f) x) = normalise (f x)
@@ -85,7 +88,7 @@ normalise x = if normal x then x else reduce x
     normal (Let (Var True _) _) = False
     normal _ = True
 
-generate :: Lam a -> Code a
+generate :: (?flags :: Opt.Flags) => Lam a -> Code a
 generate (Abs f)    = [|| \x -> $$(normaliseGen (f (Var True [||x||]))) ||]
 -- f has already been reduced, since we only expose `normaliseGen`
 generate (App f x)  = [|| $$(generate f) $$(normaliseGen x) ||]
@@ -105,11 +108,11 @@ term is minimal.
 
 @since 1.0.1.0
 -}
-normaliseGen :: Lam a -> Code a
+normaliseGen :: (?flags :: Opt.Flags) => Lam a -> Code a
 normaliseGen = eta . generate . normalise
 
 instance Show (Lam a) where
-  show = show' . normalise
+  show = let ?flags = Opt.none { Opt.termNormalisation = True } in show' . normalise
 
 show' :: Lam a -> String
 show' (Abs f) = concat ["(\\x -> ", show (f (Var True undefined)), ")"]

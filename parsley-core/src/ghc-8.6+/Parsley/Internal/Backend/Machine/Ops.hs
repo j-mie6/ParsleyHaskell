@@ -31,6 +31,8 @@ import Parsley.Internal.Common                       (One, Code, Vec(..), Nat(..
 import Parsley.Internal.Core.CharPred                (CharPred, lamTerm)
 import System.Console.Pretty                         (color, Color(Green, White, Red, Blue))
 
+import qualified Parsley.Internal.Opt   as Opt
+
 #define inputInstances(derivation) \
 derivation(Int)                    \
 derivation((OffWith [Char]))       \
@@ -49,7 +51,7 @@ updatePos :: (Code Int, Code Int) -> Code Char -> ((Code Int, Code Int) -> Code 
 updatePos (qline, qcol) qc k = [|| case updatePos# $$qline $$qcol $$qc of (# line', col' #) -> $$(k ([||line'||], [||col'||])) ||]
 
 {- Input Operations -}
-sat :: (?ops :: InputOps o) => CharPred -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
+sat :: (?ops :: InputOps o, ?flags :: Opt.Flags) => CharPred -> (Γ s o (Char : xs) n r a -> Code (ST s (Maybe a))) -> Code (ST s (Maybe a)) -> Γ s o xs n r a -> Code (ST s (Maybe a))
 sat p k bad γ@Γ{..} = next input $ \c input' -> let v = FREEVAR c in
                         updatePos pos c $ \pos' ->
                           _if (ap (LAM (lamTerm p)) v)
@@ -65,7 +67,7 @@ emitLengthCheck n good bad γ = [||
   else $$bad ||]
 
 {- General Operations -}
-dup :: Defunc x -> (Defunc x -> Code r) -> Code r
+dup :: (?flags :: Opt.Flags) => Defunc x -> (Defunc x -> Code r) -> Code r
 dup (FREEVAR x) k = k (FREEVAR x)
 dup (INPUT o pos) k = k (INPUT o pos)
 dup x k = [|| let !dupx = $$(genDefunc x) in $$(k (FREEVAR [||dupx||])) ||]
@@ -75,21 +77,21 @@ returnST :: forall s a. a -> ST s a
 returnST = return @(ST s)
 
 {- Register Operations -}
-newΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+newΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
 newΣ σ Soft x k ctx = dup x $ \dupx -> k $! insertNewΣ σ Nothing dupx ctx
 newΣ σ Hard x k ctx = dup x $ \dupx -> [||
     do ref <- newSTRef $$(genDefunc dupx)
        $$(k $! insertNewΣ σ (Just [||ref||]) dupx ctx)
   ||]
 
-writeΣ :: ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+writeΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k $! cacheΣ σ dupx ctx
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$(genDefunc dupx)
        $$(k $! cacheΣ σ dupx ctx)
   ||]
 
-readΣ :: ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
+readΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s (Maybe a))) -> Ctx s o a -> Code (ST s (Maybe a))
 readΣ σ Soft k ctx = (k $! cachedΣ σ ctx) $! ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
@@ -127,8 +129,8 @@ inputInstances(deriveHandlerOps)
 
 {- Control Flow Operations -}
 class BoxOps o => ContOps o where
-  suspend :: (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
-  resume :: Code (Cont s o a x) -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
+  suspend :: (?flags :: Opt.Flags) => (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -> Γ s o xs n r a -> Code (Cont s o a x)
+  resume :: (?flags :: Opt.Flags) => Code (Cont s o a x) -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
   callWithContinuation :: Code (Subroutine s o a x) -> Code (Cont s o a x) -> Code o -> (Code Int, Code Int) -> Vec (Succ n) (Code (Handler s o a)) -> Code (ST s (Maybe a))
 
 class ReturnOps o where
@@ -155,7 +157,7 @@ inputInstances(deriveReturnOps)
 
 {- Builder Operations -}
 class BoxOps o => JoinBuilder o where
-  setupJoinPoint :: ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+  setupJoinPoint :: (?flags :: Opt.Flags) => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 
 class BoxOps o => RecBuilder o where
   buildIter :: ReturnOps o

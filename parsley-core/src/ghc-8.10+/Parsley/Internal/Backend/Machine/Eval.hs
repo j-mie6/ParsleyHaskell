@@ -45,13 +45,15 @@ import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
 import qualified Debug.Trace (trace)
+import qualified Parsley.Internal.Opt   as Opt
+import Parsley.Internal.Opt (Flags(leadCharFactoring))
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
 
 @since 1.0.0.0
 -}
-eval :: forall o a. (Trace, Ops o, ?ops :: InputOps (StaRep o))
+eval :: forall o a. (Trace, Ops o, ?ops :: InputOps (StaRep o), ?flags :: Opt.Flags)
      => LetBinding o a a              -- ^ The binding to be generated.
      -> DMap MVar (LetBinding o a)    -- ^ The map of all other required bindings.
      -> StaRep o
@@ -67,10 +69,10 @@ eval binding fs offset  = trace "EVALUATING TOP LEVEL" [||
     nameLet :: MVar x -> String
     nameLet (MVar i) = "sub" ++ show i
 
-readyMachine :: (?ops :: InputOps (StaRep o), Ops o, Trace) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
+readyMachine :: (?ops :: InputOps (StaRep o), Ops o, Trace, ?flags :: Opt.Flags) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
 readyMachine = cata4 (Machine . alg)
   where
-    alg :: (?ops :: InputOps (StaRep o), Ops o) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
+    alg :: (?ops :: InputOps (StaRep o), Ops o, ?flags :: Opt.Flags) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = evalRet
     alg (Call μ k)          = evalCall μ k
     alg (Push x k)          = evalPush x k
@@ -97,10 +99,10 @@ readyMachine = cata4 (Machine . alg)
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
 
-evalRet :: DynOps o => MachineMonad s o (x : xs) n x a
+evalRet :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
-evalCall :: forall s o a x xs n r. (MarshalOps o, DynOps o) => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalCall :: forall s o a x xs n r. (MarshalOps o, DynOps o, ?flags :: Opt.Flags) => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalCall μ (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
@@ -109,10 +111,10 @@ evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
 evalPop :: Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ in xs})
 
-evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
+evalLift2 :: (?flags :: Opt.Flags) => Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: forall s o xs n r a. (?ops :: InputOps (StaRep o), DynOps o, Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: forall s o xs n r a. (?ops :: InputOps (StaRep o), DynOps o, Trace, ?flags :: Opt.Flags) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p mk = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -129,7 +131,7 @@ evalSat p mk = do
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
-evalEmpt :: DynOps o => MachineMonad s o xs (Succ n) r a
+evalEmpt :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o xs (Succ n) r a
 evalEmpt = return $! raise
 
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
@@ -148,14 +150,14 @@ evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ)) 
 evalSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
 evalSeek (Machine k) = k <&> \mk γ -> let Op (INPUT input) xs = operands γ in mk (γ {operands = xs, input = input})
 
-evalCase :: Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
+evalCase :: (?flags :: Opt.Flags) => Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
 evalCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
   let Op e xs = operands γ
   in [||case $$(genDefunc e) of
     Left x -> $$(mp (γ {operands = Op (FREEVAR [||x||]) xs}))
     Right y  -> $$(mq (γ {operands = Op (FREEVAR [||y||]) xs}))||]) p q
 
-evalChoices :: [Defunc (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+evalChoices :: (?flags :: Opt.Flags) => [Defunc (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands γ in go x fs mks mdef (γ {operands = xs}))
   def
   (forM ks getMachine)
@@ -175,38 +177,38 @@ evalIter μ l h =
         Same gyes (Machine yes) gno (Machine no) ->
           liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
 
-evalJoin :: DynOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
+evalJoin :: (DynOps o, ?flags :: Opt.Flags) => ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume
 
-evalMkJoin :: DynOps o => JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMkJoin :: (DynOps o, ?flags :: Opt.Flags) => JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMkJoin = setupJoinPoint
 
 evalSwap :: Machine s o (x : y : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalSwap (Machine k) = k <&> \mk γ -> mk (γ {operands = let Op y (Op x xs) = operands γ in Op x (Op y xs)})
 
-evalDup :: Machine s o (x : x : xs) n r a -> MachineMonad s o (x : xs) n r a
+evalDup :: (?flags :: Opt.Flags) => Machine s o (x : x : xs) n r a -> MachineMonad s o (x : xs) n r a
 evalDup (Machine k) = k <&> \mk γ ->
   let Op x xs = operands γ
   in dup x $ \dupx -> mk (γ {operands = Op dupx (Op dupx xs)})
 
-evalMake :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+evalMake :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalMake σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in newΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalGet :: ΣVar x -> Access -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
+evalGet :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalGet σ a k = reader $ \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
 
-evalPut :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+evalPut :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalPut σ a k = reader $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
+evalSelectPos :: (?flags :: Opt.Flags) => PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
 evalSelectPos sel (Machine k) = k <&> \m γ -> forcePos (input γ) sel $ \component input' ->
   m (γ {operands = Op (FREEVAR component) (operands γ), input = input'})
 
-evalLogEnter :: (?ops :: InputOps (StaRep o), LogHandler o, HandlerOps o)
+evalLogEnter :: (?ops :: InputOps (StaRep o), LogHandler o, HandlerOps o, ?flags :: Opt.Flags)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) = freshUnique $ \u ->
   liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindAlwaysHandler γ True (logHandler name ctx γ u) k)||])
@@ -219,7 +221,8 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps (StaRep o), DynOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps (StaRep o), DynOps o, ?flags :: Opt.Flags) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta _ (Machine k) | not (Opt.lengthCheckFactoring ?flags) = k
 evalMeta (AddCoins coins) (Machine k) =
   -- when there are coins available, this cannot be discharged, and will wait until the current amounts
   -- are exhausted. Because it might have been the case that lookahead was performed to refund, the
@@ -229,7 +232,9 @@ evalMeta (AddCoins coins) (Machine k) =
      let requiresPiggy = net /= 0
      if requiresPiggy then local (storePiggy (coins `minus` net)) k
      else withLengthCheckAndCoins coins k
-evalMeta (RefundCoins coins) (Machine k) = local (refundCoins coins) k
+evalMeta (RefundCoins coins) (Machine k)
+  | Opt.reclaimInput ?flags = local (refundCoins coins) k
+  | otherwise               = local (giveCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
   liftM3 drain
@@ -250,7 +255,7 @@ evalMeta BlockCoins{} (Machine k) = k
 withUpdatedOffset :: (Γ s o xs n r a -> t) -> Γ s o xs n r a -> Offset o -> t
 withUpdatedOffset k γ off = k (γ { input = updateOffset off (input γ)})
 
-withLengthCheckAndCoins :: (?ops::InputOps (StaRep o), DynOps o) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+withLengthCheckAndCoins :: (?ops::InputOps (StaRep o), DynOps o, ?flags :: Opt.Flags) => Coins -> MachineMonad s o xs (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 withLengthCheckAndCoins coins k = reader $ \ctx γ ->
     -- it seems like _specific_ prefetching must not move out of the scope of a handler that rolls back (like try)
     -- It does work, however, if exactly one character is considered (see take 1 below) and then n-1 Items, which cannot fail
@@ -262,8 +267,9 @@ withLengthCheckAndCoins coins k = reader $ \ctx γ ->
         good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx
     in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise γ) (off (input γ)) offset
         -- this is needed because a cached predicate cannot be compared for equality if it's user-pred, and it'll duplicate!
-  where onlyStatic UserPred{} = Nothing
-        onlyStatic p          = Just p
+  where onlyStatic UserPred{}                   = Nothing
+        onlyStatic p | leadCharFactoring ?flags = Just p
+        onlyStatic _                            = Nothing
 
 state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b
 state f k = do

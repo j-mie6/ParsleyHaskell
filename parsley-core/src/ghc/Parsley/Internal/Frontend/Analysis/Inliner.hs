@@ -1,3 +1,4 @@
+{-# LANGUAGE ImplicitParams #-}
 {-|
 Module      : Parsley.Internal.Frontend.Analysis.Inliner
 Description : Decides whether to inline a let-bound parser.
@@ -16,20 +17,23 @@ import Parsley.Internal.Common.Indexed     (Fix(..), cata)
 import Parsley.Internal.Core.CombinatorAST (Combinator(..))
 import Parsley.Internal.Core.Identifiers   (MVar)
 
-inlineThreshold :: Rational
-inlineThreshold = 13 % 10
+import qualified Parsley.Internal.Opt   as Opt
 
 {-|
 Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
 
 @since 1.7.0.0
 -}
-inliner :: Bool -> MVar a -> Fix Combinator a -> Fix Combinator a
-inliner recu _ body | not recu, shouldInline body = body
-inliner recu μ _ = In (Let recu μ)
+inliner :: (?flags :: Opt.Flags) => Maybe Int -> MVar a -> Fix Combinator a -> Fix Combinator a
+inliner occs _ body
+  | Just n <- occs
+  , Just thresh <- Opt.inlineThreshold ?flags
+  , shouldInline n thresh body = body
+inliner _ μ _ = In (Let μ)
 
-shouldInline :: Fix Combinator a -> Bool
-shouldInline = (< inlineThreshold) . getWeight . cata (InlineWeight . alg)
+--TODO: account for the number of occurrences: large number should penalise
+shouldInline :: Int -> Rational -> Fix Combinator a -> Bool
+shouldInline _occs inlineThreshold = (< inlineThreshold) . getWeight . cata (InlineWeight . alg)
 
 newtype InlineWeight a = InlineWeight { getWeight :: Rational }
 

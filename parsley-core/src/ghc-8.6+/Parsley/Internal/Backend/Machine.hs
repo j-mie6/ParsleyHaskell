@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ImplicitParams, PatternSynonyms #-}
 {-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-|
 Module      : Parsley.Internal.Backend.Machine
@@ -36,8 +36,9 @@ import Parsley.Internal.Trace                        (Trace)
 
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
 import qualified Parsley.Internal.Backend.Machine.Eval as Eval (eval)
+import qualified Parsley.Internal.Opt   as Opt
 
-eval :: forall input a. (Input input, Trace) => Code input -> (LetBinding (Rep input) a a, DMap MVar (LetBinding (Rep input) a)) -> Code (Maybe a)
+eval :: forall input a. (Input input, Trace, ?flags :: Opt.Flags) => Code input -> (LetBinding (Rep input) a a, DMap MVar (LetBinding (Rep input) a)) -> Code (Maybe a)
 eval input (toplevel, bindings) = Eval.eval (prepare input) toplevel bindings
 
 class (InputPrep input, Ops (Rep input)) => Input input

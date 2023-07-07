@@ -164,9 +164,9 @@ directDependencies = runDependencies . cata (dependenciesAlg Nothing)
 
 {-# INLINE dependenciesAlg #-}
 dependenciesAlg :: Maybe IMVar -> Combinator Dependencies a -> Dependencies a
-dependenciesAlg (Just v) (Let _ μ@(MVar u)) = Dependencies $ do unless (u == v) (dependsOn μ)
-dependenciesAlg Nothing  (Let _ μ)          = Dependencies $ do dependsOn μ
-dependenciesAlg _ p                         = Dependencies $ do traverseCombinator (fmap Const1 . doDependencies) p; return ()
+dependenciesAlg (Just v) (Let μ@(MVar u)) = Dependencies $ do unless (u == v) (dependsOn μ)
+dependenciesAlg Nothing  (Let μ)          = Dependencies $ do dependsOn μ
+dependenciesAlg _ p                       = Dependencies $ do traverseCombinator (fmap Const1 . doDependencies) p; return ()
 
 dependsOn :: MonadState (Set IMVar) m => MVar a -> m ()
 dependsOn (MVar v) = modify' (Set.insert v)

@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ImplicitParams, PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal.Backend.CodeGenerator
 Description : Translation of Combinator AST into Machine
@@ -29,6 +29,8 @@ import Parsley.Internal.Trace              (Trace(trace))
 
 import Parsley.Internal.Core.Defunc as Core (Defunc)
 
+import qualified Parsley.Internal.Opt as Opt
+
 type CodeGenStack a = VFreshT IΦVar (VFresh IMVar) a
 runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> a
 runCodeGenStack m μ0 φ0 = evalFresh (evalFreshT m φ0) μ0
@@ -42,7 +44,7 @@ Translates a parser represented with combinators into its machine representation
 @since 1.0.0.0
 -}
 {-# INLINEABLE codeGen #-}
-codeGen :: Trace
+codeGen :: (Trace, ?flags :: Opt.Flags)
         => Maybe (MVar x)   -- ^ The name of the parser, if it exists.
         -> Fix Combinator x -- ^ The definition of the parser.
         -> Set SomeΣVar     -- ^ The free registers it requires to run.
@@ -69,13 +71,13 @@ pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
 rollbackHandler = Always False (In4 (Seek (In4 Empt)))
 
-parsecHandler :: Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
+parsecHandler :: (?flags :: Opt.Flags) => Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
 parsecHandler k = Same (not (shouldInline k)) k False (In4 Empt)
 
-recoverHandler :: Fix4 (Instr o) xs n r a -> Handler o (Fix4 (Instr o)) (o : xs) n r a
+recoverHandler :: (?flags :: Opt.Flags) => Fix4 (Instr o) xs n r a -> Handler o (Fix4 (Instr o)) (o : xs) n r a
 recoverHandler = Always . not . shouldInline <*> In4 . Seek
 
-altCompile :: Trace => CodeGen o a y -> CodeGen o a x
+altCompile :: (Trace, ?flags :: Opt.Flags) => CodeGen o a y -> CodeGen o a x
            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
            -> (forall n xs r. Fix4 (Instr o) (x : xs) n r a  -> Fix4 (Instr o) (y : xs) n r a)
            -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
@@ -86,7 +88,7 @@ altCompile p q handler post m =
      -- the shared coins are not factored out of the branches, because this is done by the AddCoins evaluation
      return $! binder (In4 (Catch (addCoinsNeeded pc) (handler (addCoinsNeeded qc))))
 
-deep :: Trace => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
+deep :: (Trace, ?flags :: Opt.Flags) => Combinator (Cofree Combinator (CodeGen o a)) x -> Maybe (CodeGen o a x)
 deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user f) m))
 deep (TryOrElse p q) = Just $ CodeGen $ altCompile p q recoverHandler id
 deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . Pop . In4 . Push (user x))
@@ -96,7 +98,7 @@ deep _ = Nothing
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
 addCoinsNeeded = coinsNeeded >>= addCoins
 
-shallow :: Trace => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
+shallow :: (Trace, ?flags :: Opt.Flags) => Combinator (CodeGen o a) x -> Fix4 (Instr o) (x : xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a)
 shallow (Pure x)      m = do return $! In4 (Push (user x) m)
 shallow (Satisfy p)   m = do return $! In4 (Sat p m)
 shallow (pf :<*>: px) m = do pxc <- runCodeGen px (In4 (_App m)); runCodeGen pf pxc
@@ -125,7 +127,7 @@ shallow (Match p fs qs def) m =
      defc <- freshΦ (runCodeGen def φ)
      let defc':qcs' = map addCoinsNeeded (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
-shallow (Let _ μ)                    m = do return $! In4 (Call μ m)
+shallow (Let μ)                      m = do return $! In4 (Call μ m)
 shallow (Loop body exit)             m =
   do μ <- askM
      bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (_Jump μ)))))
@@ -159,18 +161,9 @@ freshM = mapVFreshT newScope
 freshΦ :: CodeGenStack a -> CodeGenStack a
 freshΦ = newScope
 
-makeΦ :: Trace => Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
-makeΦ m | shouldInline m = trace ("eliding " ++ show m) $ return (id, m)
-  {-where
-    elidable :: Fix4 (Instr o) (x ': xs) (Succ n) r a -> Bool
-    -- This is double-φ optimisation:   If a φ-node points shallowly to another φ-node, then it can be elided
-    elidable (In4 (Join _))             = True
-    elidable (In4 (Pop (In4 (Join _)))) = True
-    -- This is terminal-φ optimisation: If a φ-node points shallowly to a terminal operation, then it can be elided
-    elidable (In4 Ret)                  = True
-    elidable (In4 (Pop (In4 Ret)))      = True
-    -- This is a form of double-φ optimisation: If a φ-node points shallowly to a jump, then it can be elided and the jump used instead
-    -- Note that this should NOT be done for non-tail calls, as they may generate a large continuation
-    elidable (In4 (Pop (In4 (Jump _)))) = True
-    elidable _                          = False-}
-makeΦ m = let n = coinsNeeded m in fmap (\φ -> (In4 . MkJoin φ (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
+makeΦ :: (Trace, ?flags :: Opt.Flags) => Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
+makeΦ m
+  | shouldInline m                = trace ("eliding " ++ show m) $ return (id, m)
+  | Opt.factorAheadOfJoins ?flags = fmap (\φ -> (In4 . MkJoin φ (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
+  | otherwise                     = fmap (\φ -> (In4 . MkJoin φ (addCoins n m), In4 (Join φ))) askΦ
+  where n = coinsNeeded m

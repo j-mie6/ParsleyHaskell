@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms, TypeApplications #-}
+{-# LANGUAGE ImplicitParams, PatternSynonyms, TypeApplications #-}
 {-|
 Module      : Parsley.Internal.Core.Defunc
 Description : Combinator-level defunctionalisation
@@ -25,6 +25,7 @@ import Parsley.Internal.Core.CharPred   (CharPred(..), pattern Item, pattern Spe
 import Parsley.Internal.Core.Lam        (normaliseGen, Lam(..))
 
 import qualified Parsley.Internal.Core.CharPred as CharPred (lamTerm)
+import qualified Parsley.Internal.Opt as Opt (Flags(termNormalisation), none)
 
 {-|
 This datatype is useful for providing an /inspectable/ representation of common Haskell functions.
@@ -112,7 +113,7 @@ instance Quapplicative Defunc where
   _val (LET_S x f)         = let y = _val x in _val (f (makeQ y undefined))
   _val (RANGES True rngs)  = \c -> any (\(l, u) -> l <= c || c <= u) rngs
   _val (RANGES False rngs) = \c -> all (\(l, u) -> l >= c || c >= u) rngs
-  _code = normaliseGen . lamTerm
+  _code = let ?flags = Opt.none { Opt.termNormalisation = True } in normaliseGen . lamTerm
   (>*<) = APP_H
 
 {-|

@@ -18,7 +18,6 @@ import Parsley.Internal.Backend.Machine.Instructions  (Instr(..), MetaInstr(..),
 import Parsley.Internal.Backend.Machine.LetBindings   (LetBinding(..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder
 import Parsley.Internal.Backend.Machine.Ops
-import Parsley.Internal.Backend.Machine.Types         (qSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Coins   (willConsume)
 import Parsley.Internal.Backend.Machine.Types.State
 import Parsley.Internal.Common                        (Fix4, cata4, One, Code, Vec(..), Nat(..))
@@ -30,8 +29,9 @@ import Parsley.Internal.Core.Lam (Lam(Abs))
 
 import qualified Debug.Trace (trace)
 import qualified Parsley.Internal.Backend.Machine.Instructions as Instructions (Handler(..))
+import qualified Parsley.Internal.Opt                          as Opt
 
-eval :: forall o a. (Trace, Ops o) => Code (InputDependant o) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
+eval :: forall o a. (Trace, Ops o, ?flags :: Opt.Flags) => Code (InputDependant o) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
 eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
@@ -45,10 +45,10 @@ eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
     nameLet :: MVar x -> String
     nameLet (MVar i) = "sub" ++ show i
 
-readyMachine :: (?ops :: InputOps o, Ops o, Trace) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
+readyMachine :: (?ops :: InputOps o, Ops o, Trace, ?flags :: Opt.Flags) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
 readyMachine = cata4 (Machine . alg)
   where
-    alg :: (?ops :: InputOps o, Ops o) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
+    alg :: (?ops :: InputOps o, Ops o, ?flags :: Opt.Flags) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = evalRet
     alg (Call μ k)          = evalCall μ k
     alg (Push x k)          = evalPush x k
@@ -75,10 +75,10 @@ readyMachine = cata4 (Machine . alg)
     alg (LogExit name k)    = evalLogExit name k
     alg (MetaInstr m k)     = evalMeta m k
 
-evalRet :: ContOps o => MachineMonad s o (x : xs) n x a
+evalRet :: (?flags :: Opt.Flags) => ContOps o => MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
-evalCall :: ContOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalCall :: (?flags :: Opt.Flags) => ContOps o => MVar x -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalCall μ (Machine k) = liftM2 (\mk sub γ@Γ{..} -> callWithContinuation sub (suspend mk γ) input pos handlers) k (askSub μ)
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
@@ -87,10 +87,10 @@ evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
 evalPop :: Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalPop (Machine k) = k <&> \m γ -> m (γ {operands = let Op _ xs = operands γ in xs})
 
-evalLift2 :: Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
+evalLift2 :: (?flags :: Opt.Flags) => Defunc (x -> y -> z) -> Machine s o (z : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalLift2 f (Machine k) = k <&> \m γ -> m (γ {operands = let Op y (Op x xs) = operands γ in Op (ap2 f x y) xs})
 
-evalSat :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o, Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalSat :: (?flags :: Opt.Flags) => (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o, Trace) => CharPred -> Machine s o (Char : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
 evalSat p (Machine k) = do
   bankrupt <- asks isBankrupt
   hasChange <- asks hasCoin
@@ -111,7 +111,7 @@ evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ 
 evalCatch :: (BoxOps o, HandlerOps o) => Machine s o xs (Succ n) r a -> Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) (Machine h) = liftM2 (\mk mh γ -> setupHandler γ (buildHandler γ mh) mk) k h
 
-evalHandler :: PositionOps o => Instructions.Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
+evalHandler :: (?flags :: Opt.Flags) => PositionOps o => Instructions.Handler o (Machine s o) (o : xs) n r a -> Machine s o (o : xs) n r a
 evalHandler (Instructions.Always _ k) = k
 evalHandler (Instructions.Same _ yes _ no) =
   Machine (evalDup (
@@ -125,14 +125,14 @@ evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ) (
 evalSeek :: Machine s o xs n r a -> MachineMonad s o (o : xs) n r a
 evalSeek (Machine k) = k <&> \mk γ -> let Op (INPUT input pos) xs = operands γ in mk (γ {operands = xs, input = input, pos = pos})
 
-evalCase :: Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
+evalCase :: (?flags :: Opt.Flags) => Machine s o (x : xs) n r a -> Machine s o (y : xs) n r a -> MachineMonad s o (Either x y : xs) n r a
 evalCase (Machine p) (Machine q) = liftM2 (\mp mq γ ->
   let Op e xs = operands γ
   in [||case $$(genDefunc e) of
     Left x -> $$(mp (γ {operands = Op (FREEVAR [||x||]) xs}))
     Right y  -> $$(mq (γ {operands = Op (FREEVAR [||y||]) xs}))||]) p q
 
-evalChoices :: [Defunc (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+evalChoices :: (?flags :: Opt.Flags) => [Defunc (x -> Bool)] -> [Machine s o xs n r a] -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands γ in go x fs mks mdef (γ {operands = xs}))
   def
   (forM ks getMachine)
@@ -145,34 +145,34 @@ evalIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
          -> MachineMonad s o xs n r a
 evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ) (pos γ)) h ask
 
-evalJoin :: ContOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
+evalJoin :: (?flags :: Opt.Flags) => ContOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume
 
-evalMkJoin :: JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMkJoin :: (?flags :: Opt.Flags) => JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
 evalMkJoin = setupJoinPoint
 
 evalSwap :: Machine s o (x : y : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalSwap (Machine k) = k <&> \mk γ -> mk (γ {operands = let Op y (Op x xs) = operands γ in Op x (Op y xs)})
 
-evalDup :: Machine s o (x : x : xs) n r a -> MachineMonad s o (x : xs) n r a
+evalDup :: (?flags :: Opt.Flags) => Machine s o (x : x : xs) n r a -> MachineMonad s o (x : xs) n r a
 evalDup (Machine k) = k <&> \mk γ ->
   let Op x xs = operands γ
   in dup x $ \dupx -> mk (γ {operands = Op dupx (Op dupx xs)})
 
-evalMake :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+evalMake :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalMake σ a k = asks $ \ctx γ ->
   let Op x xs = operands γ
   in newΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalGet :: ΣVar x -> Access -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
+evalGet :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalGet σ a k = asks $ \ctx γ -> readΣ σ a (\x -> run k (γ {operands = Op x (operands γ)})) ctx
 
-evalPut :: ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
+evalPut :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Machine s o xs n r a -> MachineMonad s o (x : xs) n r a
 evalPut σ a k = asks $ \ctx γ ->
   let Op x xs = operands γ
   in writeΣ σ a x (run k (γ {operands = xs})) ctx
 
-evalSelectPos :: PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
+evalSelectPos :: (?flags :: Opt.Flags) => PosSelector -> Machine s o (Int : xs) n r a -> MachineMonad s o xs n r a
 evalSelectPos Line (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (fst (pos γ))) (operands γ)})
 evalSelectPos Col (Machine k) = k <&> \m γ -> m (γ {operands = Op (FREEVAR (snd (pos γ))) (operands γ)})
 
@@ -188,7 +188,8 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o, ?flags :: Opt.Flags) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta _ (Machine k) | not (Opt.lengthCheckFactoring ?flags) = k
 evalMeta (AddCoins coins') (Machine k) =
   do --requiresPiggy <- asks hasCoin
      net <- asks netWorth

@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -fno-hpc #-}
 {-# LANGUAGE AllowAmbiguousTypes,
+             ImplicitParams,
              MagicHash,
              MultiParamTypeClasses,
              UndecidableInstances #-}
@@ -26,7 +27,7 @@ import Data.IORef                          (IORef, newIORef, readIORef, writeIOR
 import Data.Kind                           (Type)
 import Data.Set                            (Set)
 import Control.Arrow                       (first, second)
-import Control.Monad                       (void, when)
+import Control.Monad                       (void, when, guard)
 import Control.Monad.Reader                (ReaderT, runReaderT, local, ask, MonadReader)
 import GHC.Exts                            (Int(..), unsafeCoerce#)
 import GHC.Prim                            (StableName#)
@@ -42,11 +43,12 @@ import Parsley.Internal.Frontend.Analysis  (analyse, emptyFlags, dependencyAnaly
 import Parsley.Internal.Trace              (Trace(trace))
 import System.IO.Unsafe                    (unsafePerformIO)
 
-import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, mapWithKey, size)
-import qualified Data.HashMap.Strict as HashMap (lookup, insert, empty, insertWith, foldrWithKey, (!))
-import qualified Data.HashSet        as HashSet (member, insert, empty)
-import qualified Data.Map            as Map     ((!))
-import qualified Data.Set            as Set     (empty)
+import qualified Data.Dependent.Map   as DMap    ((!), empty, insert, mapWithKey, size)
+import qualified Data.HashMap.Strict  as HashMap (member, lookup, insert, empty, insertWith, (!), filter)
+import qualified Data.HashSet         as HashSet (member, insert, empty)
+import qualified Data.Map             as Map     ((!))
+import qualified Data.Set             as Set     (empty)
+import qualified Parsley.Internal.Opt as Opt
 
 {-|
 Given a user's parser, this will analyse it, extract bindings and then compile them with a given function
@@ -56,7 +58,7 @@ along with the top-level definition.
 @since 1.0.0.0
 -}
 {-# INLINEABLE compile #-}
-compile :: forall compiled a. Trace
+compile :: forall compiled a. (Trace, ?flags :: Opt.Flags)
         => Parser a                                                                              -- ^ The parser to compile.
         -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> compiled x) -- ^ How to generate a compiled value with the distilled information.
         -> (compiled a, DMap MVar compiled)                                                      -- ^ The compiled top-level and all of the bindings.
@@ -71,7 +73,7 @@ compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.s
     codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
     codeGen' letBound p = codeGen letBound (analyse emptyFlags p) (freeRegs letBound) (maxV + 1)
 
-preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
+preprocess :: (?flags :: Opt.Flags) => Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 preprocess p =
   let q = tagParser p
       (lets, recs) = findLets q
@@ -94,13 +96,13 @@ data LetFinderState = LetFinderState { preds  :: HashMap ParserName Int
 type LetFinderCtx   = HashSet ParserName
 newtype LetFinder a = LetFinder { doLetFinder :: ReaderT LetFinderCtx (State LetFinderState) () }
 
-findLets :: Fix (Tag ParserName Combinator) a -> (HashSet ParserName, HashSet ParserName)
+findLets :: Fix (Tag ParserName Combinator) a -> (HashMap ParserName Int, HashSet ParserName)
 findLets p = (lets, recs)
   where
     state = LetFinderState HashMap.empty HashSet.empty
     ctx = HashSet.empty
     LetFinderState preds recs = execState (runReaderT (doLetFinder (cata findLetsAlg p)) ctx) state
-    lets = HashMap.foldrWithKey (\k n ls -> if n > 1 then HashSet.insert k ls else ls) HashSet.empty preds
+    lets = HashMap.filter (> 1) preds
 
 findLetsAlg :: Tag ParserName Combinator LetFinder a -> LetFinder a
 findLetsAlg p = LetFinder $ do
@@ -118,7 +120,7 @@ newtype LetInserter a =
                               , DMap MVar (Fix Combinator)))
                        (Fix Combinator a)
     }
-letInsertion :: HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName Combinator) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
+letInsertion :: (?flags :: Opt.Flags) => HashMap ParserName Int -> HashSet ParserName -> Fix (Tag ParserName Combinator) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 letInsertion lets recs p = (p', μs, μMax)
   where
     m = cata alg p
@@ -128,20 +130,21 @@ letInsertion lets recs p = (p', μs, μMax)
       let name = tag p
       let q = tagged p
       (vs, μs) <- get
-      let bound = HashSet.member name lets
+      let bound = HashMap.member name lets
       let recu = HashSet.member name recs
+      let occs = guard (not recu) *> HashMap.lookup name lets
       if bound || recu then case HashMap.lookup name vs of
-        Just v  -> let μ = MVar v in return $! inliner recu μ (μs DMap.! μ)
+        Just v  -> let μ = MVar v in return $! inliner occs μ (μs DMap.! μ)
         Nothing -> do
           v <- newVar
           let μ = MVar v
           modify' (first (HashMap.insert name v))
           q' <- doLetInserter (postprocess q)
           modify' (second (DMap.insert μ q'))
-          return $! inliner recu μ q'
+          return $! inliner occs μ q'
       else do doLetInserter (postprocess q)
 
-postprocess :: Combinator LetInserter a -> LetInserter a
+postprocess :: (?flags :: Opt.Flags) => Combinator LetInserter a -> LetInserter a
 postprocess = LetInserter . fmap optimise . traverseCombinator doLetInserter
 
 modifyPreds :: MonadState LetFinderState m => (HashMap ParserName Int -> HashMap ParserName Int) -> m ()

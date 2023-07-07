@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ImplicitParams, PatternSynonyms #-}
 {-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-|
 Module      : Parsley.Internal.Backend.Machine
@@ -35,6 +35,7 @@ import Parsley.Internal.Trace                        (Trace)
 
 import qualified Data.ByteString.Lazy as Lazy (ByteString)
 import qualified Parsley.Internal.Backend.Machine.Eval as Eval (eval)
+import qualified Parsley.Internal.Opt   as Opt
 
 {-|
 This function is exposed to parsley itself and is used to generate the Haskell code
@@ -42,7 +43,7 @@ for a parser.
 
 @since 0.1.0.0
 -}
-eval :: forall input a. (Input input, Trace) => Code input -> (LetBinding input a a, DMap MVar (LetBinding input a)) -> Code (Maybe a)
+eval :: forall input a. (Input input, Trace, ?flags :: Opt.Flags) => Code input -> (LetBinding input a a, DMap MVar (LetBinding input a)) -> Code (Maybe a)
 eval input (toplevel, bindings) = prepare input (Eval.eval toplevel bindings)
 
 {-|

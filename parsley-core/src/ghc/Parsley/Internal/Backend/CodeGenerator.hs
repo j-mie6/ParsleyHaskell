@@ -127,7 +127,7 @@ shallow (Match p fs qs def) m =
      defc <- freshΦ (runCodeGen def φ)
      let defc':qcs' = map addCoinsNeeded (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
-shallow (Let _ μ)                    m = do return $! In4 (Call μ m)
+shallow (Let μ)                      m = do return $! In4 (Call μ m)
 shallow (Loop body exit)             m =
   do μ <- askM
      bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (_Jump μ)))))

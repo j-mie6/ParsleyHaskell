@@ -17,7 +17,7 @@ data Flags = Flags { lawBasedOptimisations :: Bool
                    , leadCharFactoring     :: Bool -- TODO:
                    , factorAheadOfJoins    :: Bool -- TODO:
                    , reclaimInput          :: Bool -- TODO:
-                   , closeFreeRegisters    :: Bool -- TODO:
+                   --, closeFreeRegisters    :: Bool
                    }
 
 none, fast, full :: Flags
@@ -28,7 +28,7 @@ none = Flags { lawBasedOptimisations = off
              , leadCharFactoring     = off
              , factorAheadOfJoins    = off
              , reclaimInput          = off
-             , closeFreeRegisters    = off
+             --, closeFreeRegisters    = off
              }
 fast = full  --{ }
 full = Flags { lawBasedOptimisations = on
@@ -38,5 +38,5 @@ full = Flags { lawBasedOptimisations = on
              , leadCharFactoring     = on
              , factorAheadOfJoins    = on
              , reclaimInput          = on
-             , closeFreeRegisters    = on
+             --, closeFreeRegisters    = on
              }

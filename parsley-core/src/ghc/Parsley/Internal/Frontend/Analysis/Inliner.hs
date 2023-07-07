@@ -24,15 +24,16 @@ Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
 
 @since 1.7.0.0
 -}
-inliner :: (?flags :: Opt.Flags) => Bool -> MVar a -> Fix Combinator a -> Fix Combinator a
-inliner recu _ body
-  | not recu
+inliner :: (?flags :: Opt.Flags) => Maybe Int -> MVar a -> Fix Combinator a -> Fix Combinator a
+inliner occs _ body
+  | Just n <- occs
   , Just thresh <- Opt.inlineThreshold ?flags
-  , shouldInline thresh body = body
-inliner recu μ _ = In (Let recu μ)
+  , shouldInline n thresh body = body
+inliner _ μ _ = In (Let μ)
 
-shouldInline :: Rational -> Fix Combinator a -> Bool
-shouldInline inlineThreshold = (< inlineThreshold) . getWeight . cata (InlineWeight . alg)
+--TODO: account for the number of occurrences: large number should penalise
+shouldInline :: Int -> Rational -> Fix Combinator a -> Bool
+shouldInline _occs inlineThreshold = (< inlineThreshold) . getWeight . cata (InlineWeight . alg)
 
 newtype InlineWeight a = InlineWeight { getWeight :: Rational }
 

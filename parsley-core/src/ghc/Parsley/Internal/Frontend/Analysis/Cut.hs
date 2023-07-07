@@ -82,7 +82,7 @@ cutAlg Empty _ = (In Empty, False)
 -- all bindings must assume no backtracking, but bindings may be entirely pure
 -- this means they cannot satisfy a cut themselves: basically they behave like option(item)
 -- analysis could be done to prevent this though!
-cutAlg (Let r μ) _ = (In (Let r μ), False)
+cutAlg (Let μ) _ = (In (Let μ), False)
 -- obviously does not demand cuts for its children, however success of p may cause a cut
 -- for the whole try - just as long as `p` itself cuts
 cutAlg (Try (p :*: _)) backtracks =

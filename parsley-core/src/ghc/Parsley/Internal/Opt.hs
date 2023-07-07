@@ -13,7 +13,7 @@ data Flags = Flags { lawBasedOptimisations :: !Bool
                    , termNormalisation     :: !Bool
                    , inlineThreshold       :: !(Maybe Rational)
                    -- TODO: merge these together
-                   , lengthCheckFactoring  :: !Bool -- TODO:
+                   , lengthCheckFactoring  :: !Bool
                    , leadCharFactoring     :: !Bool
                    , factorAheadOfJoins    :: !Bool
                    , reclaimInput          :: !Bool

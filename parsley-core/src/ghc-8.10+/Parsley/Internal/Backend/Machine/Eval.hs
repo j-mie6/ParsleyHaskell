@@ -222,6 +222,7 @@ evalLogExit name (Machine mk) =
     ask
 
 evalMeta :: (?ops :: InputOps (StaRep o), DynOps o, ?flags :: Opt.Flags) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta _ (Machine k) | not (Opt.lengthCheckFactoring ?flags) = k
 evalMeta (AddCoins coins) (Machine k) =
   -- when there are coins available, this cannot be discharged, and will wait until the current amounts
   -- are exhausted. Because it might have been the case that lookahead was performed to refund, the

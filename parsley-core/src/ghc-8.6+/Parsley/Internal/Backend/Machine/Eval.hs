@@ -188,7 +188,8 @@ evalLogExit name (Machine mk) =
     (local debugDown mk)
     ask
 
-evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta :: (?ops :: InputOps o, PositionOps o, BoxOps o, HandlerOps o, ?flags :: Opt.Flags) => MetaInstr n -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMeta _ (Machine k) | not (Opt.lengthCheckFactoring ?flags) = k
 evalMeta (AddCoins coins') (Machine k) =
   do --requiresPiggy <- asks hasCoin
      net <- asks netWorth

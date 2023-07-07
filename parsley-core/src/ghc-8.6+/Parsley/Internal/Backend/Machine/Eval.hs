@@ -30,9 +30,10 @@ import Parsley.Internal.Core.Lam (Lam(Abs))
 
 import qualified Debug.Trace (trace)
 import qualified Parsley.Internal.Backend.Machine.Instructions as Instructions (Handler(..))
+import qualified Parsley.Internal.Opt                          as Opt
 
-eval :: forall o a. (Trace, Ops o) => Code (InputDependant o) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
-eval input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
+eval :: forall o a. (Trace, Ops o) => Opt.Flags -> Code (InputDependant o) -> LetBinding o a a -> DMap MVar (LetBinding o a) -> Code (Maybe a)
+eval _flags input binding fs = trace "EVALUATING TOP LEVEL" [|| runST $
   do let !(InputDependant next more offset) = $$input
      $$(let ?ops = InputOps [||more||] [||next||]
         in letRec fs

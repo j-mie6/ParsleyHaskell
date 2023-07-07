@@ -10,15 +10,15 @@ defaultInlineThreshold :: Maybe Rational
 defaultInlineThreshold = Just (13 % 10)
 
 data Flags = Flags { lawBasedOptimisations :: Bool
-                   , fullyStaticPredicates :: Bool
-                   , termNormalisation     :: Bool
+                   , fullyStaticPredicates :: Bool -- TODO:
+                   , termNormalisation     :: Bool -- TODO:
                    , inlineThreshold       :: Maybe Rational
                    -- TODO: merge these together
-                   , lengthCheckFactoring  :: Bool
-                   , leadCharFactoring     :: Bool
-                   , factorAheadOfJoins    :: Bool
-                   , reclaimInput          :: Bool
-                   , closeFreeRegisters    :: Bool
+                   , lengthCheckFactoring  :: Bool -- TODO:
+                   , leadCharFactoring     :: Bool -- TODO:
+                   , factorAheadOfJoins    :: Bool -- TODO:
+                   , reclaimInput          :: Bool -- TODO:
+                   , closeFreeRegisters    :: Bool -- TODO:
                    }
 
 none, fast, full :: Flags

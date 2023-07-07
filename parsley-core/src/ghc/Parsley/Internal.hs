@@ -46,4 +46,4 @@ parse :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
 parse = parseWithOpts Opt.fast
 
 parseWithOpts :: (Trace, Input input) => Opt.Flags -> Parser a -> Code (input -> Maybe a)
-parseWithOpts _flags p = [||\input -> $$(eval [||input||] (compile (try p) codeGen))||]
+parseWithOpts flags p = [||\input -> $$(eval flags [||input||] (compile flags (try p) (codeGen flags)))||]

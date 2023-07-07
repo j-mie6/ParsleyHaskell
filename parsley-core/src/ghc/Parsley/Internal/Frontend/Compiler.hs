@@ -42,11 +42,12 @@ import Parsley.Internal.Frontend.Analysis  (analyse, emptyFlags, dependencyAnaly
 import Parsley.Internal.Trace              (Trace(trace))
 import System.IO.Unsafe                    (unsafePerformIO)
 
-import qualified Data.Dependent.Map  as DMap    ((!), empty, insert, mapWithKey, size)
-import qualified Data.HashMap.Strict as HashMap (lookup, insert, empty, insertWith, foldrWithKey, (!))
-import qualified Data.HashSet        as HashSet (member, insert, empty)
-import qualified Data.Map            as Map     ((!))
-import qualified Data.Set            as Set     (empty)
+import qualified Data.Dependent.Map   as DMap    ((!), empty, insert, mapWithKey, size)
+import qualified Data.HashMap.Strict  as HashMap (lookup, insert, empty, insertWith, foldrWithKey, (!))
+import qualified Data.HashSet         as HashSet (member, insert, empty)
+import qualified Data.Map             as Map     ((!))
+import qualified Data.Set             as Set     (empty)
+import qualified Parsley.Internal.Opt as Opt
 
 {-|
 Given a user's parser, this will analyse it, extract bindings and then compile them with a given function
@@ -57,12 +58,13 @@ along with the top-level definition.
 -}
 {-# INLINEABLE compile #-}
 compile :: forall compiled a. Trace
-        => Parser a                                                                              -- ^ The parser to compile.
+        => Opt.Flags
+        -> Parser a                                                                              -- ^ The parser to compile.
         -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> compiled x) -- ^ How to generate a compiled value with the distilled information.
         -> (compiled a, DMap MVar compiled)                                                      -- ^ The compiled top-level and all of the bindings.
-compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
+compile flags (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
   where
-    (p', μs, maxV) = preprocess p
+    (p', μs, maxV) = preprocess flags p
     (μs', frs) = dependencyAnalysis p' μs
 
     freeRegs :: Maybe (MVar x) -> Set SomeΣVar
@@ -71,11 +73,11 @@ compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.s
     codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
     codeGen' letBound p = codeGen letBound (analyse emptyFlags p) (freeRegs letBound) (maxV + 1)
 
-preprocess :: Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
-preprocess p =
+preprocess :: Opt.Flags -> Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
+preprocess flags p =
   let q = tagParser p
       (lets, recs) = findLets q
-      (p', μs, maxV) = letInsertion lets recs q
+      (p', μs, maxV) = letInsertion flags lets recs q
   in (p', μs, maxV)
 
 data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
@@ -118,8 +120,8 @@ newtype LetInserter a =
                               , DMap MVar (Fix Combinator)))
                        (Fix Combinator a)
     }
-letInsertion :: HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName Combinator) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
-letInsertion lets recs p = (p', μs, μMax)
+letInsertion :: Opt.Flags -> HashSet ParserName -> HashSet ParserName -> Fix (Tag ParserName Combinator) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
+letInsertion flags lets recs p = (p', μs, μMax)
   where
     m = cata alg p
     ((p', μMax), (_, μs)) = runState (runFreshT (doLetInserter m) 0) (HashMap.empty, DMap.empty)
@@ -131,18 +133,18 @@ letInsertion lets recs p = (p', μs, μMax)
       let bound = HashSet.member name lets
       let recu = HashSet.member name recs
       if bound || recu then case HashMap.lookup name vs of
-        Just v  -> let μ = MVar v in return $! inliner recu μ (μs DMap.! μ)
+        Just v  -> let μ = MVar v in return $! inliner flags recu μ (μs DMap.! μ)
         Nothing -> do
           v <- newVar
           let μ = MVar v
           modify' (first (HashMap.insert name v))
-          q' <- doLetInserter (postprocess q)
+          q' <- doLetInserter (postprocess flags q)
           modify' (second (DMap.insert μ q'))
-          return $! inliner recu μ q'
-      else do doLetInserter (postprocess q)
+          return $! inliner flags recu μ q'
+      else do doLetInserter (postprocess flags q)
 
-postprocess :: Combinator LetInserter a -> LetInserter a
-postprocess = LetInserter . fmap optimise . traverseCombinator doLetInserter
+postprocess :: Opt.Flags -> Combinator LetInserter a -> LetInserter a
+postprocess flags = LetInserter . fmap (optimise flags) . traverseCombinator doLetInserter
 
 modifyPreds :: MonadState LetFinderState m => (HashMap ParserName Int -> HashMap ParserName Int) -> m ()
 modifyPreds f = modify' (\st -> st {preds = f (preds st)})

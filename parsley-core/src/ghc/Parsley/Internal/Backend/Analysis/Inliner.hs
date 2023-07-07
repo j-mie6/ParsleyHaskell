@@ -16,8 +16,7 @@ import Data.Ratio                       ((%))
 import Parsley.Internal.Backend.Machine (Instr(..), Handler(..), Access(Hard, Soft))
 import Parsley.Internal.Common.Indexed  (cata4, Fix4, Nat)
 
-inlineThreshold :: Rational
-inlineThreshold = 13 % 10
+import qualified Parsley.Internal.Opt   as Opt
 
 {-|
 Provides a conservative estimate on whether or not each of the elements of the stack on
@@ -25,8 +24,10 @@ entry to a machine are actually used in the computation.
 
 @since 1.7.0.0
 -}
-shouldInline :: Fix4 (Instr o) xs n r a -> Bool
-shouldInline = (< inlineThreshold) . getWeight . cata4 (InlineWeight . alg)
+shouldInline :: Opt.Flags -> Fix4 (Instr o) xs n r a -> Bool
+shouldInline flags
+  | Just thresh <- Opt.inlineThreshold flags = (< thresh) . getWeight . cata4 (InlineWeight . alg)
+  | otherwise                                = const False
 
 newtype InlineWeight xs (n :: Nat) r a = InlineWeight { getWeight :: Rational }
 

@@ -45,6 +45,7 @@ import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
 import qualified Debug.Trace (trace)
+import qualified Parsley.Internal.Opt   as Opt
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
@@ -52,11 +53,12 @@ This function performs the evaluation on the top-level let-bound parser to conve
 @since 1.0.0.0
 -}
 eval :: forall o a. (Trace, Ops o, ?ops :: InputOps (StaRep o))
-     => LetBinding o a a              -- ^ The binding to be generated.
+     => Opt.Flags
+     -> LetBinding o a a              -- ^ The binding to be generated.
      -> DMap MVar (LetBinding o a)    -- ^ The map of all other required bindings.
      -> StaRep o
      -> Code (Maybe a)                -- ^ The code for this parser.
-eval binding fs offset  = trace "EVALUATING TOP LEVEL" [||
+eval _flags binding fs offset  = trace "EVALUATING TOP LEVEL" [||
     runST $$(letRec fs
              nameLet
              (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))

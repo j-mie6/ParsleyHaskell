@@ -46,6 +46,7 @@ import System.Console.Pretty                               (color, Color(Green))
 
 import qualified Debug.Trace (trace)
 import qualified Parsley.Internal.Opt   as Opt
+import Parsley.Internal.Opt (Flags(leadCharFactoring))
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
@@ -263,8 +264,9 @@ withLengthCheckAndCoins coins k = reader $ \ctx γ ->
         good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx
     in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise γ) (off (input γ)) offset
         -- this is needed because a cached predicate cannot be compared for equality if it's user-pred, and it'll duplicate!
-  where onlyStatic UserPred{} = Nothing
-        onlyStatic p          = Just p
+  where onlyStatic UserPred{}                   = Nothing
+        onlyStatic p | leadCharFactoring ?flags = Just p
+        onlyStatic _                            = Nothing
 
 state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b
 state f k = do

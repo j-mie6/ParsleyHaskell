@@ -1,4 +1,5 @@
-{-# LANGUAGE LambdaCase,
+{-# LANGUAGE ImplicitParams,
+             LambdaCase,
              PatternSynonyms,
              ViewPatterns #-}
 {-|
@@ -34,10 +35,10 @@ for which laws are being utilised.
 
 @since 1.0.0.0
 -}
-optimise :: Opt.Flags -> Combinator (Fix Combinator) a -> Fix Combinator a
-optimise flags
-  | Opt.lawBasedOptimisations flags = opt
-  | otherwise                       = In
+optimise :: (?flags :: Opt.Flags) => Combinator (Fix Combinator) a -> Fix Combinator a
+optimise
+  | Opt.lawBasedOptimisations ?flags = opt
+  | otherwise                        = In
   where
     opt :: Combinator (Fix Combinator) a -> Fix Combinator a
     -- DESTRUCTIVE OPTIMISATION

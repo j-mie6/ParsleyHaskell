@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ImplicitParams, PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal
 Description : The gateway into the internals: here be monsters!
@@ -46,4 +46,6 @@ parse :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
 parse = parseWithOpts Opt.fast
 
 parseWithOpts :: (Trace, Input input) => Opt.Flags -> Parser a -> Code (input -> Maybe a)
-parseWithOpts flags p = [||\input -> $$(eval flags [||input||] (compile flags (try p) (codeGen flags)))||]
+parseWithOpts _flags p =
+  let ?flags = _flags
+  in [||\input -> $$(eval [||input||] (compile (try p) codeGen))||]

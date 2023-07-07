@@ -1,3 +1,4 @@
+{-# LANGUAGE ImplicitParams #-}
 {-|
 Module      : Parsley.Internal.Backend.Analysis.Inliner
 Description : Determines whether a machine should be inlined.
@@ -24,10 +25,10 @@ entry to a machine are actually used in the computation.
 
 @since 1.7.0.0
 -}
-shouldInline :: Opt.Flags -> Fix4 (Instr o) xs n r a -> Bool
-shouldInline flags
-  | Just thresh <- Opt.inlineThreshold flags = (< thresh) . getWeight . cata4 (InlineWeight . alg)
-  | otherwise                                = const False
+shouldInline :: (?flags :: Opt.Flags) => Fix4 (Instr o) xs n r a -> Bool
+shouldInline
+  | Just thresh <- Opt.inlineThreshold ?flags = (< thresh) . getWeight . cata4 (InlineWeight . alg)
+  | otherwise                                 = const False
 
 newtype InlineWeight xs (n :: Nat) r a = InlineWeight { getWeight :: Rational }
 

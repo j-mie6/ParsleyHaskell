@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ImplicitParams, PatternSynonyms #-}
 {-# OPTIONS_GHC -Wno-deprecations #-} --FIXME: remove when Text16 is removed
 {-|
 Module      : Parsley.Internal.Backend.Machine
@@ -43,8 +43,8 @@ for a parser.
 
 @since 0.1.0.0
 -}
-eval :: forall input a. (Input input, Trace) => Opt.Flags -> Code input -> (LetBinding input a a, DMap MVar (LetBinding input a)) -> Code (Maybe a)
-eval flags input (toplevel, bindings) = prepare input (Eval.eval flags toplevel bindings)
+eval :: forall input a. (Input input, Trace, ?flags :: Opt.Flags) => Code input -> (LetBinding input a a, DMap MVar (LetBinding input a)) -> Code (Maybe a)
+eval input (toplevel, bindings) = prepare input (Eval.eval toplevel bindings)
 
 {-|
 This class is exposed to parsley itself and is used to denote which types may be

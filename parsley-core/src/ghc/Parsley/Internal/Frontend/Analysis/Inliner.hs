@@ -1,3 +1,4 @@
+{-# LANGUAGE ImplicitParams #-}
 {-|
 Module      : Parsley.Internal.Frontend.Analysis.Inliner
 Description : Decides whether to inline a let-bound parser.
@@ -23,12 +24,12 @@ Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
 
 @since 1.7.0.0
 -}
-inliner :: Opt.Flags -> Bool -> MVar a -> Fix Combinator a -> Fix Combinator a
-inliner flags recu _ body
+inliner :: (?flags :: Opt.Flags) => Bool -> MVar a -> Fix Combinator a -> Fix Combinator a
+inliner recu _ body
   | not recu
-  , Just thresh <- Opt.inlineThreshold flags
+  , Just thresh <- Opt.inlineThreshold ?flags
   , shouldInline thresh body = body
-inliner _ recu μ _ = In (Let recu μ)
+inliner recu μ _ = In (Let recu μ)
 
 shouldInline :: Rational -> Fix Combinator a -> Bool
 shouldInline inlineThreshold = (< inlineThreshold) . getWeight . cata (InlineWeight . alg)

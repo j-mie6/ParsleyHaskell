@@ -233,6 +233,7 @@ offWithShiftRight :: Code (Int -> ts -> ts)        -- ^ A @drop@ function for un
                   -> PartialStaOffset -> Code ts   -- ^ The `OffWith` to shift.
                   -> Int                           -- ^ How much to shift by.
                   -> (PartialStaOffset, Code ts)
+offWithShiftRight drop po qts 0 = (intAdd po n, qts)
 offWithShiftRight drop po qts n = (intAdd po n, [|| $$drop n $$qts ||])
 
 {-|

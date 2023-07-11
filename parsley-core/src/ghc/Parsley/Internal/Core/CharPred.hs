@@ -20,7 +20,7 @@ module Parsley.Internal.Core.CharPred (
 
 import Prelude hiding (null)
 
-import Data.RangeSet             (RangeSet, elems, unelems, fromRanges, full, member, fold, null, union, extractSingle, singleton, intersection, difference, isSubsetOf, sizeRanges)
+import Data.RangeSet             (RangeSet, elems, unelems, fromRanges, full, member, fold, null, union, extractSingle, singleton, intersection, difference, isSubsetOf, sizeRanges, complement)
 import Parsley.Internal.Core.Lam (Lam(Abs, App, Var, T, F, If), andLam, notLam, orLam)
 
 {-|
@@ -157,6 +157,7 @@ lamTerm :: CharPred -> Lam (Char -> Bool)
 lamTerm (UserPred _ t) = t
 lamTerm Item = Abs (const T)
 lamTerm (Ranges (null -> True)) = Abs (const F)
+lamTerm (Ranges (extractSingle . complement -> Just c)) = App (Var True [||(/=)||]) (Var True [||c||])
 lamTerm (Ranges rngs) =
   Abs $ \c ->
     fold (conv c) F rngs

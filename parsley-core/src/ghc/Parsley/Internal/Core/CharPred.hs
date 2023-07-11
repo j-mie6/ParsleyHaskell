@@ -152,7 +152,6 @@ be optimised.
 
 @since 2.1.0.0
 -}
--- TODO: Something to optimise /= or noneOf?
 lamTerm :: CharPred -> Lam (Char -> Bool)
 lamTerm (UserPred _ t) = t
 lamTerm Item = Abs (const T)

@@ -27,7 +27,7 @@ Annotate a tree with its cut-points. We assume a cut for let-bound parsers.
 @since 1.5.0.0
 -}
 cutAnalysis :: Fix Combinator a -> Fix Combinator a
-cutAnalysis = fst . ($ True) . doCut . zygo (CutAnalysis . cutAlg) guardednessAlg
+cutAnalysis = fst . ($ False) . doCut . zygo (CutAnalysis . cutAlg) guardednessAlg
 
 newtype CutAnalysis a = CutAnalysis { doCut :: Bool -> (Fix Combinator a, Bool) }
 -- TODO: UnguardedEffects should track a set of registers

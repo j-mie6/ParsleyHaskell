@@ -33,6 +33,8 @@ newtype CutAnalysis a = CutAnalysis { doCut :: Bool -> (Fix Combinator a, Bool) 
 -- TODO: UnguardedEffects should track a set of registers
 data Guardedness (a :: Type) = Guarded | UnguardedEffect | NoEffect deriving stock Eq
 
+-- FIXME: the top-level binding needs a `cut unit *>` at the top-level
+
 guardednessAlg :: Combinator Guardedness a -> Guardedness a
 guardednessAlg Pure{} = NoEffect
 guardednessAlg Satisfy{} = Guarded

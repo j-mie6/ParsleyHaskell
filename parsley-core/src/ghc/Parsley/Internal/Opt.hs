@@ -7,7 +7,7 @@ on = True
 off = False
 
 defaultPrimaryInlineThreshold :: Maybe Rational
-defaultPrimaryInlineThreshold = Just $ 13 % 10 * {- Occurrence Bias -} 5
+defaultPrimaryInlineThreshold = Just $ 13 % 10 * {- Occurrence Bias -} 3
 
 defaultSecondaryInlineThreshold :: Maybe Rational
 defaultSecondaryInlineThreshold = Just $ 13 % 10

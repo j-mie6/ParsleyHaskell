@@ -6,40 +6,46 @@ on, off :: Bool
 on = True
 off = False
 
-defaultInlineThreshold :: Maybe Rational
-defaultInlineThreshold = Just (13 % 10)
+defaultPrimaryInlineThreshold :: Maybe Rational
+defaultPrimaryInlineThreshold = Just $ 13 % 10 * {- Occurrence Bias -} 5
 
-data Flags = Flags { lawBasedOptimisations :: !Bool
-                   , termNormalisation     :: !Bool
-                   , inlineThreshold       :: !(Maybe Rational)
+defaultSecondaryInlineThreshold :: Maybe Rational
+defaultSecondaryInlineThreshold = Just $ 13 % 10
+
+data Flags = Flags { lawBasedOptimisations    :: !Bool
+                   , termNormalisation        :: !Bool
+                   , primaryInlineThreshold   :: !(Maybe Rational)
+                   , secondaryInlineThreshold :: !(Maybe Rational)
                    -- TODO: merge these together
-                   , lengthCheckFactoring  :: !Bool
-                   , leadCharFactoring     :: !Bool
-                   , factorAheadOfJoins    :: !Bool
-                   , reclaimInput          :: !Bool
-                   , deduceFailPath        :: !Bool
-                   --, closeFreeRegisters    :: !Bool
+                   , lengthCheckFactoring     :: !Bool
+                   , leadCharFactoring        :: !Bool
+                   , factorAheadOfJoins       :: !Bool
+                   , reclaimInput             :: !Bool
+                   , deduceFailPath           :: !Bool
+                   --, closeFreeRegisters       :: !Bool
                    }
 
 none, fast, full :: Flags
-none = Flags { lawBasedOptimisations = off
-             , termNormalisation     = off
-             , inlineThreshold       = Nothing
-             , lengthCheckFactoring  = off
-             , leadCharFactoring     = off
-             , factorAheadOfJoins    = off
-             , reclaimInput          = off
-             , deduceFailPath        = off
-             --, closeFreeRegisters    = off
+none = Flags { lawBasedOptimisations    = off
+             , termNormalisation        = off
+             , primaryInlineThreshold   = Nothing
+             , secondaryInlineThreshold = Nothing
+             , lengthCheckFactoring     = off
+             , leadCharFactoring        = off
+             , factorAheadOfJoins       = off
+             , reclaimInput             = off
+             , deduceFailPath           = off
+             --, closeFreeRegisters       = off
              }
 fast = full  --{ }
-full = Flags { lawBasedOptimisations = on
-             , termNormalisation     = on
-             , inlineThreshold       = defaultInlineThreshold
-             , lengthCheckFactoring  = on
-             , leadCharFactoring     = on
-             , factorAheadOfJoins    = on
-             , reclaimInput          = on
-             , deduceFailPath        = on
-             --, closeFreeRegisters    = on
+full = Flags { lawBasedOptimisations    = on
+             , termNormalisation        = on
+             , primaryInlineThreshold   = defaultPrimaryInlineThreshold
+             , secondaryInlineThreshold = defaultSecondaryInlineThreshold
+             , lengthCheckFactoring     = on
+             , leadCharFactoring        = on
+             , factorAheadOfJoins       = on
+             , reclaimInput             = on
+             , deduceFailPath           = on
+             --, closeFreeRegisters       = on
              }

@@ -27,8 +27,8 @@ entry to a machine are actually used in the computation.
 -}
 shouldInline :: (?flags :: Opt.Flags) => Fix4 (Instr o) xs n r a -> Bool
 shouldInline
-  | Just thresh <- Opt.inlineThreshold ?flags = (< thresh) . getWeight . cata4 (InlineWeight . alg)
-  | otherwise                                 = const False
+  | Just thresh <- Opt.secondaryInlineThreshold ?flags = (< thresh) . getWeight . cata4 (InlineWeight . alg)
+  | otherwise                                          = const False
 
 newtype InlineWeight xs (n :: Nat) r a = InlineWeight { getWeight :: Rational }
 

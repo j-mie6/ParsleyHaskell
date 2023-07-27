@@ -143,7 +143,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
 evalIter :: (RecBuilder o, ReturnOps o, HandlerOps o)
          => MVar Void -> Machine s o '[] One Void a -> Machine s o (o : xs) n r a
          -> MachineMonad s o xs n r a
-evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ) (pos γ)) h ask
+evalIter μ l (Machine h) = liftM2 (\mh ctx γ -> buildIter ctx μ l (buildHandler γ mh) (input γ) (pos γ)) (local voidCoins h) ask
 
 evalJoin :: (?flags :: Opt.Flags) => ContOps o => ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume

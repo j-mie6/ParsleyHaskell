@@ -124,6 +124,7 @@ debugDown ctx = ctx {debugLevel = debugLevel ctx - 1}
 
 -- Piggy bank functions
 storePiggy :: Int -> Ctx s o a -> Ctx s o a
+storePiggy 0 ctx = ctx
 storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx), netWorth = netWorth ctx + coins}
 
 breakPiggy :: Ctx s o a -> Ctx s o a

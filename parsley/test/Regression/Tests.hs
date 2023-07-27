@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell, UnboxedTuples, ScopedTypeVariables, TypeApplications #-}
+{-# OPTIONS_GHC -ddump-splices -ddump-to-file #-}
 module Main where
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -14,7 +15,7 @@ main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Regression Tests" [ issue26, issue41 ]
+tests = testGroup "Regression Tests" [ issue26, issue41, badFactorTests ]
 
 issue26 :: TestTree
 issue26 = testGroup "#26 Coin draining on bindings is wrong"
@@ -37,6 +38,13 @@ issue41 = testGroup "#41 Length-factoring can cross `put` but shouldn't"
   , testCase "it should prevent factoring" $ issue41_ex3 "abc" @?= Just False
   ]
 
+badFactorTests :: TestTree
+badFactorTests = testGroup "bad factoring within loops"
+  [ testCase "it should not die in loop" $ badFactor "uxyaz" @?= Just "z"
+  , testCase "it should still work without a" $ badFactor "uxyz" @?= Just "z"
+  , testCase "it should fail gracefully on x" $ badFactor "u" @?= Nothing
+  ]
+
 issue26_ex1 :: String -> Maybe ()
 issue26_ex1 = $$(Parsley.parse Parsers.issue26_ex1)
 
@@ -51,3 +59,6 @@ issue41_ex2 = $$(Parsley.parse Parsers.issue41_ex2)
 
 issue41_ex3 :: String -> Maybe Bool
 issue41_ex3 = $$(Parsley.parse Parsers.issue41_ex3)
+
+badFactor :: String -> Maybe String
+badFactor = $$(Parsley.parse Parsers.badFactor)

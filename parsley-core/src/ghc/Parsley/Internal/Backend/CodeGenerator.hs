@@ -53,11 +53,12 @@ codeGen :: (Trace, ?flags :: Opt.Flags)
 codeGen letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs newMeta
   where
     name = maybe "TOP LEVEL" show letBound
-    addCoinsTop = maybe addCoinsNeeded (const id) letBound
+    --addCoinsTop = maybe addCoinsNeeded (const id) letBound
     m = finalise (histo alg p)
     alg :: Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
-    finalise cg = addCoinsTop (runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0)
+    -- add coins is safe here because if a cut is present it will only factor 1 coin
+    finalise cg = addCoinsNeeded (runCodeGenStack (runCodeGen cg (In4 Ret)) μ0 0)
 
 pattern (:<$>:) :: Core.Defunc (a -> b) -> Cofree Combinator k a -> Combinator (Cofree Combinator k) b
 pattern f :<$>: p <- (_ :< Pure f) :<*>: p

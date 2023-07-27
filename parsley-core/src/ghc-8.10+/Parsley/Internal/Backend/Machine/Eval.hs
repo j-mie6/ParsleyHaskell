@@ -171,11 +171,12 @@ evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o, DynOps o)
 evalIter μ l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
-      case h of
-        Always gh (Machine h) ->
-          liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
-        Same gyes (Machine yes) gno (Machine no) ->
-          liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
+      local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
+        case h of
+          Always gh (Machine h) ->
+            liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
+          Same gyes (Machine yes) gno (Machine no) ->
+            liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
 
 evalJoin :: (DynOps o, ?flags :: Opt.Flags) => ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume

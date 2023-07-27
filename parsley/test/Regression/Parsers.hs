@@ -7,6 +7,7 @@ import Parsley
 import Parsley.Char (token)
 import Parsley.Register (newRegister_, put_, get)
 import Parsley.Defunctionalized (Defunc(LIFTED))
+import Parsley.Internal.Core.Primitives (loop)
 
 issue26_ex1 :: Parser ()
 issue26_ex1 = (token "123" <|> token "") *> void (token "abc")
@@ -22,3 +23,8 @@ issue41_ex2 = newRegister_ (LIFTED False) $ \reg -> try ((string "abc" *> get re
 
 issue41_ex3 :: Parser Bool
 issue41_ex3 = newRegister_ (LIFTED False) $ \reg -> try ((string "abc" *> get reg) <|> (put_ reg (LIFTED True) *> item *> get reg)) <|> get reg
+
+badFactor :: Parser String
+badFactor = string "a"
+        <|> string "uxy" *> loop (void (char 'a')) unit *> string "z"
+        <|> string "b"

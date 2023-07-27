@@ -66,7 +66,7 @@ import Data.Maybe                                      (fromMaybe, isNothing)
 import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(willConsume))
+import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(Coins, willConsume))
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
@@ -348,6 +348,7 @@ broken.
 @since 1.5.0.0
 -}
 storePiggy :: Coins -> Ctx s o a -> Ctx s o a
+storePiggy (Coins 0 _ _) ctx = ctx
 storePiggy coins ctx = ctx {piggies = enqueue coins (piggies ctx), netWorth = netWorth ctx + willConsume coins}
 
 {-|

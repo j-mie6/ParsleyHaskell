@@ -106,7 +106,7 @@ common test-common
   default-language:    Haskell2010
   ghc-options:         -pgmP cpphs -optP --cpp
   other-modules:       TestUtils
-  if false && impl(ghc < 9)
+  if true && impl(ghc < 9)
     build-depends:     dump-core
     ghc-options:       -fplugin=DumpCore
 

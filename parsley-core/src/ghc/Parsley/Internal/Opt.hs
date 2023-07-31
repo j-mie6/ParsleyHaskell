@@ -28,8 +28,8 @@ data Flags = Flags { lawBasedOptimisations    :: !Bool
 none, fast, full :: Flags
 none = Flags { lawBasedOptimisations    = off
              , termNormalisation        = off
-             , primaryInlineThreshold   = Nothing
-             , secondaryInlineThreshold = Nothing
+             , primaryInlineThreshold   = Just 0
+             , secondaryInlineThreshold = Just 0
              , lengthCheckFactoring     = off
              , leadCharFactoring        = off
              , factorAheadOfJoins       = off

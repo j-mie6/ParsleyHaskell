@@ -32,7 +32,7 @@ inliner occs _ body
 inliner _ μ _ = In (Let μ)
 
 shouldInline :: Int -> Rational -> Fix Combinator a -> Bool
-shouldInline occs inlineThreshold = (< inlineThreshold) . (* toRational occs) . subtract callCost . getWeight . cata (InlineWeight . alg)
+shouldInline occs inlineThreshold = (<= inlineThreshold) . (* toRational occs) . subtract callCost . getWeight . cata (InlineWeight . alg)
 
 newtype InlineWeight a = InlineWeight { getWeight :: Rational }
 

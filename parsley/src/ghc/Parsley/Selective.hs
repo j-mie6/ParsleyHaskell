@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-|
 Module      : Parsley.Selective
 Description : The @Selective@ combinators
@@ -22,7 +23,11 @@ module Parsley.Selective (
     fromMaybeP
   ) where
 
-import Prelude hiding             (pure, (<$>))
+import Prelude hiding             (pure, (<$>)
+#if __GLASGOW_HASKELL__ >= 906
+  , liftA2
+#endif
+  )
 import Data.Function              (fix)
 import Language.Haskell.TH.Syntax (Lift(..))
 import Parsley.Alternative        (empty)

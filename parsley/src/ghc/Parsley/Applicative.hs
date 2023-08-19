@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms, CPP #-}
 {-|
 Module      : Parsley.Applicative
 Description : The @Applicative@ combinators
@@ -23,7 +23,11 @@ module Parsley.Applicative (
     (>>)
   ) where
 
-import Prelude hiding           (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence, repeat)
+import Prelude hiding           (pure, (<*>), (*>), (<*), (>>), (<$>), fmap, (<$), traverse, sequence, repeat
+#if __GLASGOW_HASKELL__ >= 906
+  , liftA2
+#endif
+  )
 import Parsley.Defunctionalized (Defunc(CONS, CONST, ID, EMPTY), pattern FLIP_H, pattern UNIT)
 import Parsley.Internal         (makeQ, Parser)
 import Parsley.ParserOps        (ParserOps, pure)

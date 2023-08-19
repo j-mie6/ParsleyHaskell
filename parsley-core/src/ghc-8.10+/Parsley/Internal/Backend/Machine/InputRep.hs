@@ -256,7 +256,7 @@ textShiftRight t n = [||textShiftRight# $$t n||]
 
 {-# INLINABLE textShiftRight# #-}
 textShiftRight# :: Text -> Int# -> Text
-textShiftRight# (Text arr off unconsumed) !i = go i arr off unconsumed
+textShiftRight# (Text arr off unconsumed) i = go i arr off unconsumed
   where
     go 0# !arr !off !unconsumed = Text arr off unconsumed
     go n !arr !off !unconsumed
@@ -290,7 +290,7 @@ byteStringNext :: UnpackedLazyByteString -> (# Char, UnpackedLazyByteString #)
 byteStringNext (# i#, addr#, final, off#, size#, cs #) =
   case readWord8OffAddr# addr# off# realWorld# of
     (# s', x #) -> case touch# final s' of
-      !_ -> (# C# (chr# (word2Int# (word8ToWord# x))),
+      _ -> (# C# (chr# (word2Int# (word8ToWord# x))),
           if I# size# /= 1 then (# i# +# 1#, addr#, final, off# +# 1#, size# -# 1#, cs #)
           else case cs of
             Lazy.Chunk (PS (ForeignPtr addr'# final') (I# off'#) (I# size'#)) cs' ->

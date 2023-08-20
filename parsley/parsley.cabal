@@ -153,24 +153,24 @@ common benchmark-common
     build-depends:     dump-core
     ghc-options:       -fplugin=DumpCore
 
-benchmark brainfuck-bench
-  import:              benchmark-common
-  type:                exitcode-stdio-1.0
-  other-modules:       BrainfuckBench.Shared, BrainfuckBench.Parsley.Parser, BrainfuckBench.Parsec.Parser, BrainfuckBench.Megaparsec.Parser,
-                       BrainfuckBench.Attoparsec.Parser, BrainfuckBench.Handrolled.Parser, BrainfuckBench.Happy.Parser
-  main-is:             BrainfuckBench/Main.hs
+--benchmark brainfuck-bench
+--  import:              benchmark-common
+--  type:                exitcode-stdio-1.0
+--  other-modules:       BrainfuckBench.Shared, BrainfuckBench.Parsley.Parser, BrainfuckBench.Parsec.Parser, BrainfuckBench.Megaparsec.Parser,
+--                       BrainfuckBench.Attoparsec.Parser, BrainfuckBench.Handrolled.Parser, BrainfuckBench.Happy.Parser
+--  main-is:             BrainfuckBench/Main.hs
 
-benchmark javascript-bench
-  import:              benchmark-common
-  type:                exitcode-stdio-1.0
-  other-modules:       JavascriptBench.Shared, JavascriptBench.Parsley.Parser, JavascriptBench.Parsec.Parser, JavascriptBench.Megaparsec.Parser,
-                       JavascriptBench.Attoparsec.Parser, JavascriptBench.Happy.Parser
-  main-is:             JavascriptBench/Main.hs
+--benchmark javascript-bench
+--  import:              benchmark-common
+--  type:                exitcode-stdio-1.0
+--  other-modules:       JavascriptBench.Shared, JavascriptBench.Parsley.Parser, JavascriptBench.Parsec.Parser, JavascriptBench.Megaparsec.Parser,
+--                       JavascriptBench.Attoparsec.Parser, JavascriptBench.Happy.Parser
+--  main-is:             JavascriptBench/Main.hs
 
-benchmark nandlang-bench
-  import:              benchmark-common
-  type:                exitcode-stdio-1.0
+--benchmark nandlang-bench
+--  import:              benchmark-common
+--  type:                exitcode-stdio-1.0
   --cc-options:          -O3
-  other-modules:       NandlangBench.Parsley.Parser, NandlangBench.Parsley.Functions, NandlangBench.Bison.Parser
-  c-sources:           benchmarks/NandlangBench/Bison/lex.yy.c, benchmarks/NandlangBench/Bison/Nandlang.tab.c
-  main-is:             NandlangBench/Main.hs
+--  other-modules:       NandlangBench.Parsley.Parser, NandlangBench.Parsley.Functions, NandlangBench.Bison.Parser
+--  c-sources:           benchmarks/NandlangBench/Bison/lex.yy.c, benchmarks/NandlangBench/Bison/Nandlang.tab.c
+--  main-is:             NandlangBench/Main.hs

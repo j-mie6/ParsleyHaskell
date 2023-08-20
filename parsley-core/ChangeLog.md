@@ -1,5 +1,19 @@
 # Revision history for `parsley-core`
 
+## 2.3.0.0 -- 2023-08-20
+
+* Added internal support for optimisation flags, not exposed into public facing API yet.
+  - These are threaded through many places and functions via an implicit parameter.
+* Deprecated `Text16`, since it is flawed with UTF-8.
+* Distinguished between static and dynamic input representations (`DynRep` vs `StaRep`).
+* Improved static binding of input changing the signature of `eval`.
+* Reworked input consumption and fixed several bugs.
+* Moved to an `uncons` model, adjusted several of the `InputOps`.
+* Removed `array`-backed `String` implementation.
+* Stored `Offset` in the rewind queue, not `Input`.
+* Unpacking and unboxing of internal structures, improving compile-time performance?
+* Removed `Jump` instruction, it's not needed.
+
 ## 2.2.0.1 -- 2023-04-26
 
 * Improved the free register analysis by reimplementing in terms of lambda-lifting algorithms.

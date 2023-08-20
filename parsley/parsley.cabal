@@ -5,7 +5,7 @@ name:                parsley
 --                   | +------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             2.0.0.0
+version:             2.0.0.1
 synopsis:            A fast parser combinator library backed by Typed Template Haskell
 description:         Parsley is a staged selective parser combinator library, which means
                      it does not support monadic operations, and relies on Typed Template

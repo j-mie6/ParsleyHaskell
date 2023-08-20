@@ -1,5 +1,10 @@
 # Revision history for `parsley`
 
+## 2.0.0.1 -- 2023-08-20
+
+* Support for 9.6
+* Removed use of `Text16` from the base API, it has been deprecated.
+
 ## 2.0.0.0 -- 2021-11-24
 
 * Incorporated API naming conventions from _Design Patterns for Parser Combinators_.

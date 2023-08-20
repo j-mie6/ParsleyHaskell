@@ -1,5 +1,10 @@
 # Revision history for `parsley-core`
 
+## 2.x.y.z -- TBD
+
+* Dropped GHC 8.6 support.
+* Dropped GHC 8.8 support.
+
 ## 2.3.0.0 -- 2023-08-20
 
 * Added internal support for optimisation flags, not exposed into public facing API yet.

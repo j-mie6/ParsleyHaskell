@@ -26,9 +26,7 @@ category:            Parsing
 build-type:          Simple
 extra-doc-files:     ChangeLog.md
                      README.md
-tested-with:         GHC == 8.6.1,  GHC == 8.6.2,  GHC == 8.6.3,  GHC == 8.6.4,  GHC == 8.6.5,
-                     GHC == 8.8.1,  GHC == 8.8.2,  GHC == 8.8.3,  GHC == 8.8.4,
-                     GHC == 8.10.4, GHC == 8.10.5, GHC == 8.10.7,
+tested-with:         GHC == 8.10.4, GHC == 8.10.5, GHC == 8.10.7,
                      GHC == 9.0.1, GHC == 9.0.2,
                      GHC == 9.2.3
 
@@ -87,6 +85,7 @@ library
                        Parsley.Internal.Backend.Analysis.Relevancy,
 
                        Parsley.Internal.Backend.Machine,
+                       Parsley.Internal.Backend.Machine.BindingOps,
                        Parsley.Internal.Backend.Machine.Defunc,
                        Parsley.Internal.Backend.Machine.Eval,
                        Parsley.Internal.Backend.Machine.LetBindings,
@@ -96,20 +95,16 @@ library
                        Parsley.Internal.Backend.Machine.InputRep,
                        Parsley.Internal.Backend.Machine.Instructions,
                        Parsley.Internal.Backend.Machine.Ops,
-
-                       Parsley.Internal.Backend.Machine.Types,
-                       Parsley.Internal.Backend.Machine.Types.Coins,
-                       Parsley.Internal.Backend.Machine.Types.InputCharacteristic,
-                       Parsley.Internal.Backend.Machine.Types.State
-
-  if impl(ghc >= 8.10)
-    exposed-modules:   Parsley.Internal.Backend.Machine.BindingOps,
                        Parsley.Internal.Backend.Machine.PosOps,
 
+                       Parsley.Internal.Backend.Machine.Types,
                        Parsley.Internal.Backend.Machine.Types.Base,
+                       Parsley.Internal.Backend.Machine.Types.Coins,
                        Parsley.Internal.Backend.Machine.Types.Context,
                        Parsley.Internal.Backend.Machine.Types.Dynamics,
                        Parsley.Internal.Backend.Machine.Types.Input,
+                       Parsley.Internal.Backend.Machine.Types.InputCharacteristic,
+                       Parsley.Internal.Backend.Machine.Types.State,
                        Parsley.Internal.Backend.Machine.Types.Statics,
 
                        Parsley.Internal.Backend.Machine.Types.Input.Offset,
@@ -129,8 +124,8 @@ library
 
                        NoStarIsType
 
---                     ghc                  >= 8.6     && < 9.8,
-  build-depends:       base                 >= 4.10    && < 4.19,
+--                     ghc                  >= 8.10    && < 9.8,
+  build-depends:       base                 >= 4.14    && < 4.19,
                        mtl                  >= 2.2.1   && < 2.3,
                        hashable             >= 1.2.7.0 && < 1.5,
                        unordered-containers >= 0.2.13  && < 0.3,
@@ -148,10 +143,6 @@ library
                        syb                  >= 0.1     && < 0.8,
   build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   hs-source-dirs:      src/ghc
-  if impl(ghc >= 8.10)
-    hs-source-dirs:    src/ghc-8.10+
-  else
-    hs-source-dirs:    src/ghc-8.6+
   default-language:    Haskell2010
   ghc-options:         -Wall -Weverything -Wcompat
                        -Wno-unticked-promoted-constructors
@@ -167,8 +158,7 @@ library
                        -Wno-incomplete-uni-patterns
                        -pgmP cpphs -optP --cpp
                        -freverse-errors
-  if impl(ghc >= 8.10)
-    ghc-options:       -Wno-missing-safe-haskell-mode
+                       -Wno-missing-safe-haskell-mode
                        -Wno-prepositive-qualified-module
                        -Wno-unused-packages
   if impl(ghc >= 9.2)
@@ -178,35 +168,36 @@ library
     cpp-options:       -DFULL_WIDTH_POSITIONS
 
 common test-common
-  build-depends:       base >=4.10 && <5,
+  build-depends:       base >=4.14 && <5,
                        parsley-core,
-                       tasty
+                       tasty,
+                       tasty-hunit,
+                       tasty-quickcheck
   hs-source-dirs:      test
   default-language:    Haskell2010
 
 test-suite primitives-test
   import:              test-common
   type:                exitcode-stdio-1.0
-  build-depends:       tasty-hunit, tasty-quickcheck, th-test-utils, deepseq, template-haskell
+  build-depends:       th-test-utils, deepseq, template-haskell
   main-is:             Primitive.hs
   other-modules:       Primitive.Parsers, TestUtils
 
 test-suite common-test
   import:              test-common
   type:                exitcode-stdio-1.0
-  build-depends:       tasty-hunit, tasty-quickcheck
   main-is:             CommonTest.hs
   other-modules:       CommonTest.Queue, CommonTest.RewindQueue
 
 test-suite regression-test
   import:              test-common
   type:                exitcode-stdio-1.0
-  build-depends:       tasty-hunit, tasty-quickcheck, containers
+  build-depends:       containers
   main-is:             RegressionTest.hs
   other-modules:       Regression.Issue27
 
 common benchmark-common
-  build-depends:       base >=4.10 && <5,
+  build-depends:       base >=4.14 && <5,
                        parsley-core,
                        gauge,
                        deepseq

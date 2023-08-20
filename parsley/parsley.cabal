@@ -61,8 +61,9 @@ library
 
                        NoStarIsType
 
+--                     When core is next min-bound bumped, we drop 8.6 and 8.8 support
 --                     ghc                  >= 8.6     && < 9.8,
-  build-depends:       base                 >= 4.10    && < 4.19,
+  build-depends:       base                 >= 4.12    && < 4.19,
                        parsley-core         >= 2       && < 3,
                        template-haskell     >= 2.14    && < 3,
                        text                 >= 1.2.3   && < 2.1
@@ -95,7 +96,7 @@ source-repository head
   location:            https://github.com/j-mie6/ParsleyHaskell
 
 common test-common
-  build-depends:       base >=4.10 && <5,
+  build-depends:       base >=4.12 && <5,
                        parsley,
                        parsley-core,
                        tasty,
@@ -130,7 +131,7 @@ test-suite regression-test
 
 common benchmark-common
   build-tool-depends:  happy:happy
-  build-depends:       base >=4.10 && <5,
+  build-depends:       base >=4.12 && <5,
                        parsley,
                        gauge,
                        deepseq,

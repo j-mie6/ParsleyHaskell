@@ -101,11 +101,9 @@ common test-common
                        parsley-core,
                        tasty,
                        template-haskell
-  build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   other-extensions:    TemplateHaskellQuotes, TemplateHaskell
   hs-source-dirs:      test
   default-language:    Haskell2010
-  ghc-options:         -pgmP cpphs -optP --cpp
   other-modules:       TestUtils
   if false && impl(ghc < 9)
     build-depends:     dump-core
@@ -144,12 +142,11 @@ common benchmark-common
                        mtl,
                        array,
                        containers
-  build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   hs-source-dirs:      benchmarks
   other-extensions:    TemplateHaskellQuotes, TemplateHaskell
   other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
   default-language:    Haskell2010
-  ghc-options:         -rtsopts -pgmP cpphs -optP --cpp -ddump-splices -ddump-to-file
+  ghc-options:         -rtsopts -ddump-splices -ddump-to-file
   if false && impl(ghc < 9)
     build-depends:     dump-core
     ghc-options:       -fplugin=DumpCore

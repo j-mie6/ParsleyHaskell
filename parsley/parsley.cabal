@@ -127,29 +127,29 @@ test-suite regression-test
   main-is:             Regression/Tests.hs
   other-modules:       Regression.Parsers
 
-common benchmark-common
-  build-tool-depends:  happy:happy
-  build-depends:       base >=4.12 && <5,
-                       parsley,
-                       gauge,
-                       deepseq,
-                       template-haskell,
-                       parsec,
-                       attoparsec,
-                       megaparsec,
-                       text,
-                       bytestring,
-                       mtl,
-                       array,
-                       containers
-  hs-source-dirs:      benchmarks
-  other-extensions:    TemplateHaskellQuotes, TemplateHaskell
-  other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
-  default-language:    Haskell2010
-  ghc-options:         -rtsopts -ddump-splices -ddump-to-file
-  if false && impl(ghc < 9)
-    build-depends:     dump-core
-    ghc-options:       -fplugin=DumpCore
+--common benchmark-common
+--  build-tool-depends:  happy:happy
+--  build-depends:       base >=4.12 && <5,
+--                       parsley,
+--                       gauge,
+--                       deepseq,
+--                       template-haskell,
+--                       parsec,
+--                       attoparsec,
+--                       megaparsec,
+--                       text,
+--                       bytestring,
+--                       mtl,
+--                       array,
+--                       containers
+--  hs-source-dirs:      benchmarks
+--  other-extensions:    TemplateHaskellQuotes, TemplateHaskell
+--  other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
+--  default-language:    Haskell2010
+--  ghc-options:         -rtsopts -ddump-splices -ddump-to-file
+--  if false && impl(ghc < 9)
+--    build-depends:     dump-core
+--    ghc-options:       -fplugin=DumpCore
 
 --benchmark brainfuck-bench
 --  import:              benchmark-common

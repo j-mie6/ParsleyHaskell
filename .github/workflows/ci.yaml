@@ -13,7 +13,7 @@ jobs:
         cabal: ['3.4', '3.6']
     env:
       CONFIG: "--enable-tests --enable-doc --builddir=build/no-full-width-positions"
-      TEST_CONFIG: "--enable-tests --enable-doc --builddir=build/no-full-width-positions --test-options=\"--color always\""
+      TEST_CONFIG: "--enable-tests --enable-doc --builddir=build/no-full-width-positions --test-options='--color always'"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2.3.4

@@ -13,6 +13,7 @@ jobs:
         cabal: ['3.4', '3.6']
     env:
       CONFIG: "--enable-tests --enable-doc --builddir=build/no-full-width-positions"
+      TEST_CONFIG: "$CONFIG --test-options=\"--color always\""
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2.3.4
@@ -44,14 +45,14 @@ jobs:
 
       - name: Test (-full-width-positions)
         run: |
-          cabal test parsley-core $CONFIG
-          cabal test parsley $CONFIG
+          cabal test parsley-core $TEST_CONFIG
+          cabal test parsley $TEST_CONFIG
 
       - name: Test (+full-width-positions)
         run: |
           rm cabal.project.freeze
-          cabal test parsley-core --flag full-width-positions $CONFIG --builddir=build/full-width-positions
-          cabal test parsley --flag full-width-positions $CONFIG --builddir=build/full-width-positions
+          cabal test parsley-core --flag full-width-positions $TEST_CONFIG --builddir=build/full-width-positions
+          cabal test parsley --flag full-width-positions $TEST_CONFIG --builddir=build/full-width-positions
 
       - name: Doc
         run: cabal haddock parsley $CONFIG

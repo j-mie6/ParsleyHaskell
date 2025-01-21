@@ -56,6 +56,10 @@ newtype Reg (r :: Type) a = Reg (ΣVar a)
 data MetaCombinator where
   -- | After this combinator exits, a cut has happened
   Cut         :: MetaCombinator
+  -- | This combinator is dead-code
+  Deadcode    :: MetaCombinator
+  -- | This Make/Get/PutRegister combinator can be `Soft`
+  Tenderise   :: MetaCombinator
 
 -- Instances
 instance IFunctor Combinator where

@@ -16,7 +16,7 @@ into another representation with a code generation function.
 
 @since 1.0.0.0
 -}
-module Parsley.Internal.Frontend.Compiler (compile) where
+module Parsley.Internal.Frontend.Compiler (compile, preprocess) where
 
 import Prelude hiding (pred)
 import Data.Dependent.Map                  (DMap)

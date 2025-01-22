@@ -9,10 +9,12 @@ import Parsley.Internal.Common (Fix(..), MonadFresh (..), intercalateDiff, HFres
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), PosSelector (..))
 import Data.Kind (Type)
 import qualified Data.Map as M
+import Data.DList (DList)
+import qualified Data.DList as DList
 import qualified Data.Dependent.Map as DM
 import Parsley.Internal.Backend.Machine.Identifiers (MVar, SomeΣVar (SomeΣVar))
 import Parsley.Internal.Common.Fresh (runFresh)
-import Parsley.Internal.Core.Identifiers (SomeΣVar)
+import Parsley.Internal.Core.Identifiers (SomeΣVar, MVar (MVar))
 import Control.Monad.ST.Lazy (ST, runST)
 import Parsley.Internal.Common.Indexed (Const1(..), cata, IFunctor(..))
 import Data.STRef.Lazy (STRef, newSTRef)
@@ -21,11 +23,16 @@ import Control.Monad (when)
 import qualified Data.Set as Set
 import Control.Monad.State (State(..), get, put, runState)
 import Data.Foldable (sequenceA_)
-import qualified Debug.Trace as Debug
+import Control.Monad.Writer (Writer, MonadWriter (tell))
+import qualified Data.Type.Bool as CFG
+import qualified Data.Type.Bool as CFG
+import qualified Data.DList as DList
+import Parsley.Internal.Core.Identifiers (IMVar)
+import Debug.Trace (trace)
 
 -- Auxilary types used in the internal orchestration of CFG creation
 type NodeID = Integer
--- CFG data of CFG <start node> <set of leaf nodes> <node -> (use, def, successors)>)
+-- CFG data of CFG <start node> <set of leaf nodes> <ca > <node -> (use, def, successors)>)
 data CFG = CFG NodeID (Set NodeID) (M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set.Set NodeID)) deriving stock Show
 
 -- Make it possible to merge two CFGs together with left-biased choice of start node
@@ -72,13 +79,13 @@ livenessAnalysis p ms = snd . fst $ flip runState (False, initSets)  $ do
         fix $ \loop -> do
             (_, m) <- get
             put (False, m)
-            Debug.trace ("Round : " ++ show cfg)  $ round cfg
+            round cfg
             (change, _) <- get
             when change loop
         get
     where
         initSets :: LivenessAnalysisResult
-        initSets = M.fromList [(i, LivenessData Set.empty Set.empty) | i <- [0..(maxID -1)]]
+        initSets = M.fromList [(i, LivenessData Set.empty Set.empty) | i <- [0..maxID]]
         (pTagged, msTagged, maxID) = tagCombinator p ms
 
         cfg = buildCFG pTagged msTagged
@@ -90,96 +97,112 @@ livenessAnalysis p ms = snd . fst $ flip runState (False, initSets)  $ do
         update t (use, def, succ) = do
             (change, m) <- get
             let curr = m M.! t
-            let liveIn' = Debug.trace ("use"  ++ show t  ++":" ++  show use) $ Set.union use (Set.difference (liveOut curr) def)
+            let liveIn' = Set.union use (Set.difference (liveOut curr) def)
             let liveOut' = Set.foldl (\l s -> Set.union l $ liveIn (m M.! s)) Set.empty succ
             let mNew = M.adjust (\_ -> LivenessData liveIn' liveOut') t m
             when (liveIn curr /= liveIn' || liveOut curr /= liveOut') $ put (True, mNew)
 
 
-
 buildCFG :: Fix TaggedCombinator a -> DM.DMap MVar (Fix TaggedCombinator) -> CFG
-buildCFG p mus = DM.foldlWithKey (\(CFG s ts m1) _ v -> let CFG _ _ m2 = graph v in CFG s ts (mergeEdges m1 m2)) (graph p) mus
+buildCFG p mus = cfg
     where
-        -- 1. Find for each tree in our CAST the initial tag that will be the root of that CFG. We optimistically cull non-effectual combinators
-        findEntryTag :: Fix TaggedCombinator a -> NodeID
-        findEntryTag (In Tag{tag=t, tagged=taggedP}) = go t taggedP
-            where
-                go :: NodeID -> Combinator (Fix TaggedCombinator) a -> NodeID
-                go _ (p :*>: _) = findEntryTag p
-                go _ (p :<*: _) = findEntryTag p
-                go _ (Try p) = findEntryTag p
-                go _ (LookAhead p) = findEntryTag p
-                go _ (NotFollowedBy p) = findEntryTag p
-                go _ (Branch p _ _) = findEntryTag p
-                go _ (Match p _ _ _) = findEntryTag p
-                go _ (Loop p _) = findEntryTag p
-                go _ (Debug _ p) = findEntryTag p
-                go _ (MetaCombinator _ p) = findEntryTag p
-                -- All other cases, the initial tag is not deeper into the tree
-                go t _ = t
+        -- a. Create CFGs for each let-bound AST
+        (initCFG, initCalls) = graph p
+        (cfgForest, calls) = DM.foldlWithKey
+                                (\(m, c) (MVar imvar) p ->
+                                        let
+                                            (cfg', calls') = graph p
+                                        in (M.insert imvar cfg' m, c <> calls'))
+                                        (M.empty, mempty)
+                                        mus
+        -- b. join all trees into one
+        cfgWithoutCalls = M.foldl mergeCFG initCFG cfgForest
+        -- c. join all calls (callNode, imvar) within the cfg forest to a single cfg
+        cfg = foldl (\c (callNode, imvar) ->
+                        let CFG start terms _ = cfgForest M.! imvar
+                        in addEdge' callNode start $ foldr (`addEdge'` callNode) c terms
+                    ) cfgWithoutCalls (initCalls <> calls) 
 
         -- Various helpers in our CFG construction
         mergeEdges :: M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID) -> M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID) -> M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID)
         mergeEdges = M.unionWith (\(use, def, x) (_, _, y) -> (use, def, Set.union x y))
-
+        -- Merge CFGs using left-biased determintion of starting and terminal nodes
+        mergeCFG :: CFG -> CFG -> CFG
+        mergeCFG (CFG s1 t1 m1) (CFG _ _ m2) = CFG s1 t1 (mergeEdges m1 m2)
         addEdge ::  NodeID -> NodeID -> M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID) ->  M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID)
         addEdge v w =  M.adjust (\(use, def, edges) -> (use, def, Set.insert w edges)) v
+        addEdge' ::  NodeID -> NodeID -> CFG -> CFG
+        addEdge' v w (CFG a b m) = CFG a b (addEdge v w m)
 
         -- seqCFG: take CFGs G and H, joining all control paths from terminals of G to start of H 
         seqCFG (CFG s1 t1 m1) (CFG s2 t2 m2) = CFG s1 t2 (Set.foldl (flip (M.adjust (\(u, d, s) -> (u, d, Set.insert s2 s)))) m t1)
             where
                 m = mergeEdges m1 m2
 
-        -- 2. Main entry point for creating a CFG for a given tagged CAST. Recurse through tree and construct 
-        graph :: Fix TaggedCombinator a -> CFG
+
+        -- 2. Main entry point for creating a CFG for a given tagged CAST. Recurse through tree and construct the CFG. 
+        -- We do this inside `Writer` monad because we need to keep track of `Let` nodes that perform a call to 
+        graph :: Fix TaggedCombinator a -> (CFG, DList (NodeID, IMVar))
         graph (In Tag{tag, tagged})= graph' tag tagged
 
         leaf :: NodeID -> CFG
         leaf t = CFG t (Set.singleton t) (M.fromList [(t, (Set.empty, Set.empty, Set.empty))])
 
-        -- Handle each node type in our CAST. Optimistically cull any tags that are purely transitionary (e.g. tagged metacombinators)
-        graph' :: NodeID -> Combinator (Fix TaggedCombinator) a ->  CFG
-        graph' _ (pf :<*>: px) = graph pf `seqCFG` graph px
-        graph' _ (p :*>: q) =  graph p `seqCFG` graph q
-        graph' _ (p :<*: q) = graph p `seqCFG` graph q
-        graph' t (p :<|>: q) = let
-             CFG ps pts mp = graph p
-             CFG qs qts mq = graph q
-             m = mp `mergeEdges` mq
-             in CFG t (Set.union pts qts) (addEdge t qs (addEdge t ps m))
+        -- Handle each node type in our CAST. Optimistically cull any tags that are purely transitionary (e.g. tagged metacombinators)       
+        graph' :: NodeID -> Combinator (Fix TaggedCombinator) a -> (CFG, DList (NodeID, IMVar))
+        graph' _ (pf :<*>: px) = let
+            (pfg, calls1) = graph pf
+            (pxg, calls2) = graph px
+            in (pfg `seqCFG` pxg, calls1 <> calls2)
+        graph' _ (p :*>: q) = let
+            (pg, calls1) = graph p
+            (qg, calls2) = graph q
+            in (pg `seqCFG` qg, calls1 <> calls2)
+        graph' _ (p :<*: q) = let
+            (pg, calls1) = graph p
+            (qg, calls2) = graph q
+            in (pg `seqCFG` qg, calls1 <> calls2)
+        graph' t (p :<|>: q) = let -- TODO: this seems broken, tag disappears, also dependency on terminals of p to start of q
+             (CFG ps pts mp, calls1) = graph p
+             (CFG qs qts mq, calls2) = graph q
+             m = mp `mergeEdges` mq `mergeEdges` M.fromList [(t, (Set.empty, Set.empty, Set.fromList [qs, ps]))]
+             in trace ("made " ++ show t) $ (CFG t (Set.union pts qts) m, calls1 <> calls2)
         graph' _ (Try p) = graph p
         graph' _ (LookAhead p) = graph p
-        graph' t (Let mvar) = leaf t
+        graph' t (Let (MVar im)) = (leaf t, DList.fromList [(t, im)])
         graph' _ (NotFollowedBy p) = graph p
         graph' _ (Branch b p q) = let
-             CFG bs bts mb = graph b
-             CFG ps pts mp = graph p
-             CFG qs qts mq = graph q
+             (CFG bs bts mb, calls1) = graph b
+             (CFG ps pts mp, calls2) = graph p
+             (CFG qs qts mq, calls3) = graph q
              m = mb `mergeEdges` mp `mergeEdges` mq
              m' = Set.foldl (\x n -> addEdge n qs (addEdge n ps x)) m bts
-             in CFG bs (Set.union pts qts) m'
+             in (CFG bs (Set.union pts qts) m', calls1 <> calls2 <> calls3)
         graph' _ (Match p fs qs def) = undefined -- TODO: implement
         graph' _ (Loop body exit) = let
-            CFG bs bts bm = graph body
-            CFG es ets em = graph exit
+            (CFG bs bts bm, calls1) = graph body
+            (CFG es ets em, calls2) = graph exit
             m = bm `mergeEdges` em
             m' = Set.foldl (\x n -> addEdge n es x) m bts -- add exit edges
             m'' = Set.foldl (\x n -> addEdge n bs x) m' bts -- add loopback edges
-            in CFG bs ets m''
+            in (CFG bs ets m'', calls1 <> calls2)
         graph' t (MakeRegister σ p q) = let
             -- leaf node that just defines σ 
             g = CFG t (Set.singleton t) (M.fromList [(t, (Set.empty, Set.singleton $ SomeΣVar σ, Set.empty))])
-            in graph p `seqCFG` g `seqCFG` graph q
-        graph' t (GetRegister σ) = CFG t (Set.singleton t) (M.fromList [(t, (Set.singleton $ SomeΣVar σ, Set.empty, Set.empty))])
+            (gp, calls1) = graph p
+            (gq, calls2) = graph q
+            in (gp `seqCFG` g `seqCFG` gq, calls1 <> calls2)
+        graph' t (GetRegister σ) = (CFG t (Set.singleton t) (M.fromList [(t, (Set.singleton $ SomeΣVar σ, Set.empty, Set.empty))]), mempty)
         graph' t (PutRegister σ p) = let
             g = CFG t (Set.singleton t) (M.fromList [(t, (Set.empty, Set.singleton $ SomeΣVar σ, Set.empty))])
-            in graph p `seqCFG` g
-        graph' t (Position _) = leaf t
+            (gp, calls) = graph p
+            in (gp `seqCFG` g, calls)
+        graph' t (Position _) = (leaf t, mempty)
         graph' _ (Debug _ p) = graph p -- skip annotational combinator
         graph' _ (MetaCombinator _ p) = graph p -- skip annotational combinator 
-        graph' t Empty = leaf t
+        graph' t Empty = (leaf t, mempty)
         -- left-over dead-end cases: Pure, Satisfy 
-        graph' t _ = leaf t
+        graph' t _ = (leaf t, mempty)
 
 
 {-|

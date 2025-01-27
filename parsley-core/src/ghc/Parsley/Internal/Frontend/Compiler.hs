@@ -24,7 +24,6 @@ import Data.Hashable                       (Hashable, hashWithSalt, hash)
 import Data.HashMap.Strict                 (HashMap)
 import Data.HashSet                        (HashSet)
 import Data.IORef                          (IORef, newIORef, readIORef, writeIORef)
-import Data.Kind                           (Type)
 import Data.Set                            (Set)
 import Control.Arrow                       (first, second)
 import Control.Monad                       (void, when, guard)
@@ -36,9 +35,9 @@ import Numeric                             (showHex)
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), ScopeRegister(..), Reg(..), Parser(..), traverseCombinator)
 import Parsley.Internal.Core.Identifiers   (IMVar, MVar(..), IΣVar, ΣVar(..), SomeΣVar)
 import Parsley.Internal.Common.Fresh       (HFreshT, newVar, runFreshT)
-import Parsley.Internal.Common.Indexed     (Fix(In), cata, cata', IFunctor(imap), (:+:)(..), (\/), Const1(..))
+import Parsley.Internal.Common.Indexed     (Fix(In), cata, cata', Tag(..), (:+:)(..), (\/), Const1(..))
 import Parsley.Internal.Common.State       (State, get, gets, runState, execState, modify', MonadState)
-import Parsley.Internal.Frontend.Optimiser (optimise)
+import Parsley.Internal.Frontend.Optimiser (optimise, dataFlowOptimise)
 import Parsley.Internal.Frontend.Analysis  (analyse, emptyFlags, dependencyAnalysis, inliner)
 import Parsley.Internal.Trace              (Trace(trace))
 import System.IO.Unsafe                    (unsafePerformIO)
@@ -49,6 +48,8 @@ import qualified Data.HashSet         as HashSet (member, insert, empty)
 import qualified Data.Map             as Map     ((!))
 import qualified Data.Set             as Set     (empty)
 import qualified Parsley.Internal.Opt as Opt
+import Parsley.Internal.Frontend.Analysis.CFG (buildCFG, tagCombinator)
+import Parsley.Internal.Frontend.Analysis.Liveness (livenessAnalysis)
 
 {-|
 Given a user's parser, this will analyse it, extract bindings and then compile them with a given function
@@ -66,6 +67,8 @@ compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.s
   where
     (p', μs, maxV) = preprocess p
     (μs', frs) = dependencyAnalysis p' μs
+    (p'', μs'') = dataFlowOptimise p' μs'
+
 
     freeRegs :: Maybe (MVar x) -> Set SomeΣVar
     freeRegs = maybe Set.empty (\(MVar v) -> frs Map.! v)
@@ -81,7 +84,6 @@ preprocess p =
   in (p', μs, maxV)
 
 data ParserName = forall a. ParserName (StableName# (Fix (Combinator :+: ScopeRegister) a))
-data Tag t f (k :: Type -> Type) a = Tag {tag :: t, tagged :: f k a}
 
 tagParser :: Fix (Combinator :+: ScopeRegister) a -> Fix (Tag ParserName Combinator) a
 tagParser p = cata' tagAlg p
@@ -186,8 +188,6 @@ freshReg maker scope = scope $ unsafePerformIO $ do
   writeIORef maker (x + 1)
   return $! Reg (ΣVar x)
 
-instance IFunctor f => IFunctor (Tag t f) where
-  imap f (Tag t k) = Tag t (imap f k)
 
 instance Eq ParserName where
   (ParserName n) == (ParserName m) = eqStableName (StableName n) (StableName m)

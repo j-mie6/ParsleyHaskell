@@ -13,7 +13,7 @@ Exposes the `optimise` algebra, which is used for optimisations based on the law
 
 @since 1.0.0.0
 -}
-module Parsley.Internal.Frontend.Optimiser (optimise) where
+module Parsley.Internal.Frontend.Optimiser (optimise, dataFlowOptimise) where
 
 import Prelude hiding                      ((<$>))
 import Parsley.Internal.Common             (Fix(In), Quapplicative(..))
@@ -21,6 +21,11 @@ import Parsley.Internal.Core.CombinatorAST (Combinator(..))
 import Parsley.Internal.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H, pattern FLIP_CONST, pattern UNIT)
 
 import qualified Parsley.Internal.Opt   as Opt
+import qualified Data.Dependent.Map as DM
+import Parsley.Internal.Backend.Machine.Identifiers (MVar)
+import Parsley.Internal.Frontend.Analysis.CFG (buildCFG, tagCombinator)
+import Parsley.Internal.Frontend.Analysis.Liveness (livenessAnalysis)
+import Debug.Trace (trace)
 
 pattern (:<$>:) :: Defunc (a -> b) -> Fix Combinator a -> Combinator (Fix Combinator) b
 pattern f :<$>: p = In (Pure f) :<*>: p
@@ -177,3 +182,14 @@ optimise
     -- Distributivity Law: f <$> match vs p g def       = match vs p ((f <$>) . g) (f <$> def)
     opt (f :<$>: (In (Match p fs qs def)))              = In (Match p fs (map (opt . (f :<$>:)) qs) (opt (f :<$>: def)))
     opt p                                               = In p
+
+{-|
+  Generates a CFG of the combinator AST forest, then performs liveness and reaching definition analyses. These analyses are then used
+  to do dead-code elimination and tenderisation of references via `MetaCombinator`s. 
+-}
+dataFlowOptimise :: (?flags :: Opt.Flags) => Fix Combinator a -> DM.DMap MVar (Fix Combinator) -> (Fix Combinator a, DM.DMap MVar (Fix Combinator))
+dataFlowOptimise p mus = trace (show liveness) $ (p, mus) -- TODO: impl
+  where 
+    (ptagged, mustagged, _) = tagCombinator  p mus
+    cfg = buildCFG ptagged mustagged
+    liveness = livenessAnalysis cfg

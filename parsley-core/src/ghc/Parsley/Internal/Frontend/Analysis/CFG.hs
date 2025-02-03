@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, DerivingStrategies #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
-module Parsley.Internal.Frontend.Analysis.CFG (TaggedCombinator, NodeID, CFG(..), tagCombinator, buildCFG) where
+module Parsley.Internal.Frontend.Analysis.CFG (TaggedCombinator, NodeID, CFG(..), ΣNodeData(..), tagCombinator, buildCFG) where
 
 import Parsley.Internal.Common.Indexed (Const1(..), cata, Tag(..), Fix (..))
 import Data.Set (Set)
@@ -20,9 +20,16 @@ import qualified Data.Dependent.Map as DM
 type NodeID = Integer
 
 {-|
-    CFG data of CFG <start node> <set of leaf nodes> <node -> (use, def, successors)>) 
+    CFG data of CFG <start node> <set of leaf nodes> <node -> (NodeData, successors)>) 
 -}
-data CFG = CFG NodeID (Set NodeID) (M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set.Set NodeID)) deriving stock Show
+data CFG = CFG NodeID (Set NodeID) (M.Map NodeID (Maybe ΣNodeData, Set.Set NodeID)) deriving stock Show
+
+{-| 
+    Meta-data attached to a node that interfaces with ΣVars. 
+-}
+data ΣNodeData = ΣMake {use :: Set.Set SomeΣVar, which :: SomeΣVar}
+              | ΣGet  {use :: Set.Set SomeΣVar, which :: SomeΣVar}
+              | ΣPut  {use :: Set.Set SomeΣVar, which :: SomeΣVar} deriving stock Show
 
 {-|
     A Combinator AST with every node tagged with `NodeID`. All `NodeID` tags ought to be unique and this is promised by `tagCombinator`
@@ -75,18 +82,18 @@ buildCFG p mus = cfg
                     ) cfgWithoutCalls (initCalls <> calls)
 
         -- Various helpers in our CFG construction
-        mergeEdges :: M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID) -> M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID) -> M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID)
-        mergeEdges = M.unionWith (\(use, def, x) (_, _, y) -> (use, def, Set.union x y))
+        mergeEdges :: M.Map NodeID (Maybe ΣNodeData, Set.Set NodeID) -> M.Map NodeID (Maybe ΣNodeData, Set.Set NodeID) -> M.Map NodeID (Maybe ΣNodeData, Set.Set NodeID)
+        mergeEdges = M.unionWith (\(info, x) (_, y) -> (info, Set.union x y))
         -- Merge CFGs using left-biased determintion of starting and terminal nodes
         mergeCFG :: CFG -> CFG -> CFG
         mergeCFG (CFG s1 t1 m1) (CFG _ _ m2) = CFG s1 t1 (mergeEdges m1 m2)
-        addEdge ::  NodeID -> NodeID -> M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID) ->  M.Map NodeID (Set SomeΣVar, Set SomeΣVar, Set NodeID)
-        addEdge v w =  M.adjust (\(use, def, edges) -> (use, def, Set.insert w edges)) v
+        addEdge ::  NodeID -> NodeID ->M.Map NodeID (Maybe ΣNodeData, Set.Set NodeID) -> M.Map NodeID (Maybe ΣNodeData, Set.Set NodeID)
+        addEdge v w =  M.adjust (\(info, edges) -> (info, Set.insert w edges)) v
         addEdge' ::  NodeID -> NodeID -> CFG -> CFG
         addEdge' v w (CFG a b m) = CFG a b (addEdge v w m)
 
         -- seqCFG: take CFGs G and H, joining all control paths from terminals of G to start of H 
-        seqCFG (CFG s1 t1 m1) (CFG s2 t2 m2) = CFG s1 t2 (Set.foldl (flip (M.adjust (\(u, d, s) -> (u, d, Set.insert s2 s)))) m t1)
+        seqCFG (CFG s1 t1 m1) (CFG s2 t2 m2) = CFG s1 t2 (Set.foldl (flip (M.adjust (\(info, s) -> (info, Set.insert s2 s)))) m t1)
             where
                 m = mergeEdges m1 m2
 
@@ -97,7 +104,14 @@ buildCFG p mus = cfg
         graph (In Tag{tag, tagged})= graph' tag tagged
 
         leaf :: NodeID -> CFG
-        leaf t = CFG t (Set.singleton t) (M.fromList [(t, (Set.empty, Set.empty, Set.empty))])
+        leaf t = CFG t (Set.singleton t) (M.fromList [(t, (Nothing, Set.empty))])
+
+        -- find uses of any registers in a parser by parsing the use-defs gathereed
+        findUsages = M.foldl (\m (info, _) ->
+            case info of
+                Just x -> m `Set.union` use x `Set.union` Set.singleton (which x)
+                Nothing -> m)
+            Set.empty
 
         -- Handle each node type in our CAST. Optimistically cull any tags that are purely transitionary (e.g. tagged metacombinators)       
         graph' :: NodeID -> Combinator (Fix TaggedCombinator) a -> (CFG, DList (NodeID, IMVar))
@@ -113,14 +127,14 @@ buildCFG p mus = cfg
             (pg, calls1) = graph p
             (qg, calls2) = graph q
             in (pg `seqCFG` qg, calls1 <> calls2)
-        graph' t (p :<|>: q) = let 
+        graph' t (p :<|>: q) = let
             -- TODO: currently we add edges for all nodes in p to qs. This is not efficient as we only need edges from nodes that can fail.
             (CFG ps pts mp, calls1) = graph p
             (CFG qs qts mq, calls2) = graph q
-            pexits = M.foldlWithKey (\a k(_, _, x) -> a `Set.union` x `Set.union` Set.singleton k) pts mp
+            pexits = M.foldlWithKey (\a k(_, x) -> a `Set.union` x `Set.union` Set.singleton k) pts mp
             m = mp `mergeEdges` mq
-                   `mergeEdges` M.fromSet (const (Set.empty, Set.empty, Set.singleton qs)) pexits -- 
-                   `mergeEdges` M.fromList [(t, (Set.empty, Set.empty, Set.fromList [qs, ps]))] -- root node to the start of both
+                   `mergeEdges` M.fromSet (const (Nothing, Set.singleton qs)) pexits -- 
+                   `mergeEdges` M.fromList [(t, (Nothing, Set.fromList [qs, ps]))] -- root node to the start of both
             in (CFG t (Set.union pts qts) m, calls1 <> calls2)
         graph' _ (Try p) = graph p
         graph' _ (LookAhead p) = graph p
@@ -140,8 +154,8 @@ buildCFG p mus = cfg
             qsCalls = map snd qsGraphs
             qsCFGs = map fst qsGraphs
             qsTerminals = foldl (\a (CFG _ t _) -> Set.union t a) Set.empty qsCFGs
-            m = foldl (\a (CFG s _ m') -> a `mergeEdges` M.fromSet (const (Set.empty, Set.empty, Set.singleton s)) pts `mergeEdges`  m')
-                    (M.fromSet (const (Set.empty, Set.empty, Set.singleton ds)) pts `mergeEdges` mp `mergeEdges` md) qsCFGs
+            m = foldl (\a (CFG s _ m') -> a `mergeEdges` M.fromSet (const (Nothing, Set.singleton s)) pts `mergeEdges`  m')
+                    (M.fromSet (const (Nothing, Set.singleton ds)) pts `mergeEdges` mp `mergeEdges` md) qsCFGs
             in (CFG ps (Set.union qsTerminals dts) m, foldl (<>) callsp qsCalls <> callsdef)
         graph' _ (Loop body exit) = let
             (CFG bs bts bm, calls1) = graph body
@@ -152,17 +166,17 @@ buildCFG p mus = cfg
             in (CFG bs ets m'', calls1 <> calls2)
         graph' t (MakeRegister σ p q) = let
             -- leaf node that just defines σ 
-            g = CFG t (Set.singleton t) (M.fromList [(t, (usages, Set.singleton $ SomeΣVar σ, Set.empty))])
+            g = CFG t (Set.singleton t) (M.fromList [(t, (Just $ ΣMake{use=usages, which=SomeΣVar σ}, Set.empty))])
             -- find uses of any registers in `p` by parsing the use-defs gathereed
-            usages = M.foldl (\m (uses, _, _) -> m `Set.union` uses) Set.empty pm
+            usages = findUsages pm
             (gp@(CFG _ _ pm), calls1) = graph p
             (gq, calls2) = graph q
             in (gp `seqCFG` g `seqCFG` gq, calls1 <> calls2)
-        graph' t (GetRegister σ) = (CFG t (Set.singleton t) (M.fromList [(t, (Set.singleton $ SomeΣVar σ, Set.empty, Set.empty))]), mempty)
+        graph' t (GetRegister σ) = (CFG t (Set.singleton t) (M.fromList [(t, (Just $ ΣGet{use=Set.singleton $ SomeΣVar σ, which=SomeΣVar σ}, Set.empty))]), mempty)
         graph' t (PutRegister σ p) = let
-            g = CFG t (Set.singleton t) (M.fromList [(t, (usages, Set.singleton $ SomeΣVar σ, Set.empty))])
+            g = CFG t (Set.singleton t) (M.fromList [(t, (Just $ ΣPut{use=usages, which=SomeΣVar σ}, Set.empty))])
             -- find uses of any registers in `p` by parsing the use-defs gathereed
-            usages = M.foldl (\m (uses,_,_) -> m `Set.union` uses) Set.empty pm
+            usages = findUsages pm
             (gp@(CFG _ _ pm), calls) = graph p
             in (gp `seqCFG` g, calls)
         graph' t (Position _) = (leaf t, mempty)

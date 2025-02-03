@@ -23,6 +23,7 @@ data Flags = Flags { lawBasedOptimisations    :: !Bool
                    , reclaimInput             :: !Bool
                    , deduceFailPath           :: !Bool
                    --, closeFreeRegisters       :: !Bool
+                   , deadCodeElimination      :: !Bool
                    }
 
 none, fast, full :: Flags
@@ -36,6 +37,7 @@ none = Flags { lawBasedOptimisations    = off
              , reclaimInput             = off
              , deduceFailPath           = off
              --, closeFreeRegisters       = off
+             , deadCodeElimination      = off
              }
 fast = full  --{ }
 full = Flags { lawBasedOptimisations    = on
@@ -48,4 +50,5 @@ full = Flags { lawBasedOptimisations    = on
              , reclaimInput             = on
              , deduceFailPath           = on
              --, closeFreeRegisters       = on
+             , deadCodeElimination      = on
              }

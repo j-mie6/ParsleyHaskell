@@ -1,18 +1,18 @@
 {-# LANGUAGE OverloadedStrings, DerivingStrategies #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
-module Parsley.Internal.Frontend.Analysis.CFG (NodeID, CFG(..), tagCombinator, buildCFG) where
+module Parsley.Internal.Frontend.Analysis.CFG (TaggedCombinator, NodeID, CFG(..), tagCombinator, buildCFG) where
 
 import Parsley.Internal.Common.Indexed (Const1(..), cata, Tag(..), Fix (..))
 import Data.Set (Set)
-import qualified Data.Map as M
-import qualified Data.Set as Set
 import Parsley.Internal.Core.CombinatorAST (Combinator (..), PosSelector (..))
-import qualified Data.Dependent.Map as DM
 import Parsley.Internal.Core.Identifiers (MVar(..), SomeΣVar(..), IMVar)
 import Data.DList (DList)
 import Parsley.Internal.Common (HFresh, intercalateDiff, MonadFresh(..), runFresh)
 import qualified Data.DList as DList
+import qualified Data.Map as M
+import qualified Data.Set as Set
+import qualified Data.Dependent.Map as DM
 
 {-| 
     Type of the identifier given to nodes in `TaggedCombinator`. Used to uniquely identify each node
@@ -113,11 +113,13 @@ buildCFG p mus = cfg
             (pg, calls1) = graph p
             (qg, calls2) = graph q
             in (pg `seqCFG` qg, calls1 <> calls2)
-        graph' t (p :<|>: q) = let
+        graph' t (p :<|>: q) = let 
+            -- TODO: currently we add edges for all nodes in p to qs. This is not efficient as we only need edges from nodes that can fail.
             (CFG ps pts mp, calls1) = graph p
             (CFG qs qts mq, calls2) = graph q
+            pexits = M.foldlWithKey (\a k(_, _, x) -> a `Set.union` x `Set.union` Set.singleton k) pts mp
             m = mp `mergeEdges` mq
-                   `mergeEdges` M.fromSet (const (Set.empty, Set.empty, Set.singleton qs)) pts -- 
+                   `mergeEdges` M.fromSet (const (Set.empty, Set.empty, Set.singleton qs)) pexits -- 
                    `mergeEdges` M.fromList [(t, (Set.empty, Set.empty, Set.fromList [qs, ps]))] -- root node to the start of both
             in (CFG t (Set.union pts qts) m, calls1 <> calls2)
         graph' _ (Try p) = graph p
@@ -150,14 +152,18 @@ buildCFG p mus = cfg
             in (CFG bs ets m'', calls1 <> calls2)
         graph' t (MakeRegister σ p q) = let
             -- leaf node that just defines σ 
-            g = CFG t (Set.singleton t) (M.fromList [(t, (Set.empty, Set.singleton $ SomeΣVar σ, Set.empty))])
-            (gp, calls1) = graph p
+            g = CFG t (Set.singleton t) (M.fromList [(t, (usages, Set.singleton $ SomeΣVar σ, Set.empty))])
+            -- find uses of any registers in `p` by parsing the use-defs gathereed
+            usages = M.foldl (\m (uses, _, _) -> m `Set.union` uses) Set.empty pm
+            (gp@(CFG _ _ pm), calls1) = graph p
             (gq, calls2) = graph q
             in (gp `seqCFG` g `seqCFG` gq, calls1 <> calls2)
         graph' t (GetRegister σ) = (CFG t (Set.singleton t) (M.fromList [(t, (Set.singleton $ SomeΣVar σ, Set.empty, Set.empty))]), mempty)
         graph' t (PutRegister σ p) = let
-            g = CFG t (Set.singleton t) (M.fromList [(t, (Set.empty, Set.singleton $ SomeΣVar σ, Set.empty))])
-            (gp, calls) = graph p
+            g = CFG t (Set.singleton t) (M.fromList [(t, (usages, Set.singleton $ SomeΣVar σ, Set.empty))])
+            -- find uses of any registers in `p` by parsing the use-defs gathereed
+            usages = M.foldl (\m (uses,_,_) -> m `Set.union` uses) Set.empty pm
+            (gp@(CFG _ _ pm), calls) = graph p
             in (gp `seqCFG` g, calls)
         graph' t (Position _) = (leaf t, mempty)
         graph' _ (Debug _ p) = graph p -- skip annotational combinator

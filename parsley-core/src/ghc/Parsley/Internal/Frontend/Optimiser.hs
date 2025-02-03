@@ -2,6 +2,7 @@
              LambdaCase,
              PatternSynonyms,
              ViewPatterns #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-|
 Module      : Parsley.Internal.Frontend.Optimiser
 Description : Combinator law optimisation.
@@ -16,16 +17,17 @@ Exposes the `optimise` algebra, which is used for optimisations based on the law
 module Parsley.Internal.Frontend.Optimiser (optimise, dataFlowOptimise) where
 
 import Prelude hiding                      ((<$>))
-import Parsley.Internal.Common             (Fix(In), Quapplicative(..))
-import Parsley.Internal.Core.CombinatorAST (Combinator(..))
+import Parsley.Internal.Common             (Fix(..), Tag(..), Quapplicative(..), cata)
+import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator (..))
 import Parsley.Internal.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H, pattern FLIP_CONST, pattern UNIT)
-
+import Parsley.Internal.Core.Identifiers (SomeΣVar (..))
+import Parsley.Internal.Backend.Machine.Identifiers (MVar)
+import Parsley.Internal.Frontend.Analysis.CFG (buildCFG, tagCombinator, TaggedCombinator)
+import Parsley.Internal.Frontend.Analysis.Liveness (livenessAnalysis, LivenessData(..), LivenessAnalysisResult)
 import qualified Parsley.Internal.Opt   as Opt
 import qualified Data.Dependent.Map as DM
-import Parsley.Internal.Backend.Machine.Identifiers (MVar)
-import Parsley.Internal.Frontend.Analysis.CFG (buildCFG, tagCombinator)
-import Parsley.Internal.Frontend.Analysis.Liveness (livenessAnalysis)
-import Debug.Trace (trace)
+import qualified Data.Map as M
+import qualified Data.Set as S
 
 pattern (:<$>:) :: Defunc (a -> b) -> Fix Combinator a -> Combinator (Fix Combinator) b
 pattern f :<$>: p = In (Pure f) :<*>: p
@@ -188,8 +190,26 @@ optimise
   to do dead-code elimination and tenderisation of references via `MetaCombinator`s. 
 -}
 dataFlowOptimise :: (?flags :: Opt.Flags) => Fix Combinator a -> DM.DMap MVar (Fix Combinator) -> (Fix Combinator a, DM.DMap MVar (Fix Combinator))
-dataFlowOptimise p mus = trace (show liveness) $ (p, mus) -- TODO: impl
-  where 
+dataFlowOptimise p mus
+ | Opt.deadCodeElimination ?flags = (cata (deadcodeAlg liveness) ptagged, DM.map (cata (deadcodeAlg liveness)) mustagged)
+ | otherwise                      = (p, mus)
+  where
     (ptagged, mustagged, _) = tagCombinator  p mus
     cfg = buildCFG ptagged mustagged
     liveness = livenessAnalysis cfg
+
+    deadcodeAlg :: LivenessAnalysisResult -> TaggedCombinator (Fix Combinator) v -> Fix Combinator v
+    --                                                          then In c else In $ MetaCombinator Tenderise (In c)
+    -- GetRegister: Here we cannot eliminate the code (no continuation) without imposing some  default value. 
+    --              Thus, we /tenderise/ the access.
+    deadcodeAlg liveness (Tag tag c@(GetRegister σ))      = if S.member (SomeΣVar σ) (liveIn $ (M.! tag) liveness) 
+                                                            then In c else In $ MetaCombinator Tenderise (In c)
+    -- PutRegister: Skip if the register is not alive going out.
+    deadcodeAlg liveness (Tag tag c@(PutRegister σ _))    = if S.member (SomeΣVar σ) (liveOut $ (M.! tag) liveness) 
+                                                            then In c else In $ MetaCombinator Tenderise (In c)
+    -- NOTE: I believe that all creates of registers need to be hard. E.g c :=1, c = 2 means the first def is dead, but not really
+    -- as creation always has an effect: bringing the register to existence.
+    -- TODO: possibly remove
+    -- deadcodeAlg liveness (Tag tag c@(MakeRegister σ  _ _)) = if S.member (SomeΣVar σ) (liveOut $ (M.! tag) liveness) 
+    -- Default case
+    deadcodeAlg _ Tag{tagged} = In tagged

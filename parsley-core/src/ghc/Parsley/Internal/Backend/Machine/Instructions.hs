@@ -22,7 +22,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
     Access(..),
     MetaInstr(..),
     -- * Smart Instructions
-    _App, _Fmap, _Modify, _Make, _Put, _Get, _Jump,
+    _App, _Fmap, _Modify, _Make, _Put, _Get, _MakeSoft, _PutSoft, _GetSoft, _Jump,
     -- * Smart Meta-Instructions
     addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
     -- * Re-exports
@@ -359,6 +359,30 @@ Smart-instruction for `Get` that uses a `Hard` access.
 -}
 _Get :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
 _Get σ = Get σ Hard
+
+{-|
+Smart-instruction for `Make` that uses a `Soft` access.
+
+@since 1.0.0.0
+-}
+_MakeSoft :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+_MakeSoft σ = Make σ Soft
+
+{-|
+Smart-instruction for `Put` that uses a `Soft` access.
+
+@since 1.0.0.0
+-}
+_PutSoft :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+_PutSoft σ = Put σ Soft
+
+{-|
+Smart-instruction for `Get` that uses a `Soft` access.
+
+@since 1.0.0.0
+-}
+_GetSoft :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
+_GetSoft σ = Get σ Soft
 
 _Jump :: MVar x -> Instr o (Fix4 (Instr o)) '[] (Succ n) x a
 _Jump = flip Call (In4 Ret)

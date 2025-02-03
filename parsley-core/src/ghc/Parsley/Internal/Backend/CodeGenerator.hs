@@ -17,7 +17,7 @@ module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 import Data.Set                            (Set, elems)
 import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
-                                            _Fmap, _App, _Get, _Put, _Make, _Jump,
+                                            _Fmap, _App, _Get, _Put, _Make, _GetSoft, _PutSoft, _MakeSoft, _Jump,
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
                                             IMVar, IΦVar, MVar(..), ΦVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline, reclaimable)
@@ -94,6 +94,10 @@ deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user 
 deep (TryOrElse p q) = Just $ CodeGen $ altCompile p q recoverHandler id
 deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . Pop . In4 . Push (user x))
 deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . _Fmap (user f))
+-- Handle tenderisation of makes/gets/puts: same as regular yet with `Soft` access
+deep (MetaCombinator Tenderise (_ :< (MakeRegister σ (p :< _) (q :< _)))) = Just $ CodeGen $ \m -> do qc <- runCodeGen q m; runCodeGen p (In4 (_MakeSoft σ qc))
+deep (MetaCombinator Tenderise (_ :< (GetRegister σ)))                    = Just $ CodeGen $ \m -> do return $! In4 (_GetSoft σ m)
+deep (MetaCombinator Tenderise (_ :< PutRegister σ (p :< _)))             = Just $ CodeGen $ \m -> do runCodeGen p (In4 (_PutSoft σ (In4 (Push (user UNIT) (blockCoins False m)))))
 deep _ = Nothing
 
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
@@ -142,6 +146,7 @@ shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 -- make sure to issue the fence after `p` is generated, to allow for a (safe) single character factor
 shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins False (addCoinsNeeded m))
+
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret
 -- However, I'm not yet sure about the interactions with try yet...

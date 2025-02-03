@@ -113,7 +113,9 @@ instance IFunctor ScopeRegister where
   imap f (ScopeRegister p g) = ScopeRegister (f p) (f . g)
 
 instance Show MetaCombinator where
-  show Cut = "cut point"
+  show Cut       = "cut point"
+  show Tenderise = "tenderise register"
+  show Deadcode  = "dead code"
 
 {-# INLINE traverseCombinator #-}
 traverseCombinator :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)

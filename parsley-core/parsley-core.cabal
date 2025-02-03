@@ -70,6 +70,8 @@ library
                        Parsley.Internal.Frontend.Optimiser,
 
                        Parsley.Internal.Frontend.Analysis,
+                       Parsley.Internal.Frontend.Analysis.Liveness,
+                       Parsley.Internal.Frontend.Analysis.CFG,
                        Parsley.Internal.Frontend.Analysis.Cut,
  
                        Parsley.Internal.Frontend.Analysis.Dependencies,

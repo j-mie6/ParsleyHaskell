@@ -113,23 +113,34 @@ buildCFG p mus = cfg
             (pg, calls1) = graph p
             (qg, calls2) = graph q
             in (pg `seqCFG` qg, calls1 <> calls2)
-        graph' t (p :<|>: q) = let -- TODO: dependency on terminals of p to start of q
-             (CFG ps pts mp, calls1) = graph p
-             (CFG qs qts mq, calls2) = graph q
-             m = mp `mergeEdges` mq `mergeEdges` M.fromList [(t, (Set.empty, Set.empty, Set.fromList [qs, ps]))]
-             in (CFG t (Set.union pts qts) m, calls1 <> calls2)
+        graph' t (p :<|>: q) = let
+            (CFG ps pts mp, calls1) = graph p
+            (CFG qs qts mq, calls2) = graph q
+            m = mp `mergeEdges` mq
+                   `mergeEdges` M.fromSet (const (Set.empty, Set.empty, Set.singleton qs)) pts -- 
+                   `mergeEdges` M.fromList [(t, (Set.empty, Set.empty, Set.fromList [qs, ps]))] -- root node to the start of both
+            in (CFG t (Set.union pts qts) m, calls1 <> calls2)
         graph' _ (Try p) = graph p
         graph' _ (LookAhead p) = graph p
         graph' t (Let (MVar im)) = (leaf t, DList.fromList [(t, im)])
         graph' _ (NotFollowedBy p) = graph p
         graph' _ (Branch b p q) = let
-             (CFG bs bts mb, calls1) = graph b
-             (CFG ps pts mp, calls2) = graph p
-             (CFG qs qts mq, calls3) = graph q
-             m = mb `mergeEdges` mp `mergeEdges` mq
-             m' = Set.foldl (\x n -> addEdge n qs (addEdge n ps x)) m bts
-             in (CFG bs (Set.union pts qts) m', calls1 <> calls2 <> calls3)
-        graph' _ (Match p fs qs def) = undefined -- TODO: implement
+            (CFG bs bts mb, calls1) = graph b
+            (CFG ps pts mp, calls2) = graph p
+            (CFG qs qts mq, calls3) = graph q
+            m = mb `mergeEdges` mp `mergeEdges` mq
+            m' = Set.foldl (\x n -> addEdge n qs (addEdge n ps x)) m bts
+            in (CFG bs (Set.union pts qts) m', calls1 <> calls2 <> calls3)
+        graph' _ (Match p _ qs def) = let -- TODO: double check this works
+            (CFG ps pts mp, callsp) = graph p
+            (CFG ds dts md, callsdef) = graph def
+            qsGraphs = map graph qs
+            qsCalls = map snd qsGraphs
+            qsCFGs = map fst qsGraphs
+            qsTerminals = foldl (\a (CFG _ t _) -> Set.union t a) Set.empty qsCFGs
+            m = foldl (\a (CFG s _ m') -> a `mergeEdges` M.fromSet (const (Set.empty, Set.empty, Set.singleton s)) pts `mergeEdges`  m')
+                    (M.fromSet (const (Set.empty, Set.empty, Set.singleton ds)) pts `mergeEdges` mp `mergeEdges` md) qsCFGs
+            in (CFG ps (Set.union qsTerminals dts) m, foldl (<>) callsp qsCalls <> callsdef)
         graph' _ (Loop body exit) = let
             (CFG bs bts bm, calls1) = graph body
             (CFG es ets em, calls2) = graph exit

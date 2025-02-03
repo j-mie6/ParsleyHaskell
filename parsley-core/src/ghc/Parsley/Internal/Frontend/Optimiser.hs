@@ -28,6 +28,8 @@ import qualified Parsley.Internal.Opt   as Opt
 import qualified Data.Dependent.Map as DM
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Debug.Trace (trace)
+import Parsley.Internal.Frontend.Analysis.ReachingDefs (soleReachers)
 
 pattern (:<$>:) :: Defunc (a -> b) -> Fix Combinator a -> Combinator (Fix Combinator) b
 pattern f :<$>: p = In (Pure f) :<*>: p
@@ -191,21 +193,37 @@ optimise
 -}
 dataFlowOptimise :: (?flags :: Opt.Flags) => Fix Combinator a -> DM.DMap MVar (Fix Combinator) -> (Fix Combinator a, DM.DMap MVar (Fix Combinator))
 dataFlowOptimise p mus
- | Opt.deadCodeElimination ?flags = (cata (deadcodeAlg liveness) ptagged, DM.map (cata (deadcodeAlg liveness)) mustagged)
+ | Opt.deadCodeElimination ?flags = trace (show ptagged') $ (p', mus')
  | otherwise                      = (p, mus)
   where
+    -- Tag the parser and build CFG
     (ptagged, mustagged, _) = tagCombinator  p mus
     cfg = buildCFG ptagged mustagged
+
+    -- Perform reaching definition analysis and tenderisation
+    reachers = soleReachers cfg
+    ptagged' = cata tenderisationAlg ptagged
+    mustagged' = DM.map (cata tenderisationAlg) mustagged
+    invalidTag = -1 -- We do not care about tags on metacombinators TODO: this is fugly
+    tenderisationAlg :: TaggedCombinator (Fix TaggedCombinator) v -> Fix TaggedCombinator v
+    tenderisationAlg (Tag t c@(GetRegister σ)) = if (reachers M.! t) (SomeΣVar σ)
+                                                 then In $ Tag invalidTag (MetaCombinator Tenderise (In $ Tag t c)) 
+                                                 else In $ Tag t c
+    tenderisationAlg (Tag t comb) = In $ Tag t comb
+
+    -- Perform liveness Analysis and dead-code elim.
     liveness = livenessAnalysis cfg
+    p' = cata (deadcodeAlg liveness) ptagged'
+    mus' = DM.map (cata (deadcodeAlg liveness)) mustagged'
 
     deadcodeAlg :: LivenessAnalysisResult -> TaggedCombinator (Fix Combinator) v -> Fix Combinator v
     --                                                          then In c else In $ MetaCombinator Tenderise (In c)
     -- GetRegister: Here we cannot eliminate the code (no continuation) without imposing some  default value. 
     --              Thus, we /tenderise/ the access.
-    deadcodeAlg liveness (Tag tag c@(GetRegister σ))      = if S.member (SomeΣVar σ) (liveIn $ (M.! tag) liveness) 
+    deadcodeAlg liveness (Tag tag c@(GetRegister σ))      = if S.member (SomeΣVar σ) (liveIn $ (M.! tag) liveness)
                                                             then In c else In $ MetaCombinator Tenderise (In c)
     -- PutRegister: Skip if the register is not alive going out.
-    deadcodeAlg liveness (Tag tag c@(PutRegister σ _))    = if S.member (SomeΣVar σ) (liveOut $ (M.! tag) liveness) 
+    deadcodeAlg liveness (Tag tag c@(PutRegister σ _))    = if S.member (SomeΣVar σ) (liveOut $ (M.! tag) liveness)
                                                             then In c else In $ MetaCombinator Tenderise (In c)
     -- NOTE: I believe that all creates of registers need to be hard. E.g c :=1, c = 2 means the first def is dead, but not really
     -- as creation always has an effect: bringing the register to existence.

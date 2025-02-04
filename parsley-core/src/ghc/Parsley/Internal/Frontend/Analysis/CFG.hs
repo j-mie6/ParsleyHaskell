@@ -161,7 +161,9 @@ buildCFG p mus = cfg
             (CFG bs bts bm, calls1) = graph body
             (CFG es ets em, calls2) = graph exit
             m = bm `mergeEdges` em
-            m' = Set.foldl (\x n -> addEdge n es x) m bts -- add exit edges
+            -- add exit edges (can be anywhere in the body due to failure)
+            bexits = M.foldlWithKey (\a k(_, x) -> a `Set.union` x `Set.union` Set.singleton k) bts bm
+            m' = m `mergeEdges` M.fromSet (const (Nothing, Set.singleton es)) bexits 
             m'' = Set.foldl (\x n -> addEdge n bs x) m' bts -- add loopback edges
             in (CFG bs ets m'', calls1 <> calls2)
         graph' t (MakeRegister σ p q) = let

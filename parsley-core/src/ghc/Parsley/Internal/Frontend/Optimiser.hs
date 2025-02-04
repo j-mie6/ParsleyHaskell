@@ -193,7 +193,7 @@ optimise
 -}
 dataFlowOptimise :: (?flags :: Opt.Flags) => Fix Combinator a -> DM.DMap MVar (Fix Combinator) -> (Fix Combinator a, DM.DMap MVar (Fix Combinator))
 dataFlowOptimise p mus
- | Opt.deadCodeElimination ?flags = trace (show ptagged') $ (p', mus')
+ | Opt.deadCodeElimination ?flags = trace (show p') $ (p', mus')
  | otherwise                      = (p, mus)
   where
     -- Tag the parser and build CFG

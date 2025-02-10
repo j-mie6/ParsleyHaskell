@@ -20,23 +20,23 @@ import Data.Array                           (Array)
 import Data.Array.MArray                    (readArray, writeArray, newArray, newArray_)
 import Data.Array.ST                        (STArray, runSTUArray, runSTArray)
 import Data.Array.Unboxed                   (UArray)
-import Data.Bifunctor                       (first, second)
 import Data.Dependent.Map                   (DMap)
-import Data.Foldable                        (foldl')
+import Data.Foldable                        (foldl', traverse_)
 import Data.Map.Strict                      (Map)
 import Data.Set                             (Set)
 import Data.STRef                           (newSTRef, readSTRef, writeSTRef)
 import Parsley.Internal.Common.Indexed      (Fix, cata, Const1(..), (:*:)(..), zipper)
-import Parsley.Internal.Common.State        (State, MonadState, execState, modify')
-import Parsley.Internal.Core.CombinatorAST  (Combinator(..), traverseCombinator)
-import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), ΣVar, SomeΣVar(..))
+import Parsley.Internal.Common.State        (State, MonadState (get), execState, modify')
+import Parsley.Internal.Core.CombinatorAST  (Combinator(..), traverseCombinator, traverseCombinatorRev)
+import Parsley.Internal.Core.Identifiers    (IMVar(..), MVar(..), ΣVar, SomeΣVar(..))
 
 import qualified Data.Dependent.Map as DMap   (foldrWithKey, filterWithKey)
-import qualified Data.Map.Strict    as Map    ((!), empty, insert, findMax, elems, maxView, fromList, fromDistinctAscList)
-import qualified Data.Set           as Set    (toList, insert, union, unions, member, notMember, empty, (\\), fromDistinctAscList, size)
+import qualified Data.Map.Strict    as Map    ((!), empty, insert, insertWith, findMax, elems, maxView, fromList, fromDistinctAscList, foldlWithKey)
+import qualified Data.Set           as Set    (toList, insert, union, unions, member, notMember, empty, (\\), fromDistinctAscList, size, singleton)
 import qualified Data.Array         as Array  ((!), listArray, bounds, indices)
 import qualified Data.Array.Unboxed as UArray ((!), assocs)
 import qualified Data.List          as List   (partition)
+import Debug.Trace (trace)
 
 type Graph = Array IMVar [IMVar]
 type PQueue k a = Map k a
@@ -137,22 +137,26 @@ propagateRegs reachables dfnums uses defs callees callers = toMap $ runSTArray $
 data DependencyMaps = DependencyMaps {
   usedRegisters         :: !(Map IMVar (Set SomeΣVar)), -- Leave Lazy
   immediateDependencies :: !(Map IMVar (Set IMVar)), -- Could be Strict
-  definedRegisters      :: !(Map IMVar (Set SomeΣVar))
-}
+  definedRegisters      :: !(Map IMVar (Set SomeΣVar)),
+  -- returnContRegisters: For each let-bound parser, set of ΣVars that are free   after a call to the parser from extrinsic contexts
+  returnContRegisters   :: !(Map IMVar (Set SomeΣVar)) 
+  }
 
 buildDependencyMaps :: DMap MVar (Fix Combinator) -> DependencyMaps
 buildDependencyMaps = DMap.foldrWithKey (\(MVar v) p deps@DependencyMaps{..} ->
-  let (uses, defs, ds) = freeRegistersAndDependencies v p
+  let (uses, defs, ds, retFrees) = freeRegistersAndDependencies v p
   in deps { usedRegisters = Map.insert v uses usedRegisters
           , immediateDependencies = Map.insert v ds immediateDependencies
-          , definedRegisters = Map.insert v defs definedRegisters}) (DependencyMaps Map.empty Map.empty Map.empty)
+          , definedRegisters = Map.insert v defs definedRegisters
+          , returnContRegisters = Map.foldlWithKey (\a k b -> Map.insertWith Set.union k b a) returnContRegisters retFrees})
+           (DependencyMaps Map.empty Map.empty Map.empty Map.empty)
 
-freeRegistersAndDependencies :: IMVar -> Fix Combinator a -> (Set SomeΣVar,  Set SomeΣVar, Set IMVar)
+freeRegistersAndDependencies :: IMVar -> Fix Combinator a -> (Set SomeΣVar,  Set SomeΣVar, Set IMVar, Map IMVar (Set SomeΣVar))
 freeRegistersAndDependencies v p =
   let frsm :*: depsm = zipper freeRegistersAlg (dependenciesAlg (Just v)) p
-      (uses, defs) = runFreeRegisters frsm
-      ds = runDependencies depsm
-  in (uses, defs, ds)
+      (uses, defs, retFrees) = runFreeRegisters frsm
+      ds = {-trace ("JYRYS FREES:" ++ show frees) $-} runDependencies depsm
+  in (uses, defs, ds, retFrees)
 
 -- DEPENDENCY ANALYSIS
 newtype Dependencies a = Dependencies { doDependencies :: State (Set IMVar) () }
@@ -172,19 +176,34 @@ dependsOn :: MonadState (Set IMVar) m => MVar a -> m ()
 dependsOn (MVar v) = modify' (Set.insert v)
 
 -- FREE REGISTER ANALYSIS
-newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: State (Set SomeΣVar, Set SomeΣVar) () }
-runFreeRegisters :: FreeRegisters a -> (Set SomeΣVar, Set SomeΣVar)
-runFreeRegisters = flip execState (Set.empty, Set.empty) . doFreeRegisters
+newtype FreeRegisters a = FreeRegisters { doFreeRegisters :: State (Set SomeΣVar, Set SomeΣVar, Map IMVar (Set SomeΣVar)) () }
+runFreeRegisters :: FreeRegisters a -> (Set SomeΣVar, Set SomeΣVar, Map IMVar (Set SomeΣVar))
+runFreeRegisters = flip execState (Set.empty, Set.empty, Map.empty) . doFreeRegisters
 
 {-# INLINE freeRegistersAlg #-}
 freeRegistersAlg :: Combinator FreeRegisters a -> FreeRegisters a
 freeRegistersAlg (GetRegister σ)      = FreeRegisters $ do uses σ
 freeRegistersAlg (PutRegister σ p)    = FreeRegisters $ do uses σ; doFreeRegisters p
 freeRegistersAlg (MakeRegister σ p q) = FreeRegisters $ do defs σ; doFreeRegisters p; doFreeRegisters q
-freeRegistersAlg p                    = FreeRegisters $ do traverseCombinator (fmap Const1 . doFreeRegisters) p; return ()
+freeRegistersAlg (Let µ)              = FreeRegisters $ do freeAfterRet µ; return ()
+freeRegistersAlg p                    = FreeRegisters $ do traverseCombinatorRev (fmap Const1 . doFreeRegisters) p; return ()
 
-uses :: MonadState (Set SomeΣVar, vs) m => ΣVar a -> m ()
-uses σ = modify' (first (Set.insert (SomeΣVar σ)))
+first3 :: (a -> a') -> (a,b,c) -> (a', b, c)
+first3 f (a, b, c) = (f a, b, c)
 
-defs :: MonadState (vs, Set SomeΣVar) m => ΣVar a -> m ()
-defs σ = modify' (second (Set.insert (SomeΣVar σ)))
+second3 :: (b -> b') -> (a,b,c) -> (a, b', c)
+second3 f (a, b, c) = (a, f b, c)
+
+third3 :: (c -> c') -> (a,b,c) -> (a, b, c')
+third3 f (a, b, c) = (a, b, f c)
+
+uses :: MonadState (Set SomeΣVar, vs, vs') m => ΣVar a -> m ()
+uses σ = modify' (first3 (Set.insert (SomeΣVar σ)))
+
+defs :: MonadState (vs, Set SomeΣVar, vs') m => ΣVar a -> m ()
+defs σ = modify' (second3 (Set.insert (SomeΣVar σ)))
+
+freeAfterRet :: MonadState (Set SomeΣVar, Set SomeΣVar, Map IMVar (Set SomeΣVar)) m => MVar a -> m ()
+freeAfterRet (MVar µ) = do
+  (use, def, _) <- get
+  traverse_ (modify' . third3 . Map.insertWith Set.union µ . Set.singleton) (use Set.\\ def)

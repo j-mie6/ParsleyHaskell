@@ -6,6 +6,7 @@ import Parsley.Internal.Common           (IFunctor(..), Fix, Const1(..), cata, i
 import Parsley.Internal.Core.Identifiers (MVar, ΣVar)
 import Parsley.Internal.Core.CharPred    (CharPred)
 import Parsley.Internal.Core.Defunc      (Defunc)
+import Control.Applicative ((<**>))
 
 {-|
 The opaque datatype that represents parsers.
@@ -136,3 +137,26 @@ traverseCombinator _      (Pure x)             = pure (Pure x)
 traverseCombinator _      (Satisfy f)          = pure (Satisfy f)
 traverseCombinator _      (Let v)              = pure (Let v)
 traverseCombinator expose (MetaCombinator m p) = MetaCombinator m <$> expose p
+
+{-# INLINE traverseCombinatorRev #-}
+traverseCombinatorRev :: Applicative m => (forall a. f a -> m (k a)) -> Combinator f a -> m (Combinator k a)
+traverseCombinatorRev expose (pf :<*>: px)        = expose px <**> ((:<*>:) <$> expose pf)
+traverseCombinatorRev expose (p :*>: q)           = expose q <**> ((:*>:) <$> expose p)
+traverseCombinatorRev expose (p :<*: q)           = expose q <**> ((:<*:) <$> expose p)
+traverseCombinatorRev expose (p :<|>: q)          = expose q <**> ((:<|>:) <$> expose p)
+traverseCombinatorRev _      Empty                = pure Empty
+traverseCombinatorRev expose (Try p)              = Try <$> expose p
+traverseCombinatorRev expose (LookAhead p)        = LookAhead <$> expose p
+traverseCombinatorRev expose (NotFollowedBy p)    = NotFollowedBy <$> expose p
+traverseCombinatorRev expose (Branch b p q)       = expose q <**> (expose p <**> (Branch <$> expose b))
+traverseCombinatorRev expose (Match p fs qs d)    = expose d <**> (traverse expose qs <**> (pure fs  <**> (Match <$> expose p)))
+traverseCombinatorRev expose (Loop body exit)     = expose exit <**> (Loop <$> expose body)
+traverseCombinatorRev expose (MakeRegister σ p q) = expose q <**> (MakeRegister σ <$> expose p)
+traverseCombinatorRev _      (GetRegister σ)      = pure (GetRegister σ)
+traverseCombinatorRev expose (PutRegister σ p)    = PutRegister σ <$> expose p
+traverseCombinatorRev _      (Position sel)       = pure (Position sel)
+traverseCombinatorRev expose (Debug name p)       = Debug name <$> expose p
+traverseCombinatorRev _      (Pure x)             = pure (Pure x)
+traverseCombinatorRev _      (Satisfy f)          = pure (Satisfy f)
+traverseCombinatorRev _      (Let v)              = pure (Let v)
+traverseCombinatorRev expose (MetaCombinator m p) = MetaCombinator m <$> expose p

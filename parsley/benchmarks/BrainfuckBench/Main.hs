@@ -6,6 +6,8 @@
              TypeFamilies,
              UnboxedTuples,
              TypeApplications #-}
+{-# OPTIONS_GHC -ddump-simpl -ddump-to-file #-}
+
 module Main where
 import Gauge.Main          (Benchmark, bgroup)
 import Control.DeepSeq     (NFData)
@@ -37,7 +39,7 @@ brainfuckParsleyT :: Text -> Maybe [BrainFuckOp]
 brainfuckParsleyT = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
 
 brainfuckParsleyB :: ByteString -> Maybe [BrainFuckOp]
-brainfuckParsleyB = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleyB = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck')
 
 brainfuckParsleyLB :: Data.ByteString.Lazy.ByteString -> Maybe [BrainFuckOp]
 brainfuckParsleyLB = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)

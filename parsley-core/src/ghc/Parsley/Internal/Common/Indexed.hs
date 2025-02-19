@@ -119,5 +119,6 @@ newtype Const4 a i j k l = Const4 {getConst4 :: a}
 
 data Tag t f (k :: Type -> Type) a = Tag {tag :: t, tagged :: f k a}
 
+
 instance IFunctor f => IFunctor (Tag t f) where
   imap f (Tag t k) = Tag t (imap f k)

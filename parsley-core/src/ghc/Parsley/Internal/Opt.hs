@@ -50,5 +50,5 @@ full = Flags { lawBasedOptimisations    = on
              , reclaimInput             = on
              , deduceFailPath           = on
              --, closeFreeRegisters       = on
-             , deadCodeElimination      = on
+             , deadCodeElimination      = off
              }

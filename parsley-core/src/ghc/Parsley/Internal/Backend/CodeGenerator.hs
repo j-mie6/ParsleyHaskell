@@ -25,11 +25,14 @@ import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFre
 import Parsley.Internal.Common.Indexed     (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 import Parsley.Internal.Core.Defunc        (pattern UNIT)
-import Parsley.Internal.Trace              (Trace(trace))
+import Parsley.Internal.Trace              (Trace)
+import Debug.Trace              (trace)
+
 
 import Parsley.Internal.Core.Defunc as Core (Defunc)
 
 import qualified Parsley.Internal.Opt as Opt
+import Parsley.Internal.Backend.Analysis.ReferenceBinds (bindReferences)
 
 type CodeGenStack a = VFreshT IΦVar (VFresh IMVar) a
 runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> a
@@ -54,7 +57,7 @@ codeGen letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\
   where
     name = maybe "TOP LEVEL" show letBound
     --addCoinsTop = maybe addCoinsNeeded (const id) letBound
-    m = finalise (histo alg p)
+    m = bindReferences $ finalise (histo alg p)
     alg :: Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
     -- add coins is safe here because if a cut is present it will only factor 1 coin

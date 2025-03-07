@@ -17,7 +17,6 @@ module Parsley.Internal.Backend.Analysis.ReferenceBinds (bindReferences) where
 import Parsley.Internal.Common (Fix4, HFresh, MonadFresh (..), IFunctor4, intercalateDiff)
 import Parsley.Internal.Backend.Machine (Instr (..), SomeΣVar, Handler (..), IΦVar, PosSelector (..), ΦVar (..), ΣVar (..), IΣVar)
 import Parsley.Internal.Common.Indexed (Nat, Fix4 (..), Const4 (..), cata4, IFunctor4 (imap4))
-import Data.Kind (Type)
 
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -37,7 +36,7 @@ import Control.Monad.State (gets, execState)
 import Control.Monad (unless)
 
 bindReferences :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-bindReferences instrs = trace (show taggedInstrs ++ show threadables) instrs
+bindReferences instrs = trace ("TAGSS: " ++ show taggedInstrs ++ "\n\n THREADABLES: " ++ show threadables) instrs
     where
         -- 1. tag the instructions
         (taggedInstrs, maxTag) = tagInstructions instrs
@@ -89,7 +88,7 @@ instance Show (Fix4 (TaggedInstr o) xs n r a) where
       alg (Tag4 t (MetaInstr m k))            = shows t . ": [" . shows m . "] " . getConst4 k
 
 newtype Tagger o xs n r a = Tagger {doTagger :: HFresh InstrID (Fix4 (TaggedInstr o) xs n r a)}
-
+-- mcata
 tagInstructions :: Fix4 (Instr o) xs n r a -> (Fix4 (TaggedInstr o) xs n r a, Int)
 tagInstructions instrs = runFresh (doTagger $ cata4 alg instrs) initID
     where
@@ -169,7 +168,7 @@ instance Monoid Graph where
 -- map instrID to (use, def)
 type ReferenceData = Map InstrID (Set IΣVar, Set IΣVar)
 
-data GraphConstruction = GraphConstruction PhiData Graph ReferenceData
+data GraphConstruction = GraphConstruction{ phiData :: PhiData, graphData :: Graph, refData :: ReferenceData}
 
 -- Smart constructors for creating constitutient parts of `GraphConstruction`
 phiGCon p = GraphConstruction p mempty mempty
@@ -191,25 +190,25 @@ type HandlerEntries = [HandlerEntry]
 newtype Grapher o xs n r a = Grapher {doGrapher :: StateT HandlerEntries (Writer GraphConstruction) InstrID }
 
 threadableRefs :: InstrID -> Fix4 (TaggedInstr o) xs n r a -> ThreadableRefs
-threadableRefs maxID instrs = trace (show graph) $ Map.map (uncurry (Set.\\)) usedefs'
+threadableRefs maxID instrs = result
     where
         -- 1. Construct graph by attaching join points, loops, and sequential instructions (in reverse) (_, GraphConstruction phidata graph usedefs)
 
         (_, GraphConstruction phidata graph' usedefs) = (runWriter . flip runStateT [] . doGrapher) $ cata4 (Grapher . alg) instrs
         -- Turn our partial graph' into a full one with phidata
-        graph = foldl (\g (join, phi) -> Map.unionWith Set.union g $ Map.fromList [(join, Set.singleton $ joinPtsMap Map.! phi)]) (unGraph graph') joins
+        graph = Graph $ foldl (\g (join, phi) -> Map.unionWith Set.union g $ Map.fromList [(join, Set.singleton $ joinPtsMap Map.! phi)]) (unGraph graph') joins
             where
                 (joins, joinPts) = phidata
                 joinPtsMap = Map.fromList $ DList.toList joinPts
 
         alg :: TaggedInstr o (Grapher o) xs n r a ->  StateT HandlerEntries (Writer GraphConstruction) InstrID
-        alg (Tag4 t Ret)                = handlerEdge t >> pure t
+        alg (Tag4 t Ret)                = handlerEdge t >> addStump t >> pure t
         alg (Tag4 t (Call _ k))         = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Push _ k))         = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Pop k))            = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Lift2 _ k))        = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Sat _ k))          = handlerEdge t >> edgeToK t k
-        alg (Tag4 t Empt)               = handlerEdge t >> pure t
+        alg (Tag4 t Empt)               = handlerEdge t >> addStump t >> pure t
         alg (Tag4 t (Commit k))         = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Catch p h))        = handlerEdge t >> pushHandler h >> edgeToK t p >> popHandler >> pure t
         alg (Tag4 t (Tell k))           = handlerEdge t >> edgeToK t k
@@ -246,6 +245,7 @@ threadableRefs maxID instrs = trace (show graph) $ Map.map (uncurry (Set.\\)) us
         addJoin t (ΦVar  φ)   = (lift . tell) (phiGCon (DList.fromList [(t, φ)], DList.empty))
         addMkJoin t (ΦVar  φ) = (lift . tell) (phiGCon (DList.empty, DList.fromList [(φ, t)]))
 
+        addStump a = (lift . tell . graphGCon . Graph) (Map.fromList [(a, mempty)])
         addEdge a b = (lift . tell . graphGCon . Graph) (Map.fromList [(a, Set.singleton b)])
         edgeToK t k = doGrapher k >>= addEdge t >> pure t
 
@@ -279,9 +279,7 @@ threadableRefs maxID instrs = trace (show graph) $ Map.map (uncurry (Set.\\)) us
         addDef t (ΣVar σ) = (lift . tell . refGCon . Map.fromList) [(t, (mempty, Set.singleton σ))]
 
         -- 2. Propagate the (use, def) sets of each node through the graph using the data-flow equations
-        --      * use(n) = union_{x in succ(n)} use(x)
-        --      * def(n) = union_{x in succ(n)} def(x)
-        usedefs' = propagateRegs graph' usedefs
+        usedefs' = propagateRegs graph usedefs
         propagateRegs :: Graph -> ReferenceData -> ReferenceData
         propagateRegs graph usedef = snd $ execState iter (initWL, initMap)
             where
@@ -289,10 +287,11 @@ threadableRefs maxID instrs = trace (show graph) $ Map.map (uncurry (Set.\\)) us
                 -- flip the graph for predessors
                 pred = Map.foldlWithKey (\g n nsucc -> foldl
                                             (\g s -> Map.insertWith Set.union s (Set.singleton n) g) g nsucc)
-                                        mempty (unGraph graph)
+                                        (Map.fromList [(x, mempty) | x <- [0..maxID]]) -- make sure all nodes have an entry in there
+                                        succ
+                -- All graph nodes
                 initWL = Map.keys succ
-                initMap = Map.foldlWithKey
-                            (\a k _ -> a <> Map.singleton k (mempty, mempty)) usedef (unGraph graph)
+                initMap = foldl (\a k -> a <> Map.singleton k (mempty, mempty)) usedef [0..maxID]
 
                 iter :: State ([InstrID], ReferenceData) ()
                 iter = do
@@ -331,6 +330,7 @@ threadableRefs maxID instrs = trace (show graph) $ Map.map (uncurry (Set.\\)) us
 
         -- 3. use the instrID -> (use, def) data to get the "future free registers" from each node with
         --    free = use \ def
+        result = Map.map (uncurry (Set.\\)) usedefs'
 
 markThreadables :: ThreadableRefs -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
 markThreadables = undefined

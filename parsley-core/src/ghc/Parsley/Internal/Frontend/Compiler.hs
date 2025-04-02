@@ -48,6 +48,7 @@ import qualified Data.HashSet         as HashSet (member, insert, empty)
 import qualified Data.Map             as Map     ((!))
 import qualified Data.Set             as Set     (empty)
 import qualified Parsley.Internal.Opt as Opt
+import Data.Map (Map)
 
 {-|
 Given a user's parser, this will analyse it, extract bindings and then compile them with a given function
@@ -59,9 +60,9 @@ along with the top-level definition.
 {-# INLINEABLE compile #-}
 compile :: forall compiled a. (Trace, ?flags :: Opt.Flags)
         => Parser a                                                                              -- ^ The parser to compile.
-        -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> compiled x) -- ^ How to generate a compiled value with the distilled information.
+        -> (forall x. Map IMVar (Set SomeΣVar) -> Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> compiled x) -- ^ How to generate a compiled value with the distilled information.
         -> (compiled a, DMap MVar compiled)                                                      -- ^ The compiled top-level and all of the bindings.
-compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") (codeGen' Nothing p'', DMap.mapWithKey (codeGen' . Just) μs'')
+compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") (codeGen' frs Nothing p'', DMap.mapWithKey (codeGen' frs . Just) μs'')
   where
     (p', μs, maxV) = preprocess p
     (μs', frs) = dependencyAnalysis p' μs
@@ -71,8 +72,8 @@ compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.s
     freeRegs :: Maybe (MVar x) -> Set SomeΣVar
     freeRegs = maybe Set.empty (\(MVar v) -> frs Map.! v)
 
-    codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
-    codeGen' letBound p = codeGen letBound (analyse emptyFlags p) (freeRegs letBound) (maxV + 1)
+    codeGen' :: Map IMVar (Set SomeΣVar) -> Maybe (MVar x) -> Fix Combinator x -> compiled x
+    codeGen' frs letBound p = codeGen frs letBound (analyse emptyFlags p) (freeRegs letBound) (maxV + 1)
 
 preprocess :: (?flags :: Opt.Flags) => Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 preprocess p =

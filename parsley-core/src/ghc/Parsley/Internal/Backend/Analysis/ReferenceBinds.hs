@@ -333,4 +333,17 @@ threadableRefs maxID instrs = result
         result = Map.map (uncurry (Set.\\)) usedefs'
 
 markThreadables :: ThreadableRefs -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
-markThreadables = undefined
+markThreadables frees = cata4 (alg frees)
+    where
+        alg :: ThreadableRefs -> TaggedInstr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a
+        alg frees Tag4{tag, tagged} = In4 $ attachData (frees Map.! tag) tagged 
+
+        attachData :: Set IΣVar -> Instr o (Fix4 (Instr o)) xs n r a -> Instr o (Fix4 (Instr o)) xs n r a
+        attachData frees Ret                   = undefined
+        attachData frees (Call x k)            = undefined
+        attachData frees (Catch m h)           = undefined
+        attachData frees (Iter name body h)    = undefined
+        attachData frees (Join x)              = undefined
+        attachData frees (MkJoin x body scope) = undefined
+        -- no need to attach free reference data
+        attachData _ instr = instr 

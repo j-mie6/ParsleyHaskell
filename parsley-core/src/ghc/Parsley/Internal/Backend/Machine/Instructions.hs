@@ -31,7 +31,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
 
 import Data.Kind                                    (Type)
 import Data.Void                                    (Void)
-import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar, SomeΣVar)
 import Parsley.Internal.Backend.Machine.Types.Coins (Coins(willConsume))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))

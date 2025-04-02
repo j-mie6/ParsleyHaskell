@@ -33,6 +33,7 @@ import Parsley.Internal.Core.Defunc as Core (Defunc)
 
 import qualified Parsley.Internal.Opt as Opt
 import Parsley.Internal.Backend.Analysis.ReferenceBinds (bindReferences)
+import Data.Map (Map)
 
 type CodeGenStack a = VFreshT IΦVar (VFresh IMVar) a
 runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> a
@@ -48,12 +49,13 @@ Translates a parser represented with combinators into its machine representation
 -}
 {-# INLINEABLE codeGen #-}
 codeGen :: (Trace, ?flags :: Opt.Flags)
-        => Maybe (MVar x)   -- ^ The name of the parser, if it exists.
-        -> Fix Combinator x -- ^ The definition of the parser.
-        -> Set SomeΣVar     -- ^ The free registers it requires to run.
-        -> IMVar            -- ^ The binding identifier to start name generation from.
+        => Map IMVar (Set SomeΣVar) -- ^ The set of free references required to run each let-bound parser.
+        -> Maybe (MVar x)           -- ^ The name of the parser, if it exists.
+        -> Fix Combinator x         -- ^ The definition of the parser.
+        -> Set SomeΣVar             -- ^ The free registers it requires to run.
+        -> IMVar                    -- ^ The binding identifier to start name generation from.
         -> LetBinding o a x
-codeGen letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs newMeta
+codeGen frees letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs newMeta
   where
     name = maybe "TOP LEVEL" show letBound
     --addCoinsTop = maybe addCoinsNeeded (const id) letBound

@@ -186,7 +186,7 @@ Depending on the access type, either generates the code for a write to a registe
 writeΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 writeΣ σ Bound x k ctx = dup x $ \dupx -> [||
     let bref = $$(genDefunc dupx) 
-      in $$(k (bindΣ σ [|| bref ||] ctx))
+      in $$(k (bindΣ σ [|| bref ||] $ cacheΣ σ dupx ctx))
     ||]
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||

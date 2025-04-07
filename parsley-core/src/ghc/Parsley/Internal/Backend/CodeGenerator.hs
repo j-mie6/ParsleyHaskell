@@ -142,7 +142,7 @@ shallow (Loop body exit)             m =
   do μ <- askM
      bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (_Jump μ)))))
      exitc <- freshM (runCodeGen exit m)
-     return $! In4 (Iter μ (addCoinsNeeded bodyc) (parsecHandler (addCoinsNeeded exitc)))
+     return $! In4 (Iter μ Nothing (addCoinsNeeded bodyc) (parsecHandler (addCoinsNeeded exitc)))
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
 -- seems effective: blocks upstream coins from commuting down, but allows them to self factor

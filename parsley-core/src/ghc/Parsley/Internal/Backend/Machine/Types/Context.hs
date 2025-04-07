@@ -23,7 +23,7 @@ module Parsley.Internal.Backend.Machine.Types.Context (
 
     -- * Subroutines
     -- $sub-doc
-    insertSub, askSub,
+    insertSub, insertLoop, askSub,
 
     -- * Join Points
     -- $join-doc
@@ -33,9 +33,9 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- $reg-doc
 
     -- ** Putters
-    insertNewΣ, cacheΣ,
+    insertNewΣ, cacheΣ, bindΣ,
     -- ** Getters
-    concreteΣ, cachedΣ,
+    concreteΣ, cachedΣ, boundΣ,
     takeFreeRegisters,
 
     -- * Debug Level Tracking
@@ -69,7 +69,7 @@ import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(Coins, willConsume))
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
-import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
+import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont, QLooproutine (QLooproutine))
 import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
@@ -78,6 +78,7 @@ import qualified Parsley.Internal.Common.QueueLike            as Queue (empty, n
 import qualified Parsley.Internal.Common.RewindQueue          as Queue (rewind)
 
 -- Core Data-types
+
 {-|
 The `Ctx` stores information that aids or facilitates the generation of parser code,
 but its components are fully static and do not materialise as runtime values, but
@@ -86,6 +87,7 @@ may form part of the generated code.
 @since 1.0.0.0
 -}
 data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))               -- ^ Map of subroutine bindings.
+                     , μLoops     :: !(DMap MVar (QLooproutine s o a))              -- ^ Map of subroutine bindings associated with loops.
                      , φs         :: !(DMap ΦVar (QJoin s o a))                     -- ^ Map of join point bindings.
                      , σs         :: !(DMap ΣVar (Reg s))                           -- ^ Map of available registers.
                      , debugLevel :: {-# UNPACK #-} !Int                            -- ^ Approximate depth of debug combinator.
@@ -111,7 +113,7 @@ bindings: information about their required free-registers is included.
 @since 1.0.0.0
 -}
 emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty 0 Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty DMap.empty 0 0 0 Queue.empty 0 Queue.empty
 
 -- Subroutines
 {- $sub-doc
@@ -131,10 +133,17 @@ according to "local" @Reader@ semantics.
 @since 1.2.0.0
 -}
 insertSub :: MVar x                -- ^ The name of the binding.
-          -> StaSubroutine s o a x -- ^ The binding to register.
+          -> StaSubroutine '[] s o a x -- ^ The binding to register.
           -> Ctx s o a             -- ^ The current context.
           -> Ctx s o a             -- ^ The new context.
 insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs) (μs ctx)}
+
+insertLoop :: MVar x                   -- ^ The name of the binding.
+           -> StaSubroutine xs s o a x -- ^ The binding to register.
+           -> Regs xs                  -- ^ Free registers in loop.
+           -> Ctx s o a                -- ^ The current context.
+           -> Ctx s o a                -- ^ The new context.
+insertLoop μ q regs ctx = ctx {μLoops = DMap.insert μ (QLooproutine q regs) (μLoops ctx)}
 
 {-|
 Fetches a binding from the context according to its name (See `Parsley.Internal.Core.Identifiers.MVar`).
@@ -143,7 +152,7 @@ exception. If this binding had free registers, these are generously provided by 
 
 @since 1.2.0.0
 -}
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubroutine s o a x)
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubroutine '[] s o a x)
 askSub μ =
   do QSubroutine sub rs <- askSubUnbound μ
      asks (provideFreeRegisters sub rs)
@@ -190,6 +199,7 @@ that registers do not exist at runtime. Both forms of register data can be extra
 however exceptions will guard against mis-management.
 -}
 data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x)) -- ^ The "true" register
+                   , getBound  :: Maybe (Code x)           -- ^ The bound variable of the register's value 
                    , getCached :: Maybe (Defunc x) }       -- ^ The "most-recently known" value
 
 {-|
@@ -200,10 +210,11 @@ the original value in the register, which is injected into the cache.
 -}
 insertNewΣ :: ΣVar x                   -- ^ The name of the register.
            -> Maybe (Code (STRef s x)) -- ^ The runtime representation, if available.
+           -> Maybe (Code x)           -- ^ The bound representation, if available.
            -> Defunc x                 -- ^ The initial value stored into the register.
            -> Ctx s o a                -- ^ The old context.
            -> Ctx s o a                -- ^ The new context.
-insertNewΣ σ qref x ctx = ctx {σs = DMap.insert σ (Reg qref (Just x)) (σs ctx)}
+insertNewΣ σ qref bref x ctx = ctx {σs = DMap.insert σ (Reg qref bref (Just x)) (σs ctx)}
 
 {-|
 Updated the "last-known value" of a register in the cache.
@@ -212,8 +223,14 @@ Updated the "last-known value" of a register in the cache.
 -}
 cacheΣ :: ΣVar x -> Defunc x -> Ctx s o a -> Ctx s o a
 cacheΣ σ x ctx = case DMap.lookup σ (σs ctx) of
-  Just (Reg ref _) -> ctx {σs = DMap.insert σ (Reg ref (Just x)) (σs ctx)}
+  Just (Reg ref _ _) -> ctx {σs = DMap.insert σ (Reg ref Nothing (Just x)) (σs ctx)}
   Nothing          -> throw (outOfScopeRegister σ)
+
+{-| 
+Update the last-known bound variable name of a register
+-}
+bindΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
+bindΣ σ bind ctx = undefined 
 
 {-|
 Fetches a known to be concrete register (i.e. one that must be materialised
@@ -235,6 +252,14 @@ cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< (DMap.lookup σ . σs))
 
 {-|
+Fetches the bound variable of a register. If the register is not bound, a 
+@RegisterFault@ exception is thrown.
+
+-}
+boundΣ :: ΣVar x -> Ctx s o a -> Code x
+boundΣ σ = fromMaybe (throw (registerFault σ)) . (getBound <=< (DMap.lookup σ . σs))
+
+{-|
 When a binding is generated, it needs to generate function arguments for each of the
 free registers it requires. This is performed by this function, which also adds each
 of these freshly bound registers into the `Ctx`. Has the effect of converting a
@@ -246,18 +271,22 @@ of these freshly bound registers into the `Ctx`. Has the effect of converting a
 -- This needs to return a DynFunc: it is fed back to shared territory
 takeFreeRegisters :: Regs rs                              -- ^ The free registers demanded by the binding.
                   -> Ctx s o a                            -- ^ The old context.
-                  -> (Ctx s o a -> DynSubroutine s o a x) -- ^ Given the new context, function that produces the subroutine.
+                  -> (Ctx s o a -> DynSubroutine '[] s o a x) -- ^ Given the new context, function that produces the subroutine.
                   -> DynFunc rs s o a x                   -- ^ The newly produced dynamic function.
 takeFreeRegisters NoRegs ctx body = body ctx
 takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
 insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
-insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing) (σs ctx)}
+insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing Nothing) (σs ctx)}
 
 -- This needs to take a StaFunc, it is fed back via `askSub`
-provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine s o a x
+provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine '[] s o a x
 provideFreeRegisters sub NoRegs _ = sub
 provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
+
+--provideBoundRegisters :: StaSubroutine xs s o a x -> Regs xs -> Ctx s o a -> StaSubroutine '[] s o a x
+--provideBoundRegisters sub NoRegs _ = sub
+--provideBoundRegisters f (FreeReg σ σs) ctx = provideBoundRegisters (f (boundΣ σ ctx)) σs ctx
 
 -- Debug Level Tracking
 {- $debug-doc

@@ -16,6 +16,7 @@ import Parsley.Internal.Backend.Machine.Instructions
 import Parsley.Internal.Frontend.Analysis.Cut (cutAnalysis)
 
 import qualified Data.Set as Set (empty)
+import qualified Data.Map as Map
 import qualified Parsley.Internal.Opt   as Opt
 
 import Parsley.Internal.Verbose
@@ -30,7 +31,7 @@ toAST :: Parser a -> Fix Combinator a
 toAST = cata (In \/ undefined) . unParser
 
 codeGen' :: Fix Combinator a -> Binding o a a
-codeGen' p = let ?flags = Opt.fast in body (codeGen Nothing p Set.empty 0)
+codeGen' p = let ?flags = Opt.fast in body (codeGen Map.empty Nothing p Set.empty 0)
 
 leadingCoinsUnderCatch :: Fix4 (Instr o) xs n r a -> Maybe Int
 leadingCoinsUnderCatch (In4 (Catch (In4 (MetaInstr (AddCoins c) _)) _)) = Just (willConsume c)

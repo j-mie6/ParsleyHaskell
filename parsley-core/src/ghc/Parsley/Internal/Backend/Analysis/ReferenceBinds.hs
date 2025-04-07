@@ -62,7 +62,7 @@ instance Show (Fix4 (TaggedInstr o) xs n r a) where
       alg (Tag4 t Ret)                        = shows t . ": Ret"
       alg (Tag4 t (Call μ k))                 = "(" . shows t . ": Call " . shows μ . " " . getConst4 k . ")"
       alg (Tag4 t (Push x k))                 = "(" . shows t . ": Push " . shows x . " " . getConst4 k . ")"
-      alg (Tag4 t (Pop k))                    = "(" .shows t . ": Pop " . getConst4 k . ")"
+      alg (Tag4 t (Pop k))                    = "(" . shows t . ": Pop " . getConst4 k . ")"
       alg (Tag4 t (Lift2 f k))                = "(" . shows t . ": Lift2 " . shows f . " " . getConst4 k . ")"
       alg (Tag4 t (Sat f k))                  = "(" . shows t . ": Sat " . shows f . " " . getConst4 k . ")"
       alg (Tag4 t Empt)                       = shows t . ": Empt"
@@ -72,7 +72,7 @@ instance Show (Fix4 (TaggedInstr o) xs n r a) where
       alg (Tag4 t (Seek k))                   = "(" . shows t . ": Seek " . getConst4 k . ")"
       alg (Tag4 t (Case p q))                 = "(" . shows t . ": Case " . getConst4 p . " " . getConst4 q . ")"
       alg (Tag4 t (Choices fs ks def))        = "(" . shows t . ": Choices " . shows fs . " [" . intercalateDiff ", " (map getConst4 ks) . "] " . getConst4 def . ")"
-      alg (Tag4 t (Iter μ l h))               = shows t . ": {Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
+      alg (Tag4 t (Iter μ _ l h))             = shows t . ": {Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
       alg (Tag4 t (Join φ))                   = shows t . ": " . shows φ
       alg (Tag4 t (MkJoin φ p k))             = "(" . shows t . ": let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
       alg (Tag4 t (Swap k))                   = "(" . shows t . ": Swap " . getConst4 k . ")"
@@ -126,7 +126,7 @@ tagInstructions instrs = runFresh (doTagger $ cata4 alg instrs) initID
                                     ks' <- traverse doTagger ks
                                     def' <- doTagger def
                                     wrap (Choices fs ks' def')
-        alg (Iter μ l h)        = Tagger $ do
+        alg (Iter μ _ l h)        = Tagger $ do
                                     l' <- doTagger l
                                     h' <- case h of
                                         (Same a ka b kb) -> do
@@ -136,7 +136,7 @@ tagInstructions instrs = runFresh (doTagger $ cata4 alg instrs) initID
                                         (Always x k) -> do
                                                                 k' <- doTagger k
                                                                 return $ Always x k'
-                                    wrap (Iter μ l' h')
+                                    wrap (Iter μ Nothing l' h')
         alg (Join φ)            = Tagger $ wrap (Join φ)
         alg (MkJoin φ p k)      = Tagger $ do
                                     p' <- doTagger p
@@ -215,7 +215,7 @@ threadableRefs maxID instrs = result
         alg (Tag4 t (Seek k))           = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Case p q))         = handlerEdge t >> edgeToK t p >> edgeToK t q
         alg (Tag4 t (Choices _ ks def)) = handlerEdge t >> traverse (edgeToK t) ks >> edgeToK t def
-        alg (Tag4 t (Iter _ l h))       = do
+        alg (Tag4 t (Iter _ _ l h))     = do
                                                 handlerEdge t
                                                 he <- pushHandler h
                                                 entry <- doGrapher l
@@ -339,11 +339,11 @@ markThreadables frees = cata4 (alg frees)
         alg frees Tag4{tag, tagged} = In4 $ attachData (frees Map.! tag) tagged 
 
         attachData :: Set IΣVar -> Instr o (Fix4 (Instr o)) xs n r a -> Instr o (Fix4 (Instr o)) xs n r a
-        attachData frees Ret                   = undefined
-        attachData frees (Call x k)            = undefined
-        attachData frees (Catch m h)           = undefined
-        attachData frees (Iter name body h)    = undefined
-        attachData frees (Join x)              = undefined
-        attachData frees (MkJoin x body scope) = undefined
+        -- attachData frees Ret                   = Ret
+        -- attachData frees (Call x k)            = undefined
+        -- attachData frees (Catch m h)           = undefined
+        attachData frees (Iter name _ body h)     = Iter name (Just frees) body h
+        -- attachData frees (Join x)              = undefined
+        -- attachData frees (MkJoin x body scope) = undefined
         -- no need to attach free reference data
         attachData _ instr = instr 

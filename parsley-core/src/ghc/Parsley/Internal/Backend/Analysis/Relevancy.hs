@@ -59,7 +59,7 @@ alg (Tell k)           n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg (Seek k)           (SSucc n) = VCons True (getStack k n)
 alg (Case p q)         n         = VCons True (let VCons _ xs = zipRelevancy (getStack p n) (getStack q n) in xs)
 alg (Choices _ ks def) (SSucc n) = VCons True (foldr (zipRelevancy . (`getStack` n)) (getStack def n) ks)
-alg (Iter _ _ h)       n         = let VCons _ xs = algHandler h (SSucc n) in xs
+alg (Iter _ _ _ h)       n         = let VCons _ xs = algHandler h (SSucc n) in xs
 alg (Join _)           (SSucc n) = VCons True (replicateVec n False)
 alg (MkJoin _ b _)     n         = let VCons _ xs = getStack b (SSucc n) in xs
 alg (Swap k)           n         = let VCons rel1 (VCons rel2 xs) = getStack k n in VCons rel2 (VCons rel1 xs)

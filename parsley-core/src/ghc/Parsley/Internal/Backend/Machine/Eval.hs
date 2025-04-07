@@ -25,7 +25,7 @@ import Control.Monad                                       (forM, liftM2, liftM3
 import Control.Monad.Reader                                (Reader, ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
-import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar, IΣVar)
 import Parsley.Internal.Backend.Machine.InputOps           (InputOps, DynOps)
 import Parsley.Internal.Backend.Machine.InputRep           (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
@@ -47,6 +47,7 @@ import System.Console.Pretty                               (color, Color(Green))
 import qualified Debug.Trace (trace)
 import qualified Parsley.Internal.Opt   as Opt
 import Parsley.Internal.Opt (Flags(leadCharFactoring))
+import Data.Set (Set)
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
@@ -86,7 +87,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Seek k)            = evalSeek k
     alg (Case p q)          = evalCase p q
     alg (Choices fs ks def) = evalChoices fs ks def
-    alg (Iter μ l k)        = evalIter μ l k
+    alg (Iter μ frs l k)    = evalIter μ frs l k
     alg (Join φ)            = evalJoin φ
     alg (MkJoin φ p k)      = evalMkJoin φ p k
     alg (Swap k)            = evalSwap k
@@ -166,9 +167,18 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go _ _      _        def γ = def γ
 
 evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o, DynOps o)
-         => MVar Void -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
+         => MVar Void -> Maybe (Set IΣVar) -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
          -> MachineMonad s o xs n r a
-evalIter μ l h =
+evalIter μ Nothing l h =
+  freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
+    freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
+      local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
+        case h of
+          Always gh (Machine h) ->
+            liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
+          Same gyes (Machine yes) gno (Machine no) ->
+            liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
+evalIter μ (Just frees) l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs

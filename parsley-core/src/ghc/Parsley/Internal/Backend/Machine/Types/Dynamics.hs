@@ -38,7 +38,7 @@ Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.
 
 @since 1.4.0.0
 -}
-type DynSubroutine s o a x = Code (Subroutine# s o a x)
+type DynSubroutine xs s o a x = Code (Subroutine# xs s o a x)
 
 {-|
 Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.Func#`

@@ -31,7 +31,7 @@ module Parsley.Internal.Backend.Machine.Instructions (
 
 import Data.Kind                                    (Type)
 import Data.Void                                    (Void)
-import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar, SomeΣVar)
+import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar, SomeΣVar, IΣVar)
 import Parsley.Internal.Backend.Machine.Types.Coins (Coins(willConsume))
 import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
 import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))
@@ -41,6 +41,7 @@ import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
 import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
 
 import qualified Parsley.Internal.Backend.Machine.Types.Coins as Coins (pattern Zero)
+import Data.Set (Set)
 
 {-|
 This represents the instructions of the machine, in CPS form as an indexed functor.
@@ -127,6 +128,7 @@ data Instr (o :: Type)                                  -- The FIXED input type
 
   @since 1.0.0.0 -}
   Iter      :: MVar Void                  {- ^ The name of the binding. -}
+            -> Maybe (Set IΣVar)       {- ^ Set of free references body needs-}
             -> k '[] One Void a           {- ^ The body of the loop: it cannot return "normally". -}
             -> Handler o k (o : xs) n r a {- ^ The handler for the loop's exit. -}
             -> Instr o k xs n r a
@@ -226,6 +228,7 @@ in the generated code or not.
 -}
 data Access = Hard -- ^ Register exists at runtime and this interaction will use it.
             | Soft -- ^ Register may not exist, and the interaction should be with cache regardless.
+            | Bound -- ^ Register that is bound to a local variable, a la `let reg = val in ...`
             deriving stock Show
 
 {-|
@@ -402,7 +405,7 @@ instance IFunctor4 (Instr o) where
   imap4 f (Seek k)            = Seek (f k)
   imap4 f (Case p q)          = Case (f p) (f q)
   imap4 f (Choices fs ks def) = Choices fs (map f ks) (f def)
-  imap4 f (Iter μ l h)        = Iter μ (f l) (imap4 f h)
+  imap4 f (Iter μ frs l h)    = Iter μ frs (f l) (imap4 f h)
   imap4 _ (Join φ)            = Join φ
   imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
@@ -436,7 +439,7 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (Seek k)                   = "(Seek " . getConst4 k . ")"
       alg (Case p q)                 = "(Case " . getConst4 p . " " . getConst4 q . ")"
       alg (Choices fs ks def)        = "(Choices " . shows fs . " [" . intercalateDiff ", " (map getConst4 ks) . "] " . getConst4 def . ")"
-      alg (Iter μ l h)               = "{Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
+      alg (Iter μ _ l h)             = "{Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
       alg (Join φ)                   = shows φ
       alg (MkJoin φ p k)             = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
       alg (Swap k)                   = "(Swap " . getConst4 k . ")"

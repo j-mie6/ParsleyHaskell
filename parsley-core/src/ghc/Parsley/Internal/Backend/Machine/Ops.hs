@@ -167,10 +167,14 @@ that in the `Ctx` cache.
 @since 1.0.0.0
 -}
 newΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-newΣ σ Soft x k ctx = dup x $ \dupx -> k (insertNewΣ σ Nothing dupx ctx)
+newΣ σ Bound x k ctx = dup x $ \dupx -> [||
+    let bref = $$(genDefunc dupx)
+      in $$(k (insertNewΣ σ Nothing (Just [|| bref ||]) dupx ctx))
+  ||]
+newΣ σ Soft x k ctx = dup x $ \dupx -> k (insertNewΣ σ Nothing Nothing dupx ctx)
 newΣ σ Hard x k ctx = dup x $ \dupx -> [||
     do ref <- newSTRef $$(genDefunc dupx)
-       $$(k (insertNewΣ σ (Just [||ref||]) dupx ctx))
+       $$(k (insertNewΣ σ (Just [||ref||]) Nothing dupx ctx))
   ||]
 
 {-|
@@ -180,6 +184,10 @@ Depending on the access type, either generates the code for a write to a registe
 @since 1.0.0.0
 -}
 writeΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
+writeΣ σ Bound x k ctx = dup x $ \dupx -> [||
+    let bref = $$(genDefunc dupx) 
+      in $$(k (bindΣ σ [|| bref ||] ctx))
+    ||]
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$(genDefunc dupx)
@@ -193,6 +201,9 @@ the value from the cache and feeds it to a continuation.
 @since 1.0.0.0
 -}
 readΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
+readΣ σ Bound k ctx = let bref = boundΣ σ ctx in [||
+       $$(let fv = FREEVAR bref in k fv (cacheΣ σ fv ctx))
+  ||]
 readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
@@ -341,7 +352,7 @@ previous return continuation in the case of a tail call.
 @since 1.8.0.0
 -}
 callWithContinuation :: (MarshalOps o, DynOps o)
-                     => StaSubroutine s o a x           -- ^ The subroutine @sub@ that will be called.
+                     => StaSubroutine '[] s o a x           -- ^ The subroutine @sub@ that will be called.
                      -> StaCont s o a x                 -- ^ The return continuation for the subroutine.
                      -> Input o                         -- ^ The input to feed to @sub@.
                      -> Vec (Succ n) (AugmentedStaHandler s o a) -- ^ The stack from which to obtain the handler to pass to @sub@.
@@ -370,7 +381,7 @@ an optimisation on the offset if the subroutine has known input characteristics.
 -}
 callCC :: forall s o xs n r a x. (MarshalOps o, DynOps o, ?flags :: Opt.Flags)
        => Word                                                   --
-       -> StaSubroutine s o a x                                  -- ^ The subroutine @sub@ that will be called.
+       -> StaSubroutine '[] s o a x                              -- ^ The subroutine @sub@ that will be called.
        -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
        -> Γ s o xs (Succ n) r a                                  --
        -> Code (ST s (Maybe a))
@@ -422,6 +433,22 @@ bindIterAlways ctx μ l needed h inp u =
       let inp = toInput u inp#
       in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
                (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
+bindIterAlways' :: forall s o a. (RecBuilder o, DynOps o)
+               => Ctx s o a                  -- ^ The context to keep the binding
+               -> MVar Void                  -- ^ The name of the binding.
+               -> Machine s o '[] One Void a -- ^ The body of the loop.
+               -> Bool                       -- ^ Does loop exit require a binding?
+               -> StaHandlerBuilder s o a    -- ^ What to do after the loop exits (by failing)
+               -> Input o                    -- ^ The initial offset to provide to the loop
+               -> Word                       -- ^ The unique name for captured offset /and/ iteration offset
+               -> Code (ST s (Maybe a))
+bindIterAlways' ctx μ l needed h inp u = undefined 
+  {- bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
+    bindIter# @o (fromInput inp) $ \qloop inp# ->
+      let inp = toInput u inp#
+      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
+               (voidCoins (insertLoop μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
+-}
 
 {-|
 Similar to `bindIterAlways`, but builds a handler that performs in

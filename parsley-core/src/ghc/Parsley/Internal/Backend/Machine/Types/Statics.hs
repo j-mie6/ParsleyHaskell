@@ -39,7 +39,7 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
     staCont#,
 
     -- * Subroutines
-    QSubroutine(..), StaSubroutine, StaSubroutine#, StaFunc,
+    QSubroutine(..), QLooproutine(..), StaSubroutine, StaSubroutine#, StaFunc,
     -- ** Subroutine Builders
     qSubroutine, mkStaSubroutine, mkStaSubroutineMeta,
 
@@ -53,7 +53,7 @@ import Data.Kind                                                  (Type)
 import Data.Maybe                                                 (fromMaybe)
 import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata, newMeta)
 import Parsley.Internal.Backend.Machine.InputOps                  (DynOps)
-import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc)
+import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), fromInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
@@ -300,9 +300,13 @@ This represents the translation of `Parsley.Internal.Backend.Machine.Types.Base.
 but where the static function structure has been exposed. This allows for β-reduction
 on subroutines, a simple form of inlining optimisation: useful for iteration.
 
+NB: made into a type family to allow n-arity
+
 @since 1.8.0.0
 -}
-type StaSubroutine# s o a x = DynCont s o a x -> DynHandler s o a -> Input# o -> Code (ST s (Maybe a))
+type family StaSubroutine# (xs :: [Type]) s o a y where
+  StaSubroutine# '[] s o a y      = DynCont s o a y -> DynHandler s o a -> Input# o -> Code (ST s (Maybe a))
+  StaSubroutine# (x : xs) s o a y = Code x -> StaSubroutine# xs s o a y
 
 {-|
 Packages a `StaSubroutine#` along with statically determined metadata that describes it derived from
@@ -310,9 +314,9 @@ static analysis.
 
 @since 1.5.0.0
 -}
-data StaSubroutine s o a x = StaSubroutine {
+data StaSubroutine (xs :: [Type]) s o a x = StaSubroutine {
     -- | Extracts the underlying subroutine.
-    staSubroutine# :: !(StaSubroutine# s o a x),
+    staSubroutine# :: !(StaSubroutine# xs s o a x),
     -- | Extracts the metadata from a subroutine.
     meta :: {-# UNPACK #-} !Metadata
   }
@@ -322,7 +326,7 @@ Converts a `StaSubroutine#` into a `StaSubroutine` by providing the empty meta.
 
 @since 1.5.0.0
 -}
-mkStaSubroutine :: StaSubroutine# s o a x -> StaSubroutine s o a x
+mkStaSubroutine :: StaSubroutine# xs s o a x -> StaSubroutine xs s o a x
 mkStaSubroutine = mkStaSubroutineMeta newMeta
 
 {-|
@@ -330,7 +334,7 @@ Converts a `StaSubroutine#` into a `StaSubroutine` by providing its metadata.
 
 @since 1.5.0.0
 -}
-mkStaSubroutineMeta :: Metadata -> StaSubroutine# s o a x -> StaSubroutine s o a x
+mkStaSubroutineMeta :: Metadata -> StaSubroutine# xs s o a x -> StaSubroutine xs s o a x
 mkStaSubroutineMeta = flip StaSubroutine
 
 {-|
@@ -341,15 +345,17 @@ on subroutines with registers, a simple form of inlining optimisation.
 @since 1.4.0.0
 -}
 type family StaFunc (rs :: [Type]) s o a x where
-  StaFunc '[] s o a x      = StaSubroutine s o a x
+  StaFunc '[] s o a x      = StaSubroutine '[]  s o a x
   StaFunc (r : rs) s o a x = Code (STRef s r) -> StaFunc rs s o a x
+
 
 {-|
 Wraps a `StaFunc` with its free registers, which are kept existential.
 
 @since 1.4.0.0
 -}
-data QSubroutine s o a x = forall rs. QSubroutine !(StaFunc rs s o a x) !(Regs rs)
+data QSubroutine s o a x = forall rs. QSubroutine !(StaFunc rs s o a x) !(Regs rs) 
+data QLooproutine s o a x = forall xs. QLooproutine !(StaSubroutine xs s o a x) !(Regs xs)
 
 {-|
 Converts a `Parsley.Internal.Backend.Machine.Types.Dynamics.DynFunc` that relies

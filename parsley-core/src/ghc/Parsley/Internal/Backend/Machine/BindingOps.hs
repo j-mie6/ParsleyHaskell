@@ -129,8 +129,8 @@ class RecBuilder o where
 
   @since 1.4.0.0
   -}
-  bindRec#  :: (DynSubroutine s o a x -> StaSubroutine# s o a x) -- ^ Code for the binding, accepting itself as an argument.
-            -> DynSubroutine s o a x                             -- ^ The code that represents this binding's name.
+  bindRec#  :: (DynSubroutine '[] s o a x -> StaSubroutine# '[] s o a x) -- ^ Code for the binding, accepting itself as an argument.
+            -> DynSubroutine '[] s o a x                             -- ^ The code that represents this binding's name.
 
 #define deriveRecBuilder(_o)                                                                        \
 instance RecBuilder _o where                                                                        \

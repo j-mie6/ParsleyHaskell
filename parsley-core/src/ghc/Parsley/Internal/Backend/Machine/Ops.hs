@@ -29,7 +29,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Abstracted Input Operations
     sat, emitLengthCheck, fetch,
     -- ** Register Operations
-    newΣ, writeΣ, readΣ,
+    newΣ, writeΣ, readΣ, liquefyΣ, solidifyΣ,
     -- ** Handler Operations
     -- *** Basic handlers and operations
     fatal, raise,
@@ -185,7 +185,7 @@ Depending on the access type, either generates the code for a write to a registe
 -}
 writeΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 writeΣ σ Bound x k ctx = dup x $ \dupx -> [||
-    let bref = $$(genDefunc dupx) 
+    let bref = $$(genDefunc dupx)
       in $$(k (bindΣ σ [|| bref ||] $ cacheΣ σ dupx ctx))
     ||]
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
@@ -209,6 +209,19 @@ readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref
        $$(let fv = FREEVAR [||x||] in k fv (cacheΣ σ fv ctx))
   ||]
+
+{-| 
+Read the concrete `STRef` value of a register and use a `Bound` `writeΣ` to bind it to a variable.
+-}
+liquefyΣ :: (?flags :: Opt.Flags) => ΣVar x -> (Ctx s o a -> Code (ST s r))-> Ctx s o a -> Code (ST s r)
+liquefyΣ σ k = readΣ σ Hard (\x -> writeΣ σ Bound x k)
+
+{-| 
+Reads the `ctx` cache and writes this to the concrete `STRef`. Also removes any bindings associated
+with a register from `ctx` using `unbindΣ`.
+-}
+solidifyΣ :: (?flags :: Opt.Flags) => ΣVar x -> (Ctx s o a -> Code (ST s r))-> Ctx s o a -> Code (ST s r)
+solidifyΣ σ k ctx = writeΣ σ Hard (cachedΣ σ ctx) k (unbindΣ σ ctx)
 
 {- Handler Operations -}
 -- Basic handlers and operations
@@ -433,22 +446,32 @@ bindIterAlways ctx μ l needed h inp u =
       let inp = toInput u inp#
       in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
                (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
-bindIterAlways' :: forall s o a. (RecBuilder o, DynOps o)
+bindIterAlways' :: forall rs s o a. (RecBuilder o, DynOps o, ?flags :: Opt.Flags)
                => Ctx s o a                  -- ^ The context to keep the binding
                -> MVar Void                  -- ^ The name of the binding.
+               -> Regs rs                    -- ^ Registers present in the loop body.
                -> Machine s o '[] One Void a -- ^ The body of the loop.
                -> Bool                       -- ^ Does loop exit require a binding?
                -> StaHandlerBuilder s o a    -- ^ What to do after the loop exits (by failing)
                -> Input o                    -- ^ The initial offset to provide to the loop
                -> Word                       -- ^ The unique name for captured offset /and/ iteration offset
                -> Code (ST s (Maybe a))
-bindIterAlways' ctx μ l needed h inp u = undefined 
-  {- bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
-    bindIter# @o (fromInput inp) $ \qloop inp# ->
-      let inp = toInput u inp#
-      in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
-               (voidCoins (insertLoop μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
--}
+bindIterAlways' ctx μ frees l needed h inp u = 
+   bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
+    bindRegs frees ctx $ \initBoundRegs ctx -> 
+      bindLiquidIter# @o (fromInput inp) initBoundRegs $ \qloop loopBoundRegs inp# ->
+        -- First populate the context with the new binds for names
+        let inp = toInput u inp#
+        in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
+                (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
+  where
+    bindRegs :: forall rs r. Regs rs -> Ctx s o a -> (RegNames rs -> Ctx s o a -> Code (ST s r)) ->Code (ST s r)
+    bindRegs NoRegs ctx k = k NoName ctx
+    bindRegs (FreeReg σ rs) ctx k = bindRegs rs ctx
+                                      (\boundr c' -> liquefyΣ σ (\c'' -> k (RegName σ (boundΣ σ c'') boundr) c'') c') 
+
+    --liquefyΣ :: (?flags :: Opt.Flags) => ΣVar x -> (Ctx s o a -> Code (ST s r))-> Ctx s o a -> Code (ST s r)
+
 
 {-|
 Similar to `bindIterAlways`, but builds a handler that performs in

@@ -103,7 +103,7 @@ by the parser, but are used to execute it.
 @since 1.4.0.0
 -}
 type family Func (rs :: [Type]) s o a x where
-  Func '[] s o a x      =  Cont# s o a x  -- What to do when this parser returns
+  Func '[] s o a x      = Cont# s o a x  -- What to do when this parser returns
                                -> Handler# s o a -- How to handle failure within the call
                                -> Pos            -- The current position
                                -> DynRep o       -- The input on entry to the call

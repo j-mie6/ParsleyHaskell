@@ -345,7 +345,7 @@ on subroutines with registers, a simple form of inlining optimisation.
 @since 1.4.0.0
 -}
 type family StaFunc (rs :: [Type]) s o a x where
-  StaFunc '[] s o a x      = StaSubroutine '[]  s o a x
+  StaFunc '[] s o a x      = StaSubroutine '[] s o a x
   StaFunc (r : rs) s o a x = Code (STRef s r) -> StaFunc rs s o a x
 
 
@@ -354,7 +354,7 @@ Wraps a `StaFunc` with its free registers, which are kept existential.
 
 @since 1.4.0.0
 -}
-data QSubroutine s o a x = forall rs. QSubroutine !(StaFunc rs s o a x) !(Regs rs) 
+data QSubroutine s o a x = forall rs. QSubroutine !(StaFunc rs s o a x) !(Regs rs)
 data QLooproutine s o a x = forall xs. QLooproutine !(StaSubroutine xs s o a x) !(Regs xs)
 
 {-|

@@ -29,7 +29,7 @@ import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣV
 import Parsley.Internal.Backend.Machine.InputOps           (InputOps, DynOps)
 import Parsley.Internal.Backend.Machine.InputRep           (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
-import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
+import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body), Regs)
 import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run, qSubroutine)
@@ -87,7 +87,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Seek k)            = evalSeek k
     alg (Case p q)          = evalCase p q
     alg (Choices fs ks def) = evalChoices fs ks def
-    alg (Iter μ frs l k)    = evalIter μ frs l k
+    alg (Iter μ frs l k)    = evalIter μ Nothing l k
     alg (Join φ)            = evalJoin φ
     alg (MkJoin φ p k)      = evalMkJoin φ p k
     alg (Swap k)            = evalSwap k
@@ -166,8 +166,8 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go x (f:fs) (mk:mks) def γ = _if (ap f x) (mk γ) (go x fs mks def γ)
     go _ _      _        def γ = def γ
 
-evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o, DynOps o)
-         => MVar Void -> Maybe (Set IΣVar) -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
+evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o, DynOps o, ?flags :: Opt.Flags)
+         => MVar Void -> Maybe (Regs rs) -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
          -> MachineMonad s o xs n r a
 evalIter μ Nothing l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure

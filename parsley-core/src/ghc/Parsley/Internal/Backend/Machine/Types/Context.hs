@@ -33,7 +33,7 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- $reg-doc
 
     -- ** Putters
-    insertNewΣ, cacheΣ, bindΣ,
+    insertNewΣ, cacheΣ, bindΣ, unbindΣ,
     -- ** Getters
     concreteΣ, cachedΣ, boundΣ,
     takeFreeRegisters,
@@ -232,7 +232,15 @@ Update the last-known bound variable name of a register
 bindΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
 bindΣ σ bref ctx = case DMap.lookup σ (σs ctx) of
   Just (Reg ref _ c) -> ctx {σs = DMap.insert σ (Reg ref (Just bref) c) (σs ctx)}
-  Nothing          -> throw (outOfScopeRegister σ)
+  Nothing            -> throw (outOfScopeRegister σ)
+
+{-| 
+Remove the binding for a register.
+-}
+unbindΣ :: ΣVar x -> Ctx s o a -> Ctx s o a
+unbindΣ σ ctx = case DMap.lookup σ (σs ctx) of
+  Just (Reg ref _ c) -> ctx {σs = DMap.insert σ (Reg ref Nothing c) (σs ctx)}
+  Nothing            -> throw (outOfScopeRegister σ)
 
 {-|
 Fetches a known to be concrete register (i.e. one that must be materialised

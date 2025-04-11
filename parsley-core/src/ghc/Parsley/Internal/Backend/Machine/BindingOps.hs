@@ -4,7 +4,6 @@
              CPP,
              MagicHash,
              TypeApplications,
-             ScopedTypeVariables,
              MultiParamTypeClasses,
              FunctionalDependencies,
              TypeFamilies,
@@ -61,6 +60,16 @@ derivation(CharList)               \
 derivation(Stream)                 \
 derivation(Lazy.ByteString)        \
 derivation(Text)
+
+#define inputInstancesWithName(derivation)  \
+derivation(String, String);                  \
+derivation(UArray, (UArray Int Char));       \
+derivation(Text16, Text16);                    \
+derivation(ByteString, ByteString);          \
+derivation(CharList, CharList);              \
+derivation(Stream, Stream);                  \
+derivation(LazyByteString, Lazy.ByteString); \
+derivation(Text, Text);
 
 {-|
 Used to generate a binding for a handler.
@@ -195,34 +204,6 @@ class RecBuilder o where
   bindRec#  :: (DynSubroutine '[] s o a x -> StaSubroutine# '[] s o a x) -- ^ Code for the binding, accepting itself as an argument.
             -> DynSubroutine '[] s o a x                             -- ^ The code that represents this binding's name.
 
-createLoopDecl :: forall rs s o a. 
-             RegNames rs -- ^ Registers that the loop continuation expects.
-          -> Code (LiquidLoopRoutine rs s o a) -- ^ name of loop
-          -> (Code (LiquidLoopRoutine rs s o a) -> RegNames rs -> Input# o -> Code (ST s (Maybe a))) 
-          -- ^ machine of the body of the loop
-          -> Q Exp
-createLoopDecl regs loop l = do 
-  boundRegsNames <- nameRegs regs
-  let boundRegs = convertNamesToCode boundRegsNames 
-  wrapRegs boundRegsNames boundRegs
-  where 
-    nameRegs :: forall rs. RegNames rs -> Q (RegTHNames rs)
-    nameRegs NoName = pure NoTHName 
-    nameRegs (RegName s _ rest) = do 
-      rest' <- nameRegs rest 
-      regname <- newName "r"
-      return (RegTHName s regname rest')
-
-    convertNamesToCode :: forall rs. RegTHNames rs -> RegNames rs 
-    convertNamesToCode NoTHName = NoName
-    convertNamesToCode (RegTHName r name rest) = let rest' = convertNamesToCode rest 
-                                                 in RegName r (unsafeCodeCoerce (return (VarE name))) rest'
-
-    wrapRegs :: forall rs'. RegTHNames rs' -> (RegNames rs -> Q Exp)
-    wrapRegs NoTHName = \regs -> unTypeCode [|| \(pos :: Pos) !(o# :: DynRep o) -> $$(l loop regs (Input# [||o#||] [||pos||])) ||]
-    wrapRegs (RegTHName _ name rest) = \regs -> do
-      func <- wrapRegs rest regs 
-      return (LamE [VarP name] func)
 {-
 class LastOneMatches (x :: Type) (ys :: [Type])
 instance LastOneMatches x '[x]
@@ -300,11 +281,42 @@ createLoopDecl' regs loop l = impl NoName regs -- [|| case appendRightId @rs of 
     -}
 -}
 
+
+-- NOTE: Everything below is awful, cpphs is awful, I'm awful. Blame TTH and cpphs not working together so well.
+
 supplyRegs :: forall rs s o a. RegNames rs -> Code (LiquidLoopRoutine rs s o a) -> Code (LiquidLoopRoutine '[] s o a)
 supplyRegs NoName l = l 
 supplyRegs (RegName _ name rest) l = supplyRegs  @_ @_ @o rest [|| $$l $$name ||]
 
-#define deriveRecBuilder(_o)                                                                        \
+nameRegs :: forall rs. RegNames rs -> Q (RegTHNames rs)
+nameRegs NoName = pure NoTHName 
+nameRegs (RegName s _ rest) = do 
+  rest' <- nameRegs rest 
+  regname <- newName "r"
+  return (RegTHName s regname rest')
+
+convertNamesToCode :: forall rs. RegTHNames rs -> RegNames rs 
+convertNamesToCode NoTHName = NoName
+convertNamesToCode (RegTHName r name rest) = let rest' = convertNamesToCode rest 
+                                              in RegName r (unsafeCodeCoerce (return (VarE name))) rest'
+
+createLoopDecl :: forall rs. (forall rs'. RegTHNames rs' -> (RegNames rs -> Q Exp)) -> RegNames rs -> Q Exp
+createLoopDecl regWrapper regs = do; boundRegsNames <- nameRegs regs; regWrapper boundRegsNames (convertNamesToCode boundRegsNames)
+
+{- 
+wrapRegsTest :: Code (LiquidLoopRoutine rs s String a) -> (Code (LiquidLoopRoutine rs s String a) -> RegNames rs -> Input# String -> Code (ST s (Maybe a))) -> (forall rs'. RegTHNames rs' -> (RegNames rs -> Q Exp))
+wrapRegsTest loop l NoTHName = \regs -> unTypeCode [|| let thing (pos :: Pos) !(o# :: DynRep String) = $$(l loop regs (Input# [||o#||] [||pos||])) in thing ||]
+wrapRegsTest loop l (RegTHName _ name rest) = \regs -> do; func <- wrapRegsTest loop l rest regs; return (LamE [VarP name] func)
+-}
+
+#define regWrapperName(_name) wrapRegs/**/_name
+
+#define defRegWrapper(_name, _o) \
+regWrapperName(_name) :: Code (LiquidLoopRoutine rs s _o a) -> (Code (LiquidLoopRoutine rs s _o a) -> RegNames rs -> Input# _o -> Code (ST s (Maybe a))) -> (forall rs'. RegTHNames rs' -> (RegNames rs -> Q Exp));\
+regWrapperName(_name) loop l NoTHName = \regs -> unTypeCode [|| \(pos :: Pos) !(o# :: DynRep _o) -> $$(l loop regs (Input# [||o#||] [||pos||])) ||];\
+regWrapperName(_name) loop l (RegTHName _ name rest) = \regs -> do; func <- regWrapperName(_name) loop l rest regs; return (LamE [VarP name] func); \
+ 
+#define deriveRecBuilder(_name, _o)                                                                 \
 instance RecBuilder _o where                                                                        \
 {                                                                                                   \
   bindIterHandler# h k = [||                                                                        \
@@ -316,7 +328,7 @@ instance RecBuilder _o where                                                    
       in loop $$(pos# inp) $$(off# inp)                                                             \
     ||];                                                                                            \
   bindLiquidIter# inp regs l = [||                                                                  \
-      let loop = $$(unsafeCodeCoerce $ createLoopDecl regs [||loop||] l)      \
+      let loop = $$(unsafeCodeCoerce $ createLoopDecl (regWrapperName(_name) [||loop||] l) regs)      \
       in $$(supplyRegs @_ @_ @_o regs [||loop||]) $$(pos# inp) $$(off# inp)                                   \
     ||];       \
   bindRec# binding =                                                                                \
@@ -324,7 +336,18 @@ instance RecBuilder _o where                                                    
     [|| let self ret h (pos :: Pos) !(o# :: DynRep _o) =                                            \
               $$(binding [||self||] [||ret||] [||h||] (Input# [||o#||] [||pos||])) in self ||]      \
 };
-inputInstances(deriveRecBuilder)
+inputInstancesWithName(deriveRecBuilder)
+defRegWrapper(String, String);                 
+defRegWrapper(UArray, (UArray Int Char));      
+defRegWrapper(Text16, Text16);                   
+defRegWrapper(ByteString, ByteString);         
+defRegWrapper(CharList, CharList);             
+defRegWrapper(Stream, Stream);                 
+defRegWrapper(LazyByteString, Lazy.ByteString);
+defRegWrapper(Text, Text);
+
+--defRegWrapper(String, String)
+
 --bindIterHandler# :: (Input# String -> StaHandler# s String a)
 -- -> (Code (Pos -> DynRep String -> Handler# s String a) -> Code b)
 -- -> Code b

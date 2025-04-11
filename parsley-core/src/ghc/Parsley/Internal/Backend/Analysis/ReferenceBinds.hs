@@ -1,4 +1,6 @@
 {-# LANGUAGE NamedFieldPuns, OverloadedStrings, DerivingStrategies #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use newtype instead of data" #-}
 {-|
 Module      : Parsley.Internal.Backend.Analysis.ReferenceBinds
 Description : Translation of Combinator AST into Machine
@@ -14,29 +16,35 @@ The determination of free references at each point is much alike to the algorith
 
 -}
 module Parsley.Internal.Backend.Analysis.ReferenceBinds (bindReferences) where
-import Parsley.Internal.Common (Fix4, HFresh, MonadFresh (..), IFunctor4, intercalateDiff)
-import Parsley.Internal.Backend.Machine (Instr (..), SomeΣVar, Handler (..), IΦVar, PosSelector (..), ΦVar (..), ΣVar (..), IΣVar)
-import Parsley.Internal.Common.Indexed (Nat, Fix4 (..), Const4 (..), cata4, IFunctor4 (imap4))
+import Parsley.Internal.Common.Fresh (HFresh, MonadFresh(..), runFresh)
+import Parsley.Internal.Common.Indexed (Fix4, IFunctor4)
+import Parsley.Internal.Common.Utils (intercalateDiff)
+import Parsley.Internal.Common.Indexed (Fix4 (..), Const4 (..), cata4, IFunctor4 (imap4))
+import Parsley.Internal.Backend.Machine.Identifiers (SomeΣVar(..), IΦVar, ΦVar(..), IMVar, MVar (..))
+import Parsley.Internal.Backend.Machine.Instructions (Instr(..), Handler(..), PosSelector(..), MetaInstr(..))
+import Parsley.Internal.Backend.Machine.Types.Registers (makeRegs)
+
+import Control.Monad.Writer (Writer, MonadWriter (..))
+import Control.Monad.Writer.Lazy (runWriter)
+import Control.Monad.State (StateT (..), MonadTrans (..), MonadState (..), when, runState, evalState)
+import Control.Monad.State.Lazy (State)
+import Control.Monad.State (gets, execState)
+import Control.Monad (unless, liftM2)
+import Debug.Trace (trace)
 
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Parsley.Internal.Common.Fresh (runFresh)
 import Data.DList (DList)
-import Control.Monad.Writer (Writer, MonadWriter (..))
-import Control.Monad.State (StateT (..), MonadTrans (..), MonadState (..), when)
 import qualified Data.DList as DList
+import Data.Void (Void)
 
-import Debug.Trace (trace)
-import Parsley.Internal.Backend.Machine.Instructions (MetaInstr(..))
-import Control.Monad.Writer.Lazy (runWriter)
-import Control.Monad.State.Lazy (State)
-import Control.Monad.State (gets, execState)
-import Control.Monad (unless)
 
-bindReferences :: Fix4 (Instr o) xs n r a -> Fix4 (Instr o) xs n r a
-bindReferences instrs = trace ("TAGSS: " ++ show taggedInstrs ++ "\n\n THREADABLES: " ++ show threadables) instrs
+bindReferences :: Map IMVar (Set SomeΣVar) -- ^ Frees required to run each let-bound parser
+                 -> Fix4 (Instr o) xs n r a -- ^ Machine to analyse. 
+                 -> Fix4 (Instr o) xs n r a
+bindReferences frees instrs = trace ("TAGSS: " ++ show taggedInstrs ++ "\n\n THREADABLES: " ++ show threadables) instrs'
     where
         -- 1. tag the instructions
         (taggedInstrs, maxTag) = tagInstructions instrs
@@ -45,7 +53,10 @@ bindReferences instrs = trace ("TAGSS: " ++ show taggedInstrs ++ "\n\n THREADABL
         threadables = threadableRefs maxTag taggedInstrs
 
         -- 3. Use `liveSets` to tag each join point, handler, and return continuation with references that might live through it
-        instrs' = markThreadables threadables taggedInstrs
+        -- TOOD
+
+        -- 4. Mark loop bodies
+        instrs' = markLoopBodies frees threadables taggedInstrs
 
 
 -- We need to tag each instruction with a unique ID so we can perform liveness analysis
@@ -60,7 +71,7 @@ instance Show (Fix4 (TaggedInstr o) xs n r a) where
     where
       alg :: forall xs n r a. TaggedInstr o (Const4 (String -> String)) xs n r a -> String -> String
       alg (Tag4 t Ret)                        = shows t . ": Ret"
-      alg (Tag4 t (Call μ k))                 = "(" . shows t . ": Call " . shows μ . " " . getConst4 k . ")"
+      alg (Tag4 t (Call μ l k))                 = "(" . shows t . ": Call " . shows μ . (if l then " [LOOP] " else " ") . getConst4 k . ")"
       alg (Tag4 t (Push x k))                 = "(" . shows t . ": Push " . shows x . " " . getConst4 k . ")"
       alg (Tag4 t (Pop k))                    = "(" . shows t . ": Pop " . getConst4 k . ")"
       alg (Tag4 t (Lift2 f k))                = "(" . shows t . ": Lift2 " . shows f . " " . getConst4 k . ")"
@@ -98,7 +109,7 @@ tagInstructions instrs = runFresh (doTagger $ cata4 alg instrs) initID
 
         alg :: Instr o (Tagger o) xs n r a -> Tagger o xs n r a
         alg Ret                 = Tagger $ wrap Ret
-        alg (Call μ k)          = Tagger $ doTagger k >>= (wrap . Call μ)
+        alg (Call μ l k)        = Tagger $ doTagger k >>= (wrap . Call μ l)
         alg (Push x k)          = Tagger $ doTagger k >>= (wrap . Push x)
         alg (Pop k)             = Tagger $ doTagger k >>= (wrap . Pop)
         alg (Lift2 f k)         = Tagger $ doTagger k >>= (wrap . Lift2 f)
@@ -155,7 +166,7 @@ tagInstructions instrs = runFresh (doTagger $ cata4 alg instrs) initID
 -- Finding threadable references
 
 -- Graph construction types
-type ThreadableRefs = Map InstrID (Set IΣVar)
+type ThreadableRefs = Map InstrID (Set SomeΣVar)
 -- PhiData: (InstrID of join to ΦVar, IΦVar to join point's InstrID )
 type PhiData = (DList (InstrID, IΦVar), DList (IΦVar, InstrID))
 newtype Graph = Graph { unGraph :: Map InstrID (Set InstrID) }
@@ -166,7 +177,7 @@ instance Monoid Graph where
     mempty = Graph Map.empty
 
 -- map instrID to (use, def)
-type ReferenceData = Map InstrID (Set IΣVar, Set IΣVar)
+type ReferenceData = Map InstrID (Set SomeΣVar, Set SomeΣVar)
 
 data GraphConstruction = GraphConstruction{ phiData :: PhiData, graphData :: Graph, refData :: ReferenceData}
 
@@ -203,7 +214,7 @@ threadableRefs maxID instrs = result
 
         alg :: TaggedInstr o (Grapher o) xs n r a ->  StateT HandlerEntries (Writer GraphConstruction) InstrID
         alg (Tag4 t Ret)                = handlerEdge t >> addStump t >> pure t
-        alg (Tag4 t (Call _ k))         = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Call _ _ k))       = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Push _ k))         = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Pop k))            = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Lift2 _ k))        = handlerEdge t >> edgeToK t k
@@ -233,9 +244,9 @@ threadableRefs maxID instrs = result
         alg (Tag4 t (MkJoin φ p k))     = handlerEdge t >> doGrapher p >>= flip addMkJoin φ >> edgeToK t k
         alg (Tag4 t (Swap k))           = handlerEdge t >> edgeToK t k
         alg (Tag4 t (Dup k))            = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Make σ _ k))       = handlerEdge t >> addDef t σ >> edgeToK t k
-        alg (Tag4 t (Get σ _ k))        = handlerEdge t >> addUse t σ >> edgeToK t k
-        alg (Tag4 t (Put σ _ k))        = handlerEdge t >> addUse t σ >> edgeToK t k
+        alg (Tag4 t (Make σ _ k))       = handlerEdge t >> addDef t (SomeΣVar σ) >> edgeToK t k
+        alg (Tag4 t (Get σ _ k))        = handlerEdge t >> addUse t (SomeΣVar σ) >> edgeToK t k
+        alg (Tag4 t (Put σ _ k))        = handlerEdge t >> addUse t (SomeΣVar σ) >> edgeToK t k
         alg (Tag4 t (SelectPos _ k))    = handlerEdge t >> edgeToK t k
         alg (Tag4 t (LogEnter _ k))     = handlerEdge t >> edgeToK t k
         alg (Tag4 t (LogExit _ k))      = handlerEdge t >> edgeToK t k
@@ -275,8 +286,8 @@ threadableRefs maxID instrs = result
                                                 ((AlwaysH h):_) -> addEdge t h
                                                 ((SameH h1 h2 ):_) -> addEdge t h1 >> addEdge t h2
 
-        addUse t (ΣVar σ) = (lift . tell . refGCon . Map.fromList) [(t, (Set.singleton σ, mempty))]
-        addDef t (ΣVar σ) = (lift . tell . refGCon . Map.fromList) [(t, (mempty, Set.singleton σ))]
+        addUse t σ = (lift . tell . refGCon . Map.fromList) [(t, (Set.singleton σ, mempty))]
+        addDef t σ = (lift . tell . refGCon . Map.fromList) [(t, (mempty, Set.singleton σ))]
 
         -- 2. Propagate the (use, def) sets of each node through the graph using the data-flow equations
         usedefs' = propagateRegs graph usedefs
@@ -333,17 +344,102 @@ threadableRefs maxID instrs = result
         result = Map.map (uncurry (Set.\\)) usedefs'
 
 markThreadables :: ThreadableRefs -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
-markThreadables frees = cata4 (alg frees)
+markThreadables frees = undefined
     where
         alg :: ThreadableRefs -> TaggedInstr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a
-        alg frees Tag4{tag, tagged} = In4 $ attachData (frees Map.! tag) tagged 
+        alg frees Tag4{tag, tagged} = In4 $ attachData (frees Map.! tag) tagged
 
-        attachData :: Set IΣVar -> Instr o (Fix4 (Instr o)) xs n r a -> Instr o (Fix4 (Instr o)) xs n r a
+        attachData :: Set SomeΣVar -> Instr o (Fix4 (Instr o)) xs n r a -> Instr o (Fix4 (Instr o)) xs n r a
         -- attachData frees Ret                   = Ret
         -- attachData frees (Call x k)            = undefined
         -- attachData frees (Catch m h)           = undefined
-        attachData frees (Iter name _ body h)     = Iter name (Just frees) body h
+        attachData frees (Iter name _ body h)     = Iter name (Just $ makeRegs frees) (body) h
         -- attachData frees (Join x)              = undefined
         -- attachData frees (MkJoin x body scope) = undefined
         -- no need to attach free reference data
-        attachData _ instr = instr 
+        attachData _ instr = instr
+
+{- 
+Keeps state of which loops are currently in scope. Helps us to know when to mark calls as loop calls 
+and decide at calls/joins which registers solidfy.
+-}
+data LoopMarkerState = LoopMarkerState { loops :: Map IMVar (Set SomeΣVar) }
+newtype LoopMarker o xs n r a = LoopMarker {doLoopMarking :: State LoopMarkerState (Fix4 (Instr o) xs n r a) }
+
+
+markLoopBodies :: Map IMVar (Set SomeΣVar) -> ThreadableRefs -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
+markLoopBodies mufrees frees instrs = evalState marking emptyLoopMarkerState
+    where
+        emptyLoopMarkerState = LoopMarkerState Map.empty
+        marking = doLoopMarking $ cata4 (LoopMarker . alg) instrs
+        alg :: TaggedInstr o (LoopMarker o) xs n r a -> State LoopMarkerState (Fix4 (Instr o) xs n r a)
+        alg (Tag4 _ Ret)                 = wrap Ret
+        alg (Tag4 _ (Call (MVar μ) _ k)) = do
+                                            LoopMarkerState{loops} <- get
+                                            k' <- doLoopMarking k
+                                            if Map.member μ loops
+                                                then wrap (Call (MVar μ) True k')
+                                                else wrap (Call (MVar μ) False k')
+        alg (Tag4 _ (Push x k))          = doLoopMarking k >>= wrap . Push x
+        alg (Tag4 _ (Pop k))             = doLoopMarking k >>= wrap . Pop
+        alg (Tag4 _ (Lift2 f k))         = doLoopMarking k >>= wrap . Lift2 f
+        alg (Tag4 _ (Sat f k))           = doLoopMarking k >>= wrap . Sat f
+        alg (Tag4 _ Empt)                = wrap Empt
+        alg (Tag4 _ (Commit k))          = doLoopMarking k >>= wrap . Commit
+        alg (Tag4 _ (Catch p h))         = do
+                                            p' <- doLoopMarking p
+                                            h' <- doHandler h
+                                            wrap (Catch p' h')
+        alg (Tag4 _ (Tell k))            = doLoopMarking k >>= wrap . Tell
+        alg (Tag4 _ (Seek k))            = doLoopMarking k >>= wrap . Seek
+        alg (Tag4 _ (Case p q))          = do
+                                            p' <- doLoopMarking p
+                                            q' <- doLoopMarking q
+                                            wrap (Case p' q')
+        alg (Tag4 _ (Choices fs ks def)) = do
+                                            ks' <- traverse doLoopMarking ks
+                                            def' <- doLoopMarking def
+                                            wrap (Choices fs ks' def')
+        alg (Tag4 t (Iter μ _ l h))      = do
+                                            let loopRegs = frees Map.! t
+                                            addLoop μ loopRegs
+                                            l' <- doLoopMarking l
+                                            removeLoop μ
+                                            h' <- doHandler h
+                                            wrap (Iter μ (Just $ makeRegs loopRegs) l' h')
+        alg (Tag4 _ (Join φ))            = wrap (Join φ)
+        alg (Tag4 _ (MkJoin φ p k))      = do
+                                            p' <- doLoopMarking p
+                                            k' <- doLoopMarking k
+                                            wrap (MkJoin φ p' k')
+        alg (Tag4 _ (Swap k))            = doLoopMarking k >>= wrap . Swap
+        alg (Tag4 _ (Dup k))             = doLoopMarking k >>= wrap . Dup
+        alg (Tag4 _ (Make σ a k))        = doLoopMarking k >>= wrap . Make σ a -- TODO: turn to bounded access if possible
+        alg (Tag4 _ (Get σ a k))         = doLoopMarking k >>= wrap . Get σ a -- TODO: turn to bounded access if possible
+        alg (Tag4 _ (Put σ a k))         = doLoopMarking k >>= wrap . Put σ a -- TODO: turn to bounded access if possible
+        alg (Tag4 _ (SelectPos p k))     = doLoopMarking k >>= wrap . SelectPos p
+        alg (Tag4 _ (LogEnter l k))      = doLoopMarking k >>= wrap . LogEnter l
+        alg (Tag4 _ (LogExit l k))       = doLoopMarking k >>= wrap . LogExit l
+        alg (Tag4 _ (MetaInstr m k))     = doLoopMarking k >>= wrap . MetaInstr m
+
+        addLoop :: MVar Void -> Set SomeΣVar -> State LoopMarkerState ()
+        addLoop (MVar μ) loopRegs = do 
+                        state <- get 
+                        put (state{loops = Map.insert μ loopRegs (loops state)})
+
+        removeLoop :: MVar Void -> State LoopMarkerState ()
+        removeLoop (MVar μ) = do 
+                        state <- get 
+                        put (state{loops = Map.delete μ (loops state)})
+
+        wrap :: Instr o (Fix4 (Instr o)) xs n r a -> State LoopMarkerState (Fix4 (Instr o) xs n r a)
+        wrap = pure . In4
+
+        doHandler :: Handler o (LoopMarker o) xs n r a -> State LoopMarkerState (Handler o (Fix4 (Instr o)) xs n r a)
+        doHandler (Same x k1 y k2) = do
+                                        k1' <- doLoopMarking k1
+                                        k2' <- doLoopMarking k2
+                                        return (Same x k1' y k2')
+        doHandler (Always x k)     = do
+                                        k' <- doLoopMarking k
+                                        return (Always x k')

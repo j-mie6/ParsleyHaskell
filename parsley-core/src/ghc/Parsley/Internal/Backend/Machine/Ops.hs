@@ -46,8 +46,8 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Join Point Operations
     setupJoinPoint,
     -- ** Iteration Operations
-    bindIterAlways,
-    bindIterSame,
+    bindIterAlways, bindIterAlways',
+    bindIterSame, bindIterSame',
     -- ** Recursion Operations
     buildRec,
     -- ** Marshalling Operations
@@ -73,8 +73,9 @@ import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, 
 import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, DynOps, next, uncons, check, asDyn, asSta)
 import Parsley.Internal.Backend.Machine.InputRep                  (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
-import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata(failureInputCharacteristic, successInputCharacteristic))
+import Parsley.Internal.Backend.Machine.LetBindings               (Metadata(failureInputCharacteristic, successInputCharacteristic))
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
+import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, chooseInput)
@@ -446,32 +447,6 @@ bindIterAlways ctx μ l needed h inp u =
       let inp = toInput u inp#
       in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
                (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
-bindIterAlways' :: forall rs s o a. (RecBuilder o, DynOps o, ?flags :: Opt.Flags)
-               => Ctx s o a                  -- ^ The context to keep the binding
-               -> MVar Void                  -- ^ The name of the binding.
-               -> Regs rs                    -- ^ Registers present in the loop body.
-               -> Machine s o '[] One Void a -- ^ The body of the loop.
-               -> Bool                       -- ^ Does loop exit require a binding?
-               -> StaHandlerBuilder s o a    -- ^ What to do after the loop exits (by failing)
-               -> Input o                    -- ^ The initial offset to provide to the loop
-               -> Word                       -- ^ The unique name for captured offset /and/ iteration offset
-               -> Code (ST s (Maybe a))
-bindIterAlways' ctx μ frees l needed h inp u = 
-   bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
-    bindRegs frees ctx $ \initBoundRegs ctx -> 
-      bindLiquidIter# @o (fromInput inp) initBoundRegs $ \qloop loopBoundRegs inp# ->
-        -- First populate the context with the new binds for names
-        let inp = toInput u inp#
-        in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
-                (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
-  where
-    bindRegs :: forall rs r. Regs rs -> Ctx s o a -> (RegNames rs -> Ctx s o a -> Code (ST s r)) ->Code (ST s r)
-    bindRegs NoRegs ctx k = k NoName ctx
-    bindRegs (FreeReg σ rs) ctx k = bindRegs rs ctx
-                                      (\boundr c' -> liquefyΣ σ (\c'' -> k (RegName σ (boundΣ σ c'') boundr) c'') c') 
-
-    --liquefyΣ :: (?flags :: Opt.Flags) => ΣVar x -> (Ctx s o a -> Code (ST s r))-> Ctx s o a -> Code (ST s r)
-
 
 {-|
 Similar to `bindIterAlways`, but builds a handler that performs in
@@ -500,6 +475,69 @@ bindIterSame ctx μ l neededYes yes neededNo no inp u =
           in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil))
                    (voidCoins (insertSub μ (mkStaSubroutine $ \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]) ctx))
 
+-- Liquid loop alternatives with registers fed
+bindIterAlways' :: forall rs s o a. (RecBuilder o, DynOps o, ?flags :: Opt.Flags)
+               => Ctx s o a                  -- ^ The context to keep the binding
+               -> MVar Void                  -- ^ The name of the binding.
+               -> Regs rs                    -- ^ Registers present in the loop body.
+               -> Machine s o '[] One Void a -- ^ The body of the loop.
+               -> Bool                       -- ^ Does loop exit require a binding?
+               -> StaHandlerBuilder s o a    -- ^ What to do after the loop exits (by failing)
+               -> Input o                    -- ^ The initial offset to provide to the loop
+               -> Word                       -- ^ The unique name for captured offset /and/ iteration offset
+               -> Code (ST s (Maybe a))
+bindIterAlways' ctx μ regs l needed h inp u = 
+   bindIterHandlerInline# @o needed (staHandler# . h . toInput u) $ \qhandler ->
+    bindRegs regs ctx $ \initBoundRegs ctx -> 
+      bindLiquidIter# @o (fromInput inp) initBoundRegs $ \qloop loopBoundRegs inp# ->
+        updateBinds loopBoundRegs ctx $ \ctx -> 
+          -- First populate the context with the new binds for names
+          let inp = toInput u inp#
+          in run l (Γ Empty noreturn inp (VCons (augmentHandler (Just inp) (qhandler inp#)) VNil))
+                  (voidCoins (insertLoop μ (mkStaSubroutine $ lambdafy regs qloop) regs ctx))
+  where
+    lambdafy :: forall rs. Regs rs -> Code (LiquidLoopRoutine rs s o a) -> StaSubroutine# rs s o a Void
+    lambdafy NoRegs qloop  = \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
+    lambdafy (Regs σ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
+    -- \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
+    --liquefyΣ :: (?flags :: Opt.Flags) => ΣVar x -> (Ctx s o a -> Code (ST s r))-> Ctx s o a -> Code (ST s r)
+
+bindRegs :: forall s o a rs r. (?flags :: Opt.Flags) => Regs rs -> Ctx s o a -> (RegNames rs -> Ctx s o a -> Code (ST s r)) -> Code (ST s r)
+bindRegs NoRegs ctx k = k NoName ctx
+bindRegs (Regs σ rs) ctx k = bindRegs rs ctx
+                                  (\boundr c' -> liquefyΣ σ (\c'' -> k (RegName σ (boundΣ σ c'') boundr) c'') c')
+
+updateBinds :: forall s o a rs r. RegNames rs -> Ctx s o a -> (Ctx s o a -> Code (ST s r)) -> Code (ST s r)
+updateBinds NoName ctx k = k ctx 
+updateBinds (RegName σ bind rs) ctx k = updateBinds rs (bindΣ σ bind ctx) k
+
+bindIterSame' :: forall s o a rs. (RecBuilder o, HandlerOps o, PositionOps (StaRep o), DynOps o, ?flags :: Opt.Flags)
+             => Ctx s o a                  -- ^ The context to store the binding in.
+             -> MVar Void                  -- ^ The name of the binding.
+             -> Regs rs                    -- ^ Registers present in the loop body.
+             -> Machine s o '[] One Void a -- ^ The loop body.
+             -> Bool                       -- ^ Is a binding required for the matching handler?
+             -> StaHandler s o a           -- ^ The handler when input is the same.
+             -> Bool                       -- ^ Is a binding required for the differing handler?
+             -> StaHandlerBuilder s o a    -- ^ The handler when input differs.
+             -> Input o                    -- ^ The initial offset of the loop.
+             -> Word                       -- ^ The unique name of the captured offsets /and/ the iteration offset.
+             -> Code (ST s (Maybe a))
+bindIterSame' ctx μ regs l neededYes yes neededNo no inp u =
+  bindHandlerInline# @o neededYes (staHandler# yes) $ \qyes ->
+    bindIterHandlerInline# neededNo (staHandler# . no . toInput u) $ \qno ->
+      let handler inpc inpo = [||if $$(same (asSta @o (off# inpc)) (asSta @o (off# inpo))) then $$(staHandler# qyes inpc) else $$(staHandler# (qno inpc) inpo)||]
+      in bindIterHandlerInline# @o True handler $ \qhandler ->
+        bindRegs regs ctx $ \initBoundRegs ctx -> 
+          bindLiquidIter# @o (fromInput inp) initBoundRegs $ \qloop loopBoundRegs inp# ->
+              updateBinds loopBoundRegs ctx $ \ctx -> 
+                let off = toInput u inp#
+                in run l (Γ Empty noreturn off (VCons (augmentHandlerFull off (qhandler inp#) (staHandler# qyes inp#) (qno inp#)) VNil))
+                          (voidCoins (insertLoop μ (mkStaSubroutine $ lambdafy regs qloop) regs ctx))
+  where
+    lambdafy :: forall rs. Regs rs -> Code (LiquidLoopRoutine rs s o a) -> StaSubroutine# rs s o a Void
+    lambdafy NoRegs qloop  = \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
+    lambdafy (Regs σ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
 {- Recursion Operations -}
 {-|
 Wraps around `bindRec#` to produce a recursive parser binding. This function

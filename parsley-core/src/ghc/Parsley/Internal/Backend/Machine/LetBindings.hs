@@ -13,7 +13,6 @@ free registers.
 -}
 module Parsley.Internal.Backend.Machine.LetBindings (
     LetBinding(..), Metadata,
-    Regs(..),
     makeLetBinding, newMeta,
     successInputCharacteristic, failureInputCharacteristic,
     Binding
@@ -22,9 +21,10 @@ module Parsley.Internal.Backend.Machine.LetBindings (
 import Prelude hiding                                             (foldr)
 import Data.Kind                                                  (Type)
 import Data.Set                                                   (Set, foldr)
-import Data.Some                                                  (Some, pattern Some)
+import Data.Some                                                  (Some, pattern Some, withSome)
 import Parsley.Internal.Backend.Machine.Identifiers               (ΣVar, SomeΣVar(..))
 import Parsley.Internal.Backend.Machine.Instructions              (Instr)
+import Parsley.Internal.Backend.Machine.Types.Registers           (Regs, makeRegs)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common                                    (Fix4, One)
 
@@ -96,22 +96,3 @@ newMeta = Metadata {
     successInputCharacteristic = MayConsume,
     failureInputCharacteristic = MayConsume
   }
-
-{-|
-Represents a collection of free registers, preserving their type
-information as a heterogeneous list.
-
-@since 1.0.0.0
--}
-data Regs (rs :: [Type]) where
-  NoRegs :: Regs '[]
-  FreeReg :: ΣVar r -> Regs rs -> Regs (r : rs)
-
-{-|
-Converts a set of existential `ΣVar`s into an existential
-heterogeneous list of free registers.
-
-@since 1.4.0.0
--}
-makeRegs :: Set SomeΣVar -> Some Regs
-makeRegs = foldr (\(SomeΣVar σ) (Some rs) -> Some (FreeReg σ rs)) (Some NoRegs)

@@ -108,6 +108,8 @@ library
                        Parsley.Internal.Backend.Machine.Types.Coins,
                        Parsley.Internal.Backend.Machine.Types.Context,
                        Parsley.Internal.Backend.Machine.Types.Dynamics,
+                       Parsley.Internal.Backend.Machine.Types.Registers,
+
                        Parsley.Internal.Backend.Machine.Types.Input,
                        Parsley.Internal.Backend.Machine.Types.InputCharacteristic,
                        Parsley.Internal.Backend.Machine.Types.State,
@@ -163,7 +165,7 @@ library
                        -Wno-missed-specialisations
                        -Wno-all-missed-specialisations
                        -Wno-incomplete-uni-patterns
-                       -pgmP cpphs -optP --cpp
+                       -pgmP cpphs -optP --cpp -optP --hashes
                        -freverse-errors
                        -Wno-missing-safe-haskell-mode
                        -Wno-prepositive-qualified-module

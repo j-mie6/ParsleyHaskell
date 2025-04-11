@@ -23,7 +23,7 @@ module Parsley.Internal.Backend.Machine.Types.Context (
 
     -- * Subroutines
     -- $sub-doc
-    insertSub, insertLoop, askSub,
+    insertSub, insertLoop, askSub, askLoop,
 
     -- * Join Points
     -- $join-doc
@@ -57,19 +57,19 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     addChar, readChar
   ) where
 
-import Control.Exception                               (Exception, throw)
-import Control.Monad                                   ((<=<))
-import Control.Monad.Reader                            (asks, local, MonadReader)
-import Data.STRef                                      (STRef)
-import Data.Dependent.Map                              (DMap)
-import Data.Maybe                                      (fromMaybe, isNothing)
-import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
-import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(Coins, willConsume))
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
+import Control.Exception                                (Exception, throw)
+import Control.Monad                                    ((<=<))
+import Control.Monad.Reader                             (asks, local, MonadReader)
+import Data.STRef                                       (STRef)
+import Data.Dependent.Map                               (DMap)
+import Data.Maybe                                       (fromMaybe, isNothing)
+import Parsley.Internal.Backend.Machine.Defunc          (Defunc, pattern FREEVAR)
+import Parsley.Internal.Backend.Machine.Identifiers     (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
+import Parsley.Internal.Backend.Machine.Types.Registers (Regs(..))
+import Parsley.Internal.Backend.Machine.Types.Coins     (Coins(Coins, willConsume))
+import Parsley.Internal.Backend.Machine.Types.Dynamics  (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
-import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont, QLooproutine (QLooproutine))
+import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine (staSubroutine#), StaCont, QLooproutine (QLooproutine))
 import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
@@ -157,8 +157,17 @@ askSub μ =
   do QSubroutine sub rs <- askSubUnbound μ
      asks (provideFreeRegisters sub rs)
 
+askLoop :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubroutine '[] s o a x)
+askLoop μ =
+  do QLooproutine sub rs <- askLoopUnbound μ
+     asks (provideBoundRegisters sub rs)
+
+
 askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubroutine s o a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
+
+askLoopUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QLooproutine s o a x)
+askLoopUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μLoops)
 
 -- Join Points
 {- $join-doc
@@ -223,11 +232,11 @@ Updated the "last-known value" of a register in the cache.
 -}
 cacheΣ :: ΣVar x -> Defunc x -> Ctx s o a -> Ctx s o a
 cacheΣ σ x ctx = case DMap.lookup σ (σs ctx) of
-  Just (Reg ref _ _) -> ctx {σs = DMap.insert σ (Reg ref Nothing (Just x)) (σs ctx)}
+  Just (Reg ref b _) -> ctx {σs = DMap.insert σ (Reg ref b (Just x)) (σs ctx)}
   Nothing          -> throw (outOfScopeRegister σ)
 
 {-| 
-Update the last-known bound variable name of a register
+Update the last-known bound variable name of a register. Does not clear/update cache.
 -}
 bindΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
 bindΣ σ bref ctx = case DMap.lookup σ (σs ctx) of
@@ -284,7 +293,7 @@ takeFreeRegisters :: Regs rs                              -- ^ The free register
                   -> (Ctx s o a -> DynSubroutine '[] s o a x) -- ^ Given the new context, function that produces the subroutine.
                   -> DynFunc rs s o a x                   -- ^ The newly produced dynamic function.
 takeFreeRegisters NoRegs ctx body = body ctx
-takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
+takeFreeRegisters (Regs σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
 
 insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
 insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing Nothing) (σs ctx)}
@@ -292,11 +301,17 @@ insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing 
 -- This needs to take a StaFunc, it is fed back via `askSub`
 provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine '[] s o a x
 provideFreeRegisters sub NoRegs _ = sub
-provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
+provideFreeRegisters f (Regs σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
+
+-- Feed all the free registers of a `StaSubroutine`
+provideBoundRegisters :: StaSubroutine rs s o a x -> Regs rs -> Ctx s o a ->  StaSubroutine '[] s o a x
+provideBoundRegisters loop NoRegs _ = loop
+provideBoundRegisters loop (Regs σ σs) ctx = provideBoundRegisters (loop{ staSubroutine# = staSubroutine# loop (boundΣ σ ctx)}) σs ctx
+
 
 --provideBoundRegisters :: StaSubroutine xs s o a x -> Regs xs -> Ctx s o a -> StaSubroutine '[] s o a x
 --provideBoundRegisters sub NoRegs _ = sub
---provideBoundRegisters f (FreeReg σ σs) ctx = provideBoundRegisters (f (boundΣ σ ctx)) σs ctx
+--provideBoundRegisters f (Regs σ σs) ctx = provideBoundRegisters (f (boundΣ σ ctx)) σs ctx
 
 -- Debug Level Tracking
 {- $debug-doc

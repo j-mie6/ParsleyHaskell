@@ -51,8 +51,9 @@ import Control.Monad.ST                                           (ST)
 import Data.STRef                                                 (STRef)
 import Data.Kind                                                  (Type)
 import Data.Maybe                                                 (fromMaybe)
-import Parsley.Internal.Backend.Machine.LetBindings               (Regs(..), Metadata, newMeta)
+import Parsley.Internal.Backend.Machine.LetBindings               (Metadata, newMeta)
 import Parsley.Internal.Backend.Machine.InputOps                  (DynOps)
+import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), fromInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
@@ -369,4 +370,4 @@ qSubroutine func frees meta = QSubroutine (staFunc frees func) frees
   where
     staFunc :: forall rs. Regs rs -> DynFunc rs s o a x -> StaFunc rs s o a x
     staFunc NoRegs func = StaSubroutine (\dk dh inp -> [|| $$func $$dk $$dh $$(pos# inp) $$(off# inp) ||]) meta
-    staFunc (FreeReg _ witness) func = \r -> staFunc witness [|| $$func $$r ||]
+    staFunc (Regs _ witness) func = \r -> staFunc witness [|| $$func $$r ||]

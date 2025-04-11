@@ -59,7 +59,7 @@ codeGen frees letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p
   where
     name = maybe "TOP LEVEL" show letBound
     --addCoinsTop = maybe addCoinsNeeded (const id) letBound
-    m = bindReferences $ finalise (histo alg p)
+    m = bindReferences frees $ finalise (histo alg p)
     alg :: Combinator (Cofree Combinator (CodeGen o a)) x -> CodeGen o a x
     alg = deep |> (\x -> CodeGen (shallow (imap extract x)))
     -- add coins is safe here because if a cut is present it will only factor 1 coin
@@ -137,7 +137,7 @@ shallow (Match p fs qs def) m =
      defc <- freshΦ (runCodeGen def φ)
      let defc':qcs' = map addCoinsNeeded (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
-shallow (Let μ)                      m = do return $! In4 (Call μ m)
+shallow (Let μ)                      m = do return $! In4 (Call μ False m)
 shallow (Loop body exit)             m =
   do μ <- askM
      bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (_Jump μ)))))

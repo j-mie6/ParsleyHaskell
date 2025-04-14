@@ -27,7 +27,7 @@ import Parsley.Internal.Common (One)
 import Parsley.Internal.Common.Fresh (HFresh, MonadFresh(..), runFresh)
 import Parsley.Internal.Common.Indexed (Fix4, IFunctor4, Fix4(..), Const4(..), cata4, IFunctor4(imap4))
 import Parsley.Internal.Common.Utils (intercalateDiff)
-import Parsley.Internal.Backend.Machine (Input)
+import Parsley.Internal.Backend.Machine (Input, ΣVar, Access (..))
 import Parsley.Internal.Backend.Machine.Identifiers (SomeΣVar(..), IΦVar, ΦVar(..), IMVar, MVar (..))
 import Parsley.Internal.Backend.Machine.Instructions (Instr(..), Handler(..), PosSelector(..), MetaInstr(..))
 import Parsley.Internal.Backend.Machine.Types.Registers (makeRegs)
@@ -51,6 +51,7 @@ import Data.Void (Void)
 
 import qualified Data.Dependent.Map as DMap
 import Data.Dependent.Map (DMap)
+import Parsley.Internal.Backend.Machine (ΣVar(..))
 
 
 {-|
@@ -59,10 +60,10 @@ into bound variables as possible.
 -}
 bindReferences :: forall input a. (Input input, Trace, ?flags::Flags) => (LetBinding input a a, DMap MVar (LetBinding input a)) -> (LetBinding input a a, DMap MVar (LetBinding input a))
 bindReferences (p, μs)
-    | totalReferenceBinds ?flags  = trace traceString (p, μs)
+    | totalReferenceBinds ?flags  = trace traceString (pOptimised, μsOptimised)
     | otherwise = (p, μs)
     where
-
+        
         -- debugging purposes. TODO: remove in final code
         traceString = "MACHINES:\n" ++ tagTrace ++ "\nGRAPH (starting at " ++ show (start cfg) ++ "): \n" ++ show (unGraph $ graph cfg)
                     ++ "\nUSE-DEFS: \n" ++ show (useDefs cfg)
@@ -70,18 +71,27 @@ bindReferences (p, μs)
 
         -- 1. Tag every instruction with a unique identifier
         (pTagged, maxV) = tagInstructions 0 (body p)
-        (μsTagged, _) = DMap.foldlWithKey (\(m, max) μ p -> let (tagged, max') = tagInstructions max (body p)
+        (μsTagged, maxV') = DMap.foldlWithKey (\(m, max) μ p -> let (tagged, max') = tagInstructions max (body p)
                                                             in (DMap.insert μ (TaggedBinding tagged) m, max'))
                                                             (DMap.empty :: DMap MVar (TaggedBinding input a), maxV) μs
 
         -- 2. create CFG of the whole forest of machines 
         cfg = constructCFG (TaggedBinding pTagged, μsTagged)
 
-        -- 3. Use `liveSets` to tag each join point, handler, and return continuation with references that might live through it
-        -- TOOD
+        -- 3. generate map tag -> set of free registers that are used later in control-flow
+        frees = freeRegisters maxV' cfg
 
         -- 4. Mark loop bodies
-        -- instrs' = markLoopBodies frees threadables taggedInstrs
+        mvars = DMap.foldlWithKey (\s (MVar m) _ -> Set.insert m s) Set.empty μs
+        pTagged' = TaggedBinding $ markLoopBodies mvars frees pTagged
+        μsTagged' = DMap.map (\x -> TaggedBinding $ markLoopBodies mvars frees (taggedBody x)) μsTagged
+
+        -- 5. Unwrap tags, reattach freeRegs and meta of original bind
+        rewrap :: MVar x -> Fix4 (Instr input) '[] One x a -> LetBinding input a x
+        rewrap μ new = let old = μs DMap.! μ in old {body = new}
+        pOptimised = p {body = unTag $ taggedBody pTagged'}
+        μsOptimised = DMap.mapWithKey (\m a -> rewrap m (unTag $ taggedBody a) ) μsTagged' 
+        
 
 -- Tagging Instructions
 
@@ -221,9 +231,10 @@ newtype Graph = Graph { unGraph :: Map InstrID (Set InstrID) }
 Keep graph and use-def data together. 
 -}
 data CFG = CFG {
-    graph   :: Graph,        -- ^ graph of the CFG
-    start   :: InstrID,      -- ^ Start node of the CFG
-    useDefs :: UseDefData -- ^ The use-defs, duh!
+    graph      :: Graph,            -- ^ graph of the CFG
+    start      :: InstrID,          -- ^ Start node of the CFG
+    useDefs    :: UseDefData,       -- ^ The use-defs, duh!
+    calleeTags :: Map IMVar InstrID -- ^ Which tag each μ-call can lead to 
 }
 
 -- Make some instances for Graph construction to make things easier and more ergonomic.
@@ -273,16 +284,19 @@ constructCFG (p, μs) = cfg
 
         -- left-biased merge of two CFGs
         mergeCFGs :: CFG -> CFG -> CFG
-        mergeCFGs cfg1 cfg2 = CFG {graph = graph cfg1 <> graph cfg2, start = start cfg1, useDefs = Map.union (useDefs cfg1) (useDefs cfg2) }
+        mergeCFGs cfg1 cfg2 = CFG {graph = graph cfg1 <> graph cfg2,
+                                   start = start cfg1,
+                                   useDefs = Map.union (useDefs cfg1) (useDefs cfg2),
+                                   calleeTags = Map.union (calleeTags cfg1) (calleeTags cfg2)}
 
 constructMachineCFG :: forall o xs n r a. Map IMVar InstrID -- ^ Map of MVar -> tag of the first instruction of machine
                     -> Fix4 (TaggedInstr o) xs n r a  -- ^ Machine instructions
                     -> CFG
-constructMachineCFG starts instrs = CFG{ graph = graph, start = skimTopTag instrs, useDefs = usedefs}
+constructMachineCFG starts instrs = CFG{ graph = graph, start = skimTopTag instrs, useDefs = usedefs, calleeTags = Map.union starts (loopTags endState)}
     where
         -- 1. Construct graph by attaching join points, loops, and sequential instructions (in reverse) (_, GraphConstruction phidata graph usedefs)
         emptyConstructionState =  GraphConstructionState Map.empty []
-        (_, GraphConstruction (joins, joinPts) partialGraph usedefs) = (runWriter . flip runStateT emptyConstructionState . doGrapher) $ cata4 (Grapher . alg) instrs
+        ((_, endState), GraphConstruction (joins, joinPts) partialGraph usedefs) = (runWriter . flip runStateT emptyConstructionState . doGrapher) $ cata4 (Grapher . alg) instrs
 
         -- 2. Turn our partial graph' into a full one with phidata
         graph = Graph $ foldl (\g (join, phi) -> Map.unionWith Set.union g $ Map.fromList [(join, Set.singleton $ joinPtsMap Map.! phi)]) (unGraph partialGraph) joins
@@ -396,8 +410,8 @@ constructMachineCFG starts instrs = CFG{ graph = graph, start = skimTopTag instr
         addDef t σ = (lift . tell . refGCon . Map.fromList) [(t, (mempty, Set.singleton σ))]
 
 
-threadableRefs :: InstrID -> CFG -> FreeReferences
-threadableRefs maxID CFG{graph, useDefs} = Map.map (uncurry (Set.\\)) usedefs'
+freeRegisters :: InstrID -> CFG -> FreeReferences
+freeRegisters maxID CFG{graph, useDefs} = Map.map (uncurry (Set.\\)) usedefs'
     where
         -- Propagate the (use, def) sets upwards. 
         usedefs' = propagateRegs graph useDefs
@@ -469,79 +483,93 @@ markThreadables frees = undefined
 Keeps state of which loops are currently in scope. Helps us to know when to mark calls as loop calls 
 and decide at calls/joins which registers solidfy.
 -}
-data LoopMarkerState = LoopMarkerState { loops :: Map IMVar (Set SomeΣVar) }
-newtype LoopMarker o xs n r a = LoopMarker {doLoopMarking :: State LoopMarkerState (Fix4 (Instr o) xs n r a) }
+data LoopMarkerState = LoopMarkerState { toBind:: Set SomeΣVar, loopBinds :: [Set SomeΣVar] }
+newtype LoopMarker o xs n r a = LoopMarker {doLoopMarking :: State LoopMarkerState (Fix4 (TaggedInstr o) xs n r a) }
 
 
-markLoopBodies :: Map IMVar (Set SomeΣVar) -> FreeReferences -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
-markLoopBodies mufrees frees instrs = evalState marking emptyLoopMarkerState
+markLoopBodies :: Set IMVar -> FreeReferences -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (TaggedInstr o) xs n r a
+markLoopBodies letBounds frees instrs = evalState marking emptyLoopMarkerState
     where
-        emptyLoopMarkerState = LoopMarkerState Map.empty
+        emptyLoopMarkerState = LoopMarkerState Set.empty []
         marking = doLoopMarking $ cata4 (LoopMarker . alg) instrs
-        alg :: TaggedInstr o (LoopMarker o) xs n r a -> State LoopMarkerState (Fix4 (Instr o) xs n r a)
-        alg (Tag4 _ Ret)                 = wrap Ret
-        alg (Tag4 _ (Call (MVar μ) _ k)) = do
-                                            LoopMarkerState{loops} <- get
+        alg :: TaggedInstr o (LoopMarker o) xs n r a -> State LoopMarkerState (Fix4 (TaggedInstr o) xs n r a)
+        alg (Tag4 t Ret)                 = wrap t Ret
+        alg (Tag4 t (Call (MVar μ) _ k)) = do
                                             k' <- doLoopMarking k
-                                            if Map.member μ loops
-                                                then wrap (Call (MVar μ) True k')
-                                                else wrap (Call (MVar μ) False k')
-        alg (Tag4 _ (Push x k))          = doLoopMarking k >>= wrap . Push x
-        alg (Tag4 _ (Pop k))             = doLoopMarking k >>= wrap . Pop
-        alg (Tag4 _ (Lift2 f k))         = doLoopMarking k >>= wrap . Lift2 f
-        alg (Tag4 _ (Sat f k))           = doLoopMarking k >>= wrap . Sat f
-        alg (Tag4 _ Empt)                = wrap Empt
-        alg (Tag4 _ (Commit k))          = doLoopMarking k >>= wrap . Commit
-        alg (Tag4 _ (Catch p h))         = do
+                                            -- TODO: remove this whenever we have total binds. Just here to get intermediary stuff working.
+                                            if Set.member μ letBounds
+                                                then wrap t (Call (MVar μ) False k') -- Is let-bound parser
+                                                else wrap t (Call (MVar μ) True k') -- Is loop
+        alg (Tag4 t (Push x k))          = doLoopMarking k >>= wrap t . Push x
+        alg (Tag4 t (Pop k))             = doLoopMarking k >>= wrap t . Pop
+        alg (Tag4 t (Lift2 f k))         = doLoopMarking k >>= wrap t . Lift2 f
+        alg (Tag4 t (Sat f k))           = doLoopMarking k >>= wrap t . Sat f
+        alg (Tag4 t Empt)                = wrap t Empt
+        alg (Tag4 t (Commit k))          = doLoopMarking k >>= wrap t . Commit
+        alg (Tag4 t (Catch p h))         = do
                                             p' <- doLoopMarking p
                                             h' <- doHandler h
-                                            wrap (Catch p' h')
-        alg (Tag4 _ (Tell k))            = doLoopMarking k >>= wrap . Tell
-        alg (Tag4 _ (Seek k))            = doLoopMarking k >>= wrap . Seek
-        alg (Tag4 _ (Case p q))          = do
+                                            wrap t (Catch p' h')
+        alg (Tag4 t (Tell k))            = doLoopMarking k >>= wrap t . Tell
+        alg (Tag4 t (Seek k))            = doLoopMarking k >>= wrap t . Seek
+        alg (Tag4 t (Case p q))          = do
                                             p' <- doLoopMarking p
                                             q' <- doLoopMarking q
-                                            wrap (Case p' q')
-        alg (Tag4 _ (Choices fs ks def)) = do
+                                            wrap t (Case p' q')
+        alg (Tag4 t (Choices fs ks def)) = do
                                             ks' <- traverse doLoopMarking ks
                                             def' <- doLoopMarking def
-                                            wrap (Choices fs ks' def')
+                                            wrap t (Choices fs ks' def')
         alg (Tag4 t (Iter μ _ l h))      = do
-                                            let loopRegs = frees Map.! t
-                                            addLoop μ loopRegs
-                                            l' <- doLoopMarking l
-                                            removeLoop μ
                                             h' <- doHandler h
-                                            wrap (Iter μ (Just $ makeRegs loopRegs) l' h')
-        alg (Tag4 _ (Join φ))            = wrap (Join φ)
-        alg (Tag4 _ (MkJoin φ p k))      = do
+                                            -- Just bind the frees in loop, not those that escape.
+                                            -- TODO: when handler continuations work, this should change
+                                            let regsToBind = (frees Map.! t) Set.\\ handlerFrees h'
+                                            addLoopBinds regsToBind
+                                            l' <- doLoopMarking l
+                                            popLoopBinds
+                                            wrap t (Iter μ (Just $ makeRegs regsToBind) l' h')
+        alg (Tag4 t (Join φ))            = wrap t (Join φ)
+        alg (Tag4 t (MkJoin φ p k))      = do
                                             p' <- doLoopMarking p
                                             k' <- doLoopMarking k
-                                            wrap (MkJoin φ p' k')
-        alg (Tag4 _ (Swap k))            = doLoopMarking k >>= wrap . Swap
-        alg (Tag4 _ (Dup k))             = doLoopMarking k >>= wrap . Dup
-        alg (Tag4 _ (Make σ a k))        = doLoopMarking k >>= wrap . Make σ a -- TODO: turn to bounded access if possible
-        alg (Tag4 _ (Get σ a k))         = doLoopMarking k >>= wrap . Get σ a -- TODO: turn to bounded access if possible
-        alg (Tag4 _ (Put σ a k))         = doLoopMarking k >>= wrap . Put σ a -- TODO: turn to bounded access if possible
-        alg (Tag4 _ (SelectPos p k))     = doLoopMarking k >>= wrap . SelectPos p
-        alg (Tag4 _ (LogEnter l k))      = doLoopMarking k >>= wrap . LogEnter l
-        alg (Tag4 _ (LogExit l k))       = doLoopMarking k >>= wrap . LogExit l
-        alg (Tag4 _ (MetaInstr m k))     = doLoopMarking k >>= wrap . MetaInstr m
+                                            wrap t (MkJoin φ p' k')
+        alg (Tag4 t (Swap k))            = doLoopMarking k >>= wrap t . Swap
+        alg (Tag4 t (Dup k))             = doLoopMarking k >>= wrap t . Dup
+        alg (Tag4 t (Make σ a k))        = do 
+                                            k' <- doLoopMarking k
+                                            bound <- isBound σ
+                                            wrap t $ if bound then Make σ Bound k' else Make σ a k' 
+        alg (Tag4 t (Get σ a k))         =do 
+                                            k' <- doLoopMarking k
+                                            bound <- isBound σ
+                                            wrap t $ if bound then Get σ Bound k' else Get σ a k' 
+        alg (Tag4 t (Put σ a k))         = do 
+                                            k' <- doLoopMarking k
+                                            bound <- isBound σ
+                                            wrap t $ if bound then Put σ Bound k' else Put σ a k' 
+        alg (Tag4 t (SelectPos p k))     = doLoopMarking k >>= wrap t . SelectPos p
+        alg (Tag4 t (LogEnter l k))      = doLoopMarking k >>= wrap t . LogEnter l
+        alg (Tag4 t (LogExit l k))       = doLoopMarking k >>= wrap t . LogExit l
+        alg (Tag4 t (MetaInstr m k))     = doLoopMarking k >>= wrap t . MetaInstr m
 
-        addLoop :: MVar Void -> Set SomeΣVar -> State LoopMarkerState ()
-        addLoop (MVar μ) loopRegs = do
-                        state <- get
-                        put (state{loops = Map.insert μ loopRegs (loops state)})
+        wrap :: InstrID -> Instr o (Fix4 (TaggedInstr o)) xs n r a -> State LoopMarkerState (Fix4 (TaggedInstr o) xs n r a)
+        wrap t instrs = pure $ In4 (Tag4 t instrs)
 
-        removeLoop :: MVar Void -> State LoopMarkerState ()
-        removeLoop (MVar μ) = do
-                        state <- get
-                        put (state{loops = Map.delete μ (loops state)})
+        -- TODO: when handler continuations are done, this state logic is wrong as we should thread the variables across handler boundaries as well
+        addLoopBinds :: Set SomeΣVar -> State LoopMarkerState ()
+        addLoopBinds regs = do
+                            state <- get
+                            put $ state{toBind = Set.union (toBind state) regs, loopBinds = regs:loopBinds state}
 
-        wrap :: Instr o (Fix4 (Instr o)) xs n r a -> State LoopMarkerState (Fix4 (Instr o) xs n r a)
-        wrap = pure . In4
+        popLoopBinds :: State LoopMarkerState ()
+        popLoopBinds = do 
+                        LoopMarkerState{toBind, loopBinds} <- get
+                        let (x:xs) = loopBinds
+                        put $ LoopMarkerState{toBind=toBind Set.\\ x, loopBinds = xs}
 
-        doHandler :: Handler o (LoopMarker o) xs n r a -> State LoopMarkerState (Handler o (Fix4 (Instr o)) xs n r a)
+
+        doHandler :: Handler o (LoopMarker o) xs n r a -> State LoopMarkerState (Handler o (Fix4 (TaggedInstr o)) xs n r a)
         doHandler (Same x k1 y k2) = do
                                         k1' <- doLoopMarking k1
                                         k2' <- doLoopMarking k2
@@ -549,3 +577,18 @@ markLoopBodies mufrees frees instrs = evalState marking emptyLoopMarkerState
         doHandler (Always x k)     = do
                                         k' <- doLoopMarking k
                                         return (Always x k')
+        handlerFrees :: Handler o (Fix4 (TaggedInstr o)) xs n r a -> Set SomeΣVar
+        handlerFrees (Same _ (In4 h1) _ (In4 h2)) = (frees Map.! (tag h1)) `Set.union` (frees Map.! (tag h2)) 
+        handlerFrees (Always _ (In4 h))           = frees Map.! tag h
+
+        isBound :: forall x. ΣVar x -> State LoopMarkerState Bool
+        isBound σ = get >>= pure . Set.member (SomeΣVar σ) . toBind
+
+{-| 
+Forgetfully removes tags from instructions. 
+-}
+unTag :: Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
+unTag = cata4 alg
+    where 
+        alg :: TaggedInstr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a
+        alg Tag4{tagged} = In4 tagged

@@ -20,20 +20,25 @@ The determination of free references at each point is much alike to the algorith
 -}
 module Parsley.Internal.Backend.ReferenceBinds (bindReferences) where
 
+import Parsley.Internal.Opt (Flags (totalReferenceBinds))
+import Parsley.Internal.Trace (Trace)
+import Parsley.Internal.Backend.Machine.LetBindings (LetBinding (..))
+import Parsley.Internal.Common (One)
 import Parsley.Internal.Common.Fresh (HFresh, MonadFresh(..), runFresh)
-import Parsley.Internal.Common.Indexed (Fix4, IFunctor4)
+import Parsley.Internal.Common.Indexed (Fix4, IFunctor4, Fix4(..), Const4(..), cata4, IFunctor4(imap4))
 import Parsley.Internal.Common.Utils (intercalateDiff)
-import Parsley.Internal.Common.Indexed (Fix4 (..), Const4 (..), cata4, IFunctor4 (imap4))
+import Parsley.Internal.Backend.Machine (Input)
 import Parsley.Internal.Backend.Machine.Identifiers (SomeΣVar(..), IΦVar, ΦVar(..), IMVar, MVar (..))
 import Parsley.Internal.Backend.Machine.Instructions (Instr(..), Handler(..), PosSelector(..), MetaInstr(..))
 import Parsley.Internal.Backend.Machine.Types.Registers (makeRegs)
 
 import Control.Monad.Writer (Writer, MonadWriter (..))
 import Control.Monad.Writer.Lazy (runWriter)
-import Control.Monad.State (StateT (..), MonadTrans (..), MonadState (..), when, runState, evalState)
+import Control.Monad.State (StateT (..), MonadTrans (..), MonadState (..), when, evalState)
 import Control.Monad.State.Lazy (State)
 import Control.Monad.State (gets, execState)
-import Control.Monad (unless, liftM2)
+import Control.Monad (unless)
+
 import Debug.Trace (trace)
 
 import Data.Map (Map)
@@ -43,21 +48,34 @@ import qualified Data.Set as Set
 import Data.DList (DList)
 import qualified Data.DList as DList
 import Data.Void (Void)
-import Parsley.Internal.Backend.Machine (Input)
-import Parsley.Internal.Opt (Flags)
-import Parsley.Internal.Trace (Trace)
-import Parsley.Internal.Backend.Machine.LetBindings (LetBinding)
+
+import qualified Data.Dependent.Map as DMap
 import Data.Dependent.Map (DMap)
 
 
+{-|
+`bindReferences` performs global analysis on the forest of let-bound parsers and turns as many references
+into bound variables as possible. 
+-}
 bindReferences :: forall input a. (Input input, Trace, ?flags::Flags) => (LetBinding input a a, DMap MVar (LetBinding input a)) -> (LetBinding input a a, DMap MVar (LetBinding input a))
-bindReferences (p, μs) = (p, μs) 
+bindReferences (p, μs)
+    | totalReferenceBinds ?flags  = trace traceString (p, μs)
+    | otherwise = (p, μs)
     where
-        -- 1. tag the instructions
-        -- (taggedInstrs, maxTag) = tagInstructions instrs
 
-        -- 2. Perform analysis to get map of Instruction ID -> references that are free at some point here
-        -- threadables = threadableRefs maxTag taggedInstrs
+        -- debugging purposes. TODO: remove in final code
+        traceString = "MACHINES:\n" ++ tagTrace ++ "\nGRAPH (starting at " ++ show (start cfg) ++ "): \n" ++ show (unGraph $ graph cfg)
+                    ++ "\nUSE-DEFS: \n" ++ show (useDefs cfg)
+        tagTrace = DMap.foldlWithKey (\s k b -> s ++ "\n    let-bound " ++ show k ++ " => " ++ show (taggedBody b) ) ("    top-level    => " ++ show pTagged) μsTagged
+
+        -- 1. Tag every instruction with a unique identifier
+        (pTagged, maxV) = tagInstructions 0 (body p)
+        (μsTagged, _) = DMap.foldlWithKey (\(m, max) μ p -> let (tagged, max') = tagInstructions max (body p)
+                                                            in (DMap.insert μ (TaggedBinding tagged) m, max'))
+                                                            (DMap.empty :: DMap MVar (TaggedBinding input a), maxV) μs
+
+        -- 2. create CFG of the whole forest of machines 
+        cfg = constructCFG (TaggedBinding pTagged, μsTagged)
 
         -- 3. Use `liveSets` to tag each join point, handler, and return continuation with references that might live through it
         -- TOOD
@@ -65,14 +83,27 @@ bindReferences (p, μs) = (p, μs)
         -- 4. Mark loop bodies
         -- instrs' = markLoopBodies frees threadables taggedInstrs
 
+-- Tagging Instructions
 
 -- We need to tag each instruction with a unique ID so we can perform liveness analysis
 data Tag4 t f k xs n r a = Tag4 {tag :: t, tagged :: f k xs n r a} deriving stock Show
 instance IFunctor4 f => IFunctor4 (Tag4 t f) where
     imap4 f Tag4{tag, tagged} = Tag4 tag (imap4 f tagged)
 
+{-|
+Type which we use to tag each instruction with
+-}
 type InstrID = Int
+
+{-|
+Type synonym to help work with wrapping instructions in Tags
+-}
 type TaggedInstr a = Tag4 InstrID (Instr a)
+
+-- Just a helper type for working with `DMap`
+data TaggedBinding o a x = TaggedBinding { taggedBody :: Fix4 (TaggedInstr o) '[] One x a }
+
+-- Show instance for debugging
 instance Show (Fix4 (TaggedInstr o) xs n r a) where
   show = ($ "") . getConst4 . cata4 (Const4 . alg)
     where
@@ -105,25 +136,28 @@ instance Show (Fix4 (TaggedInstr o) xs n r a) where
       alg (Tag4 t (MetaInstr BlockCoins{} k)) = shows t . ": " . getConst4 k
       alg (Tag4 t (MetaInstr m k))            = shows t . ": [" . shows m . "] " . getConst4 k
 
+-- we need to perform a mcata on a machine's instructions , and we do this via this newtype monad pattern thing.
 newtype Tagger o xs n r a = Tagger {doTagger :: HFresh InstrID (Fix4 (TaggedInstr o) xs n r a)}
--- mcata
-tagInstructions :: Fix4 (Instr o) xs n r a -> (Fix4 (TaggedInstr o) xs n r a, Int)
-tagInstructions instrs = runFresh (doTagger $ cata4 alg instrs) initID
-    where
-        initID = 0 :: InstrID
 
+{-|
+Does what it says on the tin. Take a fixed-point representation of our machine and run it past the tagger algebra that uses `Tagger`.
+-}
+tagInstructions :: InstrID -> Fix4 (Instr o) xs n r a -> (Fix4 (TaggedInstr o) xs n r a, Int)
+tagInstructions initID instrs = runFresh (doTagger $ cata4 (Tagger . alg) instrs) initID
+    where
         wrap p = newVar >>= (\t -> return (In4 (Tag4 t p)))
 
-        alg :: Instr o (Tagger o) xs n r a -> Tagger o xs n r a
-        alg Ret                 = Tagger $ wrap Ret
-        alg (Call μ l k)        = Tagger $ doTagger k >>= (wrap . Call μ l)
-        alg (Push x k)          = Tagger $ doTagger k >>= (wrap . Push x)
-        alg (Pop k)             = Tagger $ doTagger k >>= (wrap . Pop)
-        alg (Lift2 f k)         = Tagger $ doTagger k >>= (wrap . Lift2 f)
-        alg (Sat f k)           = Tagger $ doTagger k >>= (wrap . Sat f)
-        alg Empt                = Tagger $ wrap Empt
-        alg (Commit k)          = Tagger $ doTagger k >>= (wrap . Commit)
-        alg (Catch p h)         = Tagger $ do
+        -- Casework
+        alg :: Instr o (Tagger o) xs n r a -> HFresh InstrID (Fix4 (TaggedInstr o) xs n r a)
+        alg Ret                 = wrap Ret
+        alg (Call μ l k)        = doTagger k >>= (wrap . Call μ l)
+        alg (Push x k)          = doTagger k >>= (wrap . Push x)
+        alg (Pop k)             = doTagger k >>= (wrap . Pop)
+        alg (Lift2 f k)         = doTagger k >>= (wrap . Lift2 f)
+        alg (Sat f k)           = doTagger k >>= (wrap . Sat f)
+        alg Empt                = wrap Empt
+        alg (Commit k)          = doTagger k >>= (wrap . Commit)
+        alg (Catch p h)         = do
                                     p' <- doTagger p
                                     h' <- case h of
                                         (Same a ka b kb) -> do
@@ -134,17 +168,17 @@ tagInstructions instrs = runFresh (doTagger $ cata4 alg instrs) initID
                                                                 k' <- doTagger k
                                                                 return $ Always x k'
                                     wrap (Catch p' h')
-        alg (Tell k)            = Tagger $ doTagger k >>= (wrap . Tell)
-        alg (Seek k)            = Tagger $ doTagger k >>= (wrap . Seek)
-        alg (Case p q)          = Tagger $ do
+        alg (Tell k)            = doTagger k >>= (wrap . Tell)
+        alg (Seek k)            = doTagger k >>= (wrap . Seek)
+        alg (Case p q)          = do
                                     p' <- doTagger p
                                     q' <- doTagger q
                                     wrap (Case p' q')
-        alg (Choices fs ks def) = Tagger $ do
+        alg (Choices fs ks def) = do
                                     ks' <- traverse doTagger ks
                                     def' <- doTagger def
                                     wrap (Choices fs ks' def')
-        alg (Iter μ _ l h)        = Tagger $ do
+        alg (Iter μ _ l h)      = do
                                     l' <- doTagger l
                                     h' <- case h of
                                         (Same a ka b kb) -> do
@@ -155,109 +189,152 @@ tagInstructions instrs = runFresh (doTagger $ cata4 alg instrs) initID
                                                                 k' <- doTagger k
                                                                 return $ Always x k'
                                     wrap (Iter μ Nothing l' h')
-        alg (Join φ)            = Tagger $ wrap (Join φ)
-        alg (MkJoin φ p k)      = Tagger $ do
+        alg (Join φ)            = wrap (Join φ)
+        alg (MkJoin φ p k)      = do
                                     p' <- doTagger p
                                     k' <- doTagger k
                                     wrap (MkJoin φ p' k')
-        alg (Swap k)            = Tagger $ doTagger k >>= (wrap . Swap)
-        alg (Dup k)             = Tagger $ doTagger k >>= (wrap . Dup)
-        alg (Make σ a k)        = Tagger $ doTagger k >>= (wrap . Make σ a)
-        alg (Get σ a k)         = Tagger $ doTagger k >>= (wrap . Get σ a)
-        alg (Put σ a k)         = Tagger $ doTagger k >>= (wrap . Put σ a)
-        alg (SelectPos p k)     = Tagger $ doTagger k >>= (wrap . SelectPos p)
-        alg (LogEnter l k)      = Tagger $ doTagger k >>= (wrap . LogEnter l)
-        alg (LogExit l k)       = Tagger $ doTagger k >>= (wrap . LogExit l)
-        alg (MetaInstr m k)     = Tagger $ doTagger k >>= (wrap . MetaInstr m)
+        alg (Swap k)            = doTagger k >>= (wrap . Swap)
+        alg (Dup k)             = doTagger k >>= (wrap . Dup)
+        alg (Make σ a k)        = doTagger k >>= (wrap . Make σ a)
+        alg (Get σ a k)         = doTagger k >>= (wrap . Get σ a)
+        alg (Put σ a k)         = doTagger k >>= (wrap . Put σ a)
+        alg (SelectPos p k)     = doTagger k >>= (wrap . SelectPos p)
+        alg (LogEnter l k)      = doTagger k >>= (wrap . LogEnter l)
+        alg (LogExit l k)       = doTagger k >>= (wrap . LogExit l)
+        alg (MetaInstr m k)     = doTagger k >>= (wrap . MetaInstr m)
 
--- Finding threadable references
+-- CFG construction
 
--- Graph construction types
-type ThreadableRefs = Map InstrID (Set SomeΣVar)
--- PhiData: (InstrID of join to ΦVar, IΦVar to join point's InstrID )
+-- TODO: rename or remove
+type FreeReferences = Map InstrID (Set SomeΣVar)
+
+-- PhiData: (InstrID of join to ΦVar, IΦVar to join point's InstrID ). Used internally in CFG construction.
 type PhiData = (DList (InstrID, IΦVar), DList (IΦVar, InstrID))
+
+{-| 
+Generic graph data type. 
+-}
 newtype Graph = Graph { unGraph :: Map InstrID (Set InstrID) }
 
+{-|
+Keep graph and use-def data together. 
+-}
+data CFG = CFG {
+    graph   :: Graph,        -- ^ graph of the CFG
+    start   :: InstrID,      -- ^ Start node of the CFG
+    useDefs :: UseDefData -- ^ The use-defs, duh!
+}
+
+-- Make some instances for Graph construction to make things easier and more ergonomic.
 instance Semigroup Graph where
     a <> b = Graph $ Map.unionWith Set.union (unGraph a) (unGraph b)
 instance Monoid Graph where
     mempty = Graph Map.empty
-
--- map instrID to (use, def)
-type ReferenceData = Map InstrID (Set SomeΣVar, Set SomeΣVar)
-
-data GraphConstruction = GraphConstruction{ phiData :: PhiData, graphData :: Graph, refData :: ReferenceData}
-
--- Smart constructors for creating constitutient parts of `GraphConstruction`
-phiGCon p = GraphConstruction p mempty mempty
-graphGCon g = GraphConstruction mempty g mempty
-refGCon = GraphConstruction mempty mempty
 
 instance Semigroup GraphConstruction where
     (GraphConstruction p1 g1 r1) <> (GraphConstruction p2 g2 r2) = GraphConstruction (p1 <> p2) (g1 <> g2) (r1 <> r2)
 instance Monoid GraphConstruction where
     mempty = GraphConstruction mempty mempty mempty
 
+-- map instrID to (use, def)
+type UseDefData = Map InstrID (Set SomeΣVar, Set SomeΣVar)
+
+-- State to pass around during construction
+data GraphConstruction = GraphConstruction { phiData :: PhiData, graphData :: Graph, refData :: UseDefData}
+
 -- LoopAndHandlerScope: stack of handler insturction IDs
 data HandlerEntry = SameH InstrID InstrID | AlwaysH InstrID deriving stock Show
 type HandlerEntries = [HandlerEntry]
 
--- Grapher: State for if we are in a loop body and what the beginning instruction of the current handler is. Moreover,
---          a `Writer` instance to write the graph into as well as  record  data about Phi Joins and MkJoins that will
---          be joined later
-newtype Grapher o xs n r a = Grapher {doGrapher :: StateT HandlerEntries (Writer GraphConstruction) InstrID }
+data GraphConstructionState = GraphConstructionState { loopTags :: Map IMVar InstrID, handlerStack:: HandlerEntries }
 
-threadableRefs :: InstrID -> Fix4 (TaggedInstr o) xs n r a -> ThreadableRefs
-threadableRefs maxID instrs = result
+{- 
+Grapher: State for if we are in a loop body and what the beginning instruction of the current handler is. Moreover,
+          a `Writer` instance to write the graph into as well as  record  data about Phi Joins and MkJoins that will
+          be joined later
+-}
+newtype Grapher o xs n r a = Grapher { doGrapher :: StateT GraphConstructionState (Writer GraphConstruction) InstrID }
+
+{-| 
+`skimTopTag` just returns the tag of the entry point to a series of instructions.
+-}
+skimTopTag :: forall o xs n r a. Fix4 (TaggedInstr o) xs n r a -> InstrID
+skimTopTag (In4 Tag4{tag}) = tag
+
+constructCFG :: forall input a. (TaggedBinding input a a, DMap MVar (TaggedBinding input a)) -> CFG
+constructCFG (p, μs) = cfg
+    where
+        -- Skim the starting tags of the parsers (NB: ignoring entry machine `p`)
+        starts = DMap.foldlWithKey (\m (MVar k) b -> Map.insert k (skimTopTag $ taggedBody b) m) Map.empty μs
+
+        -- Construct the global CFG from the let-bound parsers
+        cfg = DMap.foldlWithKey (\cfg _ b -> cfg `mergeCFGs` constructMachineCFG starts (taggedBody b)) (constructMachineCFG starts (taggedBody p)) μs
+
+        -- left-biased merge of two CFGs
+        mergeCFGs :: CFG -> CFG -> CFG
+        mergeCFGs cfg1 cfg2 = CFG {graph = graph cfg1 <> graph cfg2, start = start cfg1, useDefs = Map.union (useDefs cfg1) (useDefs cfg2) }
+
+constructMachineCFG :: forall o xs n r a. Map IMVar InstrID -- ^ Map of MVar -> tag of the first instruction of machine
+                    -> Fix4 (TaggedInstr o) xs n r a  -- ^ Machine instructions
+                    -> CFG
+constructMachineCFG starts instrs = CFG{ graph = graph, start = skimTopTag instrs, useDefs = usedefs}
     where
         -- 1. Construct graph by attaching join points, loops, and sequential instructions (in reverse) (_, GraphConstruction phidata graph usedefs)
+        emptyConstructionState =  GraphConstructionState Map.empty []
+        (_, GraphConstruction (joins, joinPts) partialGraph usedefs) = (runWriter . flip runStateT emptyConstructionState . doGrapher) $ cata4 (Grapher . alg) instrs
 
-        (_, GraphConstruction phidata graph' usedefs) = (runWriter . flip runStateT [] . doGrapher) $ cata4 (Grapher . alg) instrs
-        -- Turn our partial graph' into a full one with phidata
-        graph = Graph $ foldl (\g (join, phi) -> Map.unionWith Set.union g $ Map.fromList [(join, Set.singleton $ joinPtsMap Map.! phi)]) (unGraph graph') joins
-            where
-                (joins, joinPts) = phidata
-                joinPtsMap = Map.fromList $ DList.toList joinPts
+        -- 2. Turn our partial graph' into a full one with phidata
+        graph = Graph $ foldl (\g (join, phi) -> Map.unionWith Set.union g $ Map.fromList [(join, Set.singleton $ joinPtsMap Map.! phi)]) (unGraph partialGraph) joins
+        joinPtsMap = Map.fromList $ DList.toList joinPts
 
-        alg :: TaggedInstr o (Grapher o) xs n r a ->  StateT HandlerEntries (Writer GraphConstruction) InstrID
-        alg (Tag4 t Ret)                = handlerEdge t >> addStump t >> pure t
-        alg (Tag4 t (Call _ _ k))       = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Push _ k))         = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Pop k))            = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Lift2 _ k))        = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Sat _ k))          = handlerEdge t >> edgeToK t k
-        alg (Tag4 t Empt)               = handlerEdge t >> addStump t >> pure t
-        alg (Tag4 t (Commit k))         = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Catch p h))        = handlerEdge t >> pushHandler h >> edgeToK t p >> popHandler >> pure t
-        alg (Tag4 t (Tell k))           = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Seek k))           = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Case p q))         = handlerEdge t >> edgeToK t p >> edgeToK t q
-        alg (Tag4 t (Choices _ ks def)) = handlerEdge t >> traverse (edgeToK t) ks >> edgeToK t def
-        alg (Tag4 t (Iter _ _ l h))     = do
-                                                handlerEdge t
-                                                he <- pushHandler h
+        alg :: forall o xs n r a. TaggedInstr o (Grapher o) xs n r a -> StateT GraphConstructionState (Writer GraphConstruction) InstrID
+        alg (Tag4 t Ret)                 = handlerEdge t >> addStump t >> pure t
+        alg (Tag4 t (Call (MVar μ) _ k)) = do
+                                            handlerEdge t
+                                            callTag <- if Map.member μ starts
+                                                        then pure $ starts Map.! μ -- call to let-bound
+                                                        else getLoopTag μ -- loop call-back
+                                            addEdge t callTag
+                                            edgeToK t k
+        alg (Tag4 t (Push _ k))          = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Pop k))             = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Lift2 _ k))         = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Sat _ k))           = handlerEdge t >> edgeToK t k
+        alg (Tag4 t Empt)                = handlerEdge t >> addStump t >> pure t
+        alg (Tag4 t (Commit k))          = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Catch p h))         = handlerEdge t >> pushHandler h >> edgeToK t p >> popHandler >> pure t
+        alg (Tag4 t (Tell k))            = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Seek k))            = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Case p q))          = handlerEdge t >> edgeToK t p >> edgeToK t q
+        alg (Tag4 t (Choices _ ks def))  = handlerEdge t >> traverse (edgeToK t) ks >> edgeToK t def
+        alg (Tag4 t (Iter (MVar μ) _ l h)) = do
+                                                pushHandler h
+                                                addLoopTag μ t
                                                 entry <- doGrapher l
                                                 addEdge t entry
-                                                -- FIXME: this is semantically incorrect (we won't leave the handler back to the loop), 
-                                                --        but it is functionally correct for the control-flow structure we care about.
-                                                --        Only efficient fix I can think of includes threading _even more_ state around
-                                                -- Join loop iterations together
-                                                case he of
-                                                    (SameH a _) -> addEdge a entry
-                                                    (AlwaysH a) -> addEdge a entry
+                                                removeLoopTag μ
                                                 popHandler
                                                 pure t
-        alg (Tag4 t (Join φ))           = handlerEdge t >> addJoin t φ >> pure t
-        alg (Tag4 t (MkJoin φ p k))     = handlerEdge t >> doGrapher p >>= flip addMkJoin φ >> edgeToK t k
-        alg (Tag4 t (Swap k))           = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Dup k))            = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Make σ _ k))       = handlerEdge t >> addDef t (SomeΣVar σ) >> edgeToK t k
-        alg (Tag4 t (Get σ _ k))        = handlerEdge t >> addUse t (SomeΣVar σ) >> edgeToK t k
-        alg (Tag4 t (Put σ _ k))        = handlerEdge t >> addUse t (SomeΣVar σ) >> edgeToK t k
-        alg (Tag4 t (SelectPos _ k))    = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (LogEnter _ k))     = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (LogExit _ k))      = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (MetaInstr _ k))    = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Join φ))            = handlerEdge t >> addJoin t φ >> pure t
+        alg (Tag4 t (MkJoin φ p k))      = handlerEdge t >> doGrapher p >>= flip addMkJoin φ >> edgeToK t k
+        alg (Tag4 t (Swap k))            = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Dup k))             = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Make σ _ k))        = handlerEdge t >> addDef t (SomeΣVar σ) >> edgeToK t k
+        alg (Tag4 t (Get σ _ k))         = handlerEdge t >> addUse t (SomeΣVar σ) >> edgeToK t k
+        alg (Tag4 t (Put σ _ k))         = handlerEdge t >> addUse t (SomeΣVar σ) >> edgeToK t k
+        alg (Tag4 t (SelectPos _ k))     = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (LogEnter _ k))      = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (LogExit _ k))       = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (MetaInstr _ k))     = handlerEdge t >> edgeToK t k
+
+        -- Smart constructors for creating constitutient parts of `GraphConstruction`
+        phiGCon :: PhiData -> GraphConstruction
+        phiGCon p = GraphConstruction p mempty mempty
+        graphGCon :: Graph -> GraphConstruction
+        graphGCon g = GraphConstruction mempty g mempty
+        refGCon :: UseDefData -> GraphConstruction
+        refGCon = GraphConstruction mempty mempty
 
         -- Various monadic helpers for graph construction
         addJoin t (ΦVar  φ)   = (lift . tell) (phiGCon (DList.fromList [(t, φ)], DList.empty))
@@ -265,40 +342,66 @@ threadableRefs maxID instrs = result
 
         addStump a = (lift . tell . graphGCon . Graph) (Map.fromList [(a, mempty)])
         addEdge a b = (lift . tell . graphGCon . Graph) (Map.fromList [(a, Set.singleton b)])
+
         edgeToK t k = doGrapher k >>= addEdge t >> pure t
 
-        pushHandler :: Handler o (Grapher o) xs n r a -> StateT HandlerEntries (Writer GraphConstruction) HandlerEntry
+        -- Handler state helpers
+        pushHandler :: forall o xs n r a. Handler o (Grapher o) xs n r a -> StateT GraphConstructionState (Writer GraphConstruction) HandlerEntry
         pushHandler (Same _ k1 _ k2) = do
-                                        stack <- get
+                                        state <- get
+                                        let GraphConstructionState{handlerStack} = state
                                         t1 <- doGrapher k1
                                         t2 <- doGrapher k2
                                         let h = SameH t1 t2
-                                        put (h:stack)
+                                        put state{handlerStack = h:handlerStack}
                                         pure h
         pushHandler (Always _ k)     = do
-                                        stack <- get
+                                        state <- get
+                                        let GraphConstructionState{handlerStack} = state
                                         t <- doGrapher k
                                         let h = AlwaysH t
-                                        put (h:stack)
+                                        put state{handlerStack = h:handlerStack}
                                         pure h
 
-        popHandler :: StateT HandlerEntries (Writer GraphConstruction) ()
-        popHandler = get >>= (\stack -> put $ case stack of
-                                                [] -> []
-                                                (_:hs) -> hs)
-
-        handlerEdge t = get >>= \stack -> do
+        popHandler :: StateT GraphConstructionState (Writer GraphConstruction) ()
+        popHandler = do
+                        state <- get
+                        put state{handlerStack = (\(_:hs) -> hs) $ handlerStack state}
+        handlerEdge t = get >>= (\stack -> do
                                             case stack of
                                                 [] -> pure ()
                                                 ((AlwaysH h):_) -> addEdge t h
-                                                ((SameH h1 h2 ):_) -> addEdge t h1 >> addEdge t h2
+                                                ((SameH h1 h2 ):_) -> addEdge t h1 >> addEdge t h2) . handlerStack
 
+        -- loop start position state helpers
+        getLoopTag :: IMVar -> StateT GraphConstructionState (Writer GraphConstruction) InstrID
+        getLoopTag μ = do
+            GraphConstructionState{loopTags} <- get
+            return $ loopTags Map.! μ
+
+        addLoopTag :: IMVar -> InstrID -> StateT GraphConstructionState (Writer GraphConstruction) ()
+        addLoopTag μ t = do
+                            state <- get
+                            put state{loopTags = Map.insert μ t (loopTags state)}
+                            return ()
+
+        removeLoopTag :: IMVar -> StateT GraphConstructionState (Writer GraphConstruction) ()
+        removeLoopTag μ = do
+                            state <- get
+                            put state{loopTags = Map.delete μ (loopTags state)}
+                            return ()
+
+        -- Register use/def writers
         addUse t σ = (lift . tell . refGCon . Map.fromList) [(t, (Set.singleton σ, mempty))]
         addDef t σ = (lift . tell . refGCon . Map.fromList) [(t, (mempty, Set.singleton σ))]
 
-        -- 2. Propagate the (use, def) sets of each node through the graph using the data-flow equations
-        usedefs' = propagateRegs graph usedefs
-        propagateRegs :: Graph -> ReferenceData -> ReferenceData
+
+threadableRefs :: InstrID -> CFG -> FreeReferences
+threadableRefs maxID CFG{graph, useDefs} = Map.map (uncurry (Set.\\)) usedefs'
+    where
+        -- Propagate the (use, def) sets upwards. 
+        usedefs' = propagateRegs graph useDefs
+        propagateRegs :: Graph -> UseDefData -> UseDefData
         propagateRegs graph usedef = snd $ execState iter (initWL, initMap)
             where
                 succ = unGraph graph
@@ -311,7 +414,7 @@ threadableRefs maxID instrs = result
                 initWL = Map.keys succ
                 initMap = foldl (\a k -> a <> Map.singleton k (mempty, mempty)) usedef [0..maxID]
 
-                iter :: State ([InstrID], ReferenceData) ()
+                iter :: State ([InstrID], UseDefData) ()
                 iter = do
                     node <- popWL
                     propagateNode pred succ node
@@ -319,17 +422,17 @@ threadableRefs maxID instrs = result
                     unless isEmpty iter
 
 
-        popWL :: State ([InstrID], ReferenceData) InstrID
+        popWL :: State ([InstrID], UseDefData) InstrID
         popWL = do
             (wl, b) <- get
             let (a:as) = wl
             put (as, b)
             return a
-        emptyWL :: State ([InstrID], ReferenceData) Bool
+        emptyWL :: State ([InstrID], UseDefData) Bool
         emptyWL  = do
             gets (null . fst)
 
-        propagateNode :: Map InstrID (Set InstrID) -> Map InstrID (Set InstrID) -> InstrID -> State ([InstrID], ReferenceData) ()
+        propagateNode :: Map InstrID (Set InstrID) -> Map InstrID (Set InstrID) -> InstrID -> State ([InstrID], UseDefData) ()
         propagateNode pred succ nodeid = do
             (wl, refData) <- get
             -- propagate from all successors
@@ -341,19 +444,15 @@ threadableRefs maxID instrs = result
                     -- update worklist 
                     addToWorkList (pred Map.! nodeid)
 
-        addToWorkList :: Set InstrID -> State ([InstrID], ReferenceData) ()
+        addToWorkList :: Set InstrID -> State ([InstrID], UseDefData) ()
         addToWorkList preds = do
             (wl, ref) <- get
             put (foldl (flip (:)) wl preds, ref)
 
-        -- 3. use the instrID -> (use, def) data to get the "future free registers" from each node with
-        --    free = use \ def
-        result = Map.map (uncurry (Set.\\)) usedefs'
-
-markThreadables :: ThreadableRefs -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
+markThreadables :: FreeReferences -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
 markThreadables frees = undefined
     where
-        alg :: ThreadableRefs -> TaggedInstr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a
+        alg :: FreeReferences -> TaggedInstr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a
         alg frees Tag4{tag, tagged} = In4 $ attachData (frees Map.! tag) tagged
 
         attachData :: Set SomeΣVar -> Instr o (Fix4 (Instr o)) xs n r a -> Instr o (Fix4 (Instr o)) xs n r a
@@ -374,7 +473,7 @@ data LoopMarkerState = LoopMarkerState { loops :: Map IMVar (Set SomeΣVar) }
 newtype LoopMarker o xs n r a = LoopMarker {doLoopMarking :: State LoopMarkerState (Fix4 (Instr o) xs n r a) }
 
 
-markLoopBodies :: Map IMVar (Set SomeΣVar) -> ThreadableRefs -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
+markLoopBodies :: Map IMVar (Set SomeΣVar) -> FreeReferences -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (Instr o) xs n r a
 markLoopBodies mufrees frees instrs = evalState marking emptyLoopMarkerState
     where
         emptyLoopMarkerState = LoopMarkerState Map.empty
@@ -430,13 +529,13 @@ markLoopBodies mufrees frees instrs = evalState marking emptyLoopMarkerState
         alg (Tag4 _ (MetaInstr m k))     = doLoopMarking k >>= wrap . MetaInstr m
 
         addLoop :: MVar Void -> Set SomeΣVar -> State LoopMarkerState ()
-        addLoop (MVar μ) loopRegs = do 
-                        state <- get 
+        addLoop (MVar μ) loopRegs = do
+                        state <- get
                         put (state{loops = Map.insert μ loopRegs (loops state)})
 
         removeLoop :: MVar Void -> State LoopMarkerState ()
-        removeLoop (MVar μ) = do 
-                        state <- get 
+        removeLoop (MVar μ) = do
+                        state <- get
                         put (state{loops = Map.delete μ (loops state)})
 
         wrap :: Instr o (Fix4 (Instr o)) xs n r a -> State LoopMarkerState (Fix4 (Instr o) xs n r a)

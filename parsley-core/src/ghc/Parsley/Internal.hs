@@ -41,6 +41,7 @@ import Parsley.Internal.Common.Utils    as THUtils    (Quapplicative(..), WQ, Co
 import Parsley.Internal.Trace           as Trace      (Trace(trace))
 
 import qualified Parsley.Internal.Opt   as Opt
+import Parsley.Internal.Backend.ReferenceBinds (bindReferences)
 
 parse :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
 parse = parseWithOpts Opt.fast
@@ -48,5 +49,4 @@ parse = parseWithOpts Opt.fast
 parseWithOpts :: (Trace, Input input) => Opt.Flags -> Parser a -> Code (input -> Maybe a)
 parseWithOpts _flags p =
   let ?flags = _flags
-  in let optimiser = if Opt.totalReferenceBinds ?flags then id else id
-  in [||\input -> $$(eval [||input||] (compile (try p) codeGen optimiser))||]
+  in [||\input -> $$(eval [||input||] (compile (try p) codeGen bindReferences))||]

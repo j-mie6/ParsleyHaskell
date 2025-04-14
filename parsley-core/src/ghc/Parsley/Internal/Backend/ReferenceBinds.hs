@@ -1,6 +1,9 @@
-{-# LANGUAGE NamedFieldPuns, OverloadedStrings, DerivingStrategies #-}
+{-# LANGUAGE 
+            NamedFieldPuns, 
+            OverloadedStrings,
+            ImplicitParams, 
+            DerivingStrategies #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-{-# HLINT ignore "Use newtype instead of data" #-}
 {-|
 Module      : Parsley.Internal.Backend.Analysis.ReferenceBinds
 Description : Translation of Combinator AST into Machine
@@ -15,7 +18,8 @@ by making every reference access `Soft`.
 The determination of free references at each point is much alike to the algorithm performed in `Parsley.Internal.Frontend.Analysis.Dependencies`.
 
 -}
-module Parsley.Internal.Backend.Analysis.ReferenceBinds (bindReferences) where
+module Parsley.Internal.Backend.ReferenceBinds (bindReferences) where
+
 import Parsley.Internal.Common.Fresh (HFresh, MonadFresh(..), runFresh)
 import Parsley.Internal.Common.Indexed (Fix4, IFunctor4)
 import Parsley.Internal.Common.Utils (intercalateDiff)
@@ -39,24 +43,27 @@ import qualified Data.Set as Set
 import Data.DList (DList)
 import qualified Data.DList as DList
 import Data.Void (Void)
+import Parsley.Internal.Backend.Machine (Input)
+import Parsley.Internal.Opt (Flags)
+import Parsley.Internal.Trace (Trace)
+import Parsley.Internal.Backend.Machine.LetBindings (LetBinding)
+import Data.Dependent.Map (DMap)
 
 
-bindReferences :: Map IMVar (Set SomeΣVar) -- ^ Frees required to run each let-bound parser
-                 -> Fix4 (Instr o) xs n r a -- ^ Machine to analyse. 
-                 -> Fix4 (Instr o) xs n r a
-bindReferences frees instrs = trace ("TAGSS: " ++ show taggedInstrs ++ "\n\n THREADABLES: " ++ show threadables) instrs'
+bindReferences :: forall input a. (Input input, Trace, ?flags::Flags) => (LetBinding input a a, DMap MVar (LetBinding input a)) -> (LetBinding input a a, DMap MVar (LetBinding input a))
+bindReferences (p, μs) = (p, μs) 
     where
         -- 1. tag the instructions
-        (taggedInstrs, maxTag) = tagInstructions instrs
+        -- (taggedInstrs, maxTag) = tagInstructions instrs
 
         -- 2. Perform analysis to get map of Instruction ID -> references that are free at some point here
-        threadables = threadableRefs maxTag taggedInstrs
+        -- threadables = threadableRefs maxTag taggedInstrs
 
         -- 3. Use `liveSets` to tag each join point, handler, and return continuation with references that might live through it
         -- TOOD
 
         -- 4. Mark loop bodies
-        instrs' = markLoopBodies frees threadables taggedInstrs
+        -- instrs' = markLoopBodies frees threadables taggedInstrs
 
 
 -- We need to tag each instruction with a unique ID so we can perform liveness analysis

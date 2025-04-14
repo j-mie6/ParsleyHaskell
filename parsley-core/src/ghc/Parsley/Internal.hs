@@ -48,4 +48,5 @@ parse = parseWithOpts Opt.fast
 parseWithOpts :: (Trace, Input input) => Opt.Flags -> Parser a -> Code (input -> Maybe a)
 parseWithOpts _flags p =
   let ?flags = _flags
-  in [||\input -> $$(eval [||input||] (compile (try p) codeGen))||]
+  in let optimiser = if Opt.totalReferenceBinds ?flags then id else id
+  in [||\input -> $$(eval [||input||] (compile (try p) codeGen optimiser))||]

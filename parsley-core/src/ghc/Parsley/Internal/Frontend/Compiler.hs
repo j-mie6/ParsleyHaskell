@@ -60,20 +60,22 @@ along with the top-level definition.
 {-# INLINEABLE compile #-}
 compile :: forall compiled a. (Trace, ?flags :: Opt.Flags)
         => Parser a                                                                              -- ^ The parser to compile.
-        -> (forall x. Map IMVar (Set SomeΣVar) -> Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> compiled x) -- ^ How to generate a compiled value with the distilled information.
+        -> (forall x. Maybe (MVar x) -> Fix Combinator x -> Set SomeΣVar -> IMVar -> compiled x) -- ^ How to generate a compiled value with the distilled information.
+        -> ((compiled a, DMap MVar compiled) -> (compiled a, DMap MVar compiled))
         -> (compiled a, DMap MVar compiled)                                                      -- ^ The compiled top-level and all of the bindings.
-compile (Parser p) codeGen = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") (codeGen' frs Nothing p'', DMap.mapWithKey (codeGen' frs . Just) μs'')
+compile (Parser p) codeGen optimiser = trace ("COMPILING NEW PARSER WITH " ++ show (DMap.size μs') ++ " LET BINDINGS") (optimiser compiled)
   where
     (p', μs, maxV) = preprocess p
     (μs', frs) = dependencyAnalysis p' μs
     (p'', μs'') = dataFlowOptimise p' μs'
+    compiled = (codeGen' Nothing p'', DMap.mapWithKey (codeGen' . Just) μs'')
 
 
     freeRegs :: Maybe (MVar x) -> Set SomeΣVar
     freeRegs = maybe Set.empty (\(MVar v) -> frs Map.! v)
 
-    codeGen' :: Map IMVar (Set SomeΣVar) -> Maybe (MVar x) -> Fix Combinator x -> compiled x
-    codeGen' frs letBound p = codeGen frs letBound (analyse emptyFlags p) (freeRegs letBound) (maxV + 1)
+    codeGen' :: Maybe (MVar x) -> Fix Combinator x -> compiled x
+    codeGen' letBound p = codeGen letBound (analyse emptyFlags p) (freeRegs letBound) (maxV + 1)
 
 preprocess :: (?flags :: Opt.Flags) => Fix (Combinator :+: ScopeRegister) a -> (Fix Combinator a, DMap MVar (Fix Combinator), IMVar)
 preprocess p =

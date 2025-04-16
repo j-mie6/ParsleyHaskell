@@ -73,13 +73,13 @@ pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 -- it would be nice to generate `yesSame` handler bindings for Try, perhaps a special flag?
 -- relevancy analysis might help too I guess, for a more general one?
 rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
-rollbackHandler = Always False (In4 (Seek (In4 Empt)))
+rollbackHandler = Always Nothing False (In4 (Seek (In4 Empt)))
 
 parsecHandler :: (?flags :: Opt.Flags) => Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
-parsecHandler k = Same (not (shouldInline k)) k False (In4 Empt)
+parsecHandler k = Same Nothing (not (shouldInline k)) k False (In4 Empt)
 
 recoverHandler :: (?flags :: Opt.Flags) => Fix4 (Instr o) xs n r a -> Handler o (Fix4 (Instr o)) (o : xs) n r a
-recoverHandler = Always . not . shouldInline <*> In4 . Seek
+recoverHandler = Always Nothing . not . shouldInline <*> In4 . Seek
 
 altCompile :: (Trace, ?flags :: Opt.Flags) => CodeGen o a y -> CodeGen o a x
            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
@@ -122,7 +122,7 @@ shallow (LookAhead p) m =
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      -- it should never be the case that factored input can commute out of the lookahead
-     return $! In4 (Catch (blockCoins True (addCoinsNeeded (In4 (Tell pc)))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
+     return $! In4 (Catch (blockCoins True (addCoinsNeeded (In4 (Tell pc)))) (Always Nothing (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))

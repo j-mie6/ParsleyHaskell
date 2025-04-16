@@ -210,7 +210,8 @@ data Handler (o :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Ty
       captured offset matches the current offset or not.
 
   @since 1.4.0.0 -}
-  Same :: Bool             -- ^ Whether the input matches handler should generate a binding
+  Same :: Maybe (Some Regs) -- ^ Free registers needed to run (if determined)
+       -> Bool             -- ^ Whether the input matches handler should generate a binding
        -> k xs n r a       -- ^ Execute when the input matches, notice that the captured offset is discarded since it is equal to the current.
        -> Bool             -- ^ Whether the input does not match handler should generate a binding
        -> k (o : xs) n r a -- ^ Execute when the input does not match, the resulting behaviour could use the captured or current input.
@@ -219,7 +220,8 @@ data Handler (o :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Ty
       thing regardless of the input provided.
 
   @since 1.7.0.0 -}
-  Always :: Bool             -- ^ Whether the handler should generate a binding
+  Always :: Maybe (Some Regs) -- ^ Free registers needed to run (if determined)
+         -> Bool             -- ^ Whether the handler should generate a binding
          -> k (o : xs) n r a -- ^ The handler
          -> Handler o k (o : xs) n r a
 
@@ -422,8 +424,8 @@ instance IFunctor4 (Instr o) where
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
 
 instance IFunctor4 (Handler o) where
-  imap4 f (Same gyes yes gno no) = Same gyes (f yes) gno (f no)
-  imap4 f (Always gk k)          = Always gk (f k)
+  imap4 f (Same rs gyes yes gno no) = Same rs gyes (f yes) gno (f no)
+  imap4 f (Always rs gk k)          = Always rs gk (f k)
 
 instance Show (Fix4 (Instr o) xs n r a) where
   show = ($ "") . getConst4 . cata4 (Const4 . alg)
@@ -458,8 +460,8 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (MetaInstr m k)            = "[" . shows m . "] " . getConst4 k
 
 instance Show (Handler o (Const4 (String -> String)) (o : xs) n r a) where
-  show (Same _ yes _ no) = "(Dup (Tell (Lift2 same (If " (getConst4 yes (" " (getConst4 no "))))")))
-  show (Always _ k)      = getConst4 k ""
+  show (Same _ _ yes _ no) = "(Dup (Tell (Lift2 same (If " (getConst4 yes (" " (getConst4 no "))))")))
+  show (Always _ _ k)      = getConst4 k ""
 
 instance Show (MetaInstr n) where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"

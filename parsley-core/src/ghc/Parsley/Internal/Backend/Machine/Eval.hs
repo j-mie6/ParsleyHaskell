@@ -143,10 +143,10 @@ evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ 
 
 evalCatch :: (PositionOps (StaRep o), HandlerOps o, DynOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) h = freshUnique $ \u -> case h of
-  Always gh (Machine h) ->
+  Always _ gh (Machine h) ->
     liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
-  Same gyes (Machine yes) gno (Machine no) ->
-    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes{- u-}) gno (buildHandler γ mno u) mk) k yes no
+  Same _ gyes (Machine yes) gno (Machine no) ->
+    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes) gno (buildHandler γ mno u) mk) k yes no
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ)) (operands γ)})
@@ -177,18 +177,18 @@ evalIter μ Nothing l h =
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
         case h of
-          Always gh (Machine h) ->
+          Always _ gh (Machine h) ->
             liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
-          Same gyes (Machine yes) gno (Machine no) ->
+          Same _ gyes (Machine yes) gno (Machine no) ->
             liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
 evalIter μ (Just regs) l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
         case h of
-          Always gh (Machine h) ->
+          Always _ gh (Machine h) ->
             liftM2 (\mh ctx γ -> withSome regs (\regs -> bindIterAlways' ctx μ regs l gh (buildHandler γ mh u1) (input γ) u2)) h ask
-          Same gyes (Machine yes) gno (Machine no) ->
+          Same _ gyes (Machine yes) gno (Machine no) ->
             liftM3 (\myes mno ctx γ -> withSome regs (\regs -> bindIterSame' ctx μ regs l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2)) yes no ask
 
 evalJoin :: (DynOps o, ?flags :: Opt.Flags) => ΦVar x -> MachineMonad s o (x : xs) n r a

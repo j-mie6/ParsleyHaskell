@@ -66,9 +66,9 @@ alg (LogExit _ k)      = 1 % 4 + getWeight k
 alg (MetaInstr _ k)    = 0 + getWeight k
 
 algHandler :: Handler o InlineWeight xs n r a -> Rational
-algHandler (Always _ h) = getWeight h
-algHandler (Same _ y _ n) = getWeight y + getWeight n
+algHandler (Always _ _ h)   = getWeight h
+algHandler (Same _ _ y _ n) = getWeight y + getWeight n
 
 handlerInlined :: Handler o k xs n r a -> Bool
-handlerInlined (Always True _) = True
-handlerInlined _               = False
+handlerInlined (Always _ True _) = True
+handlerInlined _                 = False

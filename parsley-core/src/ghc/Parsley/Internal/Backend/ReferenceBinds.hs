@@ -170,13 +170,13 @@ tagInstructions initID instrs = runFresh (doTagger $ cata4 (Tagger . alg) instrs
         alg (Catch p h)         = do
                                     p' <- doTagger p
                                     h' <- case h of
-                                        (Same a ka b kb) -> do
+                                        (Same _ a ka b kb) -> do
                                                                 ka' <- doTagger ka
                                                                 kb' <- doTagger kb
-                                                                return $ Same a ka' b kb'
-                                        (Always x k) -> do
+                                                                return $ Same Nothing a ka' b kb'
+                                        (Always _ x k) -> do
                                                                 k' <- doTagger k
-                                                                return $ Always x k'
+                                                                return $ Always Nothing x k'
                                     wrap (Catch p' h')
         alg (Tell k)            = doTagger k >>= (wrap . Tell)
         alg (Seek k)            = doTagger k >>= (wrap . Seek)
@@ -191,13 +191,13 @@ tagInstructions initID instrs = runFresh (doTagger $ cata4 (Tagger . alg) instrs
         alg (Iter μ _ l h)      = do
                                     l' <- doTagger l
                                     h' <- case h of
-                                        (Same a ka b kb) -> do
+                                        (Same _ a ka b kb) -> do
                                                                 ka' <- doTagger ka
                                                                 kb' <- doTagger kb
-                                                                return $ Same a ka' b kb'
-                                        (Always x k) -> do
+                                                                return $ Same Nothing a ka' b kb'
+                                        (Always _ x k) -> do
                                                                 k' <- doTagger k
-                                                                return $ Always x k'
+                                                                return $ Always Nothing x k'
                                     wrap (Iter μ Nothing l' h')
         alg (Join φ)            = wrap (Join φ)
         alg (MkJoin φ p k)      = do
@@ -361,7 +361,7 @@ constructMachineCFG starts instrs = CFG{ graph = graph, start = skimTopTag instr
 
         -- Handler state helpers
         pushHandler :: forall o xs n r a. Handler o (Grapher o) xs n r a -> StateT GraphConstructionState (Writer GraphConstruction) HandlerEntry
-        pushHandler (Same _ k1 _ k2) = do
+        pushHandler (Same _ _ k1 _ k2) = do
                                         state <- get
                                         let GraphConstructionState{handlerStack} = state
                                         t1 <- doGrapher k1
@@ -369,7 +369,7 @@ constructMachineCFG starts instrs = CFG{ graph = graph, start = skimTopTag instr
                                         let h = SameH t1 t2
                                         put state{handlerStack = h:handlerStack}
                                         pure h
-        pushHandler (Always _ k)     = do
+        pushHandler (Always _ _ k)     = do
                                         state <- get
                                         let GraphConstructionState{handlerStack} = state
                                         t <- doGrapher k
@@ -483,14 +483,14 @@ markThreadables frees = undefined
 Keeps state of which loops are currently in scope. Helps us to know when to mark calls as loop calls 
 and decide at calls/joins which registers solidfy.
 -}
-data LoopMarkerState = LoopMarkerState { toBind:: Set SomeΣVar, loopBinds :: [Set SomeΣVar] }
+data LoopMarkerState = LoopMarkerState { toBind:: Set SomeΣVar, loopBinds :: [Set SomeΣVar], lastTag :: InstrID }
 newtype LoopMarker o xs n r a = LoopMarker {doLoopMarking :: State LoopMarkerState (Fix4 (TaggedInstr o) xs n r a) }
 
 
 markLoopBodies :: Set IMVar -> FreeReferences -> Fix4 (TaggedInstr o) xs n r a -> Fix4 (TaggedInstr o) xs n r a
 markLoopBodies letBounds frees instrs = evalState marking emptyLoopMarkerState
     where
-        emptyLoopMarkerState = LoopMarkerState Set.empty []
+        emptyLoopMarkerState = LoopMarkerState Set.empty [] 0
         marking = doLoopMarking $ cata4 (LoopMarker . alg) instrs
         alg :: TaggedInstr o (LoopMarker o) xs n r a -> State LoopMarkerState (Fix4 (TaggedInstr o) xs n r a)
         alg (Tag4 t Ret)                 = wrap t Ret
@@ -540,7 +540,7 @@ markLoopBodies letBounds frees instrs = evalState marking emptyLoopMarkerState
                                             k' <- doLoopMarking k
                                             bound <- isBound σ
                                             wrap t $ if bound then Make σ Bound k' else Make σ a k' 
-        alg (Tag4 t (Get σ a k))         =do 
+        alg (Tag4 t (Get σ a k))         = do 
                                             k' <- doLoopMarking k
                                             bound <- isBound σ
                                             wrap t $ if bound then Get σ Bound k' else Get σ a k' 
@@ -554,7 +554,9 @@ markLoopBodies letBounds frees instrs = evalState marking emptyLoopMarkerState
         alg (Tag4 t (MetaInstr m k))     = doLoopMarking k >>= wrap t . MetaInstr m
 
         wrap :: InstrID -> Instr o (Fix4 (TaggedInstr o)) xs n r a -> State LoopMarkerState (Fix4 (TaggedInstr o) xs n r a)
-        wrap t instrs = pure $ In4 (Tag4 t instrs)
+        wrap t instrs = do 
+                        markLastTag t 
+                        return $ In4 (Tag4 t instrs)
 
         -- TODO: when handler continuations are done, this state logic is wrong as we should thread the variables across handler boundaries as well
         addLoopBinds :: Set SomeΣVar -> State LoopMarkerState ()
@@ -564,25 +566,35 @@ markLoopBodies letBounds frees instrs = evalState marking emptyLoopMarkerState
 
         popLoopBinds :: State LoopMarkerState ()
         popLoopBinds = do 
-                        LoopMarkerState{toBind, loopBinds} <- get
+                        LoopMarkerState{toBind, loopBinds, lastTag} <- get
                         let (x:xs) = loopBinds
-                        put $ LoopMarkerState{toBind=toBind Set.\\ x, loopBinds = xs}
-
+                        put $ LoopMarkerState{toBind=toBind Set.\\ x, loopBinds = xs,lastTag=lastTag}
 
         doHandler :: Handler o (LoopMarker o) xs n r a -> State LoopMarkerState (Handler o (Fix4 (TaggedInstr o)) xs n r a)
-        doHandler (Same x k1 y k2) = do
+        doHandler (Same _ x k1 y k2) = do
                                         k1' <- doLoopMarking k1
+                                        t1 <- getLastTag
                                         k2' <- doLoopMarking k2
-                                        return (Same x k1' y k2')
-        doHandler (Always x k)     = do
+                                        t2 <- getLastTag
+                                        let regs = (frees Map.! t1) `Set.union` (frees Map.! t2)
+                                        return (Same (Just $ makeRegs regs)x k1' y k2')
+        doHandler (Always _ x k)     = do
                                         k' <- doLoopMarking k
-                                        return (Always x k')
+                                        t <- getLastTag
+                                        let regs = frees Map.! t
+                                        return (Always (Just $ makeRegs regs)x k')
         handlerFrees :: Handler o (Fix4 (TaggedInstr o)) xs n r a -> Set SomeΣVar
-        handlerFrees (Same _ (In4 h1) _ (In4 h2)) = (frees Map.! (tag h1)) `Set.union` (frees Map.! (tag h2)) 
-        handlerFrees (Always _ (In4 h))           = frees Map.! tag h
+        handlerFrees (Same _ _ (In4 h1) _ (In4 h2)) = (frees Map.! (tag h1)) `Set.union` (frees Map.! (tag h2)) 
+        handlerFrees (Always _ _ (In4 h))           = frees Map.! tag h
 
         isBound :: forall x. ΣVar x -> State LoopMarkerState Bool
         isBound σ = get >>= pure . Set.member (SomeΣVar σ) . toBind
+
+        markLastTag :: InstrID -> State LoopMarkerState () 
+        markLastTag t = get >>= (\state -> put state{lastTag=t})
+
+        getLastTag :: State LoopMarkerState InstrID 
+        getLastTag = get >>= (pure . lastTag)
 
 {-| 
 Forgetfully removes tags from instructions. 

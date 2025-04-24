@@ -24,7 +24,7 @@ import Data.Set                                                   (Set, foldr)
 import Data.Some                                                  (Some, pattern Some, withSome)
 import Parsley.Internal.Backend.Machine.Identifiers               (ΣVar, SomeΣVar(..))
 import Parsley.Internal.Backend.Machine.Instructions              (Instr)
-import Parsley.Internal.Backend.Machine.Types.Registers           (Regs, makeRegs)
+import Parsley.Internal.Backend.Machine.Types.Registers           (Regs (..), makeRegs)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common                                    (Fix4, One)
 
@@ -39,7 +39,7 @@ the one of type @`Binding` o a a@.
 type Binding o a x = Fix4 (Instr o) '[] One x a
 
 {-|
-Packages a binding along with its free registers that are required
+Packages a binding along with its (and handler's) free registers that are required
 for it, which are left existential. This is possible since the `Regs`
 datatype serves as a singleton-style witness of the original registers
 and their types. It also requires `Metadata` to be provided, sourced
@@ -50,6 +50,7 @@ from analysis.
 data LetBinding o a x = LetBinding {
     body :: Binding o a x,
     freeRegs :: Some Regs,
+    handlerFrees :: Some Regs,
     meta :: Metadata
   }
 
@@ -83,7 +84,7 @@ Given a `Binding` , a set of existential `ΣVar`s, and some `Metadata`, produces
 @since 1.5.0.0
 -}
 makeLetBinding :: Binding o a x -> Set SomeΣVar -> Metadata -> LetBinding o a x
-makeLetBinding m rs = LetBinding m (makeRegs rs)
+makeLetBinding m rs = LetBinding m (makeRegs rs) (Some NoRegs)
 
 {-|
 Produces a new `Metadata` object, with fields initialised to sensible conservative

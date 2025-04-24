@@ -4,6 +4,7 @@
              RecordWildCards,
              TypeApplications,
              TypeFamilies,
+             ScopedTypeVariables,
              UnboxedTuples #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Statics
@@ -20,10 +21,10 @@ call boundaries.
 -}
 module Parsley.Internal.Backend.Machine.Types.Statics (
     -- * Handlers
-    StaHandler#, StaHandler, AugmentedStaHandler, StaHandlerCase,
+    StaHandler#, StaHandler(..), AugmentedStaHandler, QAugmentedStaHandler(..), StaHandlerCase, StaSameHandler,
 
     -- ** @StaHandler@ Operations
-    fromStaHandler#, fromDynHandler, staHandler#,
+    fromStaHandler#, fromDynHandler, staHandler#, SomeCallableSubroutine(..),
 
     -- ** @AugmentedStaHandler@ Builders
     -- | The following functions are builders of `AugmentedStaHandler`.
@@ -53,8 +54,8 @@ import Data.Kind                                                  (Type)
 import Data.Maybe                                                 (fromMaybe)
 import Parsley.Internal.Backend.Machine.LetBindings               (Metadata, newMeta)
 import Parsley.Internal.Backend.Machine.InputOps                  (DynOps)
-import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc, DynSubroutine)
+import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..), RegBindNames(..))
+import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), fromInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
@@ -70,27 +71,34 @@ on handlers, a simple form of inlining optimisation.
 
 @since 1.8.0.0
 -}
-type StaHandler# s o a = Input# o -> Code (ST s (Maybe a))
+type family StaHandler# (hs :: [Type]) s o a where
+    StaHandler# '[] s o a = Input# o -> Code (ST s (Maybe a))
+    StaHandler# (h:hs) s o a = Code h -> StaHandler# hs s o a
 
-mkStaHandler# :: forall o s a. DynHandler s o a -> StaHandler# s o a
-mkStaHandler# dh inp = [||$$dh $$(pos# inp) $$(off# inp)||]
+mkStaHandler# :: forall hs o s a. Regs hs -> DynHandler hs s o a -> StaHandler# hs s o a
+mkStaHandler# = mkSta
+  where
+    mkSta :: forall hs. Regs hs -> DynHandler hs s o a -> StaHandler# hs s o a
+    mkSta NoRegs dh = \inp -> [||$$dh $$(pos# inp) $$(off# inp)||]
+    mkSta (Regs _ rs) dh = \r -> mkSta rs [||$$dh $$r ||]
+
 
 {-|
 Encapsulates a static handler with its possible dynamic origin for costless conversion.
 
 @since 1.7.0.0
 -}
-data StaHandler s o a = StaHandler {
+data StaHandler hs s o a = StaHandler {
     {-|
     Extracts the raw static component out of a static handler.
 
     @since 1.7.0.0
     -}
-    staHandler# :: !(StaHandler# s o a),
-    dynOrigin :: !(Maybe (DynHandler s o a))
+    staHandler# :: !(StaHandler# hs s o a),
+    dynOrigin :: !(Maybe (DynHandler hs s o a))
   }
 
-dynHandler :: (StaHandler# s o a -> DynHandler s o a) -> StaHandler s o a -> DynHandler s o a
+dynHandler :: (StaHandler# hs s o a -> DynHandler hs s o a) -> StaHandler hs s o a -> DynHandler hs s o a
 dynHandler conv = fromMaybe . conv . staHandler# <*> dynOrigin
 
 {-|
@@ -98,7 +106,7 @@ Builds a `StaHandler` out of a `StaHandler#`, assumed to have no dynamic compone
 
 @since 1.7.0.0
 -}
-fromStaHandler# :: StaHandler# s o a -> StaHandler s o a
+fromStaHandler# :: StaHandler# hs s o a -> StaHandler hs s o a
 fromStaHandler# h = StaHandler h Nothing
 
 {-|
@@ -106,8 +114,8 @@ Builds a `StaHandler` out of a `DynHandler`, which is converted in the process.
 
 @since 1.7.0.0
 -}
-fromDynHandler :: forall s o a. DynHandler s o a -> StaHandler s o a
-fromDynHandler h = StaHandler (mkStaHandler# @o h) (Just h)
+fromDynHandler :: forall hs s o a. Regs hs -> DynHandler hs s o a -> StaHandler hs s o a
+fromDynHandler regs h = StaHandler (mkStaHandler# @hs @o @s @a regs h) (Just h)
 
 {-|
 Compared with `StaHandler#`, this type allows for the encoding of various static
@@ -117,10 +125,15 @@ domain-specific optimisation data.
 
 @since 1.7.0.0
 -}
-data AugmentedStaHandler s o a =
+data AugmentedStaHandler hs s o a =
   AugmentedStaHandler
-    (Maybe (Offset o))     -- ^ The statically bound offset for this handler, if available.
-    (StaHandlerCase s o a) -- ^ The relevant cases for the handlers behaviour
+    (Maybe (Offset o))        -- ^ The statically bound offset for this handler, if available.
+    (StaHandlerCase hs s o a) -- ^ The relevant cases for the handlers behaviour
+
+{-| 
+Wrapper for `AugmentedStaHandler` to wrap away the input registers in an existential and package witnesses alongside them
+-}
+data QAugmentedStaHandler s o a = forall hs. QAugmentedStaHandler !(AugmentedStaHandler hs s o a) !(Regs hs)
 
 {-|
 Augments a `StaHandler#` with information about what the offset is that
@@ -129,7 +142,7 @@ derived from a dynamic one.
 
 @since 1.8.0.0
 -}
-augmentHandlerSta :: Maybe (Input o) -> StaHandler# s o a -> AugmentedStaHandler s o a
+augmentHandlerSta :: Maybe (Input o) -> StaHandler# hs s o a -> AugmentedStaHandler hs s o a
 augmentHandlerSta o = augmentHandler o . fromStaHandler#
 
 {-|
@@ -141,15 +154,15 @@ if it is converted back the conversion is free.
 
 @since 1.7.0.0
 -}
-augmentHandlerDyn :: forall s o a. Maybe (Input o) -> DynHandler s o a -> AugmentedStaHandler s o a
-augmentHandlerDyn c = augmentHandler c . fromDynHandler
+augmentHandlerDyn :: forall hs s o a. Maybe (Input o) ->  DynHandler hs s o a -> Regs hs -> AugmentedStaHandler hs s o a
+augmentHandlerDyn c dh regs = augmentHandler c $ fromDynHandler regs dh
 
 {-|
 Augments a static handler with information about its captured offset.
 
 @since 1.7.0.0
 -}
-augmentHandler :: Maybe (Input o) -> StaHandler s o a -> AugmentedStaHandler s o a
+augmentHandler :: Maybe (Input o) -> StaHandler hs s o a -> AugmentedStaHandler hs s o a
 augmentHandler c = AugmentedStaHandler (fmap off c) . mkUnknown
 
 {-|
@@ -161,11 +174,11 @@ a handler to its argument.
 
 @since 1.7.0.0
 -}
-augmentHandlerFull :: Input o                   -- ^ The offset captured by the creation of the handler.
-                   -> StaHandler s o a          -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
-                   -> Code (ST s (Maybe a))     -- ^ The code that is executed when the captured offset matches the input.
-                   -> StaHandler s o a          -- ^ The handler to be executed when offsets are known not to match.
-                   -> AugmentedStaHandler s o a -- ^ A handler that carries this information around for later refinement.
+augmentHandlerFull :: Input o                      -- ^ The offset captured by the creation of the handler.
+                   -> StaHandler hs s o a          -- ^ The full handler, which can be used when offsets are incomparable and must perform the check.
+                   -> StaSameHandler hs s a        -- ^ The code that is executed when the captured offset matches the input.
+                   -> StaHandler hs s o a          -- ^ The handler to be executed when offsets are known not to match.
+                   -> AugmentedStaHandler hs s o a -- ^ A handler that carries this information around for later refinement.
 augmentHandlerFull c handler yes no = AugmentedStaHandler (Just (off c))
   (mkFull handler
           yes
@@ -186,13 +199,21 @@ which can be used to refine the outcome of the execution of the handler as follo
 
 @since 1.7.0.0
 -}
-staHandlerEval :: (DynOps o, ?flags :: Opt.Flags) => AugmentedStaHandler s o a -> Input o -> Code (ST s (Maybe a))
-staHandlerEval (AugmentedStaHandler (Just c) sh) inp
+staHandlerEval :: (DynOps o, ?flags :: Opt.Flags) => AugmentedStaHandler hs s o a -> RegBindNames hs -> Input o -> Code (ST s (Maybe a))
+staHandlerEval (AugmentedStaHandler (Just c) sh) regs inp
   | Opt.deduceFailPath ?flags
-  , Just True <- same c (off inp)             = maybe (staHandler# (unknown sh)) const (yesSame sh) (fromInput inp)
+  , Just True <- same c (off inp)             = maybe (injectStaHandlerRegs regs $ staHandler# (unknown sh)) (const . injectStaSameHandlerRegs regs) (yesSame sh) (fromInput inp)
   | Opt.deduceFailPath ?flags
-  , Just False <- same c (off inp)            = staHandler# (fromMaybe (unknown sh) (notSame sh)) (fromInput inp)
-staHandlerEval (AugmentedStaHandler _ sh) inp = staHandler# (unknown sh) (fromInput inp)
+  , Just False <- same c (off inp)            = (injectStaHandlerRegs regs . staHandler#) (fromMaybe (unknown sh) (notSame sh)) (fromInput inp)
+staHandlerEval (AugmentedStaHandler _ sh) regs inp = (injectStaHandlerRegs regs $ staHandler# (unknown sh)) (fromInput inp)
+
+injectStaHandlerRegs :: forall hs s o a. RegBindNames hs -> StaHandler# hs s o a -> StaHandler# '[] s o a
+injectStaHandlerRegs NoName h = h
+injectStaHandlerRegs (RegName _ name rs) h = injectStaHandlerRegs @_ @_ @o rs (h name)
+
+injectStaSameHandlerRegs :: forall hs s a. RegBindNames hs -> StaSameHandler hs s a -> Code (ST s (Maybe a))
+injectStaSameHandlerRegs NoName h = h
+injectStaSameHandlerRegs (RegName _ name rs) h = injectStaSameHandlerRegs rs (h name)
 
 {-|
 Selects the correct case out of a `AugmentedStaHandler` depending on what the `InputCharacteristic` that
@@ -200,10 +221,14 @@ governs the use of the handler is. This means that it can select any of the thre
 
 @since 1.7.0.0
 -}
-staHandlerCharacteristic :: AugmentedStaHandler s o a -> (StaHandler# s o a -> DynHandler s o a) -> InputCharacteristic -> StaHandler s o a
-staHandlerCharacteristic (AugmentedStaHandler _ sh) conv NeverConsumes      = maybe (unknown sh) (StaHandler <$> const <*> Just . conv . const) (yesSame sh)
-staHandlerCharacteristic (AugmentedStaHandler _ sh) _    (AlwaysConsumes _) = fromMaybe (unknown sh) (notSame sh)
-staHandlerCharacteristic (AugmentedStaHandler _ sh) _    MayConsume         = unknown sh
+staHandlerCharacteristic :: forall hs s o a. Regs hs -> AugmentedStaHandler hs s o a -> (StaHandler# hs s o a -> DynHandler hs s o a) -> InputCharacteristic -> StaHandler hs s o a
+staHandlerCharacteristic regs (AugmentedStaHandler _ sh) conv NeverConsumes      = maybe (unknown sh) (StaHandler <$> sameToSta regs <*> Just . conv . sameToSta regs) (yesSame sh)
+  where
+      sameToSta :: forall hs. Regs hs -> StaSameHandler hs s a -> StaHandler# hs s o a
+      sameToSta NoRegs      h = const h
+      sameToSta (Regs _ rs) h = sameToSta rs . h
+staHandlerCharacteristic _ (AugmentedStaHandler _ sh) _    (AlwaysConsumes _) = fromMaybe (unknown sh) (notSame sh)
+staHandlerCharacteristic _ (AugmentedStaHandler _ sh) _    MayConsume         = unknown sh
 
 {-|
 Selects the correct case out of a `AugmentedStaHandler` depending on what the `InputCharacteristic` that
@@ -212,8 +237,8 @@ static handler out of the result.
 
 @since 1.7.0.0
 -}
-staHandlerCharacteristicSta :: AugmentedStaHandler s o a -> InputCharacteristic -> StaHandler# s o a
-staHandlerCharacteristicSta sh = staHandler# . staHandlerCharacteristic sh undefined
+staHandlerCharacteristicSta :: Regs hs -> AugmentedStaHandler hs s o a -> InputCharacteristic -> StaHandler# hs s o a
+staHandlerCharacteristicSta regs sh = staHandler# . staHandlerCharacteristic regs sh undefined
 
 {-|
 Selects the correct case out of a `AugmentedStaHandler` depending on what the `InputCharacteristic` that
@@ -222,8 +247,15 @@ dynamic result out of the static handler given a conversion function.
 
 @since 1.7.0.0
 -}
-staHandlerCharacteristicDyn :: AugmentedStaHandler s o a -> (StaHandler# s o a -> DynHandler s o a) -> InputCharacteristic -> DynHandler s o a
-staHandlerCharacteristicDyn sh conv = dynHandler conv . staHandlerCharacteristic sh conv
+staHandlerCharacteristicDyn :: Regs hs -> AugmentedStaHandler hs s o a -> (StaHandler# hs s o a -> DynHandler hs s o a) -> InputCharacteristic -> DynHandler hs s o a
+staHandlerCharacteristicDyn regs sh conv = dynHandler conv . staHandlerCharacteristic regs sh conv
+
+{-|
+Type family to encapsulate a n-ary handler which knows that offsets match.
+-}
+type family StaSameHandler (hs :: [Type]) s a where
+  StaSameHandler '[] s a = Code (ST s (Maybe a))
+  StaSameHandler (h:hs) s a = Code h -> StaSameHandler hs s a
 
 {-|
 Represents potentially three handlers: one for unknown offset cases, one for offset known to be
@@ -231,19 +263,19 @@ the same, and another for offset known to be different (see `augmentHandlerFull`
 
 @since 1.7.0.0
 -}
-data StaHandlerCase s (o :: Type) a = StaHandlerCase {
+data StaHandlerCase hs s (o :: Type) a = StaHandlerCase {
   -- | The static function representing this handler when offsets are incomparable.
-  unknown :: {-# UNPACK #-} !(StaHandler s o a),
+  unknown :: {-# UNPACK #-} !(StaHandler hs s o a),
   -- | The static value representing this handler when offsets are known to match, if available.
-  yesSame :: !(Maybe (Code (ST s (Maybe a)))),
+  yesSame :: !(Maybe (StaSameHandler hs s a)),
   -- | The static function representing this handler when offsets are known not to match, if available.
-  notSame :: !(Maybe (StaHandler s o a))
+  notSame :: !(Maybe (StaHandler hs s o a))
 }
 
-mkUnknown :: StaHandler s o a -> StaHandlerCase s o a
+mkUnknown :: StaHandler hs s o a -> StaHandlerCase hs s o a
 mkUnknown h = StaHandlerCase h Nothing Nothing
 
-mkFull :: StaHandler s o a -> Code (ST s (Maybe a)) -> StaHandler s o a -> StaHandlerCase s o a
+mkFull :: StaHandler hs s o a -> StaSameHandler hs s a -> StaHandler hs s o a -> StaHandlerCase hs s o a
 mkFull h yes no = StaHandlerCase h (Just yes) (Just no)
 
 -- Continuations
@@ -305,9 +337,9 @@ NB: made into a type family to allow n-arity
 
 @since 1.8.0.0
 -}
-type family StaSubroutine# (xs :: [Type]) s o a y where
-  StaSubroutine# '[] s o a y      = DynCont s o a y -> DynHandler s o a -> Input# o -> Code (ST s (Maybe a))
-  StaSubroutine# (x : xs) s o a y = Code x -> StaSubroutine# xs s o a y
+type family StaSubroutine# (xs :: [Type]) (hs :: [Type]) s o a y where
+  StaSubroutine# '[] hs s o a y      = DynCont s o a y -> DynHandler hs s o a -> Input# o -> Code (ST s (Maybe a))
+  StaSubroutine# (x : xs) hs s o a y = Code x -> StaSubroutine# xs hs s o a y
 
 {-|
 Packages a `StaSubroutine#` along with statically determined metadata that describes it derived from
@@ -315,19 +347,21 @@ static analysis.
 
 @since 1.5.0.0
 -}
-data StaSubroutine (xs :: [Type]) s o a x = StaSubroutine {
+data StaSubroutine (xs :: [Type]) (hs :: [Type]) s o a x = StaSubroutine {
     -- | Extracts the underlying subroutine.
-    staSubroutine# :: !(StaSubroutine# xs s o a x),
+    staSubroutine# :: !(StaSubroutine# xs hs s o a x),
     -- | Extracts the metadata from a subroutine.
     meta :: {-# UNPACK #-} !Metadata
   }
+
+data SomeCallableSubroutine s o a x = forall hs. SomeCallableSubroutine (StaSubroutine '[] hs s o a x) !(Regs hs)
 
 {-|
 Converts a `StaSubroutine#` into a `StaSubroutine` by providing the empty meta.
 
 @since 1.5.0.0
 -}
-mkStaSubroutine :: StaSubroutine# xs s o a x -> StaSubroutine xs s o a x
+mkStaSubroutine :: StaSubroutine# xs hs s o a x -> StaSubroutine xs hs s o a x
 mkStaSubroutine = mkStaSubroutineMeta newMeta
 
 {-|
@@ -335,7 +369,7 @@ Converts a `StaSubroutine#` into a `StaSubroutine` by providing its metadata.
 
 @since 1.5.0.0
 -}
-mkStaSubroutineMeta :: Metadata -> StaSubroutine# xs s o a x -> StaSubroutine xs s o a x
+mkStaSubroutineMeta :: forall xs hs s o a x. Metadata -> StaSubroutine# xs hs s o a x -> StaSubroutine xs hs s o a x
 mkStaSubroutineMeta = flip StaSubroutine
 
 {-|
@@ -345,9 +379,9 @@ on subroutines with registers, a simple form of inlining optimisation.
 
 @since 1.4.0.0
 -}
-type family StaFunc (rs :: [Type]) s o a x where
-  StaFunc '[] s o a x      = StaSubroutine '[] s o a x
-  StaFunc (r : rs) s o a x = Code (STRef s r) -> StaFunc rs s o a x
+type family StaFunc (rs :: [Type]) (hs :: [Type]) s o a x where
+  StaFunc '[] hs s o a x      = StaSubroutine '[] hs s o a x          -- TODO attach registers for subroutine
+  StaFunc (r : rs) hs s o a x = Code (STRef s r) -> StaFunc rs hs s o a x
 
 
 {-|
@@ -355,8 +389,8 @@ Wraps a `StaFunc` with its free registers, which are kept existential.
 
 @since 1.4.0.0
 -}
-data QSubroutine s o a x = forall rs. QSubroutine !(StaFunc rs s o a x) !(Regs rs)
-data QLooproutine s o a x = forall xs. QLooproutine !(StaSubroutine xs s o a x) !(Regs xs)
+data QSubroutine s o a x = forall rs hs. QSubroutine !(StaFunc rs hs s o a x) !(Regs rs) !(Regs hs)
+data QLooproutine s o a x = forall xs hs. QLooproutine !(StaSubroutine xs hs s o a x) !(Regs xs) !(Regs hs)
 
 {-|
 Converts a `Parsley.Internal.Backend.Machine.Types.Dynamics.DynFunc` that relies
@@ -365,9 +399,9 @@ existentially bounds to the function.
 
 @since 1.5.0.0
 -}
-qSubroutine :: forall s o a x rs. DynFunc rs s o a x -> Regs rs -> Metadata -> QSubroutine s o a x
-qSubroutine func frees meta = QSubroutine (staFunc frees func) frees
+qSubroutine :: forall s o a x rs hs. DynFunc rs hs s o a x -> Regs rs -> Regs hs -> Metadata -> QSubroutine s o a x
+qSubroutine func frees handlerFrees meta = QSubroutine (staFunc frees func) frees handlerFrees
   where
-    staFunc :: forall rs. Regs rs -> DynFunc rs s o a x -> StaFunc rs s o a x
+    staFunc :: forall rs. Regs rs -> DynFunc rs hs s o a x -> StaFunc rs hs s o a x
     staFunc NoRegs func = StaSubroutine (\dk dh inp -> [|| $$func $$dk $$dh $$(pos# inp) $$(off# inp) ||]) meta
     staFunc (Regs _ witness) func = \r -> staFunc witness [|| $$func $$r ||]

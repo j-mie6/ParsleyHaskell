@@ -1,11 +1,16 @@
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Parsley.Internal.Backend.Machine.Types.Registers (
     module Parsley.Internal.Backend.Machine.Types.Registers, Regs(..), makeRegs
     ) where 
 
-import Data.Kind (Type)
+import Data.Kind (Type, Constraint)
 import Parsley.Internal.Core.Identifiers (ΣVar, SomeΣVar (..))
 import Data.Set (Set)
 import Data.Some (Some (..))
+import Parsley.Internal.Common (Code)
+import Language.Haskell.TH (Name)
+import Data.List (intercalate)
 
 {-|
 Represents a collection of free registers, preserving their type
@@ -16,6 +21,19 @@ information as a heterogeneous list.
 data Regs (rs :: [Type]) where
   NoRegs :: Regs '[]
   Regs   :: ΣVar r -> Regs rs -> Regs (r : rs)
+
+
+{-| 
+Represents a collection of registers and their respective `Code` bindings at a given moment
+-}
+data RegBindNames (rs :: [Type]) where 
+  NoName :: RegBindNames '[]
+  RegName :: ΣVar x -> Code x -> RegBindNames xs -> RegBindNames (x:xs)
+
+
+data RegTHNames (rs :: [Type]) where 
+  NoTHName :: RegTHNames '[]
+  RegTHName :: ΣVar x -> Name -> RegTHNames xs -> RegTHNames (x:xs)
 
 
 {-|

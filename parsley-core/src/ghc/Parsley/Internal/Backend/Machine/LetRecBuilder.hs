@@ -35,21 +35,21 @@ refer to every other. These are then in scope for the top-level parser.
 letRec :: forall key binding s o a b. GCompare key
        => {-bindings-}   DMap key (LetBinding o a)   -- ^ The bindings that should form part of the recursive group
       -> {-nameof-}      (forall x. key x -> String) -- ^ A function which can give a name to a key in the map
-      -> {-genBinding-}  (forall x rs. key x -> Binding o a x -> Regs rs -> DMap key (binding s o a) -> Metadata -> Code (Func rs s o a x))
-      -> {-wrapBinding-} (forall x rs. Code (Func rs s o a x) -> Regs rs -> Metadata -> binding s o a x)
+      -> {-genBinding-}  (forall x rs hs. key x -> Binding o a x -> Regs rs -> Regs hs -> DMap key (binding s o a) -> Metadata -> Code (Func rs hs s o a x))
+      -> {-wrapBinding-} (forall x rs hs. Code (Func rs hs s o a x) -> Regs rs -> Regs hs -> Metadata -> binding s o a x)
       -- ^ How a binding - and their free registers - should be converted into code
       -> {-expr-}        (DMap key (binding s o a) -> Code b)
       -- ^ How to produce the top-level binding given the compiled bindings, i.e. the @in@ for the @let@
       -> Code b
 letRec bindings nameOf genBinding wrapBinding expr = unsafeCodeCoerce $
   do -- Make a bunch of names
-     names <- traverseWithKey (\k (LetBinding _ rs meta) -> Const . (, rs, meta) <$> newName (nameOf k)) bindings
+     names <- traverseWithKey (\k (LetBinding _ rs hs meta) -> Const . (, rs, hs, meta) <$> newName (nameOf k)) bindings
      -- Wrap them up so that they are valid typed template haskell names
      let typedNames = DMap.map makeTypedName names
      -- Generate each binding providing them with the names
-     let makeDecl (k :=> LetBinding body (Some frees) _) =
-          do let Const (name, _, meta) = names ! k
-             func <- unTypeCode (genBinding k body frees typedNames meta)
+     let makeDecl (k :=> LetBinding body (Some frees) (Some hFrees) _) =
+          do let Const (name, _, _, meta) = names ! k
+             func <- unTypeCode (genBinding k body frees hFrees typedNames meta)
              return (FunD name [Clause [] (NormalB func) []])
      decls <- traverse makeDecl (toList bindings)
      -- Generate the main expression using the same names
@@ -57,5 +57,5 @@ letRec bindings nameOf genBinding wrapBinding expr = unsafeCodeCoerce $
      -- Construct the let expression
      return (LetE decls exp)
   where
-     makeTypedName :: Const (Name, Some Regs, Metadata) x -> binding s o a x
-     makeTypedName (Const (name, Some frees, meta)) = wrapBinding (unsafeCodeCoerce (return (VarE name))) frees meta
+     makeTypedName :: Const (Name, Some Regs, Some Regs, Metadata) x -> binding s o a x
+     makeTypedName (Const (name, Some frees, Some hFrees, meta)) = wrapBinding (unsafeCodeCoerce (return (VarE name))) frees hFrees meta

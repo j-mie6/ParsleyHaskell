@@ -21,7 +21,7 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
 import Data.Void                                           (Void)
-import Control.Monad                                       (forM, liftM2, liftM3)
+import Control.Monad                                       (forM, liftM2, liftM3, liftM4)
 import Control.Monad.Reader                                (Reader, ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
@@ -30,7 +30,7 @@ import Parsley.Internal.Backend.Machine.InputOps           (InputOps, DynOps)
 import Parsley.Internal.Backend.Machine.InputRep           (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
-import Parsley.Internal.Backend.Machine.Types.Registers    (Regs, makeRegs)
+import Parsley.Internal.Backend.Machine.Types.Registers    (Regs (..), makeRegs)
 import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run, qSubroutine)
@@ -49,7 +49,8 @@ import qualified Debug.Trace (trace)
 import qualified Parsley.Internal.Opt   as Opt
 import Parsley.Internal.Opt (Flags(leadCharFactoring))
 import Data.Set (Set)
-import Data.Some (Some, withSome)
+import Data.Some (Some (..), withSome)
+import Parsley.Internal.Backend.Machine.Types.Statics (SomeCallableSubroutine(..))
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
@@ -64,7 +65,7 @@ eval :: forall o a. (Trace, Ops o, ?ops :: InputOps (StaRep o), ?flags :: Opt.Fl
 eval binding fs offset  = trace "EVALUATING TOP LEVEL" [||
     runST $$(letRec fs
              nameLet
-             (\μ exp rs names -> buildRec μ rs (emptyCtx names) (readyMachine exp))
+             (\μ exp rs hs names -> buildRec μ rs hs (emptyCtx names) (readyMachine exp))
              qSubroutine
              (run (readyMachine (body binding)) (Γ Empty halt (mkInput offset initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
@@ -106,8 +107,18 @@ evalRet :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o (x : xs) n x a
 evalRet = return $! retCont >>= resume
 
 evalCall :: forall s o a x xs n r. (MarshalOps o, DynOps o, ?flags :: Opt.Flags) => MVar x -> Bool -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalCall μ False (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askSub μ) k
-evalCall μ True (Machine k) = freshUnique $ \u -> liftM2 (callCC u) (askLoop μ) k
+evalCall μ False (Machine k) = freshUnique $ \u -> do 
+  someSub <- askSub μ
+  case someSub of 
+    SomeCallableSubroutine sub hregs -> do 
+      ak <- k 
+      return $ \γ -> callCC u sub hregs ak γ 
+evalCall μ True (Machine k) = freshUnique $ \u -> do 
+  someLoop <- askLoop μ
+  case someLoop of 
+    SomeCallableSubroutine sub hregs -> do 
+      ak <- k 
+      return $ \γ -> callCC u sub hregs ak γ 
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
@@ -131,22 +142,23 @@ evalSat p mk = do
       readChar (spendCoin ctx) p (fetch (off (input γ))) $ \c staOldPred staPosPred offset' ctx' ->
         let staPredC' = optimisePredGiven p staOldPred
         in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos (updateOffset offset' (input γ)) c staPosPred) ctx')
-                                                (raise γ)
+                                                (raise ctx γ)
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
 evalEmpt :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o xs (Succ n) r a
-evalEmpt = return $! raise
+evalEmpt = reader $ \ctx γ -> raise ctx γ 
 
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})
 
 evalCatch :: (PositionOps (StaRep o), HandlerOps o, DynOps o) => Machine s o xs (Succ n) r a -> Handler o (Machine s o) (o : xs) n r a -> MachineMonad s o xs n r a
 evalCatch (Machine k) h = freshUnique $ \u -> case h of
-  Always _ gh (Machine h) ->
-    liftM2 (\mk mh γ -> bindAlwaysHandler γ gh (buildHandler γ mh u) mk) k h
-  Same _ gyes (Machine yes) gno (Machine no) ->
-    liftM3 (\mk myes mno γ -> bindSameHandler γ gyes (buildYesHandler γ myes) gno (buildHandler γ mno u) mk) k yes no
+  Always (Just (Some hregs)) gh h ->
+    liftM2 (\ctx mk γ -> bindAlwaysHandler γ gh (buildHandler γ ctx h hregs u) hregs mk) ask k 
+  Same (Just (Some hregs)) gyes yes gno no ->
+    liftM2 (\ctx mk γ -> bindSameHandler γ gyes (buildYesHandler γ ctx yes hregs) gno (buildHandler γ ctx no hregs u) hregs mk) ask k
+  _ -> undefined -- Should have already figured out free register data.
 
 evalTell :: Machine s o (o : xs) n r a -> MachineMonad s o xs n r a
 evalTell (Machine k) = k <&> \mk γ -> mk (γ {operands = Op (INPUT (input γ)) (operands γ)})
@@ -172,24 +184,17 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
 evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o, DynOps o, ?flags :: Opt.Flags)
          => MVar Void -> Maybe (Some Regs) -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
          -> MachineMonad s o xs n r a
-evalIter μ Nothing l h =
-  freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
-    freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
-      local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
-        case h of
-          Always _ gh (Machine h) ->
-            liftM2 (\mh ctx γ -> bindIterAlways ctx μ l gh (buildHandler γ mh u1) (input γ) u2) h ask
-          Same _ gyes (Machine yes) gno (Machine no) ->
-            liftM3 (\myes mno ctx γ -> bindIterSame ctx μ l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2) yes no ask
+evalIter _ Nothing _ _ = undefined -- We should have already attached register data!
 evalIter μ (Just regs) l h =
   freshUnique $ \u1 ->   -- This one is used for the handler's offset from point of failure
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
         case h of
-          Always _ gh (Machine h) ->
-            liftM2 (\mh ctx γ -> withSome regs (\regs -> bindIterAlways' ctx μ regs l gh (buildHandler γ mh u1) (input γ) u2)) h ask
-          Same _ gyes (Machine yes) gno (Machine no) ->
-            liftM3 (\myes mno ctx γ -> withSome regs (\regs -> bindIterSame' ctx μ regs l gyes (buildIterYesHandler γ myes u1) gno (buildHandler γ mno u1) (input γ) u2)) yes no ask
+          Always (Just (Some hregs)) gh h ->
+            reader $ \ctx γ -> withSome regs (\regs -> bindIterAlways' ctx μ regs l gh (buildHandler γ ctx h hregs u1) hregs (input γ) u2)
+          Same (Just (Some hregs)) gyes yes gno no ->
+            reader $ \ ctx γ -> withSome regs (\regs -> bindIterSame' ctx μ regs l gyes (buildIterYesHandler γ ctx yes hregs u1) gno (buildHandler γ ctx no hregs u1) hregs (input γ) u2)
+          _ -> undefined -- Should have attached register data already.
 
 evalJoin :: (DynOps o, ?flags :: Opt.Flags) => ΦVar x -> MachineMonad s o (x : xs) n r a
 evalJoin φ = askΦ φ <&> resume
@@ -225,7 +230,7 @@ evalSelectPos sel (Machine k) = k <&> \m γ -> forcePos (input γ) sel $ \compon
 evalLogEnter :: (?ops :: InputOps (StaRep o), LogHandler o, HandlerOps o, ?flags :: Opt.Flags)
              => String -> Machine s o xs (Succ (Succ n)) r a -> MachineMonad s o xs (Succ n) r a
 evalLogEnter name (Machine mk) = freshUnique $ \u ->
-  liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindAlwaysHandler γ True (logHandler name ctx γ u) k)||])
+  liftM2 (\k ctx γ -> [|| Debug.Trace.trace $$(preludeString name '>' γ ctx "") $$(bindAlwaysHandler γ True (logHandler name ctx γ u) NoRegs k)||])
     (local debugUp mk)
     ask
 
@@ -251,18 +256,19 @@ evalMeta (RefundCoins coins) (Machine k)
   | otherwise               = local (giveCoins coins) k
 -- No interaction with input reclamation here!
 evalMeta (DrainCoins coins) (Machine k) =
-  liftM3 drain
+  liftM4 drain
+         ask
          (asks isBankrupt)
          (asks (canAfford coins))
          k
   where
     -- there are enough coins to pay in full
-    drain _ Nothing mk γ = mk γ
-    drain bankrupt ~(Just m) mk γ
+    drain _ _ Nothing mk γ = mk γ
+    drain ctx bankrupt ~(Just m) mk γ
       -- full length check required
-      | bankrupt = emitLengthCheck coins 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) offset
+      | bankrupt = emitLengthCheck coins 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise ctx γ) (off (input γ)) offset
       -- can be partially paid from last known deepest offset
-      | otherwise = emitLengthCheck (m + 1) 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise γ) (off (input γ)) unsafeDeepestKnown
+      | otherwise = emitLengthCheck (m + 1) 0 Nothing (\off _ -> withUpdatedOffset mk γ off) (raise ctx γ) (off (input γ)) unsafeDeepestKnown
 evalMeta (GiveBursary coins) (Machine k) = local (giveCoins coins) k
 evalMeta BlockCoins{} (Machine k) = k
 
@@ -277,9 +283,9 @@ withLengthCheckAndCoins coins k = reader $ \ctx γ ->
         remainder deepest ctx = withUpdatedOffset (flip (run (Machine k)) (giveCoins (willConsume coins) ctx)) γ deepest
         staPred = knownPreds coins >>= onlyStatic
         preds = maybe id (:) staPred (repeat Item) -- these are fed in to ensure the right checked pred is accounted for
-        headCheck = staPred <&> \pred c good -> sat (ap (LAM (lamTerm pred))) c (const good) (raise γ)
+        headCheck = staPred <&> \pred c good -> sat (ap (LAM (lamTerm pred))) c (const good) (raise ctx γ)
         good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx
-    in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise γ) (off (input γ)) offset
+    in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise ctx γ) (off (input γ)) offset
         -- this is needed because a cached predicate cannot be compared for equality if it's user-pred, and it'll duplicate!
   where onlyStatic UserPred{}                   = Nothing
         onlyStatic p | leadCharFactoring ?flags = Just p

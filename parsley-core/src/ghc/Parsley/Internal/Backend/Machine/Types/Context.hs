@@ -2,6 +2,7 @@
              MagicHash,
              DerivingStrategies,
              UnboxedTuples,
+             TypeApplications,
              PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Context
@@ -35,7 +36,7 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- ** Putters
     insertNewΣ, cacheΣ, bindΣ, unbindΣ,
     -- ** Getters
-    concreteΣ, cachedΣ, boundΣ,
+    concreteΣ, cachedΣ, boundΣ, isBoundΣ,
     takeFreeRegisters,
 
     -- * Debug Level Tracking
@@ -62,20 +63,21 @@ import Control.Monad                                    ((<=<))
 import Control.Monad.Reader                             (asks, local, MonadReader)
 import Data.STRef                                       (STRef)
 import Data.Dependent.Map                               (DMap)
-import Data.Maybe                                       (fromMaybe, isNothing)
+import Data.Maybe                                       (fromMaybe, isNothing, isJust)
 import Parsley.Internal.Backend.Machine.Defunc          (Defunc, pattern FREEVAR)
 import Parsley.Internal.Backend.Machine.Identifiers     (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.Types.Registers (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Coins     (Coins(Coins, willConsume))
 import Parsley.Internal.Backend.Machine.Types.Dynamics  (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
-import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine (staSubroutine#), StaCont, QLooproutine (QLooproutine))
+import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine (staSubroutine#), StaCont, QLooproutine (QLooproutine), SomeCallableSubroutine (..))
 import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
 import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.QueueLike            as Queue (empty, null)
 import qualified Parsley.Internal.Common.RewindQueue          as Queue (rewind)
+import Data.Data (Proxy)
 
 -- Core Data-types
 
@@ -132,35 +134,40 @@ according to "local" @Reader@ semantics.
 
 @since 1.2.0.0
 -}
-insertSub :: MVar x                -- ^ The name of the binding.
-          -> StaSubroutine '[] s o a x -- ^ The binding to register.
+insertSub :: forall hs s o a x. MVar x                -- ^ The name of the binding.
+          -> StaSubroutine '[] hs s o a x -- ^ The binding to register.
+          -> Regs hs                      -- ^ Witnesses for handler's free registers
           -> Ctx s o a             -- ^ The current context.
           -> Ctx s o a             -- ^ The new context.
-insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs) (μs ctx)}
+insertSub μ q  hregs ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs hregs) (μs ctx)}
 
-insertLoop :: MVar x                   -- ^ The name of the binding.
-           -> StaSubroutine xs s o a x -- ^ The binding to register.
-           -> Regs xs                  -- ^ Free registers in loop.
-           -> Ctx s o a                -- ^ The current context.
-           -> Ctx s o a                -- ^ The new context.
-insertLoop μ q regs ctx = ctx {μLoops = DMap.insert μ (QLooproutine q regs) (μLoops ctx)}
+insertLoop :: MVar x                      -- ^ The name of the binding.
+           -> StaSubroutine xs hs s o a x -- ^ The binding to register.
+           -> Regs xs                     -- ^ Free registers in loop.
+           -> Regs hs                     -- ^ Free registers of handler
+           -> Ctx s o a                   -- ^ The current context.
+           -> Ctx s o a                   -- ^ The new context.
+insertLoop μ q regs hregs ctx = ctx {μLoops = DMap.insert μ (QLooproutine q regs hregs) (μLoops ctx)}
 
 {-|
 Fetches a binding from the context according to its name (See `Parsley.Internal.Core.Identifiers.MVar`).
 In the (hopefully impossible!) event that it is not found in the map, will throw a @MissingDependency@
 exception. If this binding had free registers, these are generously provided by the `Ctx`.
 
+Witnesses for the expected handler's types are returned alongside 
+
 @since 1.2.0.0
 -}
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubroutine '[] s o a x)
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (SomeCallableSubroutine s o a x)
 askSub μ =
-  do QSubroutine sub rs <- askSubUnbound μ
-     asks (provideFreeRegisters sub rs)
+  do QSubroutine sub rs hs <- askSubUnbound μ
+     asks (\c -> SomeCallableSubroutine (provideFreeRegisters sub rs c) hs)
 
-askLoop :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubroutine '[] s o a x)
+
+askLoop :: MonadReader (Ctx s o a) m => MVar x -> m (SomeCallableSubroutine s o a x)
 askLoop μ =
-  do QLooproutine sub rs <- askLoopUnbound μ
-     asks (provideBoundRegisters sub rs)
+  do QLooproutine sub rs hs <- askLoopUnbound μ
+     asks (\c -> SomeCallableSubroutine (provideBoundRegisters sub rs c) hs)
 
 
 askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubroutine s o a x)
@@ -276,7 +283,14 @@ Fetches the bound variable of a register. If the register is not bound, a
 
 -}
 boundΣ :: ΣVar x -> Ctx s o a -> Code x
-boundΣ σ = fromMaybe (throw (registerFault σ)) . (getBound <=< (DMap.lookup σ . σs))
+boundΣ σ = fromMaybe (throw (registerBindFault σ)) . (getBound <=< (DMap.lookup σ . σs))
+
+{-|
+Checks if given ΣVar is bound in the current context.
+TODO: can be removed when we fully bind everything. Here to facilitate backwards compatibiltiy between different iterations.
+-}
+isBoundΣ :: ΣVar x -> Ctx s o a -> Bool
+isBoundΣ σ = isJust . (getBound <=< (DMap.lookup σ . σs))
 
 {-|
 When a binding is generated, it needs to generate function arguments for each of the
@@ -289,22 +303,23 @@ of these freshly bound registers into the `Ctx`. Has the effect of converting a
 -}
 -- This needs to return a DynFunc: it is fed back to shared territory
 takeFreeRegisters :: Regs rs                              -- ^ The free registers demanded by the binding.
+                  -> Regs hs                              -- ^ Registers needed by handler. Left as witnesses
                   -> Ctx s o a                            -- ^ The old context.
-                  -> (Ctx s o a -> DynSubroutine '[] s o a x) -- ^ Given the new context, function that produces the subroutine.
-                  -> DynFunc rs s o a x                   -- ^ The newly produced dynamic function.
-takeFreeRegisters NoRegs ctx body = body ctx
-takeFreeRegisters (Regs σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
+                  -> (Ctx s o a -> DynSubroutine '[] hs s o a x) -- ^ Given the new context, function that produces the subroutine.
+                  -> DynFunc rs hs s o a x                   -- ^ The newly produced dynamic function.
+takeFreeRegisters NoRegs _ ctx body = body ctx
+takeFreeRegisters (Regs σ σs) hregs ctx body = [||\(!reg) -> $$(takeFreeRegisters σs hregs (insertScopedΣ σ [||reg||] ctx) body)||]
 
 insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
 insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing Nothing) (σs ctx)}
 
 -- This needs to take a StaFunc, it is fed back via `askSub`
-provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine '[] s o a x
+provideFreeRegisters :: StaFunc rs hs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine '[] hs s o a x
 provideFreeRegisters sub NoRegs _ = sub
 provideFreeRegisters f (Regs σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
 
 -- Feed all the free registers of a `StaSubroutine`
-provideBoundRegisters :: StaSubroutine rs s o a x -> Regs rs -> Ctx s o a ->  StaSubroutine '[] s o a x
+provideBoundRegisters :: StaSubroutine rs hs s o a x -> Regs rs -> Ctx s o a ->  StaSubroutine '[] hs s o a x
 provideBoundRegisters loop NoRegs _ = loop
 provideBoundRegisters loop (Regs σ σs) ctx = provideBoundRegisters (loop{ staSubroutine# = staSubroutine# loop (boundΣ σ ctx)}) σs ctx
 
@@ -520,6 +535,8 @@ newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar deriving anyclass Exception
 newtype IntangibleRegister = IntangibleRegister IΣVar deriving anyclass Exception
 newtype RegisterFault = RegisterFault IΣVar deriving anyclass Exception
+newtype RegisterBindFault = RegisterBindFault IΣVar deriving anyclass Exception
+
 
 missingDependency :: MVar x -> MissingDependency
 missingDependency (MVar v) = MissingDependency v
@@ -529,8 +546,11 @@ intangibleRegister :: ΣVar x -> IntangibleRegister
 intangibleRegister (ΣVar σ) = IntangibleRegister σ
 registerFault :: ΣVar x -> RegisterFault
 registerFault (ΣVar σ) = RegisterFault σ
+registerBindFault :: ΣVar x -> RegisterBindFault
+registerBindFault (ΣVar σ) = RegisterBindFault σ
 
 instance Show MissingDependency where show (MissingDependency μ) = "Dependency μ" ++ show μ ++ " has not been compiled"
 instance Show OutOfScopeRegister where show (OutOfScopeRegister σ) = "Register r" ++ show σ ++ " is out of scope"
 instance Show IntangibleRegister where show (IntangibleRegister σ) = "Register r" ++ show σ ++ " is intangible in this scope"
 instance Show RegisterFault where show (RegisterFault σ) = "Attempting to access register r" ++ show σ ++ " from cache has failed"
+instance Show RegisterBindFault where show (RegisterBindFault σ) = "Attempting to access bound version of r" ++ show σ ++ " from context has failed"

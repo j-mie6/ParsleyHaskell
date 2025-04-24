@@ -18,13 +18,15 @@ module Parsley.Internal.Backend.Machine.Types.Dynamics (
 import Data.Kind                                   (Type)
 import Parsley.Internal.Backend.Machine.Types.Base (Handler#, Cont#, Subroutine#, Func)
 import Parsley.Internal.Common.Utils               (Code)
+import Parsley.Internal.Backend.Machine.Types.Registers (Regs)
 
 {-|
 Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.Handler#`
 
 @since 1.4.0.0
 -}
-type DynHandler s o a = Code (Handler# s o a)
+type DynHandler hs s o a = Code (Handler# hs s o a)
+
 
 {-|
 Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.Cont#`
@@ -38,11 +40,11 @@ Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.
 
 @since 1.4.0.0
 -}
-type DynSubroutine xs s o a x = Code (Subroutine# xs s o a x)
+type DynSubroutine xs hs s o a x = Code (Subroutine# xs hs s o a x)
 
 {-|
 Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.Func#`
 
 @since 1.4.0.0
 -}
-type DynFunc (rs :: [Type]) s o a x = Code (Func rs s o a x)
+type DynFunc (rs :: [Type]) (hs :: [Type]) s o a x = Code (Func rs hs s o a x)

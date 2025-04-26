@@ -51,6 +51,7 @@ data LetBinding o a x = LetBinding {
     body :: Binding o a x,
     freeRegs :: Some Regs,
     handlerFrees :: Some Regs,
+    returnFrees :: Some Regs,
     meta :: Metadata
   }
 
@@ -84,7 +85,7 @@ Given a `Binding` , a set of existential `ΣVar`s, and some `Metadata`, produces
 @since 1.5.0.0
 -}
 makeLetBinding :: Binding o a x -> Set SomeΣVar -> Metadata -> LetBinding o a x
-makeLetBinding m rs = LetBinding m (makeRegs rs) (Some NoRegs)
+makeLetBinding m rs = LetBinding m (makeRegs rs) (Some NoRegs) (Some NoRegs)
 
 {-|
 Produces a new `Metadata` object, with fields initialised to sensible conservative

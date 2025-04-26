@@ -58,9 +58,9 @@ type family Handler# (hs :: [Type]) s o a where
 {-|
 Generic type encompassing pieces of `ST` monads that are wrapped over some list of input registers.
 -}
-type family CodeOverRegisters# (hs :: [Type]) s a where 
-  CodeOverRegisters# '[] s a  = ST s (Maybe a)
-  CodeOverRegisters# (h : hs) s a = h -> CodeOverRegisters# hs s a
+type family RegisterStack# (rs :: [Type]) x where 
+  RegisterStack# '[] x      = x
+  RegisterStack# (r : rs) x = r -> RegisterStack# rs x
 
 {-|
 @Cont#@ represents return continuation from recursive parsers. They
@@ -68,17 +68,10 @@ feed back their result @x@ back to the caller as well as the updated input.
 
 @since 1.4.0.0
 -}
-type Cont# s o a x =  x              -- ^ The value to be returned to the caller
-                   -> Pos            -- ^ The current position
-                   -> DynRep o       -- ^ The new input after the call is executed
-                   -> ST s (Maybe a)
-
-{-| 
-@NCont#@ is a n-ary version of @Cont#@. 
--}
-type family NCont# (xs :: [Type]) s o a y where 
-  NCont# '[] s o a y     = Cont# s o a y
-  NCont# (x : xs) s o a y = x -> NCont# xs s o a y
+type Cont# (rs :: [Type]) s o a x = x            -- ^ The value to be returned to the caller
+                                  -> Pos         -- ^ The current position
+                                  -> DynRep o    -- ^ The new input after the call is executed
+                                  -> RegisterStack# rs (ST s (Maybe a))
 
 {-|
 @Subroutine#@ represents top-level parsers, which require a return continuation,
@@ -88,25 +81,17 @@ NB: has been made into a type family to allow for n-ary binds
 
 @since 1.4.0.0
 -}
-type family Subroutine# (xs :: [Type]) (hs :: [Type]) s o a y where 
-  Subroutine# '[] hs s o a y      =  Cont# s o a y  -- What to do when this parser returns
-                               -> Handler# hs s o a -- How to handle failure within the call
-                               -> Pos            -- The current position
-                               -> DynRep o       -- The input on entry to the call
-                               -> ST s (Maybe a)
-  Subroutine# (x : xs) hs s o a y = x -> Subroutine# xs hs s o a y
+type family Subroutine# (xs :: [Type]) (hs :: [Type]) (ys :: [Type]) s o a y where 
+  Subroutine# '[] hs ys s o a y      = Cont# ys s o a y  -- What to do when this parser returns
+                                     -> Handler# hs s o a -- How to handle failure within the call
+                                     -> Pos            -- The current position
+                                     -> DynRep o       -- The input on entry to the call
+                                     -> ST s (Maybe a)
+  Subroutine# (x : xs) hs ys s o a y = x -> Subroutine# xs hs ys s o a y
 
 {-|
-A @Func@ is a `Subroutine#` augmented with extra arguments with which to handle over
-the required free-registers of the parser. These are registers that are not created
-by the parser, but are used to execute it.
+A @Func@ is a type alias for `Subroutine#`. 
 
 @since 1.4.0.0
 -}
-type family Func (rs :: [Type]) (hs :: [Type]) s o a x where
-  Func '[] hs s o a x      = Cont# s o a x  -- What to do when this parser returns
-                        -> Handler# hs s o a -- How to handle failure within the call
-                        -> Pos            -- The current position
-                        -> DynRep o       -- The input on entry to the call
-                        -> ST s (Maybe a)
-  Func (r : rs) hs s o a x = STRef s r -> Func rs hs s o a x
+type Func rs hs ys s o a x  = Subroutine# rs hs ys s o a x 

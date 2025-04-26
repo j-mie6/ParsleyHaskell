@@ -51,7 +51,7 @@ alg (Push _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg (Pop k)            (SSucc n) = VCons False (getStack k n)
 alg (Lift2 _ k)        (SSucc n) = let VCons rel xs = getStack k n in VCons rel (VCons rel xs)
 alg (Sat _ k)          n         = let VCons _ xs = getStack k (SSucc n) in xs
-alg (Call _ _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
+alg (Call _ _ k)         n       = let VCons _ xs = getStack k (SSucc n) in xs
 alg Empt               n         = replicateVec n False
 alg (Commit k)         n         = getStack k n
 alg (Catch k _)        n         = getStack k n
@@ -59,9 +59,9 @@ alg (Tell k)           n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg (Seek k)           (SSucc n) = VCons True (getStack k n)
 alg (Case p q)         n         = VCons True (let VCons _ xs = zipRelevancy (getStack p n) (getStack q n) in xs)
 alg (Choices _ ks def) (SSucc n) = VCons True (foldr (zipRelevancy . (`getStack` n)) (getStack def n) ks)
-alg (Iter _ _ _ h)       n         = let VCons _ xs = algHandler h (SSucc n) in xs
+alg (Iter _ _ _ h)       n       = let VCons _ xs = algHandler h (SSucc n) in xs
 alg (Join _)           (SSucc n) = VCons True (replicateVec n False)
-alg (MkJoin _ b _)     n         = let VCons _ xs = getStack b (SSucc n) in xs
+alg (MkJoin _ _ b _)     n       = let VCons _ xs = getStack b (SSucc n) in xs
 alg (Swap k)           n         = let VCons rel1 (VCons rel2 xs) = getStack k n in VCons rel2 (VCons rel1 xs)
 alg (Dup k)            n         = let VCons rel1 (VCons rel2 xs) = getStack k (SSucc n) in VCons (rel1 || rel2) xs
 alg (Make _ _ k)       (SSucc n) = VCons False (getStack k n)

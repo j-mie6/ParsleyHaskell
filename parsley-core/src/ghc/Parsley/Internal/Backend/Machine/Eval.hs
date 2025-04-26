@@ -50,7 +50,8 @@ import qualified Parsley.Internal.Opt   as Opt
 import Parsley.Internal.Opt (Flags(leadCharFactoring))
 import Data.Set (Set)
 import Data.Some (Some (..), withSome)
-import Parsley.Internal.Backend.Machine.Types.Statics (SomeCallableSubroutine(..))
+import Parsley.Internal.Backend.Machine.Types.Statics (SomeCallableSubroutine(..), QStaCont (..))
+import Data.Maybe (fromJust)
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
@@ -65,9 +66,9 @@ eval :: forall o a. (Trace, Ops o, ?ops :: InputOps (StaRep o), ?flags :: Opt.Fl
 eval binding fs offset  = trace "EVALUATING TOP LEVEL" [||
     runST $$(letRec fs
              nameLet
-             (\μ exp rs hs names -> buildRec μ rs hs (emptyCtx names) (readyMachine exp))
+             (\μ func exp rs hs rregs names -> buildRec μ func rs hs rregs (emptyCtx names) (readyMachine exp))
              qSubroutine
-             (run (readyMachine (body binding)) (Γ Empty halt (mkInput offset initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
+             (run (readyMachine (body binding)) (Γ Empty (QStaCont halt NoRegs) (mkInput offset initPos) (VCons fatal VNil)) . nextUnique . emptyCtx))
   ||]
   where
     nameLet :: MVar x -> String
@@ -92,7 +93,7 @@ readyMachine = cata4 (Machine . alg)
     alg (Choices fs ks def) = evalChoices fs ks def
     alg (Iter μ regs l k)   = evalIter μ regs l k
     alg (Join φ)            = evalJoin φ
-    alg (MkJoin φ p k)      = evalMkJoin φ p k
+    alg (MkJoin φ rs p k)   = evalMkJoin φ rs p k
     alg (Swap k)            = evalSwap k
     alg (Dup k)             = evalDup k
     alg (Make σ c k)        = evalMake σ c k
@@ -104,21 +105,17 @@ readyMachine = cata4 (Machine . alg)
     alg (MetaInstr m k)     = evalMeta m k
 
 evalRet :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o (x : xs) n x a
-evalRet = return $! retCont >>= resume
+evalRet = reader $ \ctx γ ->
+  case retCont γ of  
+    QStaCont rc regs -> resume rc ctx regs γ
 
 evalCall :: forall s o a x xs n r. (MarshalOps o, DynOps o, ?flags :: Opt.Flags) => MVar x -> Bool -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalCall μ False (Machine k) = freshUnique $ \u -> do 
+evalCall μ _ k = freshUnique $ \u -> do 
   someSub <- askSub μ
   case someSub of 
-    SomeCallableSubroutine sub hregs -> do 
-      ak <- k 
-      return $ \γ -> callCC u sub hregs ak γ 
-evalCall μ True (Machine k) = freshUnique $ \u -> do 
-  someLoop <- askLoop μ
-  case someLoop of 
-    SomeCallableSubroutine sub hregs -> do 
-      ak <- k 
-      return $ \γ -> callCC u sub hregs ak γ 
+    SomeCallableSubroutine sub hregs rregs -> do 
+      ctx <- ask
+      return $ \γ -> callCC u sub hregs rregs k ctx γ 
 
 evalPush :: Defunc x -> Machine s o (x : xs) n r a -> MachineMonad s o xs n r a
 evalPush x (Machine k) = k <&> \m γ -> m (γ {operands = Op x (operands γ)})
@@ -197,10 +194,15 @@ evalIter μ (Just regs) l h =
           _ -> undefined -- Should have attached register data already.
 
 evalJoin :: (DynOps o, ?flags :: Opt.Flags) => ΦVar x -> MachineMonad s o (x : xs) n r a
-evalJoin φ = askΦ φ <&> resume
+evalJoin φ = do 
+  qjoin <- askΦ φ
+  ctx <- ask
+  case qjoin of 
+    QJoin joinpt regs -> return $ resume joinpt ctx regs
 
-evalMkJoin :: (DynOps o, ?flags :: Opt.Flags) => JoinBuilder o => ΦVar x -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
-evalMkJoin = setupJoinPoint
+evalMkJoin :: (DynOps o, ?flags :: Opt.Flags) => JoinBuilder o => ΦVar x -> Maybe (Some Regs) -> Machine s o (x : xs) n r a -> Machine s o xs n r a -> MachineMonad s o xs n r a
+evalMkJoin _ Nothing            = undefined  -- shouldn't happen
+evalMkJoin x (Just (Some regs)) = setupJoinPoint x regs
 
 evalSwap :: Machine s o (x : y : xs) n r a -> MachineMonad s o (y : x : xs) n r a
 evalSwap (Machine k) = k <&> \mk γ -> mk (γ {operands = let Op y (Op x xs) = operands γ in Op x (Op y xs)})

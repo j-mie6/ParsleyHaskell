@@ -19,12 +19,12 @@ used to aid code generation.
 module Parsley.Internal.Backend.Machine.Types.Context (
     -- * Core Data-types
     Ctx,
-    QJoin,
+    QJoin(..),
     emptyCtx,
 
     -- * Subroutines
     -- $sub-doc
-    insertSub, insertLoop, askSub, askLoop,
+    insertSub, askSub,
 
     -- * Join Points
     -- $join-doc
@@ -71,13 +71,15 @@ import Parsley.Internal.Backend.Machine.Types.Coins     (Coins(Coins, willConsum
 import Parsley.Internal.Backend.Machine.Types.Dynamics  (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
 import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine (staSubroutine#), StaCont, QLooproutine (QLooproutine), SomeCallableSubroutine (..))
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue, intercalate)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
-import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
+import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup, keys)
 import qualified Parsley.Internal.Common.QueueLike            as Queue (empty, null)
 import qualified Parsley.Internal.Common.RewindQueue          as Queue (rewind)
 import Data.Data (Proxy)
+import Debug.Trace (trace)
+import Data.Some (Some(..))
 
 -- Core Data-types
 
@@ -106,7 +108,7 @@ as a `Parsley.Internal.Backend.Machine.Types.Statics.StaCont`.
 
 @since 1.0.0.0
 -}
-newtype QJoin s o a x = QJoin { unwrapJoin :: StaCont s o a x }
+data QJoin s o a x = forall ys. QJoin { unwrapJoin :: StaCont ys s o a x, joinRegs :: Regs ys }
 
 {-|
 Creates an empty `Ctx` populated with a map of the top-level (recursive)
@@ -134,21 +136,24 @@ according to "local" @Reader@ semantics.
 
 @since 1.2.0.0
 -}
-insertSub :: forall hs s o a x. MVar x                -- ^ The name of the binding.
-          -> StaSubroutine '[] hs s o a x -- ^ The binding to register.
-          -> Regs hs                      -- ^ Witnesses for handler's free registers
-          -> Ctx s o a             -- ^ The current context.
-          -> Ctx s o a             -- ^ The new context.
-insertSub μ q  hregs ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs hregs) (μs ctx)}
+insertSub :: forall rs hs ys s o a x. MVar x  -- ^ The name of the binding.
+          -> StaSubroutine rs hs ys s o a x   -- ^ The binding to register.
+          -> Regs rs                          -- ^ Witnesses for required free registers of sub.
+          -> Regs hs                          -- ^ Witnesses for handler's free registers.
+          -> Regs ys                          -- ^ Witnesses for return continuation's free registers.
+          -> Ctx s o a                        -- ^ The current context.
+          -> Ctx s o a                        -- ^ The new context.
+insertSub μ q regs hregs rregs ctx = ctx {μs = DMap.insert μ (QSubroutine q regs hregs rregs) (μs ctx)}
 
-insertLoop :: MVar x                      -- ^ The name of the binding.
-           -> StaSubroutine xs hs s o a x -- ^ The binding to register.
-           -> Regs xs                     -- ^ Free registers in loop.
-           -> Regs hs                     -- ^ Free registers of handler
-           -> Ctx s o a                   -- ^ The current context.
-           -> Ctx s o a                   -- ^ The new context.
+{-
+insertLoop :: MVar x                         -- ^ The name of the binding.
+           -> StaSubroutine xs hs ys s o a x -- ^ The binding to register.
+           -> Regs xs                        -- ^ Free registers in loop.
+           -> Regs hs                        -- ^ Free registers of handler
+           -> Ctx s o a                      -- ^ The current context.
+           -> Ctx s o a                      -- ^ The new context.
 insertLoop μ q regs hregs ctx = ctx {μLoops = DMap.insert μ (QLooproutine q regs hregs) (μLoops ctx)}
-
+-}
 {-|
 Fetches a binding from the context according to its name (See `Parsley.Internal.Core.Identifiers.MVar`).
 In the (hopefully impossible!) event that it is not found in the map, will throw a @MissingDependency@
@@ -160,15 +165,8 @@ Witnesses for the expected handler's types are returned alongside
 -}
 askSub :: MonadReader (Ctx s o a) m => MVar x -> m (SomeCallableSubroutine s o a x)
 askSub μ =
-  do QSubroutine sub rs hs <- askSubUnbound μ
-     asks (\c -> SomeCallableSubroutine (provideFreeRegisters sub rs c) hs)
-
-
-askLoop :: MonadReader (Ctx s o a) m => MVar x -> m (SomeCallableSubroutine s o a x)
-askLoop μ =
-  do QLooproutine sub rs hs <- askLoopUnbound μ
-     asks (\c -> SomeCallableSubroutine (provideBoundRegisters sub rs c) hs)
-
+  do QSubroutine sub rs hs ys <- askSubUnbound μ
+     asks (\c -> SomeCallableSubroutine (provideBoundRegisters sub rs c) hs ys)
 
 askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubroutine s o a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
@@ -188,19 +186,20 @@ expires according to "local" @Reader@ semantics.
 
 @since 1.0.0.0
 -}
-insertΦ :: ΦVar x          -- ^ The name of the new binding.
-        -> StaCont s o a x -- ^ The binding to add.
-        -> Ctx s o a       -- ^ The old context.
-        -> Ctx s o a       -- ^ The new context.
-insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
+insertΦ :: ΦVar x             -- ^ The name of the new binding.
+        -> StaCont ys s o a x -- ^ The binding to add.
+        -> Regs ys            -- ^ Free registers of the `StaCont` 
+        -> Ctx s o a          -- ^ The old context.
+        -> Ctx s o a          -- ^ The new context.
+insertΦ φ qjoin regs ctx = ctx {φs = DMap.insert φ (QJoin qjoin regs) (φs ctx)}
 
 {-|
 Fetches a binding from the `Ctx`.
 
 @since 1.2.0.0
 -}
-askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (StaCont s o a x)
-askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
+askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin s o a x)
+askΦ φ = asks ((DMap.! φ) . φs)
 
 -- Registers
 {- $reg-doc
@@ -248,7 +247,7 @@ Update the last-known bound variable name of a register. Does not clear/update c
 bindΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
 bindΣ σ bref ctx = case DMap.lookup σ (σs ctx) of
   Just (Reg ref _ c) -> ctx {σs = DMap.insert σ (Reg ref (Just bref) c) (σs ctx)}
-  Nothing            -> throw (outOfScopeRegister σ)
+  Nothing            -> trace ("THE CONTEXT regs : " ++ intercalate "" (map (\(Some (ΣVar i)) -> show i) (DMap.keys $ σs ctx))) $ throw (outOfScopeRegister σ)
 
 {-| 
 Remove the binding for a register.
@@ -302,31 +301,25 @@ of these freshly bound registers into the `Ctx`. Has the effect of converting a
 @since 1.2.0.0
 -}
 -- This needs to return a DynFunc: it is fed back to shared territory
-takeFreeRegisters :: Regs rs                              -- ^ The free registers demanded by the binding.
-                  -> Regs hs                              -- ^ Registers needed by handler. Left as witnesses
-                  -> Ctx s o a                            -- ^ The old context.
-                  -> (Ctx s o a -> DynSubroutine '[] hs s o a x) -- ^ Given the new context, function that produces the subroutine.
-                  -> DynFunc rs hs s o a x                   -- ^ The newly produced dynamic function.
-takeFreeRegisters NoRegs _ ctx body = body ctx
-takeFreeRegisters (Regs σ σs) hregs ctx body = [||\(!reg) -> $$(takeFreeRegisters σs hregs (insertScopedΣ σ [||reg||] ctx) body)||]
+takeFreeRegisters :: forall rs hs ys s o a x. Regs rs               -- ^ The free registers demanded by the binding.
+                  -> Regs hs                                        -- ^ Registers needed by handler. Left as witnesses.
+                  -> Regs ys                                        -- ^ Witnesses for the return continuation registers.
+                  -> Ctx s o a                                      -- ^ The old context.
+                  -> (Ctx s o a -> DynSubroutine '[] hs ys s o a x) -- ^ Given the new context, function that produces the subroutine.
+                  -> DynFunc rs hs ys s o a x                       -- ^ The newly produced dynamic function.
+takeFreeRegisters NoRegs _ retregs ctx body = body ctx
+takeFreeRegisters (Regs σ σs) hregs retregs ctx body = [||\(!reg) -> $$(takeFreeRegisters σs hregs retregs (insertScopedΣ' σ [||reg||] ctx) body)||]
 
 insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
 insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing Nothing) (σs ctx)}
 
--- This needs to take a StaFunc, it is fed back via `askSub`
-provideFreeRegisters :: StaFunc rs hs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine '[] hs s o a x
-provideFreeRegisters sub NoRegs _ = sub
-provideFreeRegisters f (Regs σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
+insertScopedΣ' :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
+insertScopedΣ' σ qref ctx = ctx {σs = DMap.insert σ (Reg Nothing (Just qref) Nothing) (σs ctx)}
 
 -- Feed all the free registers of a `StaSubroutine`
-provideBoundRegisters :: StaSubroutine rs hs s o a x -> Regs rs -> Ctx s o a ->  StaSubroutine '[] hs s o a x
-provideBoundRegisters loop NoRegs _ = loop
-provideBoundRegisters loop (Regs σ σs) ctx = provideBoundRegisters (loop{ staSubroutine# = staSubroutine# loop (boundΣ σ ctx)}) σs ctx
-
-
---provideBoundRegisters :: StaSubroutine xs s o a x -> Regs xs -> Ctx s o a -> StaSubroutine '[] s o a x
---provideBoundRegisters sub NoRegs _ = sub
---provideBoundRegisters f (Regs σ σs) ctx = provideBoundRegisters (f (boundΣ σ ctx)) σs ctx
+provideBoundRegisters :: StaSubroutine rs hs ys s o a x -> Regs rs -> Ctx s o a -> StaSubroutine '[] hs ys s o a x
+provideBoundRegisters sub NoRegs _ = sub
+provideBoundRegisters sub (Regs σ σs) ctx = provideBoundRegisters (sub{staSubroutine# = staSubroutine# sub (trace "This 1" $ boundΣ σ ctx)}) σs ctx
 
 -- Debug Level Tracking
 {- $debug-doc

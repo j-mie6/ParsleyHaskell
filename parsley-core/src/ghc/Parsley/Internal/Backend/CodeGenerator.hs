@@ -173,6 +173,6 @@ freshΦ = newScope
 makeΦ :: (Trace, ?flags :: Opt.Flags) => Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
 makeΦ m
   | shouldInline m                = trace ("eliding " ++ show m) $ return (id, m)
-  | Opt.factorAheadOfJoins ?flags = fmap (\φ -> (In4 . MkJoin φ (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
-  | otherwise                     = fmap (\φ -> (In4 . MkJoin φ (addCoins n m), In4 (Join φ))) askΦ
+  | Opt.factorAheadOfJoins ?flags = fmap (\φ -> (In4 . MkJoin φ Nothing (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
+  | otherwise                     = fmap (\φ -> (In4 . MkJoin φ Nothing (addCoins n m), In4 (Join φ))) askΦ
   where n = coinsNeeded m

@@ -9,6 +9,7 @@
              PatternSynonyms,
              RecordWildCards,
              TypeApplications,
+             ScopedTypeVariables,
              UnboxedTuples #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Ops
@@ -29,7 +30,7 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Abstracted Input Operations
     sat, emitLengthCheck, fetch,
     -- ** Register Operations
-    newΣ, writeΣ, readΣ, liquefyΣ, solidifyΣ,
+    newΣ, writeΣ, readΣ, solidifyΣ,
     -- ** Handler Operations
     -- *** Basic handlers and operations
     fatal, raise,
@@ -77,7 +78,7 @@ import Parsley.Internal.Backend.Machine.LetBindings               (Metadata(fail
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
 import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..), RegBindNames (..), RegTHNames (..))
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler)
+import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler, DynRegisterStack, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, chooseInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (moveOne)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
@@ -89,7 +90,7 @@ import System.Console.Pretty                                      (color, Color(
 
 import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), updateDeepestKnown)
 import qualified Parsley.Internal.Opt   as Opt
-import Parsley.Internal.Backend.Machine.Types.Base (Handler#, Pos, CodeOverRegisters#)
+import Parsley.Internal.Backend.Machine.Types.Base (Handler#, Pos, RegisterStack#)
 import Data.Data (Proxy(..), (:~:) (..))
 import Parsley.Internal.Core.Identifiers (ΣVar(..))
 import Unsafe.Coerce (unsafeCoerce)
@@ -173,7 +174,7 @@ that in the `Ctx` cache.
 
 @since 1.0.0.0
 -}
-newΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
+newΣ :: (?flags :: Opt.Flags) => forall x s o a r. ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
 newΣ σ Bound x k ctx = dup x $ \dupx -> [||
     let bref = $$(genDefunc dupx)
       in $$(k (insertNewΣ σ Nothing (Just [|| bref ||]) dupx ctx))
@@ -217,11 +218,6 @@ readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
        $$(let fv = FREEVAR [||x||] in k fv (cacheΣ σ fv ctx))
   ||]
 
-{-| 
-Read the concrete `STRef` value of a register and use a `Bound` `writeΣ` to bind it to a variable.
--}
-liquefyΣ :: (?flags :: Opt.Flags) => ΣVar x -> (Ctx s o a -> Code (ST s r))-> Ctx s o a -> Code (ST s r)
-liquefyΣ σ k ctx = if isBoundΣ σ ctx then k ctx else readΣ σ Hard (\x -> writeΣ σ Bound x k) ctx
 
 {-| 
 Reads the `ctx` cache and writes this to the concrete `STRef`. Also removes any bindings associated
@@ -255,9 +251,24 @@ raise ctx γ = let VCons h _ = handlers γ in case h of (QAugmentedStaHandler h 
 {-|
 Finds the current bound names of given registers from a given context
 -}
-gatherBinds :: forall hs s o a. Regs hs -> Ctx s o a -> RegBindNames hs
+gatherBinds :: forall rs s o a. Regs rs -> Ctx s o a -> RegBindNames rs
 gatherBinds NoRegs _ = NoName
 gatherBinds (Regs σ rs) ctx = RegName σ (boundΣ σ ctx) (gatherBinds rs ctx)
+
+{-|
+Feed a `RegBindNames` list to a register stack.
+-}
+feedBinds :: forall rs x. RegBindNames rs -> StaRegisterStack# rs x -> Code x
+feedBinds NoName f             = f
+feedBinds (RegName _ name rs) f = feedBinds rs (f name)
+
+{-|
+Modify a context by accepting a list of new bind names for the registers. 
+-}
+bindRegsToCtx :: forall rs s o a x. Regs rs -> Ctx s o a -> (Ctx s o a -> Code x) -> StaRegisterStack# rs x
+bindRegsToCtx NoRegs ctx k = k ctx
+bindRegsToCtx (Regs σ rs) ctx k = \r -> bindRegsToCtx rs (bindΣ σ r ctx) k 
+
 
 -- Handler preparation
 {-|
@@ -394,7 +405,7 @@ the entire parser.
 
 @since 1.2.0.0
 -}
-halt :: StaCont s o a a
+halt :: StaCont '[] s o a a
 halt = mkStaCont $ \x _ -> [||returnST (Just $$x)||]
 
 {-|
@@ -404,7 +415,7 @@ may only exit on failure, which is the case with iterating parsers.
 
 @since 1.2.0.0
 -}
-noreturn :: StaCont s o a Void
+noreturn :: forall s o a. StaCont '[] s o a Void
 noreturn = mkStaCont $ error "Return is not permitted here"
 
 {-|
@@ -413,8 +424,8 @@ join point) taking the required components from the state `Γ`.
 
 @since 1.2.0.0
 -}
-resume :: (DynOps o, ?flags :: Opt.Flags) => StaCont s o a x -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
-resume k γ = let Op x _ = operands γ in staCont# k (genDefunc x) (fromInput (input γ))
+resume :: (DynOps o, ?flags :: Opt.Flags) => StaCont rs s o a x -> Ctx s o a -> Regs rs -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
+resume k ctx regs γ = let Op x _ = operands γ in feedBinds (gatherBinds regs ctx) $ staCont# k (genDefunc x) (fromInput (input γ))
 
 {-|
 A form of @callCC@, this calls a subroutine with a given return continuation
@@ -424,18 +435,18 @@ previous return continuation in the case of a tail call.
 @since 1.8.0.0
 -}
 callWithContinuation :: (MarshalOps o, DynOps o)
-                     => StaSubroutine '[] hs s o a x              -- ^ The subroutine @sub@ that will be called.
-                     -> Regs hs                                   -- ^ Witnesses for handler's registers
-                     -> StaCont s o a x                           -- ^ The return continuation for the subroutine.
+                     => StaSubroutine '[] hs ys s o a x           -- ^ The subroutine @sub@ that will be called.
+                     -> Regs hs                                   -- ^ Witnesses for handler's registers.
+                     -> StaCont ys s o a x                        -- ^ The return continuation for the subroutine.
+                     -> Regs ys                                   -- ^ Witnesses for return cont.'s registers.
                      -> Input o                                   -- ^ The input to feed to @sub@.
                      -> Vec (Succ n) (QAugmentedStaHandler s o a) -- ^ The stack from which to obtain the handler to pass to @sub@.
                      -> Code (ST s (Maybe a))
--- TODO: make subroutines accept n-ary handlers
-callWithContinuation sub hregs ret input (VCons h _) = case h of 
-  QAugmentedStaHandler h regs -> 
-    case eqRegs regs hregs of 
-      Just Refl -> staSubroutine# sub (dynCont ret) (dynHandler h regs (failureInputCharacteristic (meta sub))) (fromInput input)
-      Nothing ->  trace ("failed to show regs equal: " ++ "\n    regs  : " ++ debugRegsList regs ++ "\n    hregs : " ++ debugRegsList hregs) $ undefined -- TODO: somehow inform with a better error message?
+callWithContinuation sub hregs ret retregs input (VCons h _) = case h of
+  QAugmentedStaHandler h regs ->
+    case eqRegs regs hregs of
+      Just Refl -> staSubroutine# sub (dynCont retregs ret) (dynHandler h regs (failureInputCharacteristic (meta sub))) (fromInput input)
+      Nothing -> trace ("failed to show regs equal: " ++ "\n    regs  : " ++ debugRegsList regs ++ "\n    hregs : " ++ debugRegsList hregs) $ undefined -- TODO: somehow inform with a better error message?
   where
     eqRegs :: forall hs rs. Regs hs -> Regs rs -> Maybe (hs :~: rs)
     eqRegs NoRegs NoRegs = Just Refl
@@ -444,10 +455,9 @@ callWithContinuation sub hregs ret input (VCons h _) = case h of
       if σ1 == σ2 then unsafeCoerce (Just Refl) else Nothing
     eqRegs _ _ = Nothing
 
-    -- TODO: delete debugging below
-    debugRegsList :: forall rs. Regs rs -> String  
+    debugRegsList :: forall rs. Regs rs -> String
     debugRegsList NoRegs = ""
-    debugRegsList (Regs s rs) = show s ++ ", " ++ debugRegsList rs 
+    debugRegsList (Regs s rs) = show s ++ ", " ++ debugRegsList rs
 
 -- Continuation preparation
 {-|
@@ -456,12 +466,14 @@ to `buildHandler`.
 
 @since 1.8.0.0
 -}
-suspend :: (?flags :: Opt.Flags)
-        => (Γ s o (x : xs) n r a -> Code (ST s (Maybe a))) -- ^ The partial parser to turn into a return continuation.
+suspend :: forall ys s o a x xs n r. (?flags :: Opt.Flags)
+        => Ctx s o a                                       -- ^ Context that will be modified with return registers
+        -> Machine s o (x : xs) n r a                 -- ^ Machine that is to meant be run.
+        -> Regs ys                                         -- ^ Return continuation registers.
         -> Γ s o xs n r a                                  -- ^ The state to execute the continuation with.
         -> (Input# o -> Input o)                           -- ^ Function used to generate the offset
-        -> StaCont s o a x
-suspend m γ off = mkStaCont $ \x o# -> m (γ {operands = Op (FREEVAR x) (operands γ), input = off o#})
+        -> StaCont ys s o a x
+suspend ctx m regs γ off = mkStaCont $ \x o# -> bindRegsToCtx @ys regs ctx (run m (γ {operands = Op (FREEVAR x) (operands γ), input = off o#}))
 
 {-|
 Combines `suspend` and `callWithContinuation`, simultaneously performing
@@ -469,14 +481,16 @@ an optimisation on the offset if the subroutine has known input characteristics.
 
 @since 1.5.0.0
 -}
-callCC :: forall s o xs n r a x hs. (MarshalOps o, DynOps o, ?flags :: Opt.Flags)
+callCC :: forall xs hs ys s o n r a x. (MarshalOps o, DynOps o, ?flags :: Opt.Flags)
        => Word                                                   --
-       -> StaSubroutine '[] hs s o a x                           -- ^ The subroutine @sub@ that will be called.
+       -> StaSubroutine '[] hs ys s o a x                        -- ^ The subroutine @sub@ that will be called.
        -> Regs hs
-       -> (Γ s o (x : xs) (Succ n) r a -> Code (ST s (Maybe a))) -- ^ The return continuation to generate
+       -> Regs ys
+       -> Machine s o (x : xs) (Succ n) r a                      -- ^ The return continuation to generate.
+       -> Ctx s o a                                              -- ^ Context to use for the generation of the return continuation.
        -> Γ s o xs (Succ n) r a                                  --
        -> Code (ST s (Maybe a))
-callCC u sub regs k γ = callWithContinuation sub regs (suspend k γ (chooseInput (successInputCharacteristic (meta sub)) u inp)) inp (handlers γ)
+callCC u sub hregs rregs m ctx γ = callWithContinuation sub hregs (suspend ctx m rregs γ (chooseInput (successInputCharacteristic (meta sub)) u inp)) rregs inp (handlers γ)
   where
     inp :: Input o
     inp = input γ
@@ -488,17 +502,17 @@ into the `Ctx`.
 
 @since 1.4.0.0
 -}
-setupJoinPoint :: forall s o xs n r a x. (JoinBuilder o, DynOps o, ?flags :: Opt.Flags)
+setupJoinPoint :: forall rs s o xs n r a x. (JoinBuilder o, DynOps o, ?flags :: Opt.Flags)
                => ΦVar x                     -- ^ The name of the binding.
+               -> Regs rs
                -> Machine s o (x : xs) n r a -- ^ The definition of the binding.
                -> Machine s o xs n r a       -- ^ The scope within which the binding is valid.
                -> MachineMonad s o xs n r a
-setupJoinPoint φ (Machine k) mx = freshUnique $ \u ->
-    liftM2 (\mk ctx γ ->
-      setupJoinPoint# @o
-        (\qx inp -> mk (γ {operands = Op (FREEVAR qx) (operands γ), input = toInput u inp}))
-        (\qjoin -> run mx γ (insertΦ φ (mkStaContDyn qjoin) ctx)))
-      (local voidCoins k) ask
+setupJoinPoint φ regs (Machine k) mx = freshUnique $ \u -> ask >>= (\ctx ->
+  return $ \γ -> setupJoinPoint# @o (Proxy @s) (Proxy @a) (Proxy @x)
+    (\qx inp -> bindRegsToCtx regs ctx (run (Machine $ local voidCoins k) (γ {operands = Op (FREEVAR qx) (operands γ), input = toInput u inp}))) regs
+    (\qjoin -> run mx γ (insertΦ φ (mkStaContDyn qjoin regs) regs ctx)))
+
 
 {- Iteration Operations -}
 {-|
@@ -522,24 +536,18 @@ bindIterAlways' :: forall s o a rs hs. (RecBuilder o, DynOps o, ?flags :: Opt.Fl
                -> Code (ST s (Maybe a))
 bindIterAlways' ctx μ regs l needed h hregs inp u =
    bindIterHandlerInline# @o @s @a @_ @hs needed (staHandler# . h . toInput u) hregs $ \qhandler ->
-    bindRegs regs ctx $ \initBoundRegs ctx ->
-      bindLiquidIter# @o (fromInput inp) initBoundRegs $ \qloop loopBoundRegs inp# ->
+      bindLiquidIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
         updateBinds loopBoundRegs ctx $ \ctx ->
           -- First populate the context with the new binds for names
           let inp = toInput u inp#
-          in run l (Γ Empty noreturn inp (VCons (QAugmentedStaHandler (augmentHandler (Just inp) (qhandler inp#)) hregs) VNil))
-                  (voidCoins (insertLoop μ (mkStaSubroutine $ lambdafy regs qloop) regs hregs ctx))
+          in run l (Γ Empty (QStaCont noreturn NoRegs) inp (VCons (QAugmentedStaHandler (augmentHandler (Just inp) (qhandler inp#)) hregs) VNil))
+                  (voidCoins (insertSub μ (mkStaSubroutine $ lambdafy regs qloop) regs hregs NoRegs ctx))
   where
-    lambdafy :: forall rs. Regs rs -> Code (LiquidLoopRoutine rs s o a) -> StaSubroutine# rs hs s o a Void
+    lambdafy :: forall rs. Regs rs -> Code (LiquidLoopRoutine rs s o a) -> StaSubroutine# rs hs '[] s o a Void
     lambdafy NoRegs qloop  = \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
     lambdafy (Regs σ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
     -- \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
     --liquefyΣ :: (?flags :: Opt.Flags) => ΣVar x -> (Ctx s o a -> Code (ST s r))-> Ctx s o a -> Code (ST s r)
-
-bindRegs :: forall s o a rs r. (?flags :: Opt.Flags) => Regs rs -> Ctx s o a -> (RegBindNames rs -> Ctx s o a -> Code (ST s r)) -> Code (ST s r)
-bindRegs NoRegs ctx k = k NoName ctx
-bindRegs (Regs σ rs) ctx k = bindRegs rs ctx
-                                  (\boundr c' -> liquefyΣ σ (\c'' -> k (RegName σ (boundΣ σ c'') boundr) c'') c')
 
 updateBinds :: forall s o a rs r. RegBindNames rs -> Ctx s o a -> (Ctx s o a -> Code (ST s r)) -> Code (ST s r)
 updateBinds NoName ctx k = k ctx
@@ -569,14 +577,13 @@ bindIterSame' ctx μ regs l neededYes yes neededNo no hregs inp u =
     bindIterHandlerInline# @o @s @a neededNo (staHandler# . no . toInput u) hregs $ \qno -> -- 
       let handler (inpc :: Input# o) = makeHandlerJoin inpc hregs qyes qno
       in bindIterHandlerInline# @o True handler hregs $ \qhandler ->
-        bindRegs regs ctx $ \initBoundRegs ctx ->
-          bindLiquidIter# @o (fromInput inp) initBoundRegs $ \qloop loopBoundRegs inp# ->
+          bindLiquidIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
               updateBinds loopBoundRegs ctx $ \ctx ->
                 let off = toInput u inp#
-                in run l (Γ Empty noreturn off (VCons (QAugmentedStaHandler (augmentHandlerFull off (qhandler inp#) (moveInputInside hregs (staHandler# qyes) inp#) (qno inp#)) hregs) VNil))
-                          (voidCoins (insertLoop μ (mkStaSubroutine $ lambdafy regs qloop) regs hregs ctx))
+                in run l (Γ Empty (QStaCont noreturn NoRegs) off (VCons (QAugmentedStaHandler (augmentHandlerFull off (qhandler inp#) (moveInputInside hregs (staHandler# qyes) inp#) (qno inp#)) hregs) VNil))
+                          (voidCoins (insertSub μ (mkStaSubroutine $ lambdafy regs qloop) regs hregs NoRegs ctx))
   where
-    lambdafy :: forall rs. Regs rs -> Code (LiquidLoopRoutine rs s o a) -> StaSubroutine# rs hs s o a Void
+    lambdafy :: forall rs. Regs rs -> Code (LiquidLoopRoutine rs s o a) -> StaSubroutine# rs hs '[] s o a Void
     lambdafy NoRegs qloop  = \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
     lambdafy (Regs σ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
 
@@ -590,6 +597,7 @@ bindIterSame' ctx μ regs l neededYes yes neededNo no hregs inp u =
       where
         applyR :: forall h hs. StaHandler (h:hs) s o a -> Code h -> StaHandler hs s o a
         applyR h r = StaHandler{ staHandler# = staHandler# h r, dynOrigin = (\d -> [|| $$d $$r||]) <$> dynOrigin h}
+
 {- Recursion Operations -}
 {-|
 Wraps around `bindRec#` to produce a recursive parser binding. This function
@@ -599,19 +607,25 @@ each time round.
 
 @since 1.5.0.0
 -}
-buildRec :: forall rs hs s o a r. (RecBuilder o, DynOps o)
-         => MVar r                  -- ^ The name of the binding.
+buildRec :: forall rs hs ys s o a r. (RecBuilder o, DynOps o)
+         => MVar r                   -- ^ The name of the binding.
+         -> DynFunc rs hs ys s o a r -- ^ Top level bound name for parser.
          -> Regs rs                 -- ^ The registers required by the binding.
          -> Regs hs                 -- ^ The registers required by the dynamic handler.
+         -> Regs ys                 -- ^ The registers required by the return continuation.
          -> Ctx s o a               -- ^ The context to re-insert the register-less binding
          -> Machine s o '[] One r a -- ^ The body of the binding.
          -> Metadata                -- ^ The metadata associated with the binding
-         -> DynFunc rs hs s o a r
-buildRec μ rs hs ctx k meta =
-  takeFreeRegisters rs hs ctx $ \ctx ->
-    bindRec# @o @hs $ \qself qret (qh :: DynHandler hs s o a) inp ->
-      run k (Γ Empty (mkStaContDyn qret) (toInput 0 inp) (VCons (QAugmentedStaHandler (augmentHandlerDyn @hs Nothing qh hs) hs) VNil))
-            (insertSub @hs μ (mkStaSubroutineMeta @_ @hs meta $ \k h inp -> [|| $$qself $$k $$h $$(pos# inp) $$(off# inp) ||]) hs (nextUnique ctx))
+         -> DynFunc rs hs ys s o a r
+buildRec μ func rs hs rregs ctx k meta =
+  takeFreeRegisters @rs @hs @ys @s @o @a @r rs hs rregs ctx $ \ctx -> 
+      bindRec# @o @hs @ys $ \qret (qh :: DynHandler hs s o a) inp -> 
+      run k (Γ Empty (QStaCont (mkStaContDyn qret rregs) rregs) (toInput 0 inp) (VCons (QAugmentedStaHandler (augmentHandlerDyn @hs Nothing qh hs) hs) VNil))
+            (insertSub @rs @hs @ys μ (mkStaSubroutineMeta @_ @hs meta (feedBinds' rs func)) rs hs rregs (nextUnique ctx))
+  where
+    feedBinds' :: forall rs. Regs rs -> DynFunc rs hs ys s o a r -> StaSubroutine# rs hs ys s o a r 
+    feedBinds' NoRegs func = \k h inp -> [|| $$func $$k $$h $$(pos# inp) $$(off# inp) ||]
+    feedBinds' (Regs _ rs) func = \r -> feedBinds' rs [|| $$func $$r ||]
 
 {- Binding Operations -}
 bindHandlerInline# :: forall o s a b hs. HandlerOps o
@@ -625,11 +639,11 @@ bindHandlerInline# False h _ k = k (fromStaHandler# h)
 
 bindYesInline# :: forall hs s a b. Bool -> StaSameHandler hs s a -> Regs hs -> (StaSameHandler hs s a -> Code b) -> Code b
 bindYesInline# True v regs k = [|| let yesSame = $$(unsafeCodeCoerce $ createDeclWithRegs yesWrapper regs) in $$(k $ mkSta regs [||yesSame||]) ||] -- TODO: semi-urgent do the bind of `yesSame
-  where 
+  where
     yesWrapper :: forall rs. RegTHNames rs -> RegBindNames hs -> Q Exp
     yesWrapper NoTHName = \bregs -> unTypeCode $ feedSameHandlerBoundRegs @hs @s @_ @a bregs v
-    yesWrapper (RegTHName _ name rest) = \bregs -> do; func <- yesWrapper rest bregs; return (LamE [VarP name] func)
-    mkSta :: forall rs. Regs rs -> Code (CodeOverRegisters# rs s a) -> StaSameHandler rs s a
+    yesWrapper (RegTHName _ name rest) = \bregs -> do ; func <- yesWrapper rest bregs; return (LamE [VarP name] func)
+    mkSta :: forall rs. Regs rs -> DynRegisterStack rs (ST s (Maybe a)) -> StaSameHandler rs s a
     mkSta NoRegs dh = dh
     mkSta (Regs _ rs) dh = \r -> mkSta rs [||$$dh $$r ||]
 bindYesInline# False v _ k = k v
@@ -664,9 +678,9 @@ originated from a `DynCont` itself, that no work is performed.
 
 @since 1.4.0.0
 -}
-dynCont :: forall s o a x. MarshalOps o => StaCont s o a x -> DynCont s o a x
-dynCont (StaCont sk Nothing)  = eta (dynCont# @o sk)
-dynCont (StaCont _ (Just dk)) = dk
+dynCont :: forall rs s o a x. MarshalOps o => Regs rs -> StaCont rs s o a x -> DynCont rs s o a x
+dynCont regs (StaCont sk Nothing) = eta (dynCont# @o (Proxy @s) (Proxy @a) (Proxy @x) regs sk)
+dynCont _ (StaCont _ (Just dk))   = dk
 
 {- Log Operations =-}
 {-|
@@ -676,7 +690,7 @@ having printed the debug information.
 @since 1.2.0.0
 -}
 logHandler :: (?ops :: InputOps (StaRep o), LogHandler o, ?flags :: Opt.Flags) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder '[] s o a
-logHandler name ctx γ u _ = let VCons qh _ = handlers γ in case qh of 
+logHandler name ctx γ u _ = let VCons qh _ = handlers γ in case qh of
       QAugmentedStaHandler h regs -> fromStaHandler# $ \inp# -> let inp = toInput u inp# in [||
                                 trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h (gatherBinds regs ctx) inp)
                               ||]

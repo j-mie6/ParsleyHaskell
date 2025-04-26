@@ -20,6 +20,8 @@ call boundaries.
 @since 1.4.0.0
 -}
 module Parsley.Internal.Backend.Machine.Types.Statics (
+    -- * Register stacks
+    StaRegisterStack#, toDynRegStack, 
     -- * Handlers
     StaHandler#, StaHandler(..), AugmentedStaHandler, QAugmentedStaHandler(..), StaHandlerCase, StaSameHandler,
 
@@ -35,7 +37,7 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
     staHandlerEval, staHandlerCharacteristicSta, staHandlerCharacteristicDyn,
 
     -- * Return Continuations
-    StaCont#, StaCont(..),
+    StaCont#, StaCont(..), QStaCont(..),
     mkStaCont, mkStaContDyn,
     staCont#,
 
@@ -55,13 +57,26 @@ import Data.Maybe                                                 (fromMaybe)
 import Parsley.Internal.Backend.Machine.LetBindings               (Metadata, newMeta)
 import Parsley.Internal.Backend.Machine.InputOps                  (DynOps)
 import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..), RegBindNames(..))
-import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc)
+import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynCont, DynHandler, DynFunc, DynRegisterStack)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), fromInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (Offset, same)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common.Utils                              (Code)
 
 import qualified Parsley.Internal.Opt as Opt
+
+-- Register Stack 
+type family StaRegisterStack# (rs :: [Type]) x where 
+  StaRegisterStack# '[] x      = Code x
+  StaRegisterStack# (r : rs) x = Code r -> StaRegisterStack# rs x
+
+fromDynRegStack :: forall rs x. DynRegisterStack rs x -> Regs rs -> StaRegisterStack# rs x
+fromDynRegStack drs NoRegs      = drs
+fromDynRegStack drs (Regs _ rs) = \r -> fromDynRegStack @_ @x [|| $$drs $$r ||] rs  
+
+toDynRegStack :: forall rs x. Regs rs ->  StaRegisterStack# rs x -> DynRegisterStack rs x
+toDynRegStack NoRegs f = f 
+toDynRegStack (Regs _ rs) f = [|| \r -> $$(toDynRegStack @_ @x rs (f [|| r ||])) ||]
 
 -- Handlers
 {-|
@@ -286,7 +301,7 @@ on continuations, a simple form of inlining optimisation.
 
 @since 1.8.0.0
 -}
-type StaCont# s o a x = Code x -> Input# o -> Code (ST s (Maybe a))
+type StaCont# (rs :: [Type]) s o a x = Code x -> Input# o -> StaRegisterStack# rs (ST s (Maybe a))
 
 {-|
 Compared with `StaCont#`, this type also bundles the static continuation
@@ -295,7 +310,12 @@ with its dynamic origin, if available.
 @since 1.4.0.0
 -}
 -- leave this lazy or it'll expode
-data StaCont s o a x = StaCont (StaCont# s o a x) !(Maybe (DynCont s o a x))
+data StaCont rs s o a x = StaCont (StaCont# rs s o a x) !(Maybe (DynCont rs s o a x))
+
+{-|
+`StaCont` where the registers are hidden behind an existential.
+-}
+data QStaCont s o a x = forall rs. QStaCont (StaCont rs s o a x) (Regs rs)
 
 {-|
 Converts a `Parsley.Internal.Machine.Types.Dynamics.DynCont` into a
@@ -305,8 +325,9 @@ if it is converted back the conversion is free.
 
 @since 1.4.0.0
 -}
-mkStaContDyn :: forall o s a x. DynCont s o a x -> StaCont s o a x
-mkStaContDyn dk = StaCont (\x inp -> [|| $$dk $$x $$(pos# inp) $$(off# inp) ||]) (Just dk)
+mkStaContDyn :: forall rs o s a x. DynCont rs s o a x -> Regs rs -> StaCont rs s o a x
+mkStaContDyn dk regs = StaCont (\x inp -> fromDynRegStack @_ @(ST s (Maybe a)) [|| $$dk $$x $$(pos# inp) $$(off# inp) ||] regs) (Just dk)
+
 
 {-|
 Given a static continuation, extracts the underlying continuation which
@@ -315,7 +336,7 @@ attached to.
 
 @since 1.4.0.0
 -}
-staCont# :: StaCont s o a x -> StaCont# s o a x
+staCont# :: StaCont xs s o a x -> StaCont# xs s o a x
 staCont# (StaCont sk _) = sk
 
 {-|
@@ -324,7 +345,7 @@ not derived from any dynamic continuation.
 
 @since 1.4.0.0
 -}
-mkStaCont :: StaCont# s o a x -> StaCont s o a x
+mkStaCont :: StaCont# xs s o a x -> StaCont xs s o a x
 mkStaCont sk = StaCont sk Nothing
 
 -- Subroutines
@@ -337,9 +358,9 @@ NB: made into a type family to allow n-arity
 
 @since 1.8.0.0
 -}
-type family StaSubroutine# (xs :: [Type]) (hs :: [Type]) s o a y where
-  StaSubroutine# '[] hs s o a y      = DynCont s o a y -> DynHandler hs s o a -> Input# o -> Code (ST s (Maybe a))
-  StaSubroutine# (x : xs) hs s o a y = Code x -> StaSubroutine# xs hs s o a y
+type family StaSubroutine# (xs :: [Type]) (hs :: [Type]) (ys :: [Type]) s o a y where
+  StaSubroutine# '[] hs ys s o a y      = DynCont ys s o a y -> DynHandler hs s o a -> Input# o -> Code (ST s (Maybe a))
+  StaSubroutine# (x : xs) hs ys s o a y = Code x -> StaSubroutine# xs hs ys s o a y
 
 {-|
 Packages a `StaSubroutine#` along with statically determined metadata that describes it derived from
@@ -347,21 +368,24 @@ static analysis.
 
 @since 1.5.0.0
 -}
-data StaSubroutine (xs :: [Type]) (hs :: [Type]) s o a x = StaSubroutine {
+data StaSubroutine (xs :: [Type]) (hs :: [Type]) (ys :: [Type]) s o a x = StaSubroutine {
     -- | Extracts the underlying subroutine.
-    staSubroutine# :: !(StaSubroutine# xs hs s o a x),
+    staSubroutine# :: !(StaSubroutine# xs hs ys s o a x),
     -- | Extracts the metadata from a subroutine.
     meta :: {-# UNPACK #-} !Metadata
   }
 
-data SomeCallableSubroutine s o a x = forall hs. SomeCallableSubroutine (StaSubroutine '[] hs s o a x) !(Regs hs)
+{-| 
+Subroutine that has been supplied all it's input registers. 
+-}
+data SomeCallableSubroutine s o a x = forall hs ys. SomeCallableSubroutine (StaSubroutine '[] hs ys s o a x) !(Regs hs) !(Regs ys)
 
 {-|
 Converts a `StaSubroutine#` into a `StaSubroutine` by providing the empty meta.
 
 @since 1.5.0.0
 -}
-mkStaSubroutine :: StaSubroutine# xs hs s o a x -> StaSubroutine xs hs s o a x
+mkStaSubroutine :: StaSubroutine# xs hs ys s o a x -> StaSubroutine xs hs ys s o a x
 mkStaSubroutine = mkStaSubroutineMeta newMeta
 
 {-|
@@ -369,7 +393,7 @@ Converts a `StaSubroutine#` into a `StaSubroutine` by providing its metadata.
 
 @since 1.5.0.0
 -}
-mkStaSubroutineMeta :: forall xs hs s o a x. Metadata -> StaSubroutine# xs hs s o a x -> StaSubroutine xs hs s o a x
+mkStaSubroutineMeta :: forall xs hs ys s o a x. Metadata -> StaSubroutine# xs hs ys s o a x -> StaSubroutine xs hs ys s o a x
 mkStaSubroutineMeta = flip StaSubroutine
 
 {-|
@@ -379,9 +403,7 @@ on subroutines with registers, a simple form of inlining optimisation.
 
 @since 1.4.0.0
 -}
-type family StaFunc (rs :: [Type]) (hs :: [Type]) s o a x where
-  StaFunc '[] hs s o a x      = StaSubroutine '[] hs s o a x          -- TODO attach registers for subroutine
-  StaFunc (r : rs) hs s o a x = Code (STRef s r) -> StaFunc rs hs s o a x
+type StaFunc rs hs ys s o a x = StaSubroutine rs hs ys s o a x
 
 
 {-|
@@ -389,8 +411,13 @@ Wraps a `StaFunc` with its free registers, which are kept existential.
 
 @since 1.4.0.0
 -}
-data QSubroutine s o a x = forall rs hs. QSubroutine !(StaFunc rs hs s o a x) !(Regs rs) !(Regs hs)
-data QLooproutine s o a x = forall xs hs. QLooproutine !(StaSubroutine xs hs s o a x) !(Regs xs) !(Regs hs)
+data QSubroutine s o a x = forall rs hs ys. QSubroutine !(StaFunc rs hs ys s o a x) !(Regs rs) !(Regs hs) !(Regs ys)
+
+{-|
+Wraps a `StaSubroutine` with its free registers, handler registers, and return continuation registers are kept existential.
+
+-}
+data QLooproutine s o a x = forall xs hs ys. QLooproutine !(StaSubroutine xs hs ys s o a x) !(Regs xs) !(Regs hs) !(Regs ys)
 
 {-|
 Converts a `Parsley.Internal.Backend.Machine.Types.Dynamics.DynFunc` that relies
@@ -399,9 +426,9 @@ existentially bounds to the function.
 
 @since 1.5.0.0
 -}
-qSubroutine :: forall s o a x rs hs. DynFunc rs hs s o a x -> Regs rs -> Regs hs -> Metadata -> QSubroutine s o a x
-qSubroutine func frees handlerFrees meta = QSubroutine (staFunc frees func) frees handlerFrees
+qSubroutine :: forall s o a x rs hs ys. DynFunc rs hs ys s o a x -> Regs rs -> Regs hs -> Regs ys -> Metadata -> QSubroutine s o a x
+qSubroutine func frees handlerFrees retFrees meta = QSubroutine (StaSubroutine (staFunc frees func) meta) frees handlerFrees retFrees
   where
-    staFunc :: forall rs. Regs rs -> DynFunc rs hs s o a x -> StaFunc rs hs s o a x
-    staFunc NoRegs func = StaSubroutine (\dk dh inp -> [|| $$func $$dk $$dh $$(pos# inp) $$(off# inp) ||]) meta
+    staFunc :: forall rs. Regs rs -> DynFunc rs hs ys s o a x -> StaSubroutine# rs hs ys s o a x
+    staFunc NoRegs func = \dk dh inp -> [|| $$func $$dk $$dh $$(pos# inp) $$(off# inp) ||]
     staFunc (Regs _ witness) func = \r -> staFunc witness [|| $$func $$r ||]

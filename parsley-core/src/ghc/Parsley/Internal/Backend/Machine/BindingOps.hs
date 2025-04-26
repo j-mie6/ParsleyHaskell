@@ -35,9 +35,10 @@ import Data.ByteString.Internal                        (ByteString)
 import Data.Text                                       (Text)
 import Parsley.Internal.Backend.Machine.InputRep       (DynRep)
 import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos)
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler)
+import Parsley.Internal.Backend.Machine.Types.Statics     (toDynRegStack)
+import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler, DynRegisterStack)
 import Parsley.Internal.Backend.Machine.Types.Input    (Input#(..))
-import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#, StaSubroutine#)
+import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#, StaSubroutine#, StaRegisterStack#)
 import Parsley.Internal.Common.Utils                   (Code)
 import Parsley.Internal.Core.InputTypes                (Text16, CharList, Stream)
 
@@ -124,6 +125,18 @@ inputInstancesWithName(deriveHandlerOps);
 createDeclWithRegs :: forall rs. (forall rs'. RegTHNames rs' -> (RegBindNames rs -> Q Exp)) -> Regs rs -> Q Exp
 createDeclWithRegs regWrapper regs = do; boundRegsNames <- nameRegs' regs; regWrapper boundRegsNames (convertNamesToCode boundRegsNames)
 
+feedRegNames :: forall rs x. RegBindNames rs -> StaRegisterStack# rs x -> Code x
+feedRegNames NoName k = k 
+feedRegNames (RegName _ name rs) k = feedRegNames rs (k name) 
+-- regWrapperName(_name) loop l (RegTHName _ name rest) = \regs -> do; func <- regWrapperName(_name) loop l rest regs; return (LamE [VarP name] func); \
+
+foo :: forall rs x. Regs rs -> StaRegisterStack# rs x -> DynRegisterStack rs x
+foo NoRegs f = f 
+foo (Regs _ rs) f = [||\r -> $$(foo @_ @x rs (f [|| r ||])) ||]
+
+createRegStackDecl :: forall rs x. Regs rs -> StaRegisterStack# rs x -> Q Exp
+createRegStackDecl regs k = do; boundRegsNames <- nameRegs' regs; unTypeCode $ feedRegNames @rs @x (convertNamesToCode boundRegsNames) k
+
 -- inputInstances(deriveHandlerOps)
 
 {-|
@@ -137,16 +150,22 @@ class JoinBuilder o where
 
   @since 1.4.0.0
   -}
-  setupJoinPoint# :: StaCont# s o a x            -- ^ The join point to bind.
-                  -> (DynCont s o a x -> Code b) -- ^ The continuation that expects the bound join point
+  setupJoinPoint# :: forall rs s a x b. Proxy s -> Proxy a -> Proxy x -> StaCont# rs s o a x            -- ^ The join point to bind.
+                  -> Regs rs                        -- ^ Registers join point expects.
+                  -> (DynCont rs s o a x -> Code b) -- ^ The continuation that expects the bound join point
                   -> Code b
 
-#define deriveJoinBuilder(_o)                                                         \
-instance JoinBuilder _o where                                                         \
-{                                                                                     \
-  setupJoinPoint# binding k =                                                         \
-    [|| let join x (pos :: Pos) !(o# :: DynRep _o) =                                  \
-              $$(binding [||x||] (Input# [||o#||] [||pos||])) in $$(k [||join||]) ||] \
+#define deriveJoinBuilder(_o)                                     \
+instance JoinBuilder _o where                                     \
+{                                                                 \
+  setupJoinPoint# :: forall rs s a x b. Proxy s -> Proxy a -> Proxy x -> StaCont# rs s _o a x     \
+                  -> Regs rs                        \
+                  -> (DynCont rs s _o a x -> Code b)  \
+                  -> Code b;\
+  setupJoinPoint# _ _ _ binding regs k =                                     \
+    [|| let join x (pos :: Pos) !(o# :: DynRep _o) =              \
+              $$(foo @rs @(ST s (Maybe a)) regs (binding [||x||] (Input# [||o#||] [||pos||])))     \
+    in $$(k [||join||]) ||]                                       \
 };
 inputInstances(deriveJoinBuilder)
 
@@ -225,8 +244,8 @@ class RecBuilder o where
 
   @since 1.4.0.0
   -}
-  bindRec#  :: (DynSubroutine '[] hs s o a x -> StaSubroutine# '[] hs s o a x) -- ^ Code for the binding, accepting itself as an argument.
-            -> DynSubroutine '[] hs s o a x                             -- ^ The code that represents this binding's name.
+  bindRec# ::  StaSubroutine# '[] hs ys s o a x -- ^ Code for the binding, accepting itself as an argument.
+            -> DynSubroutine '[] hs ys s o a x                                       -- ^ The code that represents this binding's name.
 
 -- NOTE: Everything below is awful, cpphs is awful, I'm awful. Blame TTH and cpphs not working together so well.
 
@@ -264,14 +283,7 @@ createLoopDecl regWrapper regs = do; boundRegsNames <- nameRegs regs; regWrapper
 regWrapperName(_name) :: Code (LiquidLoopRoutine rs s _o a) -> (Code (LiquidLoopRoutine rs s _o a) -> RegBindNames rs -> Input# _o -> Code (ST s (Maybe a))) -> (forall rs'. RegTHNames rs' -> (RegBindNames rs -> Q Exp));\
 regWrapperName(_name) loop l NoTHName = \regs -> unTypeCode [|| \(pos :: Pos) !(o# :: DynRep _o) -> $$(l loop regs (Input# [||o#||] [||pos||])) ||];\
 regWrapperName(_name) loop l (RegTHName _ name rest) = \regs -> do; func <- regWrapperName(_name) loop l rest regs; return (LamE [VarP name] func); \
- 
-{-
 
-  bindIterHandler# h freeRegs  k = [||                                                                        \
-      let handler (posc :: Pos) (c# :: DynRep _o) (poso :: Pos) (o# :: DynRep _o) =                 \
-            $$(h (Input# [||c#||] [||posc||]) (Input# [||o#||] [||poso||])) in $$(k [||handler||])  \
-    ||];      
--}
 
 
 #define deriveRecBuilder(_name, _o)                                                                 \
@@ -292,7 +304,7 @@ instance RecBuilder _o where                                                    
   bindRec# binding =                                                                                \
     {- The idea here is to try and reduce the number of times registers have to be passed around -} \
     [|| let self ret h (pos :: Pos) !(o# :: DynRep _o) =                                            \
-              $$(binding [||self||] [||ret||] [||h||] (Input# [||o#||] [||pos||])) in self ||]      \
+              $$(binding [||ret||] [||h||] (Input# [||o#||] [||pos||])) in self ||]      \
 };
 inputInstancesWithName(deriveRecBuilder)
 --deriveRecBuilder(String,String)
@@ -327,7 +339,7 @@ class MarshalOps o where
 
   @since 1.4.0.0
   -}
-  dynCont# :: StaCont# s o a x -> DynCont s o a x
+  dynCont# :: forall rs s a x. Proxy s -> Proxy a -> Proxy x -> Regs rs -> StaCont# rs s o a x -> DynCont rs s o a x
 
 #define deriveMarshalOps(_o)                                                                                        \
 instance MarshalOps _o where                                                                                        \
@@ -335,6 +347,7 @@ instance MarshalOps _o where                                                    
   dynHandler# :: forall hs s a. Proxy s -> Proxy a -> Regs hs  -> StaHandler# hs s _o a -> DynHandler hs s _o a;    \
   dynHandler# _ _ NoRegs        sh = [||\ (pos :: Pos) (o# :: DynRep _o) -> $$(sh (Input# [||o#||] [||pos||])) ||]; \
   dynHandler# ps pa (Regs _ rs) sh = [|| \r -> $$(dynHandler# @_o @_ @s @a ps pa rs (sh [||r||]) ) ||];             \
-  dynCont# sk = [||\ x (pos :: Pos) (o# :: DynRep _o) -> $$(sk [||x||] (Input# [||o#||] [||pos||])) ||];            \
+  dynCont# :: forall rs s a x. Proxy s -> Proxy a -> Proxy x -> Regs rs -> StaCont# rs s _o a x -> DynCont rs s _o a x; \
+  dynCont# _ _ _ regs sk = [||\ x (pos :: Pos) (o# :: DynRep _o) -> $$(toDynRegStack @_ @(ST s (Maybe a)) regs $ sk [||x||] (Input# [||o#||] [||pos||])) ||];            \
 };
 inputInstances(deriveMarshalOps);

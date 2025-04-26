@@ -143,6 +143,7 @@ data Instr (o :: Type)                                  -- The FIXED input type
 
   @since 1.0.0.0 -}
   MkJoin    :: ΦVar x           {- ^ The name of the binding that can be referred to later. -}
+            -> Maybe (Some Regs)  {- ^ Registers that are free in the control flow of the join. -}
             -> k (x : xs) n r a {- ^ The body of the join point binding. -}
             -> k xs n r a       {- ^ The scope within which the binding is valid.  -}
             -> Instr o k xs n r a
@@ -412,7 +413,7 @@ instance IFunctor4 (Instr o) where
   imap4 f (Choices fs ks def) = Choices fs (map f ks) (f def)
   imap4 f (Iter μ frs l h)    = Iter μ frs (f l) (imap4 f h)
   imap4 _ (Join φ)            = Join φ
-  imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
+  imap4 f (MkJoin φ rs p k)   = MkJoin φ rs (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
   imap4 f (Dup k)             = Dup (f k)
   imap4 f (Make σ a k)        = Make σ a (f k)
@@ -446,7 +447,7 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (Choices fs ks def)        = "(Choices " . shows fs . " [" . intercalateDiff ", " (map getConst4 ks) . "] " . getConst4 def . ")"
       alg (Iter μ _ l h)             = "{Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
       alg (Join φ)                   = shows φ
-      alg (MkJoin φ p k)             = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
+      alg (MkJoin φ _ p k)           = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
       alg (Swap k)                   = "(Swap " . getConst4 k . ")"
       alg (Dup k)                    = "(Dup " . getConst4 k . ")"
       alg (Make σ a k)               = "(Make " . shows σ . " " . shows a . " " . getConst4 k . ")"

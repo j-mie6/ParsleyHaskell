@@ -30,7 +30,7 @@ import Parsley.Internal.Backend.Machine.InputOps           (InputOps, DynOps)
 import Parsley.Internal.Backend.Machine.InputRep           (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
-import Parsley.Internal.Backend.Machine.Types.Registers    (Regs (..), makeRegs)
+import Parsley.Internal.Backend.Machine.Types.Registers    (Regs (..), makeRegs, debugRegsList)
 import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run, qSubroutine)
@@ -46,6 +46,7 @@ import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
 import qualified Debug.Trace (trace)
+import qualified Debug.Trace as Debug
 import qualified Parsley.Internal.Opt   as Opt
 import Parsley.Internal.Opt (Flags(leadCharFactoring))
 import Data.Set (Set)
@@ -75,30 +76,30 @@ eval binding fs offset  = trace "EVALUATING TOP LEVEL" [||
     nameLet (MVar i) = "sub" ++ show i
 
 readyMachine :: (?ops :: InputOps (StaRep o), Ops o, Trace, ?flags :: Opt.Flags) => Fix4 (Instr o) xs n r a -> Machine s o xs n r a
-readyMachine = cata4 (Machine . alg)
+readyMachine = trace "starting readymachine" $ cata4 (Machine . alg)
   where
     alg :: (?ops :: InputOps (StaRep o), Ops o, ?flags :: Opt.Flags) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
-    alg Ret                 = evalRet
-    alg (Call μ l k)        = evalCall μ l k
-    alg (Push x k)          = evalPush x k
-    alg (Pop k)             = evalPop k
-    alg (Lift2 f k)         = evalLift2 f k
-    alg (Sat p k)           = evalSat p k
-    alg Empt                = evalEmpt
-    alg (Commit k)          = evalCommit k
-    alg (Catch k h)         = evalCatch k h
-    alg (Tell k)            = evalTell k
-    alg (Seek k)            = evalSeek k
-    alg (Case p q)          = evalCase p q
-    alg (Choices fs ks def) = evalChoices fs ks def
-    alg (Iter μ regs l k)   = evalIter μ regs l k
-    alg (Join φ)            = evalJoin φ
-    alg (MkJoin φ rs p k)   = evalMkJoin φ rs p k
-    alg (Swap k)            = evalSwap k
-    alg (Dup k)             = evalDup k
-    alg (Make σ c k)        = evalMake σ c k
-    alg (Get σ c k)         = evalGet σ c k
-    alg (Put σ c k)         = evalPut σ c k
+    alg Ret                 = trace "EVAAAAL ret\n" $ evalRet
+    alg (Call μ l k)        = trace "EVAAAAL call\n" $ evalCall μ l k
+    alg (Push x k)          = trace "EVAAAAL push\n" $ evalPush x k
+    alg (Pop k)             = trace "EVAAAAL pop\n" $ evalPop k
+    alg (Lift2 f k)         = trace "EVAAAAL lift2\n" $ evalLift2 f k
+    alg (Sat p k)           = trace "EVAAAAL sat\n" $ evalSat p k
+    alg Empt                = trace "EVAAAAL empt\n" $ evalEmpt
+    alg (Commit k)          = trace "EVAAAAL commit\n" $ evalCommit k
+    alg (Catch k h)         = trace "EVAAAAL catch\n" $ evalCatch k h
+    alg (Tell k)            = trace "EVAAAAL tell\n" $ evalTell k
+    alg (Seek k)            = trace "EVAAAAL seek\n" $ evalSeek k
+    alg (Case p q)          = trace "EVAAAAL case\n" $ evalCase p q
+    alg (Choices fs ks def) = trace "EVAAAAL choice\n" $ evalChoices fs ks def
+    alg (Iter μ regs l k)   = trace "EVAAAAL iter\n" $ evalIter μ regs l k
+    alg (Join φ)            = trace "EVAAAAL join\n" $ evalJoin φ
+    alg (MkJoin φ rs p k)   = trace "EVAAAAL mkjoin\n" $ evalMkJoin φ rs p k
+    alg (Swap k)            = trace "EVAAAAL swap\n" $ evalSwap k
+    alg (Dup k)             = trace "EVAAAAL dup\n" $ evalDup k
+    alg (Make σ c k)        = trace "EVAAAAL make\n" $ evalMake σ c k
+    alg (Get σ c k)         = trace "EVAAAAL get\n" $ evalGet σ c k
+    alg (Put σ c k)         = trace "EVAAAAL put\n" $ evalPut σ c k
     alg (SelectPos sel k)   = evalSelectPos sel k
     alg (LogEnter name k)   = evalLogEnter name k
     alg (LogExit name k)    = evalLogExit name k
@@ -187,10 +188,10 @@ evalIter μ (Just regs) l h =
     freshUnique $ \u2 -> -- This one is used for the handler's check and loop offset
       local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
         case h of
-          Always (Just (Some hregs)) gh h ->
-            reader $ \ctx γ -> withSome regs (\regs -> bindIterAlways' ctx μ regs l gh (buildHandler γ ctx h hregs u1) hregs (input γ) u2)
+          Always (Just (Some hregs)) gh h -> 
+            reader $ \ctx γ -> withSome regs (\regs -> Debug.trace ("iter always with " ++ debugRegsList regs ++ " and handler: " ++ debugRegsList hregs) $ bindIterAlways' ctx μ regs l gh (buildHandler γ ctx h hregs u1) hregs (input γ) u2)
           Same (Just (Some hregs)) gyes yes gno no ->
-            reader $ \ ctx γ -> withSome regs (\regs -> bindIterSame' ctx μ regs l gyes (buildIterYesHandler γ ctx yes hregs u1) gno (buildHandler γ ctx no hregs u1) hregs (input γ) u2)
+            reader $ \ ctx γ -> withSome regs (\regs -> Debug.trace ("iter same with " ++ debugRegsList regs ++ " and handler: " ++ debugRegsList hregs) $ bindIterSame' ctx μ regs l gyes (buildIterYesHandler γ ctx yes hregs u1) gno (buildHandler γ ctx no hregs u1) hregs (input γ) u2)
           _ -> undefined -- Should have attached register data already.
 
 evalJoin :: (DynOps o, ?flags :: Opt.Flags) => ΦVar x -> MachineMonad s o (x : xs) n r a

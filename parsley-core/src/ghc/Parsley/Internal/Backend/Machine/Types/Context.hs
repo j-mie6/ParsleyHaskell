@@ -282,7 +282,7 @@ Fetches the bound variable of a register. If the register is not bound, a
 
 -}
 boundΣ :: ΣVar x -> Ctx s o a -> Code x
-boundΣ σ = fromMaybe (throw (registerBindFault σ)) . (getBound <=< (DMap.lookup σ . σs))
+boundΣ σ = trace "bound called" $ fromMaybe (throw (registerBindFault σ)) . (getBound <=< (DMap.lookup σ . σs))
 
 {-|
 Checks if given ΣVar is bound in the current context.

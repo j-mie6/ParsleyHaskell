@@ -76,7 +76,7 @@ import Parsley.Internal.Backend.Machine.InputRep                  (StaRep, DynRe
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Metadata(failureInputCharacteristic, successInputCharacteristic))
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
-import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..), RegBindNames (..), RegTHNames (..))
+import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..), RegBindNames (..), RegTHNames (..), debugRegsList)
 import Parsley.Internal.Backend.Machine.Types.Context
 import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler, DynRegisterStack, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, chooseInput)
@@ -175,7 +175,7 @@ that in the `Ctx` cache.
 @since 1.0.0.0
 -}
 newΣ :: (?flags :: Opt.Flags) => forall x s o a r. ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-newΣ σ Bound x k ctx = dup x $ \dupx -> [||
+newΣ σ Bound x k ctx = trace ("creating " ++ show σ) $ dup x $ \dupx -> [||
     let bref = $$(genDefunc dupx)
       in $$(k (insertNewΣ σ Nothing (Just [|| bref ||]) dupx ctx))
   ||]
@@ -192,7 +192,7 @@ Depending on the access type, either generates the code for a write to a registe
 @since 1.0.0.0
 -}
 writeΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-writeΣ σ Bound x k ctx = dup x $ \dupx -> [||
+writeΣ σ Bound x k ctx = trace ("wri " ++ show σ) $ dup x $ \dupx -> [||
     let bref = $$(genDefunc dupx)
       in $$(k (bindΣ σ [|| bref ||] $ cacheΣ σ dupx ctx))
     ||]
@@ -209,7 +209,7 @@ the value from the cache and feeds it to a continuation.
 @since 1.0.0.0
 -}
 readΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-readΣ σ Bound k ctx = let bref = boundΣ σ ctx in [||
+readΣ σ Bound k ctx = trace ("read " ++ show σ) $ let bref = boundΣ σ ctx in [||
        $$(let fv = FREEVAR bref in k fv (cacheΣ σ fv ctx))
   ||]
 readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
@@ -246,14 +246,23 @@ about the state of the input (since 1.4.0.0).
 @since 1.0.0.0
 -}
 raise :: (DynOps o, ?flags :: Opt.Flags) => Ctx s o a -> Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
-raise ctx γ = let VCons h _ = handlers γ in case h of (QAugmentedStaHandler h regs) -> staHandlerEval h (gatherBinds regs ctx) (input γ)
+raise ctx γ = let VCons h _ = handlers γ in case h of (QAugmentedStaHandler h regs) -> staHandlerEval h (trace "gather from 249" $ gatherBinds' regs ctx) (input γ)
+
+{-|
+`gatherBinds'` works the same as `gatherBinds` except it fills in unbound values with `undefined`. 
+This needs to be done for handlers because globally all handlers that might enter the scope of the same let-bound 
+parser must have the same input registers, thus some input registers to a handler might not exist in some contexts.   
+-}
+gatherBinds' :: forall rs s o a. Regs rs -> Ctx s o a -> RegBindNames rs
+gatherBinds' NoRegs _ = NoName
+gatherBinds' (Regs σ rs) ctx = RegName σ (trace ("gather binds' " ++ show σ) $ if isBoundΣ σ ctx then boundΣ σ ctx else [|| undefined ||]) (gatherBinds rs ctx)
 
 {-|
 Finds the current bound names of given registers from a given context
 -}
 gatherBinds :: forall rs s o a. Regs rs -> Ctx s o a -> RegBindNames rs
 gatherBinds NoRegs _ = NoName
-gatherBinds (Regs σ rs) ctx = RegName σ (boundΣ σ ctx) (gatherBinds rs ctx)
+gatherBinds (Regs σ rs) ctx = RegName σ (trace ("gather binds " ++ show σ) $ boundΣ σ ctx) (gatherBinds rs ctx)
 
 {-|
 Feed a `RegBindNames` list to a register stack.
@@ -425,7 +434,7 @@ join point) taking the required components from the state `Γ`.
 @since 1.2.0.0
 -}
 resume :: (DynOps o, ?flags :: Opt.Flags) => StaCont rs s o a x -> Ctx s o a -> Regs rs -> Γ s o (x : xs) n r a -> Code (ST s (Maybe a))
-resume k ctx regs γ = let Op x _ = operands γ in feedBinds (gatherBinds regs ctx) $ staCont# k (genDefunc x) (fromInput (input γ))
+resume k ctx regs γ = let Op x _ = operands γ in feedBinds (trace "gather from 428" $ gatherBinds regs ctx) $ staCont# k (genDefunc x) (fromInput (input γ))
 
 {-|
 A form of @callCC@, this calls a subroutine with a given return continuation
@@ -455,9 +464,7 @@ callWithContinuation sub hregs ret retregs input (VCons h _) = case h of
       if σ1 == σ2 then unsafeCoerce (Just Refl) else Nothing
     eqRegs _ _ = Nothing
 
-    debugRegsList :: forall rs. Regs rs -> String
-    debugRegsList NoRegs = ""
-    debugRegsList (Regs s rs) = show s ++ ", " ++ debugRegsList rs
+
 
 -- Continuation preparation
 {-|
@@ -536,7 +543,7 @@ bindIterAlways' :: forall s o a rs hs. (RecBuilder o, DynOps o, ?flags :: Opt.Fl
                -> Code (ST s (Maybe a))
 bindIterAlways' ctx μ regs l needed h hregs inp u =
    bindIterHandlerInline# @o @s @a @_ @hs needed (staHandler# . h . toInput u) hregs $ \qhandler ->
-      bindLiquidIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
+      bindLiquidIter# @o (fromInput inp) (trace "gather from 537" $ gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
         updateBinds loopBoundRegs ctx $ \ctx ->
           -- First populate the context with the new binds for names
           let inp = toInput u inp#
@@ -577,7 +584,7 @@ bindIterSame' ctx μ regs l neededYes yes neededNo no hregs inp u =
     bindIterHandlerInline# @o @s @a neededNo (staHandler# . no . toInput u) hregs $ \qno -> -- 
       let handler (inpc :: Input# o) = makeHandlerJoin inpc hregs qyes qno
       in bindIterHandlerInline# @o True handler hregs $ \qhandler ->
-          bindLiquidIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
+          bindLiquidIter# @o (fromInput inp) (trace "gather from 578" $ gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
               updateBinds loopBoundRegs ctx $ \ctx ->
                 let off = toInput u inp#
                 in run l (Γ Empty (QStaCont noreturn NoRegs) off (VCons (QAugmentedStaHandler (augmentHandlerFull off (qhandler inp#) (moveInputInside hregs (staHandler# qyes) inp#) (qno inp#)) hregs) VNil))
@@ -692,7 +699,7 @@ having printed the debug information.
 logHandler :: (?ops :: InputOps (StaRep o), LogHandler o, ?flags :: Opt.Flags) => String -> Ctx s o a -> Γ s o xs (Succ n) ks a -> Word -> StaHandlerBuilder '[] s o a
 logHandler name ctx γ u _ = let VCons qh _ = handlers γ in case qh of
       QAugmentedStaHandler h regs -> fromStaHandler# $ \inp# -> let inp = toInput u inp# in [||
-                                trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h (gatherBinds regs ctx) inp)
+                                trace $$(preludeString name '<' (γ {input = inp}) ctx (color Red " Fail")) $$(staHandlerEval h (trace "gather from 693" $ gatherBinds regs ctx) inp)
                               ||]
 
 {-|

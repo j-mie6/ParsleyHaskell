@@ -558,7 +558,7 @@ findFreeRegisters maxID CFG{graph, useDefs, handlerTags, callerTags, letBoundTag
                 unifyHandlerCallRegs hConns cConns
 
         -- 4. find return continuation free registers from `callerTags` data and `frees`.
-        retContData = Map.mapWithKey (\k frees -> frees `Set.union` (Map.findWithDefault (error "561") k letboundUses)) retFrees
+        retContData = Map.mapWithKey (\k frees -> frees `Set.intersection` (Map.findWithDefault (error "561") k letboundUses)) retFrees
         retFrees = Map.map (\rets -> Set.foldl (\acc ret -> acc `Set.union` (Map.findWithDefault (error "562") ret frees)) Set.empty rets) returnTags
         letboundUses = Map.map (\tags -> Set.foldl (\b tag -> b `Set.union` (fst $ Map.findWithDefault (mempty, mempty) tag  useDefs)) Set.empty tags) letBoundTags
 

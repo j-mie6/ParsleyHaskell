@@ -175,7 +175,7 @@ that in the `Ctx` cache.
 @since 1.0.0.0
 -}
 newΣ :: (?flags :: Opt.Flags) => forall x s o a r. ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-newΣ σ Bound x k ctx = trace ("creating " ++ show σ) $ dup x $ \dupx -> [||
+newΣ σ Bound x k ctx =  dup x $ \dupx -> [||
     let bref = $$(genDefunc dupx)
       in $$(k (insertNewΣ σ Nothing (Just [|| bref ||]) dupx ctx))
   ||]
@@ -192,7 +192,7 @@ Depending on the access type, either generates the code for a write to a registe
 @since 1.0.0.0
 -}
 writeΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-writeΣ σ Bound x k ctx = trace ("wri " ++ show σ) $ dup x $ \dupx -> [||
+writeΣ σ Bound x k ctx = dup x $ \dupx -> [||
     let bref = $$(genDefunc dupx)
       in $$(k (bindΣ σ [|| bref ||] $ cacheΣ σ dupx ctx))
     ||]
@@ -209,7 +209,7 @@ the value from the cache and feeds it to a continuation.
 @since 1.0.0.0
 -}
 readΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-readΣ σ Bound k ctx = trace ("read " ++ show σ) $ let bref = boundΣ σ ctx in [||
+readΣ σ Bound k ctx = let bref = boundΣ σ ctx in [||
        $$(let fv = FREEVAR bref in k fv (cacheΣ σ fv ctx))
   ||]
 readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
@@ -246,23 +246,15 @@ about the state of the input (since 1.4.0.0).
 @since 1.0.0.0
 -}
 raise :: (DynOps o, ?flags :: Opt.Flags) => Ctx s o a -> Γ s o xs (Succ n) r a -> Code (ST s (Maybe a))
-raise ctx γ = let VCons h _ = handlers γ in case h of (QAugmentedStaHandler h regs) -> staHandlerEval h (trace "gather from 249" $ gatherBinds' regs ctx) (input γ)
+raise ctx γ = let VCons h _ = handlers γ in case h of (QAugmentedStaHandler h regs) -> staHandlerEval h (gatherBinds regs ctx) (input γ)
 
-{-|
-`gatherBinds'` works the same as `gatherBinds` except it fills in unbound values with `undefined`. 
-This needs to be done for handlers because globally all handlers that might enter the scope of the same let-bound 
-parser must have the same input registers, thus some input registers to a handler might not exist in some contexts.   
--}
-gatherBinds' :: forall rs s o a. Regs rs -> Ctx s o a -> RegBindNames rs
-gatherBinds' NoRegs _ = NoName
-gatherBinds' (Regs σ rs) ctx = RegName σ (trace ("gather binds' " ++ show σ) $ if isBoundΣ σ ctx then boundΣ σ ctx else [|| undefined ||]) (gatherBinds rs ctx)
 
 {-|
 Finds the current bound names of given registers from a given context
 -}
 gatherBinds :: forall rs s o a. Regs rs -> Ctx s o a -> RegBindNames rs
 gatherBinds NoRegs _ = NoName
-gatherBinds (Regs σ rs) ctx = RegName σ (trace ("gather binds " ++ show σ) $ boundΣ σ ctx) (gatherBinds rs ctx)
+gatherBinds (Regs σ rs) ctx = RegName σ (boundΣ σ ctx ) (gatherBinds rs ctx)
 
 {-|
 Feed a `RegBindNames` list to a register stack.
@@ -455,7 +447,7 @@ callWithContinuation sub hregs ret retregs input (VCons h _) = case h of
   QAugmentedStaHandler h regs ->
     case eqRegs regs hregs of
       Just Refl -> staSubroutine# sub (dynCont retregs ret) (dynHandler h regs (failureInputCharacteristic (meta sub))) (fromInput input)
-      Nothing -> trace ("failed to show regs equal: " ++ "\n    regs  : " ++ debugRegsList regs ++ "\n    hregs : " ++ debugRegsList hregs) $ undefined -- TODO: somehow inform with a better error message?
+      Nothing -> trace ("failed to show regs equal: " ++ "\n    handler's hregs: " ++ debugRegsList regs ++ "\n    sub's hregs : " ++ debugRegsList hregs) $ undefined -- TODO: somehow inform with a better error message?
   where
     eqRegs :: forall hs rs. Regs hs -> Regs rs -> Maybe (hs :~: rs)
     eqRegs NoRegs NoRegs = Just Refl

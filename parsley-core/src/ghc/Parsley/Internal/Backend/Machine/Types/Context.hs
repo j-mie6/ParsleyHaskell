@@ -247,7 +247,8 @@ Update the last-known bound variable name of a register. Does not clear/update c
 bindΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
 bindΣ σ bref ctx = case DMap.lookup σ (σs ctx) of
   Just (Reg ref _ c) -> ctx {σs = DMap.insert σ (Reg ref (Just bref) c) (σs ctx)}
-  Nothing            -> trace ("THE CONTEXT regs : " ++ intercalate "" (map (\(Some (ΣVar i)) -> show i) (DMap.keys $ σs ctx))) $ throw (outOfScopeRegister σ)
+  Nothing            -> ctx {σs = DMap.insert σ (Reg Nothing (Just bref) Nothing) (σs ctx)}
+    -- trace ("THE CONTEXT regs : " ++ intercalate "" (map (\(Some (ΣVar i)) -> show i) (DMap.keys $ σs ctx))) $ throw (outOfScopeRegister σ)
 
 {-| 
 Remove the binding for a register.
@@ -282,7 +283,7 @@ Fetches the bound variable of a register. If the register is not bound, a
 
 -}
 boundΣ :: ΣVar x -> Ctx s o a -> Code x
-boundΣ σ = trace "bound called" $ fromMaybe (throw (registerBindFault σ)) . (getBound <=< (DMap.lookup σ . σs))
+boundΣ σ = fromMaybe (throw (registerBindFault σ)) . (getBound <=< (DMap.lookup σ . σs))
 
 {-|
 Checks if given ΣVar is bound in the current context.

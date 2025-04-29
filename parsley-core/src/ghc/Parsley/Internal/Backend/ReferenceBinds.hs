@@ -30,7 +30,7 @@ import Parsley.Internal.Common.Utils (intercalateDiff)
 import Parsley.Internal.Backend.Machine (Input, ΣVar, Access (..))
 import Parsley.Internal.Backend.Machine.Identifiers (SomeΣVar(..), IΦVar, ΦVar(..), IMVar, MVar (..))
 import Parsley.Internal.Backend.Machine.Instructions (Instr(..), Handler(..), PosSelector(..), MetaInstr(..))
-import Parsley.Internal.Backend.Machine.Types.Registers (makeRegs)
+import Parsley.Internal.Backend.Machine.Types.Registers (makeRegs, fromRegs)
 
 import Control.Monad.Writer (Writer, MonadWriter (..))
 import Control.Monad.Writer.Lazy (runWriter)
@@ -60,11 +60,10 @@ import Control.Monad.State (runState)
 into bound variables as possible. 
 -}
 bindReferences :: forall input a. (Input input, Trace) => (LetBinding input a a, DMap MVar (LetBinding input a)) -> (LetBinding input a a, DMap MVar (LetBinding input a))
-bindReferences (p, μs) = trace traceString (pOptimised, μsOptimised)
+bindReferences (p, μs) = (trace $ "CFG GRAPH:\n" ++ computeDOT cfg freeRegData) $  trace traceString (pOptimised, μsOptimised)
     where
         -- debugging purposes. TODO: remove in final code
-        traceString = "MACHINES:\n" ++ tagTrace ++ "\nGRAPH (starting at " ++ show (start cfg) ++ "): \n" ++ show (unGraph $ graph cfg)
-                    ++ "\nUSE-DEFS: \n" ++ show (useDefs cfg)
+        traceString = "MACHINES:\n" ++ tagTrace
         tagTrace = DMap.foldlWithKey (\s k b -> s ++ "\n    let-bound " ++ show k ++ " => " ++ show (taggedBody b) ) ("    top-level    => " ++ show pTagged) μsTagged
 
         -- 1. Tag every instruction with a unique identifier
@@ -77,18 +76,20 @@ bindReferences (p, μs) = trace traceString (pOptimised, μsOptimised)
         cfg = constructCFG (TaggedBinding pTagged, μsTagged)
 
         -- 3. generate map tag -> set of free registers that are used later in control-flow
-        freeRegData = trace "finding this" $ findFreeRegisters maxV' cfg
+        freeRegData = findFreeRegisters maxV' cfg
 
         -- 4. Mark loop bodies
         mvars = DMap.foldlWithKey (\s (MVar m) _ -> Set.insert m s) Set.empty μs
         (!pTagged', !μsTagged') = trace "marking that" $ markFreeRegisters freeRegData (TaggedBinding pTagged, μsTagged)
 
         -- 5. Unwrap tags, reattach freeRegs and meta of original bind
+        xsData = Map.map (\start -> fst $ (livenessSets freeRegData) Map.! start) (letBoundStarts cfg)
         hsData = fst $ callAndHandlerRegs freeRegData
         ysData = returnContinuations freeRegData
         rewrap :: MVar x -> Fix4 (Instr input) '[] One x a -> LetBinding input a x
         rewrap μ new = let old = μs DMap.! μ
                            (MVar μ') = μ in old {body = new,
+                                                -- freeRegs = makeRegs $ (fromRegs $ freeRegs old) `Set.union` (Map.findWithDefault Set.empty μ' hsData),
                                                 handlerFrees = makeRegs $ Map.findWithDefault Set.empty μ' hsData,
                                                 returnFrees = makeRegs $ Map.findWithDefault Set.empty μ' ysData }
         pOptimised = p {body = unTag $ taggedBody pTagged'}
@@ -121,7 +122,7 @@ instance Show (Fix4 (TaggedInstr o) xs n r a) where
     where
       alg :: forall xs n r a. TaggedInstr o (Const4 (String -> String)) xs n r a -> String -> String
       alg (Tag4 t Ret)                        = shows t . ": Ret"
-      alg (Tag4 t (Call μ l k))                 = "(" . shows t . ": Call " . shows μ . (if l then " [LOOP] " else " ") . getConst4 k . ")"
+      alg (Tag4 t (Call μ l k))               = "(" . shows t . ": Call " . shows μ . (if l then " [LOOP] " else " ") . getConst4 k . ")"
       alg (Tag4 t (Push x k))                 = "(" . shows t . ": Push " . shows x . " " . getConst4 k . ")"
       alg (Tag4 t (Pop k))                    = "(" . shows t . ": Pop " . getConst4 k . ")"
       alg (Tag4 t (Lift2 f k))                = "(" . shows t . ": Lift2 " . shows f . " " . getConst4 k . ")"
@@ -155,7 +156,7 @@ newtype Tagger o xs n r a = Tagger {doTagger :: HFresh InstrID (Fix4 (TaggedInst
 Does what it says on the tin. Take a fixed-point representation of our machine and run it past the tagger algebra that uses `Tagger`.
 -}
 tagInstructions :: InstrID -> Fix4 (Instr o) xs n r a -> (Fix4 (TaggedInstr o) xs n r a, Int)
-tagInstructions initID instrs = runFresh (doTagger $ cata4 (Tagger . alg) instrs) initID
+tagInstructions initID instrs = runFresh (doTagger $ cata4 (Tagger . alg) instrs) (initID + 1)
     where
         wrap p = newVar >>= (\t -> return (In4 (Tag4 t p)))
 
@@ -219,7 +220,7 @@ tagInstructions initID instrs = runFresh (doTagger $ cata4 (Tagger . alg) instrs
 -- CFG construction
 
 -- TODO: rename or remove
-data FreeRegisters = FreeRegisters { freeRegisters :: !(Map InstrID (Set SomeΣVar))
+data FreeRegisters = FreeRegisters { livenessSets :: !(Map InstrID ((Set SomeΣVar, Set SomeΣVar)))
                                    , callAndHandlerRegs :: !((Map IMVar (Set SomeΣVar), Map InstrID (Set SomeΣVar)))
                                    , returnContinuations :: !(Map IMVar (Set SomeΣVar))}
 
@@ -235,12 +236,13 @@ newtype Graph = Graph { unGraph :: Map InstrID (Set InstrID) }
 Keep graph and use-def data together. 
 -}
 data CFG = CFG {
-      graph          :: !Graph                              -- ^ graph of the CFG
-    , start          :: !InstrID                            -- ^ Start node of the CFG
-    , useDefs        :: !UseDefData                         -- ^ The use-defs, duh!
+      graph          :: !Graph                                -- ^ graph of the CFG
+    , start          :: !InstrID                              -- ^ Start node of the CFG
+    , useDefs        :: !UseDefData                           -- ^ The use-defs, duh!
     , calleeTags     :: !(Map IMVar InstrID)                  -- ^ Which tag each μ-call can lead to 
     , handlerTags    :: !(Set InstrID)                        -- ^ The tags that are entry points of a handler 
     , callerTags     :: !(Map IMVar (Set (InstrID, InstrID))) -- ^ Each node that is a call to a given let-bound, along the ret. cont. tag
+    , letBoundStarts :: !(Map IMVar InstrID)                  -- ^ InstrID of the start for each let bound parser
     , letBoundTags   :: !(Map IMVar (Set InstrID))            -- ^ Which instruction tags belong to which let bound parser 
     , returnTags     :: !(Map IMVar (Set InstrID))            -- ^ Which tags are return calls from let-bound parsers.
 }
@@ -264,6 +266,7 @@ data GraphConstruction = GraphConstruction { phiData :: PhiData, graphData :: Gr
 
 -- LoopAndHandlerScope: stack of handler insturction IDs
 data HandlerEntry = SameH InstrID InstrID | AlwaysH InstrID deriving stock Show
+
 type HandlerEntries = [HandlerEntry]
 
 data GraphConstructionState = GraphConstructionState {
@@ -271,8 +274,10 @@ data GraphConstructionState = GraphConstructionState {
     , handlerStack :: !(HandlerEntries)
     -- TODO: maybe the three below fields should bein `GraphConstruction` instead...
     , collectedHTags :: !(Set InstrID)
-    , collectedCTags :: !(Map IMVar (Set (InstrID, InstrID))) -- muvar -> Set of (call tag, ret cont. tag)
+    , collectedCTags :: !(Map IMVar ([(InstrID, InstrID, Maybe HandlerEntry)])) -- muvar -> Set of (call tag, ret cont. tag)
     , collectedRetTags :: !(Set InstrID)
+    , collectedHandlerStumps :: !(Set InstrID)
+    , collectedTags   :: !(Set InstrID)
 }
 
 {- 
@@ -295,13 +300,69 @@ constructCFG (p, μs) = cfg
         starts = DMap.foldlWithKey (\m (MVar k) b -> Map.insert k (skimTopTag $ taggedBody b) m) Map.empty μs
 
         -- 2. Construct the global (partial) CFG from the let-bound parsers
-        cfg' = DMap.foldlWithKey (\cfg (MVar k) b -> cfg `mergeCFGs` constructMachineCFG starts (Just k) (taggedBody b)) (constructMachineCFG starts Nothing (taggedBody p)) μs
+        (cfg', handlerStumpData) = DMap.foldlWithKey (\(cfg, handls) (MVar k) b -> let (cfg', handls') = constructMachineCFG starts (Just k) (taggedBody b)
+                                                               in (cfg `mergeCFGs` cfg', joinHandlerStumpData handls handls') ) (constructMachineCFG starts Nothing (taggedBody p)) μs
 
         -- 3. hook up all the return calls properly
-        cfg = Map.foldlWithKey (\cfg k rets ->
+        cfg'' = Map.foldlWithKey (\cfg k rets ->
                                             let possibleEnds = Set.map snd (Map.findWithDefault Set.empty k (callerTags cfg))
                                                 retEdges = Set.foldl (\b a -> Map.insert a possibleEnds b) Map.empty rets
                                             in cfg{graph=graph cfg <> Graph retEdges}) cfg' (returnTags cfg')
+
+        -- 4. propagate handlers to each callee's starts and handler stumps using `handlerStumpData`
+
+        --    a) We create a graph where edge (a, b) denotes that "a is a call-site to the parser containing b and b is a handler stump"
+        HandlerStumpData callSites handlerStumps = handlerStumpData
+        -- We add the head of each parser to the set of handler stumps because we will use this for analysis later when we do handler-call register unification.
+        handlerStumpsWithStarts = Map.foldlWithKey (\acc mvar start -> Map.insertWith Set.union mvar (Set.singleton start) acc) handlerStumps starts
+
+        allStumps = foldl Set.union Set.empty $ Map.elems handlerStumpsWithStarts
+
+        -- Initial stump handler data that we will let flow
+        stumpsAndCallsiteHandlers' = Set.foldl (\acc s -> Map.insert s Set.empty acc) Map.empty allStumps
+        stumpsAndCallsiteHandlers = Map.foldlWithKey (\acc _ callsites -> Set.foldl (\acc (callsite, handler) -> case handler of 
+                                                                                            Just x -> Map.insertWith Set.union callsite (Set.singleton x) acc
+                                                                                            _ -> Map.insertWith Set.union callsite (Set.empty) acc) acc callsites) 
+                                                    stumpsAndCallsiteHandlers' callSites
+
+        -- Make a graph of call-site connections
+        stumpGraph = Map.foldlWithKey (\acc mvar callsites -> Set.foldl (\acc (callsite, _) -> Map.insert callsite (handlerStumpsWithStarts Map.! mvar) acc) acc callsites)
+                                       Map.empty callSites
+
+        --    b) Let the handlers flow till convergence using a worklist algorithm
+        flowHandlers :: State ([InstrID], (Map InstrID (Set InstrID))) ()
+        flowHandlers = do 
+            (worklist, handlerSets) <- get
+            case worklist of 
+                [] -> return () 
+                (x:xs) -> do 
+                            put (xs, handlerSets) 
+                            flowNode x 
+                            flowHandlers
+        flowNode :: InstrID -> State ([InstrID], (Map InstrID (Set InstrID))) ()
+        flowNode nodeid = do 
+            (worklist, handlerSets) <- get
+            let handlers = Map.findWithDefault (error "336") nodeid handlerSets
+            let children = Map.findWithDefault Set.empty nodeid stumpGraph 
+            -- add handlers to all immediate children nodes
+            let (handlerSets', changes) = Set.foldl (\(hs, chngs) child -> let childSet  = Map.findWithDefault (error "339") child handlerSets 
+                                                                               childSet' = childSet `Set.union` handlers
+                                                                               changed = Set.size childSet /= Set.size childSet'
+                                                                            in 
+                                                                               (Map.insert child childSet' hs, if changed then child:chngs else chngs))
+                                                    (handlerSets, []) children
+            -- When we changed some children, add them to the worklist
+            let updatedWorklist = foldl (\acc change -> change:acc) worklist changes
+            -- Update state and recutse
+            put (updatedWorklist, handlerSets')
+        
+        initWorklist = Set.toList $ Set.unions $ Map.elems $ Map.map (Set.map fst) callSites
+        (_, (_, finalStumpAndCallHandlers)) = trace ("STUMPGRAPH!!!!" ++ show stumpGraph) $ runState flowHandlers (initWorklist, stumpsAndCallsiteHandlers)  
+
+        --    c) enrich the almost-complete cfg with these handler edges
+        addStumpEdges :: Graph -> InstrID -> Set InstrID -> Graph 
+        addStumpEdges (Graph g) t handlers = Graph (Set.foldl (\acc he -> Map.insertWith Set.union t (Set.singleton he) acc) g handlers)  
+        cfg = cfg'' {graph = Set.foldl (\g stump -> addStumpEdges g stump (finalStumpAndCallHandlers Map.! stump) ) (graph cfg'') allStumps}
 
         -- left-biased merge of two CFGs
         mergeCFGs :: CFG -> CFG -> CFG
@@ -311,60 +372,97 @@ constructCFG (p, μs) = cfg
                                    calleeTags = Map.union (calleeTags cfg1) (calleeTags cfg2),
                                    handlerTags = Set.union (handlerTags cfg1) (handlerTags cfg2),
                                    callerTags = Map.unionWith Set.union (callerTags cfg1) (callerTags cfg2),
+                                   letBoundStarts = letBoundStarts cfg1,
                                    letBoundTags = Map.union (letBoundTags cfg1) (letBoundTags cfg2),
                                    returnTags = Map.unionWith Set.union (returnTags cfg1) (returnTags cfg2)}
+        -- join for handler stump data
+        joinHandlerStumpData :: HandlerStumpData -> HandlerStumpData -> HandlerStumpData
+        joinHandlerStumpData (HandlerStumpData a b) (HandlerStumpData a' b') = HandlerStumpData (Map.unionWith Set.union a a') (Map.unionWith Set.union b b')
+{-
+When we have a call instruction, we transfer the handler to the callee parser. This means that any other non-top-level 
+parser can have failures without a local handler in scope which means that handler needs to be inherited from one of
+the call-sites. This is not known locally, so we need to keep track of 
+    1) local stumps of a let-bound parser that require a handler connection  
+    2) which handler entries are in scope to a let bound call
+However, a stumped call can occur which means that a callee might not inherit the immediate caller's handler but some
+ancestor of it. Furthermore, the caller-callee graph is not necessarily acyclic.  
+
+HandlerStumpData could be included in the CFG but we do not want to expose this.
+-}
+data HandlerStumpData = HandlerStumpData (Map IMVar (Set (InstrID, Maybe InstrID))) -- ^ Record of call-sites and possible handlers (if not stumped)
+                                         (Map IMVar (Set InstrID))                  -- ^ Set of stumped instructions per each let-bound parser
+                        deriving stock Show
 
 constructMachineCFG :: forall o xs n r a. Map IMVar InstrID -- ^ Map of MVar -> tag of the first instruction of machine
                     -> Maybe IMVar -- ^ Which let-bound parser are we constructing now?
                     -> Fix4 (TaggedInstr o) xs n r a  -- ^ Machine instructions
-                    -> CFG
-constructMachineCFG starts mvar instrs = CFG{
-      graph       = graph, start = skimTopTag instrs
-    , useDefs     = usedefs
-    , calleeTags  = Map.union starts (loopTags endState)
-    , handlerTags = trace ("final htags: " ++ (show $ collectedHTags endState)) $ collectedHTags endState
-    , callerTags  = collectedCTags endState
-    , letBoundTags = case mvar of
-        Just k -> Map.fromList [(k, allTags)]
-        _ -> Map.empty
-    , returnTags = case mvar of
-        Just k -> Map.fromList [(k, collectedRetTags endState)]
-        _ -> Map.empty
-    }
+                    -> (CFG, HandlerStumpData)
+constructMachineCFG starts mvar instrs = (cfg, handlerStumpData)
     where
+        cfg = CFG{
+                   graph       = graph, start = skimTopTag instrs
+                 , useDefs     = usedefs
+                 , calleeTags  = Map.union starts (loopTags endState)
+                 , handlerTags = collectedHTags endState
+                 , callerTags  = Map.map (Set.fromList . map (\(a, b,_) -> (a, b))) $ collectedCTags endState
+                 , letBoundStarts = starts
+                 , letBoundTags = case mvar of
+                     Just k -> Map.fromList [(k, allTags)]
+                     _ -> Map.empty
+                 , returnTags = case mvar of
+                     Just k -> Map.fromList [(k, collectedRetTags endState)]
+                     _ -> Map.empty
+                 }
+
+        handlerStumps = case mvar of
+                    Just m -> Map.singleton m (collectedHandlerStumps endState)
+                    _ -> Map.empty -- no stumps at the top level.
+
+        -- convert from HandlerEntry to just InstrID.
+        gatherHandlerConns :: Set (InstrID, Maybe InstrID) -> (InstrID, InstrID, Maybe HandlerEntry) -> Set (InstrID, Maybe InstrID)
+        gatherHandlerConns acc (a, _, Nothing)            = Set.insert (a, Nothing) acc
+        gatherHandlerConns acc (a, _, Just (AlwaysH h))   = Set.insert (a, Just h) acc
+        gatherHandlerConns acc (a, _, Just (SameH h1 h2)) = Set.insert (a, Just h1) $ Set.insert (a, Just h2) acc
+
+        handlerStumpData = HandlerStumpData (Map.map (foldl gatherHandlerConns Set.empty) $ collectedCTags endState) handlerStumps
+
         -- 1. Construct graph by attaching join points, loops, and sequential instructions (in reverse) (_, GraphConstruction phidata graph usedefs)
-        emptyConstructionState =  GraphConstructionState Map.empty [] Set.empty Map.empty Set.empty
+        emptyConstructionState =  GraphConstructionState Map.empty [] Set.empty Map.empty Set.empty Set.empty Set.empty
 
         ((_, endState), GraphConstruction (joins, joinPts) partialGraph usedefs) = (runWriter . flip runStateT emptyConstructionState . doGrapher) $ cata4 (Grapher . alg) instrs
 
         -- 2. Turn our partial graph' into a full one with phidata
         graph = Graph $ foldl (\g (join, phi) -> Map.unionWith Set.union g $ Map.fromList [(join, Set.singleton $ Map.findWithDefault (error "341") phi joinPtsMap)]) (unGraph partialGraph) joins
         joinPtsMap = Map.fromList $ DList.toList joinPts
+
         allTags = Map.foldlWithKey (\b k a -> Set.insert k $ b `Set.union` a) Set.empty (unGraph graph)
 
         alg :: forall o xs n r a. TaggedInstr o (Grapher o) xs n r a -> StateT GraphConstructionState (Writer GraphConstruction) InstrID
         alg (Tag4 t Ret)                 = handlerEdge t >> addRetTag t >> addStump t >> pure t
         alg (Tag4 t (Call (MVar μ) _ k)) = do
-                                            handlerEdge t
-                                            callTag <- if Map.member μ starts
+                                            -- handlerEdge t
+                                            let notLoop = Map.member μ starts
+                                            callTag <- if notLoop
                                                         then pure $ Map.findWithDefault (error "350") μ starts  -- call to let-bound
-                                                        else getLoopTag μ -- loop call-back
+                                                        else getLoopTag μ  -- loop call-back, don't do rest
                                             addEdge t callTag
-                                            kt <- doGrapher k
-                                            addCall μ t kt
-                                            addEdge t kt
+                                            -- Don't add a real call if loop call.
+                                            when notLoop $ do
+                                                kt <- doGrapher k
+                                                addCall μ t kt
+                                                -- handlerEdge callTag -- NB: not needed anymore as we handler this in handler stump collection at the top level
                                             return t
-        alg (Tag4 t (Push _ k))          = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Pop k))             = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Lift2 _ k))         = handlerEdge t >> edgeToK t k
+        alg (Tag4 t (Push _ k))          = edgeToK t k
+        alg (Tag4 t (Pop k))             = edgeToK t k
+        alg (Tag4 t (Lift2 _ k))         = edgeToK t k
         alg (Tag4 t (Sat _ k))           = handlerEdge t >> edgeToK t k
         alg (Tag4 t Empt)                = handlerEdge t >> addStump t >> pure t
-        alg (Tag4 t (Commit k))          = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Catch p h))         = handlerEdge t >> pushHandler h >> edgeToK t p >> popHandler >> pure t
-        alg (Tag4 t (Tell k))            = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Seek k))            = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Case p q))          = handlerEdge t >> edgeToK t p >> edgeToK t q
-        alg (Tag4 t (Choices _ ks def))  = handlerEdge t >> traverse (edgeToK t) ks >> edgeToK t def
+        alg (Tag4 t (Commit k))          = edgeToK t k
+        alg (Tag4 t (Catch p h))         = pushHandler h >> edgeToK t p >> popHandler >> pure t
+        alg (Tag4 t (Tell k))            = edgeToK t k
+        alg (Tag4 t (Seek k))            = edgeToK t k
+        alg (Tag4 t (Case p q))          = edgeToK t p >> edgeToK t q
+        alg (Tag4 t (Choices _ ks def))  = traverse (edgeToK t) ks >> edgeToK t def
         alg (Tag4 t (Iter (MVar μ) _ l h)) = do
                                                 pushHandler h
                                                 addLoopTag μ t
@@ -373,13 +471,13 @@ constructMachineCFG starts mvar instrs = CFG{
                                                 removeLoopTag μ
                                                 popHandler
                                                 pure t
-        alg (Tag4 t (Join φ))            = handlerEdge t >> addJoin t φ >> pure t
-        alg (Tag4 t (MkJoin φ _ p k))    = handlerEdge t >> doGrapher p >>= flip addMkJoin φ >> edgeToK t k
-        alg (Tag4 t (Swap k))            = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Dup k))             = handlerEdge t >> edgeToK t k
-        alg (Tag4 t (Make σ _ k))        = handlerEdge t >> addDef t (SomeΣVar σ) >> edgeToK t k
-        alg (Tag4 t (Get σ _ k))         = handlerEdge t >> addUse t (SomeΣVar σ) >> edgeToK t k
-        alg (Tag4 t (Put σ _ k))         = handlerEdge t >> addUse t (SomeΣVar σ) >> edgeToK t k
+        alg (Tag4 t (Join φ))            = addJoin t φ >> pure t
+        alg (Tag4 t (MkJoin φ _ p k))    = doGrapher p >>= flip addMkJoin φ >> edgeToK t k
+        alg (Tag4 t (Swap k))            = edgeToK t k
+        alg (Tag4 t (Dup k))             = edgeToK t k
+        alg (Tag4 t (Make σ _ k))        = addDef t (SomeΣVar σ) >> edgeToK t k
+        alg (Tag4 t (Get σ _ k))         = addUse t (SomeΣVar σ) >> edgeToK t k
+        alg (Tag4 t (Put σ _ k))         = addDef t (SomeΣVar σ) >> edgeToK t k
         alg (Tag4 t (SelectPos _ k))     = handlerEdge t >> edgeToK t k
         alg (Tag4 t (LogEnter _ k))      = handlerEdge t >> edgeToK t k
         alg (Tag4 t (LogExit _ k))       = handlerEdge t >> edgeToK t k
@@ -423,9 +521,13 @@ constructMachineCFG starts mvar instrs = CFG{
         popHandler = do
                         state <- get
                         put state{handlerStack = (\(_:hs) -> hs) $ handlerStack state}
+        handlerEdge :: InstrID -> StateT GraphConstructionState (Writer GraphConstruction) ()
         handlerEdge t = get >>= (\stack -> do
                                             case stack of
-                                                [] -> pure ()
+                                                [] -> do
+                                                    -- Add this instruction as a handler stump that will be joined later
+                                                    state <- get
+                                                    put state{collectedHandlerStumps = Set.insert t (collectedHandlerStumps state)}
                                                 ((AlwaysH h):_) -> addEdge t h
                                                 ((SameH h1 h2 ):_) -> addEdge t h1 >> addEdge t h2) . handlerStack
 
@@ -455,8 +557,11 @@ constructMachineCFG starts mvar instrs = CFG{
         addCall :: IMVar -> InstrID -> InstrID -> StateT GraphConstructionState (Writer GraphConstruction) ()
         addCall μ t kt = do
                         state <- get
-                        let GraphConstructionState{collectedCTags} = state
-                        let cTags = Map.insertWith Set.union μ (Set.singleton (t, kt)) collectedCTags
+                        let GraphConstructionState{handlerStack, collectedCTags} = state
+                        let handlerEntry = case handlerStack of
+                                                (h:_) -> Just h
+                                                [] -> Nothing
+                        let cTags = Map.insertWith (++) μ [(t, kt, handlerEntry)] collectedCTags
                         put $ state{collectedCTags = cTags}
 
         addRetTag :: InstrID -> StateT GraphConstructionState (Writer GraphConstruction) ()
@@ -465,6 +570,12 @@ constructMachineCFG starts mvar instrs = CFG{
                         let GraphConstructionState{collectedRetTags} = state
                         put $ state{collectedRetTags = Set.insert t collectedRetTags}
 
+        addTag :: InstrID -> StateT GraphConstructionState (Writer GraphConstruction) ()
+        addTag t = do
+                    state <- get
+                    let GraphConstructionState{collectedTags} = state
+                    put state {collectedTags = Set.insert t collectedTags}
+
 {-| 
 Analyse the CFG and its register data to find data pertaining to register usage such as 
     - Free registers required from  each instruction onwards
@@ -472,14 +583,14 @@ Analyse the CFG and its register data to find data pertaining to register usage 
     - Return continuation free registers
 -}
 findFreeRegisters :: InstrID -> CFG -> FreeRegisters
-findFreeRegisters maxID CFG{graph, useDefs, handlerTags, callerTags, letBoundTags, returnTags} = FreeRegisters { freeRegisters = frees
-                                                                                                               , callAndHandlerRegs = callerHandlerRegs
+findFreeRegisters maxID CFG{graph, useDefs, handlerTags, callerTags, letBoundStarts, letBoundTags, returnTags} = FreeRegisters { livenessSets = livesets
+                                                                                                               , callAndHandlerRegs = trace ("callandhandler REGS" ++ show callerHandlerRegs) callerHandlerRegs
                                                                                                                , returnContinuations = retContData }
     where
         -- 1. Propagate the (use, def) sets upwards. 
-        !usedefs' = propagateRegs graph useDefs
-        propagateRegs :: Graph -> UseDefData -> UseDefData
-        propagateRegs graph usedef = snd $ execState iter (initWL, initMap)
+        !livesets = trace "PRIOOPAP" $ propagateRegs graph
+        propagateRegs :: Graph -> Map InstrID (Set SomeΣVar, Set SomeΣVar)
+        propagateRegs graph = snd $ execState iter (initWL, initMap)
             where
                 succ = unGraph graph
                 -- flip the graph for predessors
@@ -489,81 +600,84 @@ findFreeRegisters maxID CFG{graph, useDefs, handlerTags, callerTags, letBoundTag
                                         succ
                 -- All graph nodes
                 initWL = Map.keys succ
-                initMap = foldl (\a k -> a <> Map.singleton k (mempty, mempty)) usedef [0..maxID]
+                initMap = foldl (\a k -> a <> Map.singleton k (mempty,  mempty)) Map.empty [0..maxID]
 
-                iter :: State ([InstrID], UseDefData) ()
+                iter :: State ([InstrID], Map InstrID (Set SomeΣVar, Set SomeΣVar)) ()
                 iter = do
                     node <- popWL
                     propagateNode pred succ node
                     isEmpty <- emptyWL
                     unless isEmpty iter
 
-        popWL :: State ([InstrID], UseDefData) InstrID
+        popWL :: State ([InstrID], Map InstrID (Set SomeΣVar, Set SomeΣVar)) InstrID
         popWL = do
             (wl, b) <- get
             let (a:as) = wl
             put (as, b)
             return a
-        emptyWL :: State ([InstrID], UseDefData) Bool
+
+        emptyWL :: State ([InstrID], Map InstrID (Set SomeΣVar, Set SomeΣVar)) Bool
         emptyWL  = do
             gets (null . fst)
 
-        propagateNode :: Map InstrID (Set InstrID) -> Map InstrID (Set InstrID) -> InstrID -> State ([InstrID], UseDefData) ()
+        propagateNode :: Map InstrID (Set InstrID) -> Map InstrID (Set InstrID) -> InstrID -> State ([InstrID], Map InstrID (Set SomeΣVar, Set SomeΣVar)) ()
         propagateNode pred succ nodeid = do
-            (wl, refData) <- get
-            -- propagate from all successors
-            let !(use, def) = Map.findWithDefault (error "515") nodeid refData
-            let !(use', def') = foldl (\b s -> b <> Map.findWithDefault (error "516a") s refData) (use, def) $ Map.findWithDefault (error "516b") nodeid succ
-            put (wl, Map.insert nodeid (use', def') refData) -- update (use, def) in state
-            -- update worklist as necessary
-            when (Set.size use' /= Set.size use || Set.size def' /= Set.size def) $ do
-                    -- update worklist 
-                    addToWorkList (Map.findWithDefault (error "521") nodeid pred)
-
-        addToWorkList :: Set InstrID -> State ([InstrID], UseDefData) ()
+            (wl, liveSets) <- get
+            -- calculate using data-flow equations
+            let !(livein, liveout) = trace ("The worklist:" ++ show wl) $ Map.findWithDefault (error "515") nodeid liveSets
+            let succs = Map.findWithDefault Set.empty nodeid succ
+            let liveout' = Set.foldl (\l s -> Set.union l $ fst (liveSets Map.! s)) Set.empty succs  -- eqn.
+            let livein' = case Map.lookup nodeid useDefs of
+                                Just (use, def) -> Set.union use (Set.difference liveout' def) -- use eqn.
+                                Nothing -> liveout' -- No use/def data
+            put $ trace (show nodeid ++ ": " ++ show (livein, liveout) ++ "->" ++ show (livein', liveout')) $ (wl, Map.insert nodeid (livein', liveout') liveSets) -- update live sets in state
+            when  (livein' /= livein || liveout' /= liveout) $ do
+                    -- update worklist as necessary
+                    addToWorkList $ (trace $ "adding to WL:" ++ (show $ pred Map.! nodeid)) $  (Map.findWithDefault (error "521") nodeid pred)       
+ 
+        
+        addToWorkList :: Set InstrID -> State ([InstrID], Map InstrID (Set SomeΣVar, Set SomeΣVar)) ()
         addToWorkList preds = do
             (wl, ref) <- get
             put (foldl (flip (:)) wl preds, ref)
 
-        -- 2. Using the propagated use-defs for each node, find out all possible free registers for each node
-        frees = Map.map (uncurry (Set.\\)) usedefs'
+        -- 2. use the live sets to find out over which registers each handler and let-bound parser needs to be parameterised over
 
-        -- 3. use the frees to find out over which registers each handler and let-bound parser needs to be parameterised over
+        --    a) Which handlers reach which let bound parsers. During construction, we make an edge from the start of each let-bound parser that is called
+        --       with all possible handlers it is called under.
+        callHandlerConns = Map.foldlWithKey (\hconns k start -> Map.insert k (getHandlerAttached start) hconns ) Map.empty letBoundStarts
+        handlerCallConns = Map.foldlWithKey (\acc k x -> Set.foldl (\acc m -> Map.insertWith Set.union m (Set.singleton k) acc ) acc x) Map.empty callHandlerConns
 
-        --    a) Which handlers reach which let bound parsers (we assume we draw an edge from the callsite to the handler at construction)
-        callerTagsFst = Map.map (Set.map fst) callerTags
-        handlerCallConns = Set.foldl (\hconns hTag ->
-                                                    let conns = Map.foldlWithKey (\agg mvar calls -> if checkForEdge hTag calls then Set.insert mvar agg else agg) Set.empty callerTagsFst
-                                                    in Map.insert hTag conns hconns) Map.empty handlerTags
-        callHandlerConns = Map.foldlWithKey (\agg k x -> Set.foldl (\agg m -> Map.insertWith Set.union m (Set.singleton k) agg ) agg x) Map.empty handlerCallConns
-        checkForEdge :: InstrID -> Set InstrID -> Bool
-        checkForEdge t = Set.foldl (\agg t' -> agg || Set.member t (Map.findWithDefault (error "540") t' $ unGraph graph)) False
-
+        getHandlerAttached :: InstrID -> Set InstrID
+        getHandlerAttached id = Set.filter (flip Set.member handlerTags) (Map.findWithDefault Set.empty id (unGraph graph))
 
         --    b) For each MVar, get the union of all the handler's free registers that reach it. Then assign that union to all the reaching
         --       handlers. Repeat till convergence. 
         (_, callerHandlerRegs) = runState (unifyHandlerCallRegs handlerCallConns callHandlerConns) (initCSets, initHSets)
         !initCSets = Map.fromList $ map (\x -> (x, Set.empty :: Set SomeΣVar)) (Map.keys callerTags)
-        !initHSets = Map.fromList $ map (\x -> (x, Map.findWithDefault (error "547") x frees)) $ Set.toList handlerTags
+        !initHSets = Map.fromList $ map (\x -> (x, fst $ Map.findWithDefault (error "547") x livesets)) $ Set.toList handlerTags
         unifyHandlerCallRegs :: Map InstrID (Set IMVar) -> Map IMVar (Set InstrID) -> State (Map IMVar (Set SomeΣVar), Map InstrID (Set SomeΣVar)) ()
         unifyHandlerCallRegs hConns cConns = trace ("hConns: " ++ show hConns ++ "\ncConns: " ++ show cConns) $ do
             -- Step 1: accumulate to IMVars
             (cSets, hSets) <- get
-            let cSets' = trace (show cSets ++ show hSets) $ Map.mapWithKey (\mvar s -> Set.foldl (\agg id -> agg `Set.union` (Map.findWithDefault (error "csets'") id hSets)) s (Map.findWithDefault (error "552") mvar cConns)) cSets
+            let cSets' = Map.mapWithKey (\mvar s -> Set.foldl (\agg id -> agg `Set.union` (Map.findWithDefault (error "csets'") id hSets)) s (Map.findWithDefault (error "552") mvar cConns)) cSets
             -- Step 2: check for convergence
             unless (cSets' == cSets) $ do
                 -- Step 3: propagate new union to handlers
-                let hSets' = Map.mapWithKey (\id s -> Set.foldl (\agg id -> agg `Set.union` (Map.findWithDefault (error "hsets'") id cSets')) s (Map.findWithDefault (error "hConns") id hConns)) hSets
+                let hSets' = Map.mapWithKey (\id s -> Set.foldl (\agg id -> agg `Set.union` (Map.findWithDefault (error "hsets'") id cSets')) s (Map.findWithDefault Set.empty id hConns)) hSets
+                trace ("TRACE !!!" ++ show (cSets', hSets')) $ pure ()
                 put (cSets', hSets')
                 unifyHandlerCallRegs hConns cConns
 
-        -- 4. find return continuation free registers from `callerTags` data and `frees`.
+        -- 3. find return continuation free registers from `callerTags` data and `frees`.
+        -- TODO: look this over, remove reliance on 
         retContData = Map.mapWithKey (\k frees -> frees `Set.intersection` (Map.findWithDefault (error "561") k letboundUses)) retFrees
-        retFrees = Map.map (\rets -> Set.foldl (\acc ret -> acc `Set.union` (Map.findWithDefault (error "562") ret frees)) Set.empty rets) returnTags
+        retFrees = Map.map (\rets -> Set.foldl (\acc ret -> acc `Set.union` (snd $ Map.findWithDefault (error "562") ret livesets)) Set.empty rets) returnTags
         letboundUses = Map.map (\tags -> Set.foldl (\b tag -> b `Set.union` (fst $ Map.findWithDefault (mempty, mempty) tag  useDefs)) Set.empty tags) letBoundTags
 
 
 {- 
+TODO: remove things that are not needed under total liqudification
 State for `markFreeRegisters` that keeps track of a few things:
     - Keeps state of which loops are currently in scope. Helps us to know when to mark calls as loop calls 
       and decide at calls/joins which registers solidfy.
@@ -575,7 +689,6 @@ State for `markFreeRegisters` that keeps track of a few things:
 data FreeRegMarkerState = FreeRegMarkerState { toBind :: Set SomeΣVar
                                              , loopBinds :: [Set SomeΣVar]
                                              , lastTag :: InstrID
-                                             -- , initHandlerFrees :: Map InstrID (Set SomeΣVar) 
                                              }
 newtype FreeRegMarker o xs n r a = FreeRegMarker { doFreeRegMarking :: State FreeRegMarkerState (Fix4 (TaggedInstr o) xs n r a) }
 
@@ -594,7 +707,7 @@ markFreeRegisters freeRegsData (p, μs) = (pResult, μsResult)
         μsResult = DMap.foldlWithKey (\b k a -> DMap.insert k (TaggedBinding $ doMarking a) b) DMap.empty μs
 
         -- `frees`: set of free registers
-        frees = freeRegisters freeRegsData
+        livesets = livenessSets freeRegsData
         (_, handlerRegs) = callAndHandlerRegs freeRegsData
 
         -- `letBounds`: set of all mvars
@@ -634,17 +747,19 @@ markFreeRegisters freeRegsData (p, μs) = (pResult, μsResult)
         alg (Tag4 t (Iter μ _ l h))      = do
                                             h' <- doHandler t h
                                             -- Just bind the frees in loop, not those that escape.
-                                            -- TODO: when handler continuations work, this should change
                                             l' <- doFreeRegMarking l
                                             t' <- getLastTag
-                                            let regsToBind = Map.findWithDefault (error "638") t frees
+                                            -- TODO: figure out liveness sets here!!!
+                                            let regsToBind = fst $ Map.findWithDefault (error "638") t' livesets
+                                            trace ("Iter at " ++ show t ++ " with regs " ++ show regsToBind) $ pure ()
                                             wrap t (Iter μ (Just $ makeRegs regsToBind) l' h')
         alg (Tag4 t (Join φ))            = wrap t (Join φ)
         alg (Tag4 t (MkJoin φ _ p k))      = do
                                             p' <- doFreeRegMarking p
                                             t' <- getLastTag
                                             k' <- doFreeRegMarking k
-                                            wrap t (MkJoin φ (Just $ makeRegs (Map.findWithDefault (error "648") t' frees)) p' k')
+                                            let livein = fst $ Map.findWithDefault (error "648") t' livesets
+                                            wrap t (MkJoin φ (Just $ makeRegs livein) p' k')
         alg (Tag4 t (Swap k))            = doFreeRegMarking k >>= wrap t . Swap
         alg (Tag4 t (Dup k))             = doFreeRegMarking k >>= wrap t . Dup
         alg (Tag4 t (Make σ a k))        = do
@@ -689,16 +804,13 @@ markFreeRegisters freeRegsData (p, μs) = (pResult, μsResult)
                                         k2' <- doFreeRegMarking k2
                                         t2 <- getLastTag
                                         let regs = (Map.findWithDefault (error "692a") t1 handlerRegs) `Set.union` (Map.findWithDefault (error "692b") t2 handlerRegs)
+                                        trace ("handlerREGS" ++ show (t1,t2) ++ show regs) $ pure ()
                                         return (Same (Just $ makeRegs regs) x k1' y k2')
         doHandler t (Always _ x k)     = do
                                         k' <- doFreeRegMarking k
-                                        let tlast = skimTopTag k'
+                                        tlast <- getLastTag
                                         let regs = trace ("getting " ++ show tlast) $ Map.findWithDefault (error $ "697: tried to get " ++ show tlast ++ " from " ++ show handlerRegs) tlast handlerRegs
                                         return (Always (Just $ makeRegs regs) x k')
-
-        handlerFrees :: Handler o (Fix4 (TaggedInstr o)) xs n r a -> Set SomeΣVar
-        handlerFrees (Same _ _ (In4 h1) _ (In4 h2)) = trace ("trying to get " ++ show (tag h1, tag h2) ++ " from " ++ show frees ) $  (frees Map.! (tag h1)) `Set.union` (frees Map.! (tag h2))
-        handlerFrees (Always _ _ (In4 h))           = trace ("trying to get " ++ show (tag h) ++ " from " ++ show frees ) $ frees Map.! tag h
 
         isBound :: forall x. ΣVar x -> State FreeRegMarkerState Bool
         isBound σ = get >>= pure . Set.member (SomeΣVar σ) . toBind
@@ -717,3 +829,49 @@ unTag = cata4 alg
     where
         alg :: TaggedInstr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a
         alg Tag4{tagged} = In4 tagged
+
+-- Compute the DOT program of a given graph. Slow, but useful for debugging CFG problems
+computeDOT :: CFG -> FreeRegisters -> String
+computeDOT CFG{graph, start, useDefs, letBoundStarts, handlerTags, letBoundTags} FreeRegisters{livenessSets} = computedCFG ""
+    where
+        Graph map = graph
+        showNode :: InstrID -> ShowS
+        showNode id = "N" . shows id
+
+        showConn :: InstrID -> Set InstrID -> ShowS
+        showConn a bs = (Set.foldl (\head b -> head . " " . showNode b) (" " . showNode a . " -> {") bs) . "}\n"
+
+        computeGraph :: ShowS -> Set InstrID -> ShowS
+        computeGraph name instrs = (Set.foldl (\head a -> head . showConn a (Map.findWithDefault Set.empty a map)) header instrs) . "}\n"
+            where
+                header = "subgraph " . name . "{ \n"  . thing . name . "\";\n"
+                thing = " label = \"" :: ShowS
+        allNodes = Map.foldlWithKey (\acc k b -> Set.insert k (acc `Set.union` b)) Set.empty map
+        letBoundNodes = Map.foldl (\acc b -> acc `Set.union` b) Set.empty letBoundTags
+        isTopLevel x = not $ Set.member x letBoundNodes
+        topLevelNodes = Set.filter isTopLevel allNodes
+
+        computedCFG :: ShowS
+        computedCFG = "digraph {\n" . toplevel . "\n\n" . letboundsShown . "\n" . startTag . computeHTags handlerTags . usedefs . parserStarts . "}\n"
+            where
+                letbounds = Map.mapWithKey (\k b -> computeGraph ("mu_" . shows k) b) letBoundTags
+                letboundsShown = Map.foldl (\b a -> b . a) ("" :: ShowS) letbounds
+                toplevel = computeGraph "top_level" topLevelNodes
+                startTag = " " . showNode start . " [style=filled, color=red, shape=Msquare];\n" :: ShowS
+                parserStarts = Map.foldlWithKey (\acc mu x -> acc . showNode x . "[label=\"" . showNode x . "[" .shows mu . "]\"style=filled,color=red];\n") ("" :: ShowS) letBoundStarts
+                usedefs = attachLabelsToNodes allNodes
+
+        computeHTags :: Set InstrID -> ShowS
+        computeHTags = Set.foldl (\b a -> b . " " . showNode a . " [style=filled, color=green];\n") ("" :: ShowS)
+
+        attachLabelsToNodes :: Set InstrID -> ShowS
+        attachLabelsToNodes = Set.foldl (\b a -> b . attachLabel a . "\n") ("\n" :: ShowS)
+
+        attachLabel :: InstrID -> ShowS
+        attachLabel id = " " . showNode id . (" [xlabel=\"" :: ShowS) . label . "\"];"
+            where
+                label = udlabel . freelabel
+                udlabel = if Map.member id useDefs then "UD: (" . shows (Set.toList use) . "," . shows (Set.toList def) . ")\\n" else ""
+                freelabel = ("live sets: " :: ShowS) . if Map.member id livenessSets then shows (both Set.toList (livenessSets Map.! id)) else "{0}"
+                (use, def) = useDefs Map.! id
+        both f (a,b) = (f a, f b)

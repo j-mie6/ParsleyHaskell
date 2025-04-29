@@ -52,7 +52,7 @@ import Parsley.Internal.Opt (Flags(leadCharFactoring))
 import Data.Set (Set)
 import Data.Some (Some (..), withSome)
 import Parsley.Internal.Backend.Machine.Types.Statics (SomeCallableSubroutine(..), QStaCont (..))
-import Data.Maybe (fromJust)
+import qualified Debug.Trace as DBG
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
@@ -79,31 +79,31 @@ readyMachine :: (?ops :: InputOps (StaRep o), Ops o, Trace, ?flags :: Opt.Flags)
 readyMachine = trace "starting readymachine" $ cata4 (Machine . alg)
   where
     alg :: (?ops :: InputOps (StaRep o), Ops o, ?flags :: Opt.Flags) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
-    alg Ret                 = trace "EVAAAAL ret\n" $ evalRet
-    alg (Call μ l k)        = trace "EVAAAAL call\n" $ evalCall μ l k
-    alg (Push x k)          = trace "EVAAAAL push\n" $ evalPush x k
-    alg (Pop k)             = trace "EVAAAAL pop\n" $ evalPop k
-    alg (Lift2 f k)         = trace "EVAAAAL lift2\n" $ evalLift2 f k
-    alg (Sat p k)           = trace "EVAAAAL sat\n" $ evalSat p k
-    alg Empt                = trace "EVAAAAL empt\n" $ evalEmpt
-    alg (Commit k)          = trace "EVAAAAL commit\n" $ evalCommit k
-    alg (Catch k h)         = trace "EVAAAAL catch\n" $ evalCatch k h
-    alg (Tell k)            = trace "EVAAAAL tell\n" $ evalTell k
-    alg (Seek k)            = trace "EVAAAAL seek\n" $ evalSeek k
-    alg (Case p q)          = trace "EVAAAAL case\n" $ evalCase p q
-    alg (Choices fs ks def) = trace "EVAAAAL choice\n" $ evalChoices fs ks def
-    alg (Iter μ regs l k)   = trace "EVAAAAL iter\n" $ evalIter μ regs l k
-    alg (Join φ)            = trace "EVAAAAL join\n" $ evalJoin φ
-    alg (MkJoin φ rs p k)   = trace "EVAAAAL mkjoin\n" $ evalMkJoin φ rs p k
-    alg (Swap k)            = trace "EVAAAAL swap\n" $ evalSwap k
-    alg (Dup k)             = trace "EVAAAAL dup\n" $ evalDup k
-    alg (Make σ c k)        = trace "EVAAAAL make\n" $ evalMake σ c k
-    alg (Get σ c k)         = trace "EVAAAAL get\n" $ evalGet σ c k
-    alg (Put σ c k)         = trace "EVAAAAL put\n" $ evalPut σ c k
-    alg (SelectPos sel k)   = evalSelectPos sel k
-    alg (LogEnter name k)   = evalLogEnter name k
-    alg (LogExit name k)    = evalLogExit name k
-    alg (MetaInstr m k)     = evalMeta m k
+    alg Ret                 = {- DBG.trace "EVAL RET " $  -}evalRet
+    alg (Call μ l k)        = {- DBG.trace "EVAL CALL" $  -}evalCall μ l k
+    alg (Push x k)          = {- DBG.trace "EVAL p   " $  -}evalPush x k
+    alg (Pop k)             = {- DBG.trace "EVAL pp  " $  -}evalPop k
+    alg (Lift2 f k)         = {- DBG.trace "EVAL l   " $  -}evalLift2 f k
+    alg (Sat p k)           = {- DBG.trace "EVAL sat " $  -}evalSat p k
+    alg Empt                = {- DBG.trace "EVAL EMPT" $  -}evalEmpt
+    alg (Commit k)          = {- DBG.trace "EVAL comm" $  -}evalCommit k
+    alg (Catch k h)         = {- DBG.trace "EVAL CTCH" $  -}evalCatch k h
+    alg (Tell k)            = {- DBG.trace "EVAL tell" $  -}evalTell k
+    alg (Seek k)            = {- DBG.trace "EVAL seek" $  -}evalSeek k
+    alg (Case p q)          = {- DBG.trace "EVAL case" $  -}evalCase p q
+    alg (Choices fs ks def) = {- DBG.trace "EVAL chcs" $  -}evalChoices fs ks def
+    alg (Iter μ regs l k)   = {- DBG.trace "EVAL ITER" $  -}evalIter μ regs l k
+    alg (Join φ)            = {- DBG.trace "EVAL JOIN" $  -}evalJoin φ
+    alg (MkJoin φ rs p k)   = {- DBG.trace "EVAL mkj " $  -}evalMkJoin φ rs p k
+    alg (Swap k)            = {- DBG.trace "EVAL swap" $  -}evalSwap k
+    alg (Dup k)             = {- DBG.trace "EVAL DUPs" $  -}evalDup k
+    alg (Make σ c k)        = {- DBG.trace "EVAL MAKE" $  -}evalMake σ c k
+    alg (Get σ c k)         = {- DBG.trace "EVAL GET"  $  -}evalGet σ c k
+    alg (Put σ c k)         = {- DBG.trace "EVAL PUT"  $  -}evalPut σ c k
+    alg (SelectPos sel k)   = {- DBG.trace "EVAL xxxx" $  -}evalSelectPos sel k
+    alg (LogEnter name k)   = {- DBG.trace "EVAL xxxx" $  -}evalLogEnter name k
+    alg (LogExit name k)    = {- DBG.trace "EVAL xxxx" $  -}evalLogExit name k
+    alg (MetaInstr m k)     = {- DBG.trace "EVAL xxxx" $  -}evalMeta m k
 
 evalRet :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o (x : xs) n x a
 evalRet = reader $ \ctx γ ->
@@ -140,12 +140,12 @@ evalSat p mk = do
       readChar (spendCoin ctx) p (fetch (off (input γ))) $ \c staOldPred staPosPred offset' ctx' ->
         let staPredC' = optimisePredGiven p staOldPred
         in sat (ap (LAM (lamTerm staPredC'))) c (continue mk γ (updatePos (updateOffset offset' (input γ)) c staPosPred) ctx')
-                                                (raise ctx γ)
+                                                (raise ctx' γ)
 
     continue mk γ input' ctx v = run mk (γ {input = input', operands = Op v (operands γ)}) ctx
 
 evalEmpt :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o xs (Succ n) r a
-evalEmpt = reader $ \ctx γ -> raise ctx γ 
+evalEmpt = reader $ \ctx γ -> raise ctx γ
 
 evalCommit :: Machine s o xs n r a -> MachineMonad s o xs (Succ n) r a
 evalCommit (Machine k) = k <&> \mk γ -> let VCons _ hs = handlers γ in mk (γ {handlers = hs})

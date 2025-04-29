@@ -5,12 +5,13 @@ module Parsley.Internal.Backend.Machine.Types.Registers (
     ) where 
 
 import Data.Kind (Type, Constraint)
-import Parsley.Internal.Core.Identifiers (ΣVar, SomeΣVar (..))
+import Parsley.Internal.Core.Identifiers (ΣVar (..), SomeΣVar (..))
 import Data.Set (Set)
 import Data.Some (Some (..))
 import Parsley.Internal.Common (Code)
 import Language.Haskell.TH (Name)
 import Data.List (intercalate)
+import qualified Data.Set as Set
 
 {-|
 Represents a collection of free registers, preserving their type
@@ -44,6 +45,10 @@ heterogeneous list of free registers.
 -}
 makeRegs :: Set SomeΣVar -> Some Regs
 makeRegs = foldr (\(SomeΣVar σ) (Some rs) -> Some (Regs σ rs)) (Some NoRegs)
+
+fromRegs :: Some Regs -> Set SomeΣVar
+fromRegs (Some NoRegs) = Set.empty 
+fromRegs (Some (Regs r rs)) = Set.insert (SomeΣVar r) $ fromRegs (Some rs)
 
 debugRegsList :: forall rs. Regs rs -> String
 debugRegsList NoRegs = ""

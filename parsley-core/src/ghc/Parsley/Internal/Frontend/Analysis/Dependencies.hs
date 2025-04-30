@@ -36,7 +36,6 @@ import qualified Data.Set           as Set    (toList, insert, union, unions, me
 import qualified Data.Array         as Array  ((!), listArray, bounds, indices)
 import qualified Data.Array.Unboxed as UArray ((!), assocs)
 import qualified Data.List          as List   (partition)
-import Debug.Trace (trace)
 
 type Graph = Array IMVar [IMVar]
 type PQueue k a = Map k a

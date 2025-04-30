@@ -77,9 +77,6 @@ import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, 
 import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup, keys)
 import qualified Parsley.Internal.Common.QueueLike            as Queue (empty, null)
 import qualified Parsley.Internal.Common.RewindQueue          as Queue (rewind)
-import Data.Data (Proxy)
-import Debug.Trace (trace)
-import Data.Some (Some(..))
 
 -- Core Data-types
 
@@ -248,7 +245,6 @@ bindΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
 bindΣ σ bref ctx = case DMap.lookup σ (σs ctx) of
   Just (Reg ref _ c) -> ctx {σs = DMap.insert σ (Reg ref (Just bref) c) (σs ctx)}
   Nothing            -> ctx {σs = DMap.insert σ (Reg Nothing (Just bref) Nothing) (σs ctx)}
-    -- trace ("THE CONTEXT regs : " ++ intercalate "" (map (\(Some (ΣVar i)) -> show i) (DMap.keys $ σs ctx))) $ throw (outOfScopeRegister σ)
 
 {-| 
 Remove the binding for a register.
@@ -320,7 +316,7 @@ insertScopedΣ' σ qref ctx = ctx {σs = DMap.insert σ (Reg Nothing (Just qref)
 -- Feed all the free registers of a `StaSubroutine`
 provideBoundRegisters :: StaSubroutine rs hs ys s o a x -> Regs rs -> Ctx s o a -> StaSubroutine '[] hs ys s o a x
 provideBoundRegisters sub NoRegs _ = sub
-provideBoundRegisters sub (Regs σ σs) ctx = provideBoundRegisters (sub{staSubroutine# = staSubroutine# sub (trace "This 1" $ boundΣ σ ctx)}) σs ctx
+provideBoundRegisters sub (Regs σ σs) ctx = provideBoundRegisters (sub{staSubroutine# = staSubroutine# sub (boundΣ σ ctx)}) σs ctx
 
 -- Debug Level Tracking
 {- $debug-doc

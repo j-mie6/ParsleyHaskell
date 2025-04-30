@@ -46,13 +46,11 @@ import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
 import qualified Debug.Trace (trace)
-import qualified Debug.Trace as Debug
 import qualified Parsley.Internal.Opt   as Opt
 import Parsley.Internal.Opt (Flags(leadCharFactoring))
 import Data.Set (Set)
 import Data.Some (Some (..), withSome)
 import Parsley.Internal.Backend.Machine.Types.Statics (SomeCallableSubroutine(..), QStaCont (..))
-import qualified Debug.Trace as DBG
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
@@ -189,9 +187,9 @@ evalIter μ (Just regs) l h =
       local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
         case h of
           Always (Just (Some hregs)) gh h -> 
-            reader $ \ctx γ -> withSome regs (\regs -> Debug.trace ("iter always with " ++ debugRegsList regs ++ " and handler: " ++ debugRegsList hregs) $ bindIterAlways' ctx μ regs l gh (buildHandler γ ctx h hregs u1) hregs (input γ) u2)
+            reader $ \ctx γ -> withSome regs (\regs -> bindIterAlways' ctx μ regs l gh (buildHandler γ ctx h hregs u1) hregs (input γ) u2)
           Same (Just (Some hregs)) gyes yes gno no ->
-            reader $ \ ctx γ -> withSome regs (\regs -> Debug.trace ("iter same with " ++ debugRegsList regs ++ " and handler: " ++ debugRegsList hregs) $ bindIterSame' ctx μ regs l gyes (buildIterYesHandler γ ctx yes hregs u1) gno (buildHandler γ ctx no hregs u1) hregs (input γ) u2)
+            reader $ \ ctx γ -> withSome regs (\regs -> bindIterSame' ctx μ regs l gyes (buildIterYesHandler γ ctx yes hregs u1) gno (buildHandler γ ctx no hregs u1) hregs (input γ) u2)
           _ -> undefined -- Should have attached register data already.
 
 evalJoin :: (DynOps o, ?flags :: Opt.Flags) => ΦVar x -> MachineMonad s o (x : xs) n r a

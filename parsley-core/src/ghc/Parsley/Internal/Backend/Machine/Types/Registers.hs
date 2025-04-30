@@ -46,9 +46,9 @@ heterogeneous list of free registers.
 makeRegs :: Set SomeΣVar -> Some Regs
 makeRegs = foldr (\(SomeΣVar σ) (Some rs) -> Some (Regs σ rs)) (Some NoRegs)
 
-fromRegs :: Some Regs -> Set SomeΣVar
-fromRegs (Some NoRegs) = Set.empty 
-fromRegs (Some (Regs r rs)) = Set.insert (SomeΣVar r) $ fromRegs (Some rs)
+fromRegs :: Regs rs -> Set SomeΣVar
+fromRegs NoRegs = Set.empty 
+fromRegs (Regs r rs) = Set.insert (SomeΣVar r) $ fromRegs rs
 
 debugRegsList :: forall rs. Regs rs -> String
 debugRegsList NoRegs = ""

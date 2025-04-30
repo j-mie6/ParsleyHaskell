@@ -28,7 +28,6 @@ import qualified Parsley.Internal.Opt   as Opt
 import qualified Data.Dependent.Map as DM
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Debug.Trace (trace)
 import Parsley.Internal.Frontend.Analysis.ReachingDefs (soleReachers)
 
 pattern (:<$>:) :: Defunc (a -> b) -> Fix Combinator a -> Combinator (Fix Combinator) b

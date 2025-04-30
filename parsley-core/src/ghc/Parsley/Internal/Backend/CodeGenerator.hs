@@ -25,8 +25,7 @@ import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFre
 import Parsley.Internal.Common.Indexed     (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 import Parsley.Internal.Core.Defunc        (pattern UNIT)
-import Parsley.Internal.Trace              (Trace)
-import Debug.Trace              (trace)
+import Parsley.Internal.Trace              (Trace(..))
 
 
 import Parsley.Internal.Core.Defunc as Core (Defunc)

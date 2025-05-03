@@ -436,10 +436,11 @@ constructMachineCFG starts mvar instrs = (cfg, handlerStumpData)
                                             callTag <- if notLoop
                                                         then pure $ Map.findWithDefault (error "350") μ starts  -- call to let-bound
                                                         else getLoopTag μ  -- loop call-back, don't do rest
-                                            addEdge t callTag
+                                            -- addEdge t callTag
                                             -- Don't add a real call if loop call.
                                             when notLoop $ do
                                                 kt <- doGrapher k
+                                                addEdge t kt
                                                 addCall μ t kt
                                                 -- handlerEdge callTag -- NB: not needed anymore as we handler this in handler stump collection at the top level
                                             return t

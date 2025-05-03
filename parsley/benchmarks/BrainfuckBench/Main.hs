@@ -33,16 +33,16 @@ deriving instance Generic BrainFuckOp
 deriving instance NFData BrainFuckOp
 
 brainfuckParsleyS :: String -> Maybe [BrainFuckOp]
-brainfuckParsleyS = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleyS = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck')
 
 brainfuckParsleyT :: Text -> Maybe [BrainFuckOp]
-brainfuckParsleyT = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleyT = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck')
 
 brainfuckParsleyB :: ByteString -> Maybe [BrainFuckOp]
 brainfuckParsleyB = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck')
 
 brainfuckParsleyLB :: Data.ByteString.Lazy.ByteString -> Maybe [BrainFuckOp]
-brainfuckParsleyLB = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck)
+brainfuckParsleyLB = $$(Parsley.parse BrainfuckBench.Parsley.Parser.brainfuck')
 
 brainfuck :: Benchmark
 brainfuck =
@@ -52,12 +52,12 @@ brainfuck =
        [ bfTest string          "Parsley (String)"          brainfuckParsleyS
        , bfTest text            "Parsley (Text)"            brainfuckParsleyT
        , bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB
-       --, bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
-       , bfTest string          "Handrolled"                BrainfuckBench.Handrolled.Parser.brainfuck
-       , bfTest string          "Happy"                     BrainfuckBench.Happy.Parser.brainfuck
-       , bfTest string          "Parsec (String)"           (parsecParse BrainfuckBench.Parsec.Parser.brainfuck)
-       , bfTest text            "Parsec (Text)"             (parsecParse BrainfuckBench.Parsec.Parser.brainfuck)
-       , bfTest string          "Mega (String)"             (megaParse BrainfuckBench.Megaparsec.Parser.brainfuck)
-       , bfTest text            "Mega (Text)"               (megaParse BrainfuckBench.Megaparsec.Parser.brainfuck)
-       , bfTest text            "Atto (Text)"               (attoParse BrainfuckBench.Attoparsec.Parser.brainfuck)
+       , bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
+       -- , bfTest string          "Handrolled"                BrainfuckBench.Handrolled.Parser.brainfuck
+       -- , bfTest string          "Happy"                     BrainfuckBench.Happy.Parser.brainfuck
+       -- , bfTest string          "Parsec (String)"           (parsecParse BrainfuckBench.Parsec.Parser.brainfuck)
+       -- , bfTest text            "Parsec (Text)"             (parsecParse BrainfuckBench.Parsec.Parser.brainfuck)
+       -- , bfTest string          "Mega (String)"             (megaParse BrainfuckBench.Megaparsec.Parser.brainfuck)
+       -- , bfTest text            "Mega (Text)"               (megaParse BrainfuckBench.Megaparsec.Parser.brainfuck)
+       -- , bfTest text            "Atto (Text)"               (attoParse BrainfuckBench.Attoparsec.Parser.brainfuck)
        ]

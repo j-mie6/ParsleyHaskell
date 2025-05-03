@@ -129,7 +129,7 @@ test-suite regression-test
 
 common benchmark-common
   build-tool-depends:  happy:happy
-  build-depends:       base >=4.12 && <5,
+  build-depends:       base >= 4.12 && <5,
                        parsley,
                        gauge,
                        deepseq,
@@ -147,9 +147,6 @@ common benchmark-common
   other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
   ghc-options:         -rtsopts -ddump-splices -ddump-to-file
   default-language:    Haskell2010
-  if false && impl(ghc < 9)
-    build-depends:     dump-core
-    ghc-options:       -fplugin=DumpCore
 
 benchmark brainfuck-bench
   import:              benchmark-common
@@ -168,7 +165,22 @@ benchmark brainfuck-bench
 --benchmark nandlang-bench
 --  import:              benchmark-common
 --  type:                exitcode-stdio-1.0
-  --cc-options:          -O3
+--  cc-options:          -O3
 --  other-modules:       NandlangBench.Parsley.Parser, NandlangBench.Parsley.Functions, NandlangBench.Bison.Parser
 --  c-sources:           benchmarks/NandlangBench/Bison/lex.yy.c, benchmarks/NandlangBench/Bison/Nandlang.tab.c
 --  main-is:             NandlangBench/Main.hs
+
+executable brainfuck-profile 
+  build-depends: base >=4.12 && <5,
+                 parsley,
+                 parsley-core,
+                 tasty,
+                 bytestring,
+                 template-haskell,
+                 deepseq
+  hs-source-dirs:  benchmarks
+  other-extensions:    TemplateHaskellQuotes, TemplateHaskell
+  ghc-options: -O2 -auto
+  default-language:    Haskell2010
+  other-modules: BrainfuckBench.Shared, BrainfuckBench.Parsley.Parser
+  main-is:         BrainfuckBench/BrainfuckProfile.hs

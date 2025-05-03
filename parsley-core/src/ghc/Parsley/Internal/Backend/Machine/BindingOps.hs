@@ -35,7 +35,7 @@ import Data.ByteString.Internal                        (ByteString)
 import Data.Text                                       (Text)
 import Parsley.Internal.Backend.Machine.InputRep       (DynRep)
 import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos)
-import Parsley.Internal.Backend.Machine.Types.Statics     (toDynRegStack)
+import Parsley.Internal.Backend.Machine.Types.Statics  (toDynRegStack)
 import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler, DynRegisterStack)
 import Parsley.Internal.Backend.Machine.Types.Input    (Input#(..))
 import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#, StaSubroutine#, StaRegisterStack#)
@@ -45,8 +45,8 @@ import Parsley.Internal.Core.InputTypes                (Text16, CharList, Stream
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString)
 import Data.Kind (Type)
 import Parsley.Internal.Backend.Machine.Identifiers (ΣVar)
-import Language.Haskell.TH (newName, Q, unsafeCodeCoerce, Pat (VarP))
-import Language.Haskell.TH.Syntax (Exp(..), Dec(FunD), mkName)
+import Language.Haskell.TH (newName, Q, unsafeCodeCoerce, Pat (..))
+import Language.Haskell.TH.Syntax (Exp(..), Dec(FunD), mkName, Clause (..), Body (..), Pat (BangP))
 import Language.Haskell.TH (unTypeCode, runQ)
 import Data.Type.Equality ((:~:))
 import Data.Data ((:~:)(..))
@@ -103,13 +103,29 @@ regHandlerWrapperName(_name) :: (RegBindNames hs -> StaHandler# '[] s _o a) -> (
 regHandlerWrapperName(_name) h NoTHName                = \regs -> unTypeCode [|| \(pos :: Pos) !(o# :: DynRep _o) -> $$(h regs (Input# [||o#||] [||pos||])) ||];\
 regHandlerWrapperName(_name) h (RegTHName _ name rest) = \regs -> do; func <- regHandlerWrapperName(_name) h rest regs; return (LamE [VarP name] func); 
 
+createHandlerDef :: forall hs s o a b. (RegBindNames hs -> StaHandler# '[] s o a) -> Regs hs -> Q Pat -> (DynHandler hs s o a -> Code b) -> Code b
+createHandlerDef hbody regs qoff k = unsafeCodeCoerce $ do 
+        handlerName <- newName "handler"
+        regNames <- nameRegs' regs
+        pos <- [p| (pos :: Pos) |]
+        off <- qoff
+        let makebind = do
+                        let posE = pure $ VarE $ extractNameFromPat pos
+                        let offE = pure $ VarE $ extractNameFromPat off
+                        body <- unTypeCode $ hbody (convertNamesToCode regNames) (Input# (unsafeCodeCoerce offE) (unsafeCodeCoerce posE))
+                        return $ FunD handlerName [Clause (namesToArgList regNames [pos, off]) (NormalB body) [] ]
+        k' <- unTypeCode $ k (unsafeCodeCoerce $ return (VarE handlerName))
+        bind <- makebind
+        return (LetE [bind] k')
+  where
+    extractNameFromPat (SigP (VarP name) _ ) = name
+    extractNameFromPat (SigP (BangP (VarP name)) _ ) = name
+    extractNameFromPat _ = undefined -- TODO: better error??
+
 #define deriveHandlerOps(_name, _o)                                                \
 instance HandlerOps _o where                                                       \
 {                                                                                  \
-  bindHandler# h freeRegs k = [||                                                  \
-    let handler = $$(unsafeCodeCoerce $ createDeclWithRegs (regHandlerWrapperName(_name) h) freeRegs) \
-    in $$(k [||handler||])                                                         \
-  ||];                                                                             \
+  bindHandler# h freeRegs k = createHandlerDef @_ @_ @_o h freeRegs ([p| (!o# :: DynRep _o) |]) k\
 };
 
 defHandlerRegWrapper(String, String);                 
@@ -274,6 +290,10 @@ convertNamesToCode :: forall rs. RegTHNames rs -> RegBindNames rs
 convertNamesToCode NoTHName = NoName
 convertNamesToCode (RegTHName r name rest) = let rest' = convertNamesToCode rest 
                                               in RegName r (unsafeCodeCoerce (return (VarE name))) rest'
+
+namesToArgList :: forall rs. RegTHNames rs -> [Pat] -> [Pat]
+namesToArgList NoTHName tail                = tail
+namesToArgList (RegTHName _ name rest) tail = VarP name:namesToArgList rest tail 
 
 createLoopDecl :: forall rs. (forall rs'. RegTHNames rs' -> (RegBindNames rs -> Q Exp)) -> RegBindNames rs -> Q Exp
 createLoopDecl regWrapper regs = do; boundRegsNames <- nameRegs regs; regWrapper boundRegsNames (convertNamesToCode boundRegsNames)

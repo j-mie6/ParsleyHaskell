@@ -153,6 +153,7 @@ benchmark brainfuck-bench
   type:                exitcode-stdio-1.0
   other-modules:       BrainfuckBench.Shared, BrainfuckBench.Parsley.Parser, BrainfuckBench.Parsec.Parser, BrainfuckBench.Megaparsec.Parser,
                        BrainfuckBench.Attoparsec.Parser, BrainfuckBench.Handrolled.Parser, BrainfuckBench.Happy.Parser
+  ghc-options: -O2
   main-is:             BrainfuckBench/Main.hs
 
 --benchmark javascript-bench

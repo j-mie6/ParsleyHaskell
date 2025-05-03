@@ -85,7 +85,7 @@ import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacte
 import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                                    (One, Code, Vec(..), Nat(..))
-import Parsley.Internal.Common.THUtils                            (eta, unTypeCode, unsafeCodeCoerce)
+import Parsley.Internal.Common.THUtils                            (eta, unTypeCode, unsafeCodeCoerce, debugTH)
 import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
 import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), updateDeepestKnown)
@@ -98,6 +98,7 @@ import Language.Haskell.TH (Exp(LamE), Pat (VarP))
 import Language.Haskell.TH.Syntax (Q)
 import qualified Data.Set as Set
 import Parsley.Internal.Backend.Machine.Identifiers (SomeΣVar(..))
+import Language.Haskell.TH (runQ)
 
 {- General Operations -}
 {-|
@@ -194,10 +195,11 @@ Depending on the access type, either generates the code for a write to a registe
 @since 1.0.0.0
 -}
 writeΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> Defunc x -> (Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-writeΣ σ Bound x k ctx = dup x $ \dupx -> [||
-    let bref = $$(genDefunc dupx)
-      in $$(k (bindΣ σ [|| bref ||] $ cacheΣ σ dupx ctx))
+writeΣ σ Bound x k ctx = let val = genDefunc x in [||
+    let bref = $$val
+      in $$(k (bindΣ σ [|| bref ||] $ cacheΣ σ (FREEVAR [|| bref ||]) ctx))
     ||]
+-- writeΣ σ Bound x k ctx = dup x $ \bref -> k (bindΣ σ (genDefunc bref) $ cacheΣ σ bref ctx)
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$(genDefunc dupx)
@@ -448,7 +450,7 @@ callWithContinuation :: (MarshalOps o, DynOps o)
                      -> Code (ST s (Maybe a))
 callWithContinuation ctx sub hregs ret retregs input (VCons h _) = case h of
   QAugmentedStaHandler h regs ->
-    staSubroutine# sub (dynCont retregs ret) (fitHandler ctx hregs (dynHandler h regs (failureInputCharacteristic (meta sub))) regs) (fromInput input)
+    staSubroutine# sub (dynCont retregs ret) (eta $ fitHandler ctx hregs (dynHandler h regs (failureInputCharacteristic (meta sub))) regs) (fromInput input)
   where
     eqReg :: ΣVar a -> ΣVar b -> Maybe (a :~: b)
     eqReg (ΣVar σa) (ΣVar σb) = if σa == σb then unsafeCoerce (Just Refl) else Nothing

@@ -54,6 +54,7 @@ import Type.Reflection (eqTypeRep, typeRep, type (:~~:) (HRefl))
 import Parsley.Internal.Backend.Machine.Types.Registers (RegBindNames (..), Regs (..), RegTHNames(..))
 import Unsafe.Coerce (unsafeCoerce)
 import Data.Proxy (Proxy)
+import Parsley.Internal.Common.THUtils (eta)
 
 #define inputInstances(derivation) \
 derivation(String)                 \
@@ -264,7 +265,7 @@ nameRegs (RegName s _ rest) = do
 -- Same as `nameRegs` but for unbound registers
 nameRegs' :: forall rs. Regs rs -> Q (RegTHNames rs)
 nameRegs' NoRegs = pure NoTHName 
-nameRegs' (Regs s rest) = do 
+nameRegs' (Regs s rest) = do
   rest' <- nameRegs' rest 
   regname <- newName "r"
   return (RegTHName s regname rest')
@@ -348,6 +349,6 @@ instance MarshalOps _o where                                                    
   dynHandler# _ _ NoRegs        sh = [||\ (pos :: Pos) (o# :: DynRep _o) -> $$(sh (Input# [||o#||] [||pos||])) ||]; \
   dynHandler# ps pa (Regs _ rs) sh = [|| \r -> $$(dynHandler# @_o @_ @s @a ps pa rs (sh [||r||]) ) ||];             \
   dynCont# :: forall rs s a x. Proxy s -> Proxy a -> Proxy x -> Regs rs -> StaCont# rs s _o a x -> DynCont rs s _o a x; \
-  dynCont# _ _ _ regs sk = [||\ x (pos :: Pos) (o# :: DynRep _o) -> $$(toDynRegStack @_ @(ST s (Maybe a)) regs $ sk [||x||] (Input# [||o#||] [||pos||])) ||];            \
+  dynCont# _ _ _ regs sk = eta [|| \x (pos :: Pos) (o# :: DynRep _o) -> $$(eta $ toDynRegStack @_ @(ST s (Maybe a)) regs $ sk [||x||] (Input# [||o#||] [||pos||])) ||];            \
 };
 inputInstances(deriveMarshalOps);

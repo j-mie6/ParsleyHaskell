@@ -305,7 +305,7 @@ takeFreeRegisters :: forall rs hs ys s o a x. Regs rs               -- ^ The fre
                   -> (Ctx s o a -> DynSubroutine '[] hs ys s o a x) -- ^ Given the new context, function that produces the subroutine.
                   -> DynFunc rs hs ys s o a x                       -- ^ The newly produced dynamic function.
 takeFreeRegisters NoRegs _ retregs ctx body = body ctx
-takeFreeRegisters (Regs σ σs) hregs retregs ctx body = [||\(!reg) -> $$(takeFreeRegisters σs hregs retregs (insertScopedΣ' σ [||reg||] ctx) body)||]
+takeFreeRegisters (Regs σ σs) hregs retregs ctx body = [||\reg -> $$(takeFreeRegisters σs hregs retregs (insertScopedΣ' σ [||reg||] ctx) body)||]
 
 insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
 insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing Nothing) (σs ctx)}

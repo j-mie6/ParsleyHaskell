@@ -154,7 +154,27 @@ foo (Regs _ rs) f = [||\r -> $$(foo @_ @x rs (f [|| r ||])) ||]
 createRegStackDecl :: forall rs x. Regs rs -> StaRegisterStack# rs x -> Q Exp
 createRegStackDecl regs k = do; boundRegsNames <- nameRegs' regs; unTypeCode $ feedRegNames @rs @x (convertNamesToCode boundRegsNames) k
 
--- inputInstances(deriveHandlerOps)
+createJoinPointDef :: forall rs s o a x b. StaCont# rs s o a x -> Regs rs -> Q Pat -> (DynCont rs s o a x -> Code b) -> Code b
+createJoinPointDef jbody regs qoff k = unsafeCodeCoerce $ do 
+        joinName <- newName "join"
+        xName <- newName "x"
+        regNames <- nameRegs' regs
+        pos <- [p| (pos :: Pos) |]
+        off <- qoff
+        let makebind = do
+                        let posE = pure $ VarE $ extractNameFromPat pos
+                        let offE = pure $ VarE $ extractNameFromPat off
+                        let xE = pure $ VarE xName
+                        body <- unTypeCode $ feedRegNames @rs @(ST s (Maybe a)) (convertNamesToCode regNames) 
+                                          (jbody (unsafeCodeCoerce xE) (Input# (unsafeCodeCoerce offE) (unsafeCodeCoerce posE))) 
+                        return $ FunD joinName [Clause ([VarP xName, pos, off] ++ namesToArgList regNames []) (NormalB body) [] ]
+        k' <- unTypeCode $ k (unsafeCodeCoerce $ return (VarE joinName))
+        bind <- makebind
+        return (LetE [bind] k')
+  where
+    extractNameFromPat (SigP (VarP name) _ ) = name
+    extractNameFromPat (SigP (BangP (VarP name)) _ ) = name
+    extractNameFromPat _ = undefined -- TODO: better error??
 
 {-|
 Generates join-point bindings.
@@ -179,13 +199,12 @@ instance JoinBuilder _o where                                     \
                   -> Regs rs                        \
                   -> (DynCont rs s _o a x -> Code b)  \
                   -> Code b;\
-  setupJoinPoint# _ _ _ binding regs k =                                     \
-    [|| let join x (pos :: Pos) !(o# :: DynRep _o) =              \
-              $$(foo @rs @(ST s (Maybe a)) regs (binding [||x||] (Input# [||o#||] [||pos||])))     \
-    in $$(k [||join||]) ||]                                       \
+  setupJoinPoint# _ _ _ binding regs = createJoinPointDef @rs @s @_o @a @x binding regs [p| (!o# :: DynRep _o) |]  \
 };
 inputInstances(deriveJoinBuilder)
 
+{-  [|| let join x (pos :: Pos)  =              \
+              $$(foo @rs @(ST s (Maybe a)) regs (binding [||x||] (Input# [||o#||] [||pos||])))     \-}
 {-|
 Type family to capture the arity of a loop body which might have multiple
 liquid registers passed through it.

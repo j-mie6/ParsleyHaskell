@@ -94,8 +94,8 @@ import Parsley.Internal.Backend.Machine.Types.Base (Handler#, Pos, RegisterStack
 import Data.Data (Proxy(..), (:~:) (..))
 import Parsley.Internal.Core.Identifiers (ΣVar(..))
 import Unsafe.Coerce (unsafeCoerce)
-import Language.Haskell.TH (Exp(LamE), Pat (VarP))
-import Language.Haskell.TH.Syntax (Q)
+import Language.Haskell.TH (newName, Q, unsafeCodeCoerce, Pat (..))
+import Language.Haskell.TH.Syntax (Exp(..), Dec(FunD), mkName, Clause (..), Body (..), Pat (BangP))
 import qualified Data.Set as Set
 import Parsley.Internal.Backend.Machine.Identifiers (SomeΣVar(..))
 import Language.Haskell.TH (runQ)
@@ -561,14 +561,14 @@ bindIterAlways' :: forall s o a rs hs. (RecBuilder o, DynOps o, ?flags :: Opt.Fl
                -> Code (ST s (Maybe a))
 bindIterAlways' ctx μ regs l needed h hregs inp u =
    bindIterHandlerInline# @o @s @a @_ @hs needed (staHandler# . h . toInput u) hregs $ \qhandler ->
-      bindLiquidIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
+      bindIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
         updateBinds loopBoundRegs ctx $ \ctx ->
           -- First populate the context with the new binds for names
           let inp = toInput u inp#
           in run l (Γ Empty (QStaCont noreturn NoRegs) inp (VCons (QAugmentedStaHandler (augmentHandler (Just inp) (qhandler inp#)) hregs) VNil))
                   (voidCoins (insertSub μ (mkStaSubroutine $ lambdafy regs qloop) regs hregs NoRegs ctx))
   where
-    lambdafy :: forall rs. Regs rs -> Code (LiquidLoopRoutine rs s o a) -> StaSubroutine# rs hs '[] s o a Void
+    lambdafy :: forall rs. Regs rs -> Code (LoopRoutine rs s o a) -> StaSubroutine# rs hs '[] s o a Void
     lambdafy NoRegs qloop  = \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
     lambdafy (Regs σ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
     -- \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
@@ -602,13 +602,13 @@ bindIterSame' ctx μ regs l neededYes yes neededNo no hregs inp u =
     bindIterHandlerInline# @o @s @a neededNo (staHandler# . no . toInput u) hregs $ \qno -> -- 
       let handler (inpc :: Input# o) = makeHandlerJoin inpc hregs qyes qno
       in bindIterHandlerInline# @o True handler hregs $ \qhandler ->
-          bindLiquidIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
+          bindIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
               updateBinds loopBoundRegs ctx $ \ctx ->
                 let off = toInput u inp#
                 in run l (Γ Empty (QStaCont noreturn NoRegs) off (VCons (QAugmentedStaHandler (augmentHandlerFull off (qhandler inp#) (moveInputInside hregs (staHandler# qyes) inp#) (qno inp#)) hregs) VNil))
                           (voidCoins (insertSub μ (mkStaSubroutine $ lambdafy regs qloop) regs hregs NoRegs ctx))
   where
-    lambdafy :: forall rs. Regs rs -> Code (LiquidLoopRoutine rs s o a) -> StaSubroutine# rs hs '[] s o a Void
+    lambdafy :: forall rs. Regs rs -> Code (LoopRoutine rs s o a) -> StaSubroutine# rs hs '[] s o a Void
     lambdafy NoRegs qloop  = \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
     lambdafy (Regs σ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
 
@@ -663,11 +663,15 @@ bindHandlerInline# True  h regs k = bindHandler# @o (\bregs -> feedHandlerBoundR
 bindHandlerInline# False h _ k = k (fromStaHandler# h)
 
 bindYesInline# :: forall hs s a b. Bool -> StaSameHandler hs s a -> Regs hs -> (StaSameHandler hs s a -> Code b) -> Code b
-bindYesInline# True v regs k = [|| let yesSame = $$(unsafeCodeCoerce $ createDeclWithRegs yesWrapper regs) in $$(k $ mkSta regs [||yesSame||]) ||] -- TODO: semi-urgent do the bind of `yesSame
+bindYesInline# True v regs k = bindYesSame v regs k
   where
-    yesWrapper :: forall rs. RegTHNames rs -> RegBindNames hs -> Q Exp
-    yesWrapper NoTHName = \bregs -> unTypeCode $ feedSameHandlerBoundRegs @hs @s @_ @a bregs v
-    yesWrapper (RegTHName _ name rest) = \bregs -> do ; func <- yesWrapper rest bregs; return (LamE [VarP name] func)
+    bindYesSame :: StaSameHandler hs s a -> Regs hs -> (StaSameHandler hs s a -> Code b) -> Code b
+    bindYesSame h regs k = unsafeCodeCoerce $ do
+      handlerName <- newName "yesSame"
+      regNames <- nameRegs' regs
+      body' <- unTypeCode $ feedRegNames @_ @(ST s (Maybe a)) (convertNamesToCode regNames) h
+      k' <- unTypeCode $ k $ mkSta regs (unsafeCodeCoerce $ return $ VarE handlerName)
+      return (LetE [FunD handlerName [Clause (namesToArgList regNames []) (NormalB body') [] ]] k')
     mkSta :: forall rs. Regs rs -> DynRegisterStack rs (ST s (Maybe a)) -> StaSameHandler rs s a
     mkSta NoRegs dh = dh
     mkSta (Regs _ rs) dh = \r -> mkSta rs [||$$dh $$r ||]

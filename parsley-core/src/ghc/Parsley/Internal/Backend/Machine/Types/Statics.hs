@@ -266,11 +266,9 @@ staHandlerCharacteristicDyn :: Regs hs -> AugmentedStaHandler hs s o a -> (StaHa
 staHandlerCharacteristicDyn regs sh conv = dynHandler conv . staHandlerCharacteristic regs sh conv
 
 {-|
-Type family to encapsulate a n-ary handler which knows that offsets match.
+Type to encapsulate a n-ary handler which knows that offsets match.
 -}
-type family StaSameHandler (hs :: [Type]) s a where
-  StaSameHandler '[] s a = Code (ST s (Maybe a))
-  StaSameHandler (h:hs) s a = Code h -> StaSameHandler hs s a
+type StaSameHandler hs s a = StaRegisterStack# hs (ST s (Maybe a))
 
 {-|
 Represents potentially three handlers: one for unknown offset cases, one for offset known to be

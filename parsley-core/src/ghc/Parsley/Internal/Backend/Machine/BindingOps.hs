@@ -54,7 +54,7 @@ import Type.Reflection (eqTypeRep, typeRep, type (:~~:) (HRefl))
 import Parsley.Internal.Backend.Machine.Types.Registers (RegBindNames (..), Regs (..), RegTHNames(..))
 import Unsafe.Coerce (unsafeCoerce)
 import Data.Proxy (Proxy)
-import Parsley.Internal.Common.THUtils (eta)
+import Parsley.Internal.Common.THUtils (eta, debugTH)
 
 #define inputInstances(derivation) \
 derivation(String)                 \
@@ -125,7 +125,7 @@ createHandlerDef hbody regs qoff k = unsafeCodeCoerce $ do
 #define deriveHandlerOps(_name, _o)                                                \
 instance HandlerOps _o where                                                       \
 {                                                                                  \
-  bindHandler# h freeRegs k = createHandlerDef @_ @_ @_o h freeRegs ([p| (!o# :: DynRep _o) |]) k\
+  bindHandler# h freeRegs k = createHandlerDef @_ @_ @_o h freeRegs [p| (!o# :: DynRep _o) |] k\
 };
 
 defHandlerRegWrapper(String, String);                 
@@ -203,25 +203,19 @@ instance JoinBuilder _o where                                     \
 };
 inputInstances(deriveJoinBuilder)
 
-{-  [|| let join x (pos :: Pos)  =              \
-              $$(foo @rs @(ST s (Maybe a)) regs (binding [||x||] (Input# [||o#||] [||pos||])))     \-}
+
 {-|
 Type family to capture the arity of a loop body which might have multiple
 liquid registers passed through it.
 -}
-type family LiquidLoopRoutine (xs :: [Type]) s o a where 
-  LiquidLoopRoutine '[] s o a = Pos -> DynRep o -> ST s (Maybe a)
-  LiquidLoopRoutine (x:xs) s o a = x -> LiquidLoopRoutine xs s o a  
+type family LoopRoutine (xs :: [Type]) s o a where 
+  LoopRoutine '[] s o a = Pos -> DynRep o -> ST s (Maybe a)
+  LoopRoutine (x:xs) s o a = x -> LoopRoutine xs s o a  
 
-type family StaLiquidLoopRoutine (xs :: [Type]) s o a where 
-  StaLiquidLoopRoutine '[] s o a = Code Pos -> Code (DynRep o) -> Code (ST s (Maybe a))
-  StaLiquidLoopRoutine (x:xs) s o a = Code x -> StaLiquidLoopRoutine xs s o a  
+type family StaLoopRoutine (xs :: [Type]) s o a where 
+  StaLoopRoutine '[] s o a = Code Pos -> Code (DynRep o) -> Code (ST s (Maybe a))
+  StaLoopRoutine (x:xs) s o a = Code x -> StaLoopRoutine xs s o a  
 
-
-{-| 
-Existentially qualified input registers of `LiquidLoopRoutine`.
--}
-data QLiquidLoopRoutine s o a = forall xs. QLiquidLoopRoutine !(StaLiquidLoopRoutine xs s o a) !(RegBindNames xs)
 
 noName :: RegBindNames '[]
 noName = NoName 
@@ -229,13 +223,6 @@ noName = NoName
 regName :: ΣVar x -> Code x -> (RegBindNames xs -> RegBindNames (x:xs))
 regName = RegName 
 
-
-qLiquidLoopRoutine :: forall s o a rs. Code (LiquidLoopRoutine rs s o a) -> RegBindNames rs -> QLiquidLoopRoutine s o a
-qLiquidLoopRoutine loop frees = QLiquidLoopRoutine (stat frees loop) frees 
-  where 
-    stat :: forall rs. RegBindNames rs -> Code (LiquidLoopRoutine rs s o a) -> StaLiquidLoopRoutine rs s o a
-    stat NoName loop = \pos o -> [|| $$loop $$pos $$o ||]
-    stat (RegName _ _ ws) loop = \r -> stat ws [|| $$loop $$r ||] 
 
 {-|
 Various functions for creating bindings for recursive parsers.
@@ -256,22 +243,13 @@ class RecBuilder o where
                    -> Code b
 
   {-|
-  Creates a binding for a tail-recursive loop.
-
-  @since 1.4.0.0
-  -}
-  bindIter# :: Input# o                                                                        -- ^ Initial offset for the loop.
-            -> (Code (Pos -> DynRep o -> ST s (Maybe a)) -> Input# o -> Code (ST s (Maybe a))) -- ^ The code for the loop given self-call and offset.
-            -> Code (ST s (Maybe a))                                                           -- ^ Code of the executing loop.
-
-  {-|
   Generalisation of `bindIter#` for when we have bound liquid registers.
 
   @since 1.4.0.0
   -}
-  bindLiquidIter# :: Input# o                                                                  -- ^ Initial offset for the loop.
+  bindIter# :: Input# o                                                                  -- ^ Initial offset for the loop.
             -> RegBindNames rs
-            -> (Code (LiquidLoopRoutine rs s o a) -> RegBindNames rs -> Input# o -> Code (ST s (Maybe a))) 
+            -> (Code (LoopRoutine rs s o a) -> RegBindNames rs -> Input# o -> Code (ST s (Maybe a))) 
             -- ^ The code for the loop given self-call and offset. 
             -> Code (ST s (Maybe a))                                                           -- ^ Code of the executing loop.
 
@@ -285,7 +263,7 @@ class RecBuilder o where
 
 -- NOTE: Everything below is awful, cpphs is awful, I'm awful. Blame TTH and cpphs not working together so well.
 
-supplyRegs :: forall rs s o a. RegBindNames rs -> Code (LiquidLoopRoutine rs s o a) -> Code (LiquidLoopRoutine '[] s o a)
+supplyRegs :: forall rs s o a. RegBindNames rs -> Code (LoopRoutine rs s o a) -> Code (LoopRoutine '[] s o a)
 supplyRegs NoName l = l 
 supplyRegs (RegName _ name rest) l = supplyRegs  @_ @_ @o rest [|| $$l $$name ||]
 
@@ -317,45 +295,62 @@ namesToArgList (RegTHName _ name rest) tail = VarP name:namesToArgList rest tail
 createLoopDecl :: forall rs. (forall rs'. RegTHNames rs' -> (RegBindNames rs -> Q Exp)) -> RegBindNames rs -> Q Exp
 createLoopDecl regWrapper regs = do; boundRegsNames <- nameRegs regs; regWrapper boundRegsNames (convertNamesToCode boundRegsNames)
 
-#define regWrapperName(_name) wrapRegs/**/_name
 
-#define defRegWrapper(_name, _o) \
-regWrapperName(_name) :: Code (LiquidLoopRoutine rs s _o a) -> (Code (LiquidLoopRoutine rs s _o a) -> RegBindNames rs -> Input# _o -> Code (ST s (Maybe a))) -> (forall rs'. RegTHNames rs' -> (RegBindNames rs -> Q Exp));\
-regWrapperName(_name) loop l NoTHName = \regs -> unTypeCode [|| \(pos :: Pos) !(o# :: DynRep _o) -> $$(l loop regs (Input# [||o#||] [||pos||])) ||];\
-regWrapperName(_name) loop l (RegTHName _ name rest) = \regs -> do; func <- regWrapperName(_name) loop l rest regs; return (LamE [VarP name] func); \
+createIterHandlerDef :: forall hs s o a b. (RegBindNames hs -> (Input# o -> Input# o -> Code (ST s (Maybe a)))) -> Regs hs -> Q Pat -> Q Pat -> (Code (Pos -> DynRep o -> Handler# hs s o a) -> Code b) -> Code b
+createIterHandlerDef hbody regs qcoff qoff k = unsafeCodeCoerce $ do 
+        handlerName <- newName "handler"
+        regNames <- nameRegs' regs
+        posc <- [p| (posc :: Pos) |]
+        offc <- qcoff
+        pos <- [p| (pos :: Pos) |]
+        off <- qoff
+        let makebind = do
+                        let posE = pure $ VarE $ extractNameFromPat pos
+                        let offE = pure $ VarE $ extractNameFromPat off
+                        let poscE = pure $ VarE $ extractNameFromPat posc
+                        let offcE = pure $ VarE $ extractNameFromPat offc
+                        body <- unTypeCode $ hbody (convertNamesToCode regNames) (Input# (unsafeCodeCoerce offcE) (unsafeCodeCoerce poscE)) (Input# (unsafeCodeCoerce offE) (unsafeCodeCoerce posE))
+                        return $ FunD handlerName [Clause ([posc, offc] ++ namesToArgList regNames [pos, off]) (NormalB body) [] ]
+        k' <- unTypeCode $ k (unsafeCodeCoerce $ return (VarE handlerName))
+        bind <- makebind
+        return (LetE [bind] k')
+  where
+    extractNameFromPat (SigP (VarP name) _ ) = name
+    extractNameFromPat (SigP (BangP (VarP name)) _ ) = name
+    extractNameFromPat _ = undefined -- TODO: better error??
 
+createLoopDef :: forall rs s o a b. Input# o -> RegBindNames rs -> Q Pat -> (Code (LoopRoutine rs s o a) -> RegBindNames rs -> Input# o -> Code (ST s (Maybe a))) -> Code b
+createLoopDef initialOffset regs qoff l = unsafeCodeCoerce $ do 
+        joinName <- newName "loop"
+        regNames <- nameRegs regs
+        pos <- [p| (pos :: Pos) |]
+        off <- qoff
+        let makebind = do
+                        let posE = pure $ VarE $ extractNameFromPat pos
+                        let offE = pure $ VarE $ extractNameFromPat off
+                        let body = l (unsafeCodeCoerce $ pure $ VarE joinName) (convertNamesToCode regNames) (Input# (unsafeCodeCoerce offE) (unsafeCodeCoerce posE))
+                        body' <- unTypeCode body
+                        return $ FunD joinName [Clause (namesToArgList regNames [pos, off]) (NormalB body') [] ]
+        k' <- unTypeCode [|| $$(supplyRegs @_ @_ @o regs (unsafeCodeCoerce $ return (VarE joinName))) $$(pos# initialOffset) $$(off# initialOffset) ||]
+        bind <- makebind
+        return (LetE [bind] k')
+  where
+    extractNameFromPat (SigP (VarP name) _ ) = name
+    extractNameFromPat (SigP (BangP (VarP name)) _ ) = name
+    extractNameFromPat _ = error "Could not extract name from Pat!" -- TODO: better error??
 
 
 #define deriveRecBuilder(_name, _o)                                                                 \
 instance RecBuilder _o where                                                                        \
 {                                                                                                   \
-  bindIterHandler# h freeRegs k = [||                                                                        \
-      let handler (posc :: Pos) (c# :: DynRep _o) = $$(unsafeCodeCoerce $ createDeclWithRegs (regHandlerWrapperName(_name) (\bregs -> h bregs (Input# [||c#||] [||posc||])) ) freeRegs) \
-        in $$(k [||handler||])                                                         \
-    ||]; \
-  bindIter# inp l = [||                                                                             \
-      let loop (pos :: Pos) !(o# :: DynRep _o) = $$(l [||loop||] (Input# [||o#||] [||pos||]))       \
-      in loop $$(pos# inp) $$(off# inp)                                                             \
-    ||];                                                                                            \
-  bindLiquidIter# inp regs l = [||                                                                  \
-      let loop = $$(unsafeCodeCoerce $ createLoopDecl (regWrapperName(_name) [||loop||] l) regs)    \
-      in $$(supplyRegs @_ @_ @_o regs [||loop||]) $$(pos# inp) $$(off# inp)                         \
-    ||];                                                                                            \
+  bindIterHandler# h freeRegs = createIterHandlerDef h freeRegs [p| (c# :: DynRep _o) |] [p| (!o# :: DynRep _o) |]; \
+  bindIter# inp regs = createLoopDef inp regs [p| (!o# :: DynRep _o) |]; \
   bindRec# binding =                                                                                \
     {- The idea here is to try and reduce the number of times registers have to be passed around -} \
     [|| let self ret h (pos :: Pos) !(o# :: DynRep _o) =                                            \
               $$(binding [||ret||] [||h||] (Input# [||o#||] [||pos||])) in self ||]      \
 };
 inputInstancesWithName(deriveRecBuilder)
---deriveRecBuilder(String,String)
-defRegWrapper(String, String);                 
-defRegWrapper(UArray, (UArray Int Char));      
-defRegWrapper(Text16, Text16);                   
-defRegWrapper(ByteString, ByteString);         
-defRegWrapper(CharList, CharList);             
-defRegWrapper(Stream, Stream);                 
-defRegWrapper(LazyByteString, Lazy.ByteString);
-defRegWrapper(Text, Text);
                                                                                                                                            
 
 {- Marshalling Operations -}

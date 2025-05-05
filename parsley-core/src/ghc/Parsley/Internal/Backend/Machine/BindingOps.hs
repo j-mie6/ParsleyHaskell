@@ -29,32 +29,25 @@ here.
 -}
 module Parsley.Internal.Backend.Machine.BindingOps (module Parsley.Internal.Backend.Machine.BindingOps) where
 
-import Control.Monad.ST                                (ST)
-import Data.Array.Unboxed                              (UArray)
-import Data.ByteString.Internal                        (ByteString)
-import Data.Text                                       (Text)
-import Parsley.Internal.Backend.Machine.InputRep       (DynRep)
-import Parsley.Internal.Backend.Machine.Types.Base     (Handler#, Pos)
-import Parsley.Internal.Backend.Machine.Types.Statics  (toDynRegStack)
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynSubroutine, DynCont, DynHandler, DynRegisterStack, DynFunc)
-import Parsley.Internal.Backend.Machine.Types.Input    (Input#(..))
-import Parsley.Internal.Backend.Machine.Types.Statics  (StaCont#, StaHandler#, StaSubroutine#, StaRegisterStack#)
-import Parsley.Internal.Common.Utils                   (Code)
-import Parsley.Internal.Core.InputTypes                (Text16, CharList, Stream)
+import Control.Monad.ST                                 (ST)
+import Data.Array.Unboxed                               (UArray)
+import Data.ByteString.Internal                         (ByteString)
+import Data.Text                                        (Text)
+import Data.Kind                                        (Type)
+import Data.Proxy                                       (Proxy)
+import Language.Haskell.TH                              (newName, Q, unsafeCodeCoerce, Pat (..), Name, unTypeCode)
+import Language.Haskell.TH.Syntax                       (Exp(..), Dec(FunD), Clause (..), Body (..))
+import Parsley.Internal.Backend.Machine.InputRep        (DynRep)
+import Parsley.Internal.Backend.Machine.Types.Base      (Handler#, Pos)
+import Parsley.Internal.Backend.Machine.Types.Dynamics  (DynCont, DynHandler, DynFunc)
+import Parsley.Internal.Backend.Machine.Types.Input     (Input#(..))
+import Parsley.Internal.Backend.Machine.Types.Statics   (StaCont#, StaHandler#, StaSubroutine#, StaRegisterStack#, toDynRegStack)
+import Parsley.Internal.Backend.Machine.Types.Registers (RegBindNames (..), Regs (..), RegTHNames(..))
+import Parsley.Internal.Common.Utils                    (Code)
+import Parsley.Internal.Core.InputTypes                 (Text16, CharList, Stream)
+import Parsley.Internal.Common.THUtils                  (eta)
 
 import qualified Data.ByteString.Lazy.Internal as Lazy (ByteString)
-import Data.Kind (Type)
-import Parsley.Internal.Backend.Machine.Identifiers (ΣVar)
-import Language.Haskell.TH (newName, Q, unsafeCodeCoerce, Pat (..), Name)
-import Language.Haskell.TH.Syntax (Exp(..), Dec(FunD), mkName, Clause (..), Body (..), Pat (BangP))
-import Language.Haskell.TH (unTypeCode, runQ)
-import Data.Type.Equality ((:~:))
-import Data.Data ((:~:)(..))
-import Type.Reflection (eqTypeRep, typeRep, type (:~~:) (HRefl))
-import Parsley.Internal.Backend.Machine.Types.Registers (RegBindNames (..), Regs (..), RegTHNames(..))
-import Unsafe.Coerce (unsafeCoerce)
-import Data.Proxy (Proxy)
-import Parsley.Internal.Common.THUtils (eta, debugTH)
 
 #define inputInstances(derivation) \
 derivation(String)                 \
@@ -65,6 +58,48 @@ derivation(CharList)               \
 derivation(Stream)                 \
 derivation(Lazy.ByteString)        \
 derivation(Text)
+
+
+-- Helpers
+
+supplyRegs :: forall rs s o a. RegBindNames rs -> Code (LoopRoutine rs s o a) -> Code (LoopRoutine '[] s o a)
+supplyRegs NoName l                = l 
+supplyRegs (RegName _ name rest) l = supplyRegs  @_ @_ @o rest [|| $$l $$name ||]
+
+-- Generate new names for register binds
+nameRegs :: forall rs. RegBindNames rs -> Q (RegTHNames rs)
+nameRegs NoName             = pure NoTHName 
+nameRegs (RegName s _ rest) = do 
+  rest' <- nameRegs rest 
+  regname <- newName "r"
+  return (RegTHName s regname rest')
+
+-- Same as `nameRegs` but for unbound registers
+nameRegs' :: forall rs. Regs rs -> Q (RegTHNames rs)
+nameRegs' NoRegs = pure NoTHName 
+nameRegs' (Regs s rest) = do
+  rest' <- nameRegs' rest 
+  regname <- newName "r"
+  return (RegTHName s regname rest')
+
+convertNamesToCode :: forall rs. RegTHNames rs -> RegBindNames rs 
+convertNamesToCode NoTHName                = NoName
+convertNamesToCode (RegTHName r name rest) = RegName r (unsafeCodeCoerce (return (VarE name))) (convertNamesToCode rest )
+
+extractNameFromPat :: Pat -> Name
+extractNameFromPat (SigP (VarP name) _ )         = name
+extractNameFromPat (SigP (BangP (VarP name)) _ ) = name
+extractNameFromPat (VarP name)                   = name
+extractNameFromPat (BangP (VarP name))           = name
+extractNameFromPat _ = error "Could not extract name from Pat!" -- TODO: better error??
+
+namesToArgList :: forall rs. RegTHNames rs -> [Pat] -> [Pat]
+namesToArgList NoTHName tail                = tail
+namesToArgList (RegTHName _ name rest) tail = VarP name:namesToArgList rest tail 
+
+feedRegNames :: forall rs x. RegBindNames rs -> StaRegisterStack# rs x -> Code x
+feedRegNames NoName k              = k 
+feedRegNames (RegName _ name rs) k = feedRegNames rs (k name) 
 
 
 {-|
@@ -78,12 +113,12 @@ class HandlerOps o where
 
   @since 1.4.0.0
   -}
-  -- TODO: we could get rid of the names -> handler continuation and let it just be StaHandler#. The power of hindsight, i guess...
   bindHandler# :: (RegBindNames hs -> StaHandler# '[] s o a) -- ^ Static handler to bind, waiting to capture the register binds
                -> Regs hs                                    -- ^ Registers required by handler, and which to bind in handler definition.
                -> (DynHandler hs s o a -> Code b)            -- ^ The continuation that expects the bound handler
                -> Code b
 
+-- Function to create the bind for in `HandlerOps`
 
 createHandlerDef :: forall hs s o a b. (RegBindNames hs -> StaHandler# '[] s o a) -> Regs hs -> Q Pat -> (DynHandler hs s o a -> Code b) -> Code b
 createHandlerDef hbody regs qoff k = unsafeCodeCoerce $ do 
@@ -99,32 +134,14 @@ createHandlerDef hbody regs qoff k = unsafeCodeCoerce $ do
         k' <- unTypeCode $ k (unsafeCodeCoerce $ return (VarE handlerName))
         bind <- makebind
         return (LetE [bind] k')
-  where
-    extractNameFromPat (SigP (VarP name) _ ) = name
-    extractNameFromPat (SigP (BangP (VarP name)) _ ) = name
-    extractNameFromPat _ = undefined -- TODO: better error??
 
-#define deriveHandlerOps(_o)                                                \
-instance HandlerOps _o where                                                       \
-{                                                                                  \
-  bindHandler# h freeRegs = createHandlerDef @_ @_ @_o h freeRegs [p| (!o# :: DynRep _o) |]\
+#define deriveHandlerOps(_o)                                                                \
+instance HandlerOps _o where                                                                \
+{                                                                                           \
+  bindHandler# h freeRegs = createHandlerDef @_ @_ @_o h freeRegs [p| (!o# :: DynRep _o) |] \
 };
-
-
 inputInstances(deriveHandlerOps);
 
--- main entry point to bind something that takes in `Regs rs`, actually
-createDeclWithRegs :: forall rs. (forall rs'. RegTHNames rs' -> (RegBindNames rs -> Q Exp)) -> Regs rs -> Q Exp
-createDeclWithRegs regWrapper regs = do; boundRegsNames <- nameRegs' regs; regWrapper boundRegsNames (convertNamesToCode boundRegsNames)
-
-feedRegNames :: forall rs x. RegBindNames rs -> StaRegisterStack# rs x -> Code x
-feedRegNames NoName k = k 
-feedRegNames (RegName _ name rs) k = feedRegNames rs (k name) 
--- regWrapperName(_name) loop l (RegTHName _ name rest) = \regs -> do; func <- regWrapperName(_name) loop l rest regs; return (LamE [VarP name] func); \
-
-foo :: forall rs x. Regs rs -> StaRegisterStack# rs x -> DynRegisterStack rs x
-foo NoRegs f = f 
-foo (Regs _ rs) f = [||\r -> $$(foo @_ @x rs (f [|| r ||])) ||]
 
 createRegStackDecl :: forall rs x. Regs rs -> StaRegisterStack# rs x -> Q Exp
 createRegStackDecl regs k = do; boundRegsNames <- nameRegs' regs; unTypeCode $ feedRegNames @rs @x (convertNamesToCode boundRegsNames) k
@@ -137,19 +154,14 @@ createJoinPointDef jbody regs qoff k = unsafeCodeCoerce $ do
         pos <- [p| (pos :: Pos) |]
         off <- qoff
         let makebind = do
-                        let posE = pure $ VarE $ extractNameFromPat pos
-                        let offE = pure $ VarE $ extractNameFromPat off
-                        let xE = pure $ VarE xName
-                        body <- unTypeCode $ feedRegNames @rs @(ST s (Maybe a)) (convertNamesToCode regNames) 
-                                          (jbody (unsafeCodeCoerce xE) (Input# (unsafeCodeCoerce offE) (unsafeCodeCoerce posE))) 
+                        let posE = unsafeCodeCoerce $ pure $ VarE $ extractNameFromPat pos
+                        let offE = unsafeCodeCoerce $ pure $ VarE $ extractNameFromPat off
+                        let xE   = unsafeCodeCoerce $ pure $ VarE xName
+                        body <- unTypeCode $ feedRegNames @rs @(ST s (Maybe a)) (convertNamesToCode regNames) (jbody xE (Input# offE posE)) 
                         return $ FunD joinName [Clause ([VarP xName, pos, off] ++ namesToArgList regNames []) (NormalB body) [] ]
         k' <- unTypeCode $ k (unsafeCodeCoerce $ return (VarE joinName))
         bind <- makebind
         return (LetE [bind] k')
-  where
-    extractNameFromPat (SigP (VarP name) _ ) = name
-    extractNameFromPat (SigP (BangP (VarP name)) _ ) = name
-    extractNameFromPat _ = undefined -- TODO: better error??
 
 {-|
 Generates join-point bindings.
@@ -162,42 +174,21 @@ class JoinBuilder o where
 
   @since 1.4.0.0
   -}
-  setupJoinPoint# :: forall rs s a x b. Proxy s -> Proxy a -> Proxy x -> StaCont# rs s o a x            -- ^ The join point to bind.
-                  -> Regs rs                        -- ^ Registers join point expects.
-                  -> (DynCont rs s o a x -> Code b) -- ^ The continuation that expects the bound join point
+  setupJoinPoint# :: forall rs s a x b. Proxy s -> Proxy a -> Proxy x -> StaCont# rs s o a x -- ^ The join point to bind.
+                  -> Regs rs                                                                 -- ^ Registers join point expects.
+                  -> (DynCont rs s o a x -> Code b)                                          -- ^ The continuation that expects the bound join point
                   -> Code b
 
-#define deriveJoinBuilder(_o)                                     \
-instance JoinBuilder _o where                                     \
-{                                                                 \
-  setupJoinPoint# :: forall rs s a x b. Proxy s -> Proxy a -> Proxy x -> StaCont# rs s _o a x     \
-                  -> Regs rs                        \
-                  -> (DynCont rs s _o a x -> Code b)  \
-                  -> Code b;\
-  setupJoinPoint# _ _ _ binding regs = createJoinPointDef @rs @s @_o @a @x binding regs [p| (!o# :: DynRep _o) |]  \
+#define deriveJoinBuilder(_o)                                                                                     \
+instance JoinBuilder _o where                                                                                     \
+{                                                                                                                 \
+  setupJoinPoint# :: forall rs s a x b. Proxy s -> Proxy a -> Proxy x -> StaCont# rs s _o a x                     \
+                  -> Regs rs                                                                                      \
+                  -> (DynCont rs s _o a x -> Code b)                                                              \
+                  -> Code b;                                                                                      \
+  setupJoinPoint# _ _ _ binding regs = createJoinPointDef @rs @s @_o @a @x binding regs [p| (!o# :: DynRep _o) |] \
 };
 inputInstances(deriveJoinBuilder)
-
-
-{-|
-Type family to capture the arity of a loop body which might have multiple
-liquid registers passed through it.
--}
-type family LoopRoutine (xs :: [Type]) s o a where 
-  LoopRoutine '[] s o a = Pos -> DynRep o -> ST s (Maybe a)
-  LoopRoutine (x:xs) s o a = x -> LoopRoutine xs s o a  
-
-type family StaLoopRoutine (xs :: [Type]) s o a where 
-  StaLoopRoutine '[] s o a = Code Pos -> Code (DynRep o) -> Code (ST s (Maybe a))
-  StaLoopRoutine (x:xs) s o a = Code x -> StaLoopRoutine xs s o a  
-
-
-noName :: RegBindNames '[]
-noName = NoName 
-
-regName :: ΣVar x -> Code x -> (RegBindNames xs -> RegBindNames (x:xs))
-regName = RegName 
-
 
 {-|
 Various functions for creating bindings for recursive parsers.
@@ -238,48 +229,19 @@ class RecBuilder o where
             -> (RegBindNames rs -> StaSubroutine# '[] hs ys s o a x )-- ^ Code for the binding, accepting itself as an argument.
             -> Q Dec  -- ^ The code that represents this binding's name.
 
--- NOTE: Everything below is awful, cpphs is awful, I'm awful. Blame TTH and cpphs not working together so well.
+-- Functions to create the bindings in `RecBuilder`
 
-supplyRegs :: forall rs s o a. RegBindNames rs -> Code (LoopRoutine rs s o a) -> Code (LoopRoutine '[] s o a)
-supplyRegs NoName l = l 
-supplyRegs (RegName _ name rest) l = supplyRegs  @_ @_ @o rest [|| $$l $$name ||]
+{-|
+Type family to capture the arity of a loop body which might have multiple
+liquid registers passed through it.
+-}
+type family LoopRoutine (xs :: [Type]) s o a where 
+  LoopRoutine '[] s o a = Pos -> DynRep o -> ST s (Maybe a)
+  LoopRoutine (x:xs) s o a = x -> LoopRoutine xs s o a  
 
--- Generate new names for register binds
-nameRegs :: forall rs. RegBindNames rs -> Q (RegTHNames rs)
-nameRegs NoName = pure NoTHName 
-nameRegs (RegName s _ rest) = do 
-  rest' <- nameRegs rest 
-  regname <- newName "r"
-  return (RegTHName s regname rest')
-
--- Same as `nameRegs` but for unbound registers
-nameRegs' :: forall rs. Regs rs -> Q (RegTHNames rs)
-nameRegs' NoRegs = pure NoTHName 
-nameRegs' (Regs s rest) = do
-  rest' <- nameRegs' rest 
-  regname <- newName "r"
-  return (RegTHName s regname rest')
-
-convertNamesToCode :: forall rs. RegTHNames rs -> RegBindNames rs 
-convertNamesToCode NoTHName = NoName
-convertNamesToCode (RegTHName r name rest) = let rest' = convertNamesToCode rest 
-                                              in RegName r (unsafeCodeCoerce (return (VarE name))) rest'
-
-extractNameFromPat :: Pat -> Name
-extractNameFromPat (SigP (VarP name) _ )         = name
-extractNameFromPat (SigP (BangP (VarP name)) _ ) = name
-extractNameFromPat (VarP name)                   = name
-extractNameFromPat (BangP (VarP name))           = name
-extractNameFromPat _ = error "Could not extract name from Pat!" -- TODO: better error??
-
-
-namesToArgList :: forall rs. RegTHNames rs -> [Pat] -> [Pat]
-namesToArgList NoTHName tail                = tail
-namesToArgList (RegTHName _ name rest) tail = VarP name:namesToArgList rest tail 
-
-createLoopDecl :: forall rs. (forall rs'. RegTHNames rs' -> (RegBindNames rs -> Q Exp)) -> RegBindNames rs -> Q Exp
-createLoopDecl regWrapper regs = do; boundRegsNames <- nameRegs regs; regWrapper boundRegsNames (convertNamesToCode boundRegsNames)
-
+type family StaLoopRoutine (xs :: [Type]) s o a where 
+  StaLoopRoutine '[] s o a = Code Pos -> Code (DynRep o) -> Code (ST s (Maybe a))
+  StaLoopRoutine (x:xs) s o a = Code x -> StaLoopRoutine xs s o a  
 
 createIterHandlerDef :: forall hs s o a b. (RegBindNames hs -> (Input# o -> Input# o -> Code (ST s (Maybe a)))) -> Regs hs -> Q Pat -> Q Pat -> (Code (Pos -> DynRep o -> Handler# hs s o a) -> Code b) -> Code b
 createIterHandlerDef hbody regs qcoff qoff k = unsafeCodeCoerce $ do 
@@ -336,19 +298,15 @@ createRecDef name regs body qoff = do
     extractNameFromExpr (VarE name) = name 
     extractNameFromExpr _ = error "could not extract name from expr!"
 
-#define deriveRecBuilder(_o)                                                                 \
-instance RecBuilder _o where                                                                        \
-{                                                                                                   \
-  bindIterHandler# h freeRegs = createIterHandlerDef h freeRegs [p| (c# :: DynRep _o) |] [p| (!o# :: DynRep _o) |]; \
-  bindIter# inp regs = createLoopDef inp regs [p| (!o# :: DynRep _o) |];\
+#define deriveRecBuilder(_o)                                                                                                                                            \
+instance RecBuilder _o where                                                                                                                                            \
+{                                                                                                                                                                       \
+  bindIterHandler# h freeRegs = createIterHandlerDef h freeRegs [p| (c# :: DynRep _o) |] [p| (!o# :: DynRep _o) |];                                                     \
+  bindIter# inp regs = createLoopDef inp regs [p| (!o# :: DynRep _o) |];                                                                                                \
   bindRec# :: forall rs hs ys s a x. DynFunc rs hs ys s _o a x  -> Regs rs -> Proxy hs -> Proxy ys -> (RegBindNames rs -> StaSubroutine# '[] hs ys s _o a x ) -> Q Dec; \
-  bindRec# name regs _ _ binding = createRecDef @rs @hs @ys name regs binding [p| (!o# :: DynRep _o) |] \
+  bindRec# name regs _ _ binding = createRecDef @rs @hs @ys name regs binding [p| (!o# :: DynRep _o) |]                                                                 \
 };
 inputInstances(deriveRecBuilder)
-
-{-     {- The idea here is to try and reduce the number of times registers have to be passed around -} \
-    [|| let self ret h (pos :: Pos) !(o# :: DynRep _o) =                                            \
-              $$(binding [||ret||] [||h||] (Input# [||o#||] [||pos||])) in self ||]      \ -}                                 
 
 {- Marshalling Operations -}
 {-|
@@ -373,13 +331,13 @@ class MarshalOps o where
   -}
   dynCont# :: forall rs s a x. Proxy s -> Proxy a -> Proxy x -> Regs rs -> StaCont# rs s o a x -> DynCont rs s o a x
 
-#define deriveMarshalOps(_o)                                                                                        \
-instance MarshalOps _o where                                                                                        \
-{                                                                                                                   \
-  dynHandler# :: forall hs s a. Proxy s -> Proxy a -> Regs hs  -> StaHandler# hs s _o a -> DynHandler hs s _o a;    \
-  dynHandler# _ _ NoRegs        sh = eta [||\ (pos :: Pos) (o# :: DynRep _o) -> $$(sh (Input# [||o#||] [||pos||])) ||]; \
-  dynHandler# ps pa (Regs _ rs) sh = [|| \r -> $$(dynHandler# @_o @_ @s @a ps pa rs (sh [||r||]) ) ||];             \
-  dynCont# :: forall rs s a x. Proxy s -> Proxy a -> Proxy x -> Regs rs -> StaCont# rs s _o a x -> DynCont rs s _o a x; \
-  dynCont# _ _ _ regs sk = eta [|| \x (pos :: Pos) (o# :: DynRep _o) -> $$(eta $ toDynRegStack @_ @(ST s (Maybe a)) regs $ sk [||x||] (Input# [||o#||] [||pos||])) ||];            \
+#define deriveMarshalOps(_o)                                                                                                                                           \
+instance MarshalOps _o where                                                                                                                                           \
+{                                                                                                                                                                      \
+  dynHandler# :: forall hs s a. Proxy s -> Proxy a -> Regs hs  -> StaHandler# hs s _o a -> DynHandler hs s _o a;                                                       \
+  dynHandler# _ _ NoRegs        sh = eta [||\ (pos :: Pos) (o# :: DynRep _o) -> $$(sh (Input# [||o#||] [||pos||])) ||];                                                \
+  dynHandler# ps pa (Regs _ rs) sh = [|| \r -> $$(dynHandler# @_o @_ @s @a ps pa rs (sh [||r||]) ) ||];                                                                \
+  dynCont# :: forall rs s a x. Proxy s -> Proxy a -> Proxy x -> Regs rs -> StaCont# rs s _o a x -> DynCont rs s _o a x;                                                \
+  dynCont# _ _ _ regs sk = eta [|| \x (pos :: Pos) (o# :: DynRep _o) -> $$(eta $ toDynRegStack @_ @(ST s (Maybe a)) regs $ sk [||x||] (Input# [||o#||] [||pos||])) ||] \
 };
 inputInstances(deriveMarshalOps);

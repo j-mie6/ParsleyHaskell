@@ -1,4 +1,4 @@
-{-# LANGUAGE MagicHash, UnboxedTuples #-}
+{-# LANGUAGE MagicHash #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Dynamics
 Description : Representation of components that cross function boundaries
@@ -15,10 +15,8 @@ module Parsley.Internal.Backend.Machine.Types.Dynamics (
     module Parsley.Internal.Backend.Machine.Types.Dynamics
   ) where
 
-import Data.Kind                                   (Type)
 import Parsley.Internal.Backend.Machine.Types.Base (Handler#, Cont#, Subroutine#, Func, RegisterStack#)
 import Parsley.Internal.Common.Utils               (Code)
-import Parsley.Internal.Backend.Machine.Types.Registers (Regs)
 
 {-| 
 TODO: write comment

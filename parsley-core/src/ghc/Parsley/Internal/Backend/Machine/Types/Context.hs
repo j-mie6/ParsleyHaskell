@@ -64,17 +64,17 @@ import Control.Monad.Reader                             (asks, local, MonadReade
 import Data.STRef                                       (STRef)
 import Data.Dependent.Map                               (DMap)
 import Data.Maybe                                       (fromMaybe, isNothing, isJust)
-import Parsley.Internal.Backend.Machine.Defunc          (Defunc, pattern FREEVAR)
+import Parsley.Internal.Backend.Machine.Defunc          (Defunc)
 import Parsley.Internal.Backend.Machine.Identifiers     (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
 import Parsley.Internal.Backend.Machine.Types.Registers (Regs(..))
 import Parsley.Internal.Backend.Machine.Types.Coins     (Coins(Coins, willConsume))
 import Parsley.Internal.Backend.Machine.Types.Dynamics  (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
-import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine (staSubroutine#), StaCont, QLooproutine (QLooproutine), SomeCallableSubroutine (..))
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue, intercalate)
+import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaSubroutine (staSubroutine#), StaCont, SomeCallableSubroutine (..))
+import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
 import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
 
-import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup, keys)
+import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.QueueLike            as Queue (empty, null)
 import qualified Parsley.Internal.Common.RewindQueue          as Queue (rewind)
 
@@ -88,7 +88,6 @@ may form part of the generated code.
 @since 1.0.0.0
 -}
 data Ctx s o a = Ctx { μs         :: !(DMap MVar (QSubroutine s o a))               -- ^ Map of subroutine bindings.
-                     , μLoops     :: !(DMap MVar (QLooproutine s o a))              -- ^ Map of subroutine bindings associated with loops.
                      , φs         :: !(DMap ΦVar (QJoin s o a))                     -- ^ Map of join point bindings.
                      , σs         :: !(DMap ΣVar (Reg s))                           -- ^ Map of available registers.
                      , debugLevel :: {-# UNPACK #-} !Int                            -- ^ Approximate depth of debug combinator.
@@ -114,7 +113,7 @@ bindings: information about their required free-registers is included.
 @since 1.0.0.0
 -}
 emptyCtx :: DMap MVar (QSubroutine s o a) -> Ctx s o a
-emptyCtx μs = Ctx μs DMap.empty DMap.empty DMap.empty 0 0 0 Queue.empty 0 Queue.empty
+emptyCtx μs = Ctx μs DMap.empty DMap.empty 0 0 0 Queue.empty 0 Queue.empty
 
 -- Subroutines
 {- $sub-doc
@@ -167,9 +166,6 @@ askSub μ =
 
 askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubroutine s o a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
-
-askLoopUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QLooproutine s o a x)
-askLoopUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μLoops)
 
 -- Join Points
 {- $join-doc
@@ -304,7 +300,7 @@ takeFreeRegisters :: forall rs hs ys s o a x. Regs rs               -- ^ The fre
                   -> Ctx s o a                                      -- ^ The old context.
                   -> (Ctx s o a -> DynSubroutine '[] hs ys s o a x) -- ^ Given the new context, function that produces the subroutine.
                   -> DynFunc rs hs ys s o a x                       -- ^ The newly produced dynamic function.
-takeFreeRegisters NoRegs _ retregs ctx body = body ctx
+takeFreeRegisters NoRegs _ _ ctx body = body ctx
 takeFreeRegisters (Regs σ σs) hregs retregs ctx body = [||\reg -> $$(takeFreeRegisters σs hregs retregs (insertScopedΣ' σ [||reg||] ctx) body)||]
 
 insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a

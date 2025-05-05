@@ -19,11 +19,9 @@ module Parsley.Internal.Backend.Machine.Types.Base (
   ) where
 
 import Control.Monad.ST                          (ST)
-import Data.STRef                                (STRef)
 import Data.Kind                                 (Type)
 import GHC.Prim                                  (Word#)
 import Parsley.Internal.Backend.Machine.InputRep (DynRep)
-import Parsley.Internal.Backend.Machine.Types.Registers (Regs)
 
 #include "MachDeps.h"
 #if WORD_SIZE_IN_BITS < 64

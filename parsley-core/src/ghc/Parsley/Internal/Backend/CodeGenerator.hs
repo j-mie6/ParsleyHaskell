@@ -27,11 +27,8 @@ import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 import Parsley.Internal.Core.Defunc        (pattern UNIT)
 import Parsley.Internal.Trace              (Trace(..))
 
-
 import Parsley.Internal.Core.Defunc as Core (Defunc)
-
 import qualified Parsley.Internal.Opt as Opt
-import Data.Map (Map)
 
 type CodeGenStack a = VFreshT IΦVar (VFresh IMVar) a
 runCodeGenStack :: CodeGenStack a -> IMVar -> IΦVar -> a
@@ -134,7 +131,7 @@ shallow (Match p fs qs def) m =
      defc <- freshΦ (runCodeGen def φ)
      let defc':qcs' = map addCoinsNeeded (defc:qcs)
      fmap binder (runCodeGen p (In4 (Choices (map user fs) qcs' defc')))
-shallow (Let μ)                      m = do return $! In4 (Call μ False m)
+shallow (Let μ)                      m = do return $! In4 (Call μ m)
 shallow (Loop body exit)             m =
   do μ <- askM
      bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (_Jump μ)))))

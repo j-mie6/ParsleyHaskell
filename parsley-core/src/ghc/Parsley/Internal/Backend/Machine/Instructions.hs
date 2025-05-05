@@ -29,21 +29,19 @@ module Parsley.Internal.Backend.Machine.Instructions (
     PosSelector(..)
   ) where
 
-import Data.Kind                                    (Type)
-import Data.Void                                    (Void)
-import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar, SomeΣVar, IΣVar)
-import Parsley.Internal.Backend.Machine.Types.Coins (Coins(willConsume))
-import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
-import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))
-import Parsley.Internal.Core.CharPred               (CharPred)
-
-import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
-import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
-
-import qualified Parsley.Internal.Backend.Machine.Types.Coins as Coins (pattern Zero)
-import Data.Set (Set)
+import Data.Kind                                        (Type)
+import Data.Void                                        (Void)
+import Data.Some                                        (Some)
+import Parsley.Internal.Backend.Machine.Identifiers     (MVar, ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.Types.Coins     (Coins(willConsume))
 import Parsley.Internal.Backend.Machine.Types.Registers (Regs)
-import Data.Some (Some)
+import Parsley.Internal.Common                          (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
+import Parsley.Internal.Core.CombinatorAST              (PosSelector(..))
+import Parsley.Internal.Core.CharPred                   (CharPred)
+
+import           Parsley.Internal.Backend.Machine.Defunc      as Machine (Defunc, user)
+import           Parsley.Internal.Core.Defunc                 as Core    (Defunc(ID), pattern FLIP_H)
+import qualified Parsley.Internal.Backend.Machine.Types.Coins as Coins   (pattern Zero)
 
 {-|
 This represents the instructions of the machine, in CPS form as an indexed functor.
@@ -87,7 +85,6 @@ data Instr (o :: Type)                                  -- The FIXED input type
 
   @since 1.0.0.0 -}
   Call      :: MVar x                  {- ^ The binding to invoke. -}
-            -> Bool                    {- ^ Set to true if a loop subroutine call. Temporary fix to get loop continuations to work.-}
             -> k (x : xs) (Succ n) r a {- ^ Continuation to do after the call. -}
             -> Instr o k xs (Succ n) r a
   {-| Fails unconditionally.
@@ -394,7 +391,7 @@ _GetSoft :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
 _GetSoft σ = Get σ Soft
 
 _Jump :: MVar x -> Instr o (Fix4 (Instr o)) '[] (Succ n) x a
-_Jump x = Call x False (In4 Ret)
+_Jump x = Call x (In4 Ret)
 
 -- Instances
 instance IFunctor4 (Instr o) where
@@ -403,7 +400,7 @@ instance IFunctor4 (Instr o) where
   imap4 f (Pop k)             = Pop (f k)
   imap4 f (Lift2 g k)         = Lift2 g (f k)
   imap4 f (Sat g k)           = Sat g (f k)
-  imap4 f (Call μ l k)        = Call μ l (f k)
+  imap4 f (Call μ k)          = Call μ (f k)
   imap4 _ Empt                = Empt
   imap4 f (Commit k)          = Commit (f k)
   imap4 f (Catch p h)         = Catch (f p) (imap4 f h)
@@ -433,7 +430,7 @@ instance Show (Fix4 (Instr o) xs n r a) where
     where
       alg :: forall xs n r a. Instr o (Const4 (String -> String)) xs n r a -> String -> String
       alg Ret                        = "Ret"
-      alg (Call μ l k)               = "(Call " . shows μ . (if l then " [LOOP] " else " ") . getConst4 k . ")"
+      alg (Call μ k)                 = "(Call " . shows μ . getConst4 k . ")"
       alg (Push x k)                 = "(Push " . shows x . " " . getConst4 k . ")"
       alg (Pop k)                    = "(Pop " . getConst4 k . ")"
       alg (Lift2 f k)                = "(Lift2 " . shows f . " " . getConst4 k . ")"

@@ -13,18 +13,16 @@ for the top level of a parser.
 -}
 module Parsley.Internal.Backend.Machine.LetRecBuilder (letRec) where
 
-import Data.Dependent.Sum                           (DSum((:=>)))
-import Data.Functor.Const                           (Const(..))
-import Data.GADT.Compare                            (GCompare)
-import Data.Some                                    (Some(Some))
-import Language.Haskell.TH                          (newName, Name, Q)
-import Language.Haskell.TH.Syntax                   (Exp(VarE, LetE), Dec(FunD), Clause(Clause), Body(NormalB))
-import Parsley.Internal.Backend.Machine.LetBindings (LetBinding(..), Metadata, Binding)
-import Parsley.Internal.Backend.Machine.Types.Base ( Func )
-import Parsley.Internal.Backend.Machine.Types.Registers
-    ( Regs(..) )
-import Parsley.Internal.Common.Utils                (Code)
-import Parsley.Internal.Common.THUtils              (unsafeCodeCoerce, unTypeCode)
+import Data.Dependent.Sum                               (DSum((:=>)))
+import Data.Functor.Const                               (Const(..))
+import Data.GADT.Compare                                (GCompare)
+import Data.Some                                        (Some(Some))
+import Language.Haskell.TH                              (newName, Name, Q, Dec, Exp(VarE, LetE))
+import Parsley.Internal.Backend.Machine.LetBindings     (LetBinding(..), Metadata, Binding)
+import Parsley.Internal.Backend.Machine.Types.Base      ( Func )
+import Parsley.Internal.Backend.Machine.Types.Registers ( Regs(..) )
+import Parsley.Internal.Common.Utils                    (Code)
+import Parsley.Internal.Common.THUtils                  (unsafeCodeCoerce, unTypeCode)
 
 import Data.Dependent.Map as DMap (DMap, (!), map, toList, traverseWithKey)
 

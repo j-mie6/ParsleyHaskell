@@ -21,21 +21,23 @@ module Parsley.Internal.Backend.Machine.Eval (eval) where
 import Data.Dependent.Map                                  (DMap)
 import Data.Functor                                        ((<&>))
 import Data.Void                                           (Void)
-import Control.Monad                                       (forM, liftM2, liftM3, liftM4)
+import Data.Some                                           (Some (..), withSome)
+import Control.Monad                                       (forM, liftM2, liftM4)
 import Control.Monad.Reader                                (Reader, ask, asks, reader, local)
 import Control.Monad.ST                                    (runST)
 import Parsley.Internal.Backend.Machine.Defunc             (Defunc(INPUT, LAM), pattern FREEVAR, genDefunc, ap, ap2, _if)
-import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar, IΣVar)
+import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΦVar, ΣVar)
 import Parsley.Internal.Backend.Machine.InputOps           (InputOps, DynOps)
 import Parsley.Internal.Backend.Machine.InputRep           (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions       (Instr(..), MetaInstr(..), Access(..), Handler(..), PosSelector(..))
 import Parsley.Internal.Backend.Machine.LetBindings        (LetBinding(body))
-import Parsley.Internal.Backend.Machine.Types.Registers    (Regs (..), makeRegs, debugRegsList)
+import Parsley.Internal.Backend.Machine.Types.Registers    (Regs (..))
 import Parsley.Internal.Backend.Machine.LetRecBuilder      (letRec)
 import Parsley.Internal.Backend.Machine.Ops
 import Parsley.Internal.Backend.Machine.Types              (MachineMonad, Machine(..), run, qSubroutine)
 import Parsley.Internal.Backend.Machine.PosOps             (initPos)
 import Parsley.Internal.Backend.Machine.Types.Context
+import Parsley.Internal.Backend.Machine.Types.Statics      (SomeCallableSubroutine(..), QStaCont (..))
 import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(knownPreds, willConsume, willCache), one, minus)
 import Parsley.Internal.Backend.Machine.Types.Input        (Input(off), mkInput, forcePos, updatePos, updateOffset)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset(offset), unsafeDeepestKnown)
@@ -46,11 +48,7 @@ import Parsley.Internal.Trace                              (Trace(trace))
 import System.Console.Pretty                               (color, Color(Green))
 
 import qualified Debug.Trace (trace)
-import qualified Parsley.Internal.Opt   as Opt
-import Parsley.Internal.Opt (Flags(leadCharFactoring))
-import Data.Set (Set)
-import Data.Some (Some (..), withSome)
-import Parsley.Internal.Backend.Machine.Types.Statics (SomeCallableSubroutine(..), QStaCont (..))
+import qualified Parsley.Internal.Opt as Opt
 
 {-|
 This function performs the evaluation on the top-level let-bound parser to convert it into code.
@@ -77,39 +75,39 @@ readyMachine :: (?ops :: InputOps (StaRep o), Ops o, Trace, ?flags :: Opt.Flags)
 readyMachine = trace "starting readymachine" $ cata4 (Machine . alg)
   where
     alg :: (?ops :: InputOps (StaRep o), Ops o, ?flags :: Opt.Flags) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
-    alg Ret                 = {- DBG.trace "EVAL RET " $  -}evalRet
-    alg (Call μ l k)        = {- DBG.trace "EVAL CALL" $  -}evalCall μ l k
-    alg (Push x k)          = {- DBG.trace "EVAL p   " $  -}evalPush x k
-    alg (Pop k)             = {- DBG.trace "EVAL pp  " $  -}evalPop k
-    alg (Lift2 f k)         = {- DBG.trace "EVAL l   " $  -}evalLift2 f k
-    alg (Sat p k)           = {- DBG.trace "EVAL sat " $  -}evalSat p k
-    alg Empt                = {- DBG.trace "EVAL EMPT" $  -}evalEmpt
-    alg (Commit k)          = {- DBG.trace "EVAL comm" $  -}evalCommit k
-    alg (Catch k h)         = {- DBG.trace "EVAL CTCH" $  -}evalCatch k h
-    alg (Tell k)            = {- DBG.trace "EVAL tell" $  -}evalTell k
-    alg (Seek k)            = {- DBG.trace "EVAL seek" $  -}evalSeek k
-    alg (Case p q)          = {- DBG.trace "EVAL case" $  -}evalCase p q
-    alg (Choices fs ks def) = {- DBG.trace "EVAL chcs" $  -}evalChoices fs ks def
-    alg (Iter μ regs l k)   = {- DBG.trace "EVAL ITER" $  -}evalIter μ regs l k
-    alg (Join φ)            = {- DBG.trace "EVAL JOIN" $  -}evalJoin φ
-    alg (MkJoin φ rs p k)   = {- DBG.trace "EVAL mkj " $  -}evalMkJoin φ rs p k
-    alg (Swap k)            = {- DBG.trace "EVAL swap" $  -}evalSwap k
-    alg (Dup k)             = {- DBG.trace "EVAL DUPs" $  -}evalDup k
-    alg (Make σ c k)        = {- DBG.trace "EVAL MAKE" $  -}evalMake σ c k
-    alg (Get σ c k)         = {- DBG.trace "EVAL GET"  $  -}evalGet σ c k
-    alg (Put σ c k)         = {- DBG.trace "EVAL PUT"  $  -}evalPut σ c k
-    alg (SelectPos sel k)   = {- DBG.trace "EVAL xxxx" $  -}evalSelectPos sel k
-    alg (LogEnter name k)   = {- DBG.trace "EVAL xxxx" $  -}evalLogEnter name k
-    alg (LogExit name k)    = {- DBG.trace "EVAL xxxx" $  -}evalLogExit name k
-    alg (MetaInstr m k)     = {- DBG.trace "EVAL xxxx" $  -}evalMeta m k
+    alg Ret                 = evalRet
+    alg (Call μ k)        = evalCall μ k
+    alg (Push x k)          = evalPush x k
+    alg (Pop k)             = evalPop k
+    alg (Lift2 f k)         = evalLift2 f k
+    alg (Sat p k)           = evalSat p k
+    alg Empt                = evalEmpt
+    alg (Commit k)          = evalCommit k
+    alg (Catch k h)         = evalCatch k h
+    alg (Tell k)            = evalTell k
+    alg (Seek k)            = evalSeek k
+    alg (Case p q)          = evalCase p q
+    alg (Choices fs ks def) = evalChoices fs ks def
+    alg (Iter μ regs l k)   = evalIter μ regs l k
+    alg (Join φ)            = evalJoin φ
+    alg (MkJoin φ rs p k)   = evalMkJoin φ rs p k
+    alg (Swap k)            = evalSwap k
+    alg (Dup k)             = evalDup k
+    alg (Make σ c k)        = evalMake σ c k
+    alg (Get σ c k)         = evalGet σ c k
+    alg (Put σ c k)         = evalPut σ c k
+    alg (SelectPos sel k)   = evalSelectPos sel k
+    alg (LogEnter name k)   = evalLogEnter name k
+    alg (LogExit name k)    = evalLogExit name k
+    alg (MetaInstr m k)     = evalMeta m k
 
 evalRet :: (DynOps o, ?flags :: Opt.Flags) => MachineMonad s o (x : xs) n x a
 evalRet = reader $ \ctx γ ->
   case retCont γ of  
     QStaCont rc regs -> resume rc ctx regs γ
 
-evalCall :: forall s o a x xs n r. (MarshalOps o, DynOps o, ?flags :: Opt.Flags) => MVar x -> Bool -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
-evalCall μ _ k = freshUnique $ \u -> do 
+evalCall :: forall s o a x xs n r. (MarshalOps o, DynOps o, ?flags :: Opt.Flags) => MVar x  -> Machine s o (x : xs) (Succ n) r a -> MachineMonad s o xs (Succ n) r a
+evalCall μ k = freshUnique $ \u -> do 
   someSub <- askSub μ
   case someSub of 
     SomeCallableSubroutine sub hregs rregs -> do 
@@ -177,7 +175,7 @@ evalChoices fs ks (Machine def) = liftM2 (\mdef mks γ -> let Op x xs = operands
     go x (f:fs) (mk:mks) def γ = _if (ap f x) (mk γ) (go x fs mks def γ)
     go _ _      _        def γ = def γ
 
-evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o, DynOps o, ?flags :: Opt.Flags)
+evalIter :: (RecBuilder o, PositionOps (StaRep o), HandlerOps o, DynOps o)
          => MVar Void -> Maybe (Some Regs) -> Machine s o '[] One Void a -> Handler o (Machine s o) (o : xs) n r a
          -> MachineMonad s o xs n r a
 evalIter _ Nothing _ _ = undefined -- We should have already attached register data!
@@ -187,9 +185,9 @@ evalIter μ (Just regs) l h =
       local voidCoins $  -- We must not allow factored input to pass through to iterative handlers, they have rolling inputs
         case h of
           Always (Just (Some hregs)) gh h -> 
-            reader $ \ctx γ -> withSome regs (\regs -> bindIterAlways' ctx μ regs l gh (buildHandler γ ctx h hregs u1) hregs (input γ) u2)
+            reader $ \ctx γ -> withSome regs (\regs -> bindIterAlways ctx μ regs l gh (buildHandler γ ctx h hregs u1) hregs (input γ) u2)
           Same (Just (Some hregs)) gyes yes gno no ->
-            reader $ \ ctx γ -> withSome regs (\regs -> bindIterSame' ctx μ regs l gyes (buildIterYesHandler γ ctx yes hregs u1) gno (buildHandler γ ctx no hregs u1) hregs (input γ) u2)
+            reader $ \ ctx γ -> withSome regs (\regs -> bindIterSame ctx μ regs l gyes (buildIterYesHandler γ ctx yes hregs u1) gno (buildHandler γ ctx no hregs u1) hregs (input γ) u2)
           _ -> undefined -- Should have attached register data already.
 
 evalJoin :: (DynOps o, ?flags :: Opt.Flags) => ΦVar x -> MachineMonad s o (x : xs) n r a
@@ -288,9 +286,9 @@ withLengthCheckAndCoins coins k = reader $ \ctx γ ->
         good deepest cached = foldr prefetch (remainder deepest) (zip cached preds) ctx
     in emitLengthCheck (willConsume coins) (willCache coins) headCheck good (raise ctx γ) (off (input γ)) offset
         -- this is needed because a cached predicate cannot be compared for equality if it's user-pred, and it'll duplicate!
-  where onlyStatic UserPred{}                   = Nothing
-        onlyStatic p | leadCharFactoring ?flags = Just p
-        onlyStatic _                            = Nothing
+  where onlyStatic UserPred{}                       = Nothing
+        onlyStatic p | Opt.leadCharFactoring ?flags = Just p
+        onlyStatic _                                = Nothing
 
 state :: (r -> (a, r)) -> (a -> Reader r b) -> Reader r b
 state f k = do

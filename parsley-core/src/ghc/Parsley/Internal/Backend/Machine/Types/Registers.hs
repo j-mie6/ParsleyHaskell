@@ -1,16 +1,15 @@
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies, UndecidableInstances #-}
 module Parsley.Internal.Backend.Machine.Types.Registers (
-    module Parsley.Internal.Backend.Machine.Types.Registers, Regs(..), makeRegs
+    module Parsley.Internal.Backend.Machine.Types.Registers, Regs(..)
     ) where 
 
-import Data.Kind (Type, Constraint)
+import Data.Kind                         (Type)
+import Data.Set                          (Set)
+import Data.Some                         (Some (..))
+import Language.Haskell.TH               (Name)
 import Parsley.Internal.Core.Identifiers (ΣVar (..), SomeΣVar (..))
-import Data.Set (Set)
-import Data.Some (Some (..))
-import Parsley.Internal.Common (Code)
-import Language.Haskell.TH (Name)
-import Data.List (intercalate)
+import Parsley.Internal.Common           (Code)
+
 import qualified Data.Set as Set
 
 {-|

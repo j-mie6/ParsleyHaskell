@@ -19,10 +19,9 @@ module Parsley.Internal.Backend.Machine.LetBindings (
   ) where
 
 import Prelude hiding                                             (foldr)
-import Data.Kind                                                  (Type)
-import Data.Set                                                   (Set, foldr)
-import Data.Some                                                  (Some, pattern Some, withSome)
-import Parsley.Internal.Backend.Machine.Identifiers               (ΣVar, SomeΣVar(..))
+import Data.Set                                                   (Set)
+import Data.Some                                                  (Some, pattern Some)
+import Parsley.Internal.Backend.Machine.Identifiers               (SomeΣVar(..))
 import Parsley.Internal.Backend.Machine.Instructions              (Instr)
 import Parsley.Internal.Backend.Machine.Types.Registers           (Regs (..), makeRegs)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))

@@ -51,7 +51,7 @@ alg (Push _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg (Pop k)            (SSucc n) = VCons False (getStack k n)
 alg (Lift2 _ k)        (SSucc n) = let VCons rel xs = getStack k n in VCons rel (VCons rel xs)
 alg (Sat _ k)          n         = let VCons _ xs = getStack k (SSucc n) in xs
-alg (Call _ _ k)         n       = let VCons _ xs = getStack k (SSucc n) in xs
+alg (Call _ k)         n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg Empt               n         = replicateVec n False
 alg (Commit k)         n         = getStack k n
 alg (Catch k _)        n         = getStack k n

@@ -26,7 +26,7 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
     StaHandler#, StaHandler(..), AugmentedStaHandler, QAugmentedStaHandler(..), StaHandlerCase, StaSameHandler,
 
     -- ** @StaHandler@ Operations
-    fromStaHandler#, fromDynHandler, staHandler#, SomeCallableSubroutine(..),
+    fromStaHandler#, fromDynHandler, SomeCallableSubroutine(..),
 
     -- ** @AugmentedStaHandler@ Builders
     -- | The following functions are builders of `AugmentedStaHandler`.
@@ -51,7 +51,6 @@ module Parsley.Internal.Backend.Machine.Types.Statics (
   ) where
 
 import Control.Monad.ST                                           (ST)
-import Data.STRef                                                 (STRef)
 import Data.Kind                                                  (Type)
 import Data.Maybe                                                 (fromMaybe)
 import Parsley.Internal.Backend.Machine.LetBindings               (Metadata, newMeta)

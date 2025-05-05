@@ -13,18 +13,11 @@ template haskell as a lower, combinator-based, level.
 -}
 module Parsley.Internal.Common.THUtils (eta, unsafeCodeCoerce, unTypeCode, debugTH) where
 
-import Data.Generics                 (everything, mkQ)
 import Control.Arrow                 (first)
-import Language.Haskell.TH.Syntax    ( Exp(AppE, LamE, VarE), Pat(VarP, BangP, SigP)
-
-
-
-                                     , unTypeCode, unsafeCodeCoerce
-
-                                     )
+import Data.Generics                 (everything, mkQ)
+import Language.Haskell.TH           (Q, Exp(AppE, LamE, VarE), Pat(VarP, BangP, SigP), unTypeCode, unsafeCodeCoerce, runQ)
 import Parsley.Internal.Common.Utils (Code)
-import Language.Haskell.TH (Q, runQ)
-import GHC.IO (unsafePerformIO)
+import GHC.IO                        (unsafePerformIO)
 
 {-|
 Given a function (of arbitrarily many arguments, but it must at /least/ have 1), eta-reduces
@@ -57,18 +50,10 @@ eta = unsafeCodeCoerce . fmap checkEtaMulti . unTypeCode
                          args
     checkEtaMulti qf = qf
 
-
-
-
-
-
-
-
-
--- | Debug: print TH AST at "pure" site
+-- Debug: print TH AST at "pure" site
 debugTH :: Q Exp -> a -> a
 debugTH qexp result =
   unsafePerformIO $ do
     expr <- runQ qexp
-    putStrLn (show expr)
+    print expr
     return result

@@ -47,8 +47,8 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Join Point Operations
     setupJoinPoint,
     -- ** Iteration Operations
-    bindIterAlways', -- TODO: rename to remove aposth
-    bindIterSame',   -- TODO: ^
+    bindIterAlways, -- TODO: rename to remove aposth
+    bindIterSame,   -- TODO: ^
     -- ** Recursion Operations
     buildRec,
     -- ** Marshalling Operations
@@ -61,44 +61,37 @@ module Parsley.Internal.Backend.Machine.Ops (
     HandlerOps, JoinBuilder, RecBuilder, PositionOps, MarshalOps, LogOps
   ) where
 
-import Control.Monad                                              (liftM2)
 import Control.Monad.Reader                                       (ask, local)
 import Control.Monad.ST                                           (ST)
+import Data.Data                                                  (Proxy(..))
 import Data.List                                                  (mapAccumL)
 import Data.STRef                                                 (writeSTRef, readSTRef, newSTRef)
-import Data.Void                                                  (Void)
 import Debug.Trace                                                (trace)
+import Data.Void                                                  (Void)
+import Language.Haskell.TH                                        (newName, Q, Exp(..), Dec(FunD), Clause(..), Body(NormalB))
 import Parsley.Internal.Backend.Machine.BindingOps
 import Parsley.Internal.Backend.Machine.Defunc                    (Defunc(INPUT), genDefunc, _if, pattern FREEVAR)
-import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.Identifiers               (MVar, ΦVar, ΣVar(..), SomeΣVar(..))
 import Parsley.Internal.Backend.Machine.InputOps                  (PositionOps(..), LogOps(..), InputOps, DynOps, next, uncons, check, asDyn, asSta)
-import Parsley.Internal.Backend.Machine.InputRep                  (StaRep, DynRep)
+import Parsley.Internal.Backend.Machine.InputRep                  (StaRep)
 import Parsley.Internal.Backend.Machine.Instructions              (Access(..))
 import Parsley.Internal.Backend.Machine.LetBindings               (Metadata(failureInputCharacteristic, successInputCharacteristic))
 import Parsley.Internal.Backend.Machine.Types                     (MachineMonad, Machine(..), run)
-import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..), RegBindNames (..), RegTHNames (..), fromRegs, debugRegsList)
+import Parsley.Internal.Backend.Machine.Types.Registers           (Regs(..), RegBindNames (..), fromRegs)
 import Parsley.Internal.Backend.Machine.Types.Context
-import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler, DynRegisterStack, DynSubroutine)
+import Parsley.Internal.Backend.Machine.Types.Dynamics            (DynFunc, DynCont, DynHandler, DynRegisterStack)
 import Parsley.Internal.Backend.Machine.Types.Input               (Input(..), Input#(..), toInput, fromInput, chooseInput)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset        (moveOne)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic)
 import Parsley.Internal.Backend.Machine.Types.State               (Γ(..), OpStack(..))
 import Parsley.Internal.Backend.Machine.Types.Statics
 import Parsley.Internal.Common                                    (One, Code, Vec(..), Nat(..))
-import Parsley.Internal.Common.THUtils                            (eta, unTypeCode, unsafeCodeCoerce, debugTH)
+import Parsley.Internal.Common.THUtils                            (eta, unTypeCode, unsafeCodeCoerce)
 import System.Console.Pretty                                      (color, Color(Green, White, Red, Blue))
 
 import Parsley.Internal.Backend.Machine.Types.Input.Offset as Offset (Offset(..), updateDeepestKnown)
-import qualified Parsley.Internal.Opt   as Opt
-import Parsley.Internal.Backend.Machine.Types.Base (Handler#, Pos, RegisterStack#)
-import Data.Data (Proxy(..), (:~:) (..))
-import Parsley.Internal.Core.Identifiers (ΣVar(..))
-import Unsafe.Coerce (unsafeCoerce)
-import Language.Haskell.TH (newName, Q, unsafeCodeCoerce, Pat (..))
-import Language.Haskell.TH.Syntax (Exp(..), Dec(FunD), mkName, Clause (..), Body (..), Pat (BangP))
+import qualified Parsley.Internal.Opt  as Opt
 import qualified Data.Set as Set
-import Parsley.Internal.Backend.Machine.Identifiers (SomeΣVar(..))
-import Language.Haskell.TH (runQ)
 
 {- General Operations -}
 {-|
@@ -340,7 +333,7 @@ buildIterYesHandler γ ctx h regs u = fromStaHandler# (peel regs $ buildYesHandl
   where
     peel :: forall hs. Regs hs -> (Input# o -> StaSameHandler hs s a) -> StaHandler# hs s o a
     peel NoRegs      h = h
-    peel (Regs _ rs) h = \r -> peel rs (\inp -> h inp r)
+    peel (Regs _ rs) h = \r -> peel rs (`h` r)
 
 -- Handler binding
 {-|
@@ -396,9 +389,6 @@ feedHandlerBoundRegs :: forall hs s o a. RegBindNames hs -> StaHandler# hs s o a
 feedHandlerBoundRegs NoName h = h
 feedHandlerBoundRegs (RegName _ name rs) h = feedHandlerBoundRegs rs (h name)
 
-feedSameHandlerBoundRegs :: forall hs s o a. RegBindNames hs -> StaSameHandler hs s a -> StaSameHandler '[] s a
-feedSameHandlerBoundRegs NoName h = h
-feedSameHandlerBoundRegs (RegName _ name rs) h = feedSameHandlerBoundRegs rs (h name)
 
 
 {- Continuation Operations -}
@@ -452,16 +442,6 @@ callWithContinuation ctx sub hregs ret retregs input (VCons h _) = case h of
   QAugmentedStaHandler h regs ->
     staSubroutine# sub (dynCont retregs ret) (eta $ fitHandler ctx hregs (dynHandler h regs (failureInputCharacteristic (meta sub))) regs) (fromInput input)
   where
-    eqReg :: ΣVar a -> ΣVar b -> Maybe (a :~: b)
-    eqReg (ΣVar σa) (ΣVar σb) = if σa == σb then unsafeCoerce (Just Refl) else Nothing
-    eqRegs :: forall hs rs. Regs hs -> Regs rs -> Maybe (hs :~: rs)
-    eqRegs NoRegs NoRegs = Just Refl
-    eqRegs (Regs σ1 xs) (Regs σ2 ys) = do
-      Refl <- eqRegs xs ys
-      Refl <- eqReg σ1 σ2
-      return Refl
-    eqRegs _ _ = Nothing
-
     -- Take a handler with input regs hs, transform this into a handler with inputs hs' such that all necessary 
     -- registers from hs' are piped and others are gathered from the given callsite context (i.e. they have not changed in the call)
     fitHandler :: forall hs hs' s o a. Ctx s o a -> Regs hs' -> DynHandler hs s o a -> Regs hs -> DynHandler hs' s o a
@@ -477,10 +457,9 @@ callWithContinuation ctx sub hregs ret retregs input (VCons h _) = case h of
         provide (Regs σ rs') ctx dh rs = if Set.member (SomeΣVar σ) sharedRegs
                                          then [|| \hr -> $$(provide rs' (bindΣ σ [|| hr ||] ctx )  dh rs) ||] -- Supply
                                          else [|| \_ -> $$(provide rs' ctx dh rs) ||] -- Ignore
-        
 
         supplyAllFromContext :: forall rs. Ctx s o a -> DynHandler rs s o a -> Regs rs -> DynHandler '[] s o a
-        supplyAllFromContext ctx dh NoRegs = dh 
+        supplyAllFromContext _ dh NoRegs = dh 
         supplyAllFromContext ctx dh (Regs σ rs) = supplyAllFromContext ctx [|| $$dh $$(boundΣ σ ctx) ||] rs
 
 
@@ -548,7 +527,7 @@ the loop consumed input in its final iteration.
 
 @since 1.8.0.0
 -}
-bindIterAlways' :: forall s o a rs hs. (RecBuilder o, DynOps o, ?flags :: Opt.Flags)
+bindIterAlways :: forall s o a rs hs. (RecBuilder o, DynOps o)
                => Ctx s o a                  -- ^ The context to keep the binding
                -> MVar Void                  -- ^ The name of the binding.
                -> Regs rs                    -- ^ Registers present in the loop body.
@@ -559,7 +538,7 @@ bindIterAlways' :: forall s o a rs hs. (RecBuilder o, DynOps o, ?flags :: Opt.Fl
                -> Input o                    -- ^ The initial offset to provide to the loop
                -> Word                       -- ^ The unique name for captured offset /and/ iteration offset
                -> Code (ST s (Maybe a))
-bindIterAlways' ctx μ regs l needed h hregs inp u =
+bindIterAlways ctx μ regs l needed h hregs inp u =
    bindIterHandlerInline# @o @s @a @_ @hs needed (staHandler# . h . toInput u) hregs $ \qhandler ->
       bindIter# @o (fromInput inp) (gatherBinds regs ctx) $ \qloop loopBoundRegs inp# ->
         updateBinds loopBoundRegs ctx $ \ctx ->
@@ -570,9 +549,7 @@ bindIterAlways' ctx μ regs l needed h hregs inp u =
   where
     lambdafy :: forall rs. Regs rs -> Code (LoopRoutine rs s o a) -> StaSubroutine# rs hs '[] s o a Void
     lambdafy NoRegs qloop  = \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
-    lambdafy (Regs σ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
-    -- \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
-    --liquefyΣ :: (?flags :: Opt.Flags) => ΣVar x -> (Ctx s o a -> Code (ST s r))-> Ctx s o a -> Code (ST s r)
+    lambdafy (Regs _ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
 
 updateBinds :: forall s o a rs r. RegBindNames rs -> Ctx s o a -> (Ctx s o a -> Code (ST s r)) -> Code (ST s r)
 updateBinds NoName ctx k = k ctx
@@ -584,7 +561,7 @@ the same way as `bindSameHandler`.
 
 @since 2.1.0.0
 -}
-bindIterSame' :: forall s o a rs hs. (RecBuilder o, HandlerOps o, PositionOps (StaRep o), DynOps o, ?flags :: Opt.Flags)
+bindIterSame :: forall s o a rs hs. (RecBuilder o, HandlerOps o, PositionOps (StaRep o), DynOps o)
              => Ctx s o a                  -- ^ The context to store the binding in.
              -> MVar Void                  -- ^ The name of the binding.
              -> Regs rs                    -- ^ Registers present in the loop body.
@@ -597,7 +574,7 @@ bindIterSame' :: forall s o a rs hs. (RecBuilder o, HandlerOps o, PositionOps (S
              -> Input o                    -- ^ The initial offset of the loop.
              -> Word                       -- ^ The unique name of the captured offsets /and/ the iteration offset.
              -> Code (ST s (Maybe a))
-bindIterSame' ctx μ regs l neededYes yes neededNo no hregs inp u =
+bindIterSame ctx μ regs l neededYes yes neededNo no hregs inp u =
   bindHandlerInline# @o @s @a neededYes (staHandler# yes) hregs $ \qyes ->
     bindIterHandlerInline# @o @s @a neededNo (staHandler# . no . toInput u) hregs $ \qno -> -- 
       let handler (inpc :: Input# o) = makeHandlerJoin inpc hregs qyes qno
@@ -610,7 +587,7 @@ bindIterSame' ctx μ regs l neededYes yes neededNo no hregs inp u =
   where
     lambdafy :: forall rs. Regs rs -> Code (LoopRoutine rs s o a) -> StaSubroutine# rs hs '[] s o a Void
     lambdafy NoRegs qloop  = \_ _ inp -> [|| $$qloop $$(pos# inp) $$(off# inp) ||]
-    lambdafy (Regs σ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
+    lambdafy (Regs _ rs) qloop = \r -> lambdafy rs [|| $$qloop $$r ||]
 
     moveInputInside :: forall hs. Regs hs -> StaHandler# hs s o a -> Input# o -> StaSameHandler hs s a
     moveInputInside NoRegs sh inp = sh inp

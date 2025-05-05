@@ -641,12 +641,12 @@ buildRec :: forall rs hs ys s o a r. (RecBuilder o, DynOps o)
          -> Ctx s o a               -- ^ The context to re-insert the register-less binding
          -> Machine s o '[] One r a -- ^ The body of the binding.
          -> Metadata                -- ^ The metadata associated with the binding
-         -> DynFunc rs hs ys s o a r
+         -> Q Dec
 buildRec μ func rs hs rregs ctx k meta =
-  takeFreeRegisters @rs @hs @ys @s @o @a @r rs hs rregs ctx $ \ctx -> 
-      bindRec# @o @hs @ys $ \qret (qh :: DynHandler hs s o a) inp -> 
-      run k (Γ Empty (QStaCont (mkStaContDyn qret rregs) rregs) (toInput 0 inp) (VCons (QAugmentedStaHandler (augmentHandlerDyn @hs Nothing qh hs) hs) VNil))
-            (insertSub @rs @hs @ys μ (mkStaSubroutineMeta @_ @hs meta (feedBinds' rs func)) rs hs rregs (nextUnique ctx))
+      bindRec# @o @rs @hs @ys @s @a @r func rs (Proxy @hs) (Proxy @ys) $ \bregs qret (qh :: DynHandler hs s o a) inp -> 
+        updateBinds bregs ctx $ \ctx -> 
+          run k (Γ Empty (QStaCont (mkStaContDyn qret rregs) rregs) (toInput 0 inp) (VCons (QAugmentedStaHandler (augmentHandlerDyn @hs Nothing qh hs) hs) VNil))
+              (insertSub @rs @hs @ys μ (mkStaSubroutineMeta @_ @hs meta (feedBinds' rs func)) rs hs rregs (nextUnique ctx))
   where
     feedBinds' :: forall rs. Regs rs -> DynFunc rs hs ys s o a r -> StaSubroutine# rs hs ys s o a r 
     feedBinds' NoRegs func = \k h inp -> [|| $$func $$k $$h $$(pos# inp) $$(off# inp) ||]

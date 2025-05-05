@@ -52,7 +52,7 @@ brainfuck =
        [ bfTest string          "Parsley (String)"          brainfuckParsleyS
        , bfTest text            "Parsley (Text)"            brainfuckParsleyT
        , bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB
-       , bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
+       -- , bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
        -- , bfTest string          "Handrolled"                BrainfuckBench.Handrolled.Parser.brainfuck
        -- , bfTest string          "Happy"                     BrainfuckBench.Happy.Parser.brainfuck
        -- , bfTest string          "Parsec (String)"           (parsecParse BrainfuckBench.Parsec.Parser.brainfuck)

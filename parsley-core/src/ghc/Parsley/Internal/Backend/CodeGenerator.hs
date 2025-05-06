@@ -145,7 +145,7 @@ shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 -- make sure to issue the fence after `p` is generated, to allow for a (safe) single character factor
 shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins False (addCoinsNeeded m))
-
+shallow (MetaCombinator Tenderise p) m = do runCodeGen p m
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret
 -- However, I'm not yet sure about the interactions with try yet...

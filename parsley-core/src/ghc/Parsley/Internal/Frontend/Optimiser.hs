@@ -28,7 +28,8 @@ import qualified Parsley.Internal.Opt   as Opt
 import qualified Data.Dependent.Map as DM
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Parsley.Internal.Frontend.Analysis.ReachingDefs (soleReachers)
+import Parsley.Internal.Frontend.Analysis.ReachingDefs (soleReachers, SoleReacherData (..))
+import qualified Debug.Trace as Debug
 
 pattern (:<$>:) :: Defunc (a -> b) -> Fix Combinator a -> Combinator (Fix Combinator) b
 pattern f :<$>: p = In (Pure f) :<*>: p
@@ -200,15 +201,18 @@ dataFlowOptimise p mus
     cfg = buildCFG ptagged mustagged
 
     -- Perform reaching definition analysis and tenderisation
-    reachers = soleReachers cfg
+    reacherData = soleReachers cfg
     ptagged' = cata tenderisationAlg ptagged
     mustagged' = DM.map (cata tenderisationAlg) mustagged
     invalidTag = -1 -- We do not care about tags on metacombinators TODO: this is fugly
     tenderisationAlg :: TaggedCombinator (Fix TaggedCombinator) v -> Fix TaggedCombinator v
-    tenderisationAlg (Tag t c@(GetRegister σ)) = if (reachers M.! t) (SomeΣVar σ)
+    tenderisationAlg (Tag t c@(GetRegister σ))   = if (hasSoleReacher reacherData M.! t) (SomeΣVar σ)
                                                  then In $ Tag invalidTag (MetaCombinator Tenderise (In $ Tag t c)) 
                                                  else In $ Tag t c
-    tenderisationAlg (Tag t comb) = In $ Tag t comb
+    tenderisationAlg (Tag t c@(PutRegister σ _)) = if (isSoleReacher reacherData M.! t) (SomeΣVar σ)
+                                                 then In $ Tag invalidTag (MetaCombinator Tenderise (In $ Tag t c)) 
+                                                 else In $ Tag t c
+    tenderisationAlg (Tag t comb)                = In $ Tag t comb
 
     -- Perform liveness Analysis and dead-code elim.
     liveness = livenessAnalysis cfg

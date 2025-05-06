@@ -1,5 +1,5 @@
 {-# LANGUAGE DerivingStrategies #-}
-module Parsley.Internal.Frontend.Analysis.ReachingDefs (soleReachers) where
+module Parsley.Internal.Frontend.Analysis.ReachingDefs (SoleReacherData(..), soleReachers) where
 
 import Parsley.Internal.Frontend.Analysis (NodeID, ΣNodeData (..))
 import qualified Data.Map as M
@@ -10,14 +10,17 @@ import Control.Monad.Fix (fix)
 import Control.Monad (when)
 import Control.Monad.State (State, get, put, runState)
 import Data.Foldable (sequenceA_)
+import Debug.Trace (trace)
 
 
 data ReachingDefs = ReachingDefs {reachIn :: Set.Set NodeID, reachOut :: Set.Set NodeID} deriving stock Show
 
+data SoleReacherData = SoleReacherData {hasSoleReacher :: M.Map NodeID  (SomeΣVar -> Bool),  isSoleReacher :: M.Map NodeID (SomeΣVar -> Bool) }
+
 {-|
     Perform reaching definition analysis and return a map from NodeID to function "does ΣVar have a single reaching definition here?"
 -}
-soleReachers :: CFG -> M.Map NodeID (SomeΣVar -> Bool)
+soleReachers :: CFG -> SoleReacherData
 soleReachers cfg@(CFG start _ adj) = wrapNeatly $ snd . fst $ flip Control.Monad.State.runState (False, initSets)  $ do
         fix $ \loop -> do
             (_, m) <- Control.Monad.State.get
@@ -27,7 +30,13 @@ soleReachers cfg@(CFG start _ adj) = wrapNeatly $ snd . fst $ flip Control.Monad
             when change loop
         Control.Monad.State.get
     where
-        wrapNeatly = M.map (\rdefs svar -> Set.size (defs M.! svar `Set.intersection` reachIn rdefs) == 1)
+        wrapNeatly :: M.Map NodeID ReachingDefs -> SoleReacherData
+        wrapNeatly rdefs = SoleReacherData {hasSoleReacher = hasSoleReacher, isSoleReacher = isSoleReacher}
+            where 
+                reachTo = M.foldlWithKey (\acc nid rdefs -> Set.foldl (\acc d -> M.insertWith Set.union d (Set.singleton nid) acc) acc rdefs) M.empty (M.map reachIn rdefs)
+                hasSoleReacher = M.map (\rdefs svar -> Set.size (defs M.! svar `Set.intersection` reachIn rdefs) == 1) rdefs
+                isSoleReacher  = M.map (\reachTo svar -> Set.foldl (\a b -> a && (hasSoleReacher M.! b $ svar)) True $ (uses M.! svar) `Set.intersection` reachTo) reachTo
+
 
         maxID :: NodeID
         maxID = M.foldlWithKey (\a k (_, b) -> max k $ Set.foldl max a b) start adj
@@ -41,6 +50,14 @@ soleReachers cfg@(CFG start _ adj) = wrapNeatly $ snd . fst $ flip Control.Monad
                                     Nothing -> a
                                     Just (ΣGet{}) -> a
                                     Just x -> M.insertWith Set.union (which x) (Set.singleton k) a) M.empty adj
+        -- uses map: all nodes that use a ΣVar (makes and puts)
+        uses :: M.Map SomeΣVar (Set.Set NodeID)
+        uses = M.foldlWithKey (\a k (info, _)
+                                -> case info of
+                                    Nothing -> a
+                                    Just (ΣPut{}) -> a
+                                    Just (ΣMake{}) -> a
+                                    Just x ->  M.insertWith Set.union (which x) (Set.singleton k) a) M.empty adj
 
         pred :: M.Map NodeID (Set.Set NodeID)
         pred = M.foldlWithKey (\a k (_, succ) -> foldl (\m s -> M.insertWith Set.union s (Set.singleton k) m) a succ) M.empty adj

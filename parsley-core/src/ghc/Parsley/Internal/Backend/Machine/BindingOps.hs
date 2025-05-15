@@ -63,7 +63,7 @@ derivation(Text)
 -- Helpers
 
 supplyRegs :: forall rs s o a. RegBindNames rs -> Code (LoopRoutine rs s o a) -> Code (LoopRoutine '[] s o a)
-supplyRegs NoName l                = l 
+supplyRegs NoName l                = l
 supplyRegs (RegName _ name rest) l = supplyRegs  @_ @_ @o rest [|| $$l $$name ||]
 
 -- Generate new names for register binds
@@ -239,9 +239,6 @@ type family LoopRoutine (xs :: [Type]) s o a where
   LoopRoutine '[] s o a = Pos -> DynRep o -> ST s (Maybe a)
   LoopRoutine (x:xs) s o a = x -> LoopRoutine xs s o a  
 
-type family StaLoopRoutine (xs :: [Type]) s o a where 
-  StaLoopRoutine '[] s o a = Code Pos -> Code (DynRep o) -> Code (ST s (Maybe a))
-  StaLoopRoutine (x:xs) s o a = Code x -> StaLoopRoutine xs s o a  
 
 createIterHandlerDef :: forall hs s o a b. (RegBindNames hs -> (Input# o -> Input# o -> Code (ST s (Maybe a)))) -> Regs hs -> Q Pat -> Q Pat -> (Code (Pos -> DynRep o -> Handler# hs s o a) -> Code b) -> Code b
 createIterHandlerDef hbody regs qcoff qoff k = unsafeCodeCoerce $ do 

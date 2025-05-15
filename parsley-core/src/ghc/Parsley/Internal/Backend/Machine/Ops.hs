@@ -192,7 +192,6 @@ writeΣ σ Bound x k ctx = let val = genDefunc x in [||
     let bref = $$val
       in $$(k (bindΣ σ [|| bref ||] $ cacheΣ σ (FREEVAR [|| bref ||]) ctx))
     ||]
--- writeΣ σ Bound x k ctx = dup x $ \bref -> k (bindΣ σ (genDefunc bref) $ cacheΣ σ bref ctx)
 writeΣ σ Soft x k ctx = dup x $ \dupx -> k (cacheΣ σ dupx ctx)
 writeΣ σ Hard x k ctx = let ref = concreteΣ σ ctx in dup x $ \dupx -> [||
     do writeSTRef $$ref $$(genDefunc dupx)
@@ -206,9 +205,7 @@ the value from the cache and feeds it to a continuation.
 @since 1.0.0.0
 -}
 readΣ :: (?flags :: Opt.Flags) => ΣVar x -> Access -> (Defunc x -> Ctx s o a -> Code (ST s r)) -> Ctx s o a -> Code (ST s r)
-readΣ σ Bound k ctx = let bref = boundΣ σ ctx in [||
-       $$(let fv = FREEVAR bref in k fv (cacheΣ σ fv ctx))
-  ||]
+readΣ σ Bound k ctx = let bref = boundΣ σ ctx in k (FREEVAR bref) (cacheΣ σ (FREEVAR bref) ctx)
 readΣ σ Soft k ctx = k (cachedΣ σ ctx) ctx
 readΣ σ Hard k ctx = let ref = concreteΣ σ ctx in [||
     do x <- readSTRef $$ref

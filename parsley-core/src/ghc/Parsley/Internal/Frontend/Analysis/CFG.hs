@@ -198,54 +198,59 @@ tagCombinator p ps = (a, b, maxV')
         (a, maxV) = runFresh (tagCombinatorNodes p) init
         (b, maxV') = runFresh (DM.traverseWithKey (\_ a -> tagCombinatorNodes a) ps) (succ maxV)
 
-wrap p = newVar >>= (\t -> return $ In (Tag t p))
+newtype Tagger a = Tagger { unTagger :: HFresh NodeID (Fix TaggedCombinator a) }
 
 tagCombinatorNodes :: forall a. Fix Combinator a -> HFresh NodeID (Fix TaggedCombinator a)
-tagCombinatorNodes (In (Pure x)) = wrap (Pure x)
-tagCombinatorNodes (In (Satisfy f)) = wrap (Satisfy f)
-tagCombinatorNodes (In Empty) = wrap Empty
-tagCombinatorNodes (In (pf :<*>: px)) = do
-    pft <- tagCombinatorNodes pf
-    pxt <- tagCombinatorNodes px
-    wrap (pft :<*>: pxt)
-tagCombinatorNodes (In (p :*>: q) ) = do
-    pt <- tagCombinatorNodes p
-    qt <- tagCombinatorNodes q
-    wrap (pt :*>: qt)
-tagCombinatorNodes (In (p :<*: q) ) = do
-    pt <- tagCombinatorNodes p
-    qt <- tagCombinatorNodes q
-    wrap (pt :<*: qt)
-tagCombinatorNodes (In (p :<|>: q) ) = do
-    pt <- tagCombinatorNodes p
-    qt <- tagCombinatorNodes q
-    wrap (pt :<|>: qt)
-tagCombinatorNodes (In (Try p)) = tagCombinatorNodes p >>= wrap . Try
-tagCombinatorNodes (In (LookAhead p)) = tagCombinatorNodes p >>= wrap . LookAhead
-tagCombinatorNodes (In (Let v)) = wrap (Let v)
-tagCombinatorNodes (In (NotFollowedBy p)) = tagCombinatorNodes p >>= wrap . NotFollowedBy
-tagCombinatorNodes (In (Branch b p q)) = do
-    bt <- tagCombinatorNodes b
-    pt <- tagCombinatorNodes p
-    qt <- tagCombinatorNodes q
-    wrap (Branch bt pt qt)
-tagCombinatorNodes (In (Match p fs qs def)) = do
-    pt <- tagCombinatorNodes p
-    qst <- traverse tagCombinatorNodes qs
-    deft <- tagCombinatorNodes def
-    wrap (Match pt fs qst deft)
-tagCombinatorNodes (In (Loop body exit)) = do
-    bodyt <- tagCombinatorNodes body
-    exitt <- tagCombinatorNodes exit
-    wrap (Loop bodyt exitt)
-tagCombinatorNodes (In (MakeRegister σ p q)) =  do
-    pt <- tagCombinatorNodes p
-    qt <- tagCombinatorNodes q
-    wrap (MakeRegister σ pt qt)
-tagCombinatorNodes (In (GetRegister σ)) = wrap (GetRegister σ)
-tagCombinatorNodes (In (PutRegister σ p)) = do
-    pt <- tagCombinatorNodes p
-    wrap (PutRegister σ pt)
-tagCombinatorNodes (In (Position p)) = wrap (Position p)
-tagCombinatorNodes (In (Debug d p)) = tagCombinatorNodes p >>= (wrap . Debug d)
-tagCombinatorNodes (In (MetaCombinator m p)) = tagCombinatorNodes p >>= (wrap . MetaCombinator m)
+tagCombinatorNodes ast = unTagger $ cata (Tagger . alg) ast
+    where 
+        wrap p = newVar >>= (\t -> return $ In (Tag t p))
+
+        alg :: forall a. Combinator Tagger a -> HFresh NodeID (Fix TaggedCombinator a)
+        alg (Pure x) = wrap (Pure x)
+        alg (Satisfy f) = wrap (Satisfy f)
+        alg Empty = wrap Empty
+        alg (pf :<*>: px) = do
+            pft <- unTagger pf
+            pxt <- unTagger px
+            wrap (pft :<*>: pxt)
+        alg (p :*>: q) = do
+            pt <- unTagger p
+            qt <- unTagger q
+            wrap (pt :*>: qt)
+        alg (p :<*: q) = do
+            pt <- unTagger p
+            qt <- unTagger q
+            wrap (pt :<*: qt)
+        alg (p :<|>: q) = do
+            pt <- unTagger p
+            qt <- unTagger q
+            wrap (pt :<|>: qt)
+        alg (Try p) = unTagger p >>= wrap . Try
+        alg (LookAhead p) = unTagger p >>= wrap . LookAhead
+        alg (Let v) = wrap (Let v)
+        alg (NotFollowedBy p) = unTagger p >>= wrap . NotFollowedBy
+        alg (Branch b p q) = do
+            bt <- unTagger b
+            pt <- unTagger p
+            qt <- unTagger q
+            wrap (Branch bt pt qt)
+        alg (Match p fs qs def) = do
+            pt <- unTagger p
+            qst <- traverse unTagger qs
+            deft <- unTagger def
+            wrap (Match pt fs qst deft)
+        alg (Loop body exit) = do
+            bodyt <- unTagger body
+            exitt <- unTagger exit
+            wrap (Loop bodyt exitt)
+        alg (MakeRegister σ p q) =  do
+            pt <- unTagger p
+            qt <- unTagger q
+            wrap (MakeRegister σ pt qt)
+        alg (GetRegister σ) = wrap (GetRegister σ)
+        alg (PutRegister σ p) = do
+            pt <- unTagger p
+            wrap (PutRegister σ pt)
+        alg (Position p) = wrap (Position p)
+        alg (Debug d p) = unTagger p >>= (wrap . Debug d)
+        alg (MetaCombinator m p) = unTagger p >>= (wrap . MetaCombinator m)

@@ -18,7 +18,7 @@ module Parsley.Internal.Backend.Machine.Types.State (
 
 import Parsley.Internal.Backend.Machine.Defunc        (Defunc)
 import Parsley.Internal.Backend.Machine.Types.Input   (Input)
-import Parsley.Internal.Backend.Machine.Types.Statics (StaCont, AugmentedStaHandler, QAugmentedStaHandler, QStaCont)
+import Parsley.Internal.Backend.Machine.Types.Statics (QAugmentedStaHandler, QStaCont)
 import Parsley.Internal.Common.Vec                    (Vec)
 
 {-|

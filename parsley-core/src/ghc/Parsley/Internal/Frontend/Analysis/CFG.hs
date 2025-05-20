@@ -206,51 +206,49 @@ tagCombinatorNodes ast = unTagger $ cata (Tagger . alg) ast
         wrap p = newVar >>= (\t -> return $ In (Tag t p))
 
         alg :: forall a. Combinator Tagger a -> HFresh NodeID (Fix TaggedCombinator a)
-        alg (Pure x) = wrap (Pure x)
-        alg (Satisfy f) = wrap (Satisfy f)
-        alg Empty = wrap Empty
-        alg (pf :<*>: px) = do
-            pft <- unTagger pf
-            pxt <- unTagger px
-            wrap (pft :<*>: pxt)
-        alg (p :*>: q) = do
-            pt <- unTagger p
-            qt <- unTagger q
-            wrap (pt :*>: qt)
-        alg (p :<*: q) = do
-            pt <- unTagger p
-            qt <- unTagger q
-            wrap (pt :<*: qt)
-        alg (p :<|>: q) = do
-            pt <- unTagger p
-            qt <- unTagger q
-            wrap (pt :<|>: qt)
-        alg (Try p) = unTagger p >>= wrap . Try
-        alg (LookAhead p) = unTagger p >>= wrap . LookAhead
-        alg (Let v) = wrap (Let v)
-        alg (NotFollowedBy p) = unTagger p >>= wrap . NotFollowedBy
-        alg (Branch b p q) = do
-            bt <- unTagger b
-            pt <- unTagger p
-            qt <- unTagger q
-            wrap (Branch bt pt qt)
-        alg (Match p fs qs def) = do
-            pt <- unTagger p
-            qst <- traverse unTagger qs
-            deft <- unTagger def
-            wrap (Match pt fs qst deft)
-        alg (Loop body exit) = do
-            bodyt <- unTagger body
-            exitt <- unTagger exit
-            wrap (Loop bodyt exitt)
-        alg (MakeRegister σ p q) =  do
-            pt <- unTagger p
-            qt <- unTagger q
-            wrap (MakeRegister σ pt qt)
-        alg (GetRegister σ) = wrap (GetRegister σ)
-        alg (PutRegister σ p) = do
-            pt <- unTagger p
-            wrap (PutRegister σ pt)
-        alg (Position p) = wrap (Position p)
-        alg (Debug d p) = unTagger p >>= (wrap . Debug d)
+        alg (Pure x)             = wrap (Pure x)
+        alg (Satisfy f)          = wrap (Satisfy f)
+        alg Empty                = wrap Empty
+        alg (pf :<*>: px)        = do
+                                    pft <- unTagger pf
+                                    pxt <- unTagger px
+                                    wrap (pft :<*>: pxt)
+        alg (p :*>: q)           = do
+                                    pt <- unTagger p
+                                    qt <- unTagger q
+                                    wrap (pt :*>: qt)
+        alg (p :<*: q)           = do
+                                    pt <- unTagger p
+                                    qt <- unTagger q
+                                    wrap (pt :<*: qt)
+        alg (p :<|>: q)          = do
+                                    pt <- unTagger p
+                                    qt <- unTagger q
+                                    wrap (pt :<|>: qt)
+        alg (Try p)              = unTagger p >>= wrap . Try
+        alg (LookAhead p)        = unTagger p >>= wrap . LookAhead
+        alg (Let v)              = wrap (Let v)
+        alg (NotFollowedBy p)    = unTagger p >>= wrap . NotFollowedBy
+        alg (Branch b p q)       = do
+                                    bt <- unTagger b
+                                    pt <- unTagger p
+                                    qt <- unTagger q
+                                    wrap (Branch bt pt qt)
+        alg (Match p fs qs def)  = do
+                                    pt <- unTagger p
+                                    qst <- traverse unTagger qs
+                                    deft <- unTagger def
+                                    wrap (Match pt fs qst deft)
+        alg (Loop body exit)     = do
+                                    bodyt <- unTagger body
+                                    exitt <- unTagger exit
+                                    wrap (Loop bodyt exitt)
+        alg (MakeRegister σ p q) = do
+                                    pt <- unTagger p
+                                    qt <- unTagger q
+                                    wrap (MakeRegister σ pt qt)
+        alg (GetRegister σ)      = wrap (GetRegister σ)
+        alg (PutRegister σ p)    = unTagger p >>= wrap . PutRegister σ
+        alg (Position p)         = wrap (Position p)
+        alg (Debug d p)          = unTagger p >>= (wrap . Debug d)
         alg (MetaCombinator m p) = unTagger p >>= (wrap . MetaCombinator m)

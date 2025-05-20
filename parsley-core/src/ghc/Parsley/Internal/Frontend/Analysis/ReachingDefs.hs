@@ -36,8 +36,6 @@ soleReachers cfg@(CFG start _ adj) = wrapNeatly $ snd . fst $ flip Control.Monad
                 reachTo = M.foldlWithKey (\acc nid rdefs -> Set.foldl (\acc d -> M.insertWith Set.union d (Set.singleton nid) acc) acc rdefs) M.empty (M.map reachIn rdefs)
                 hasSoleReacher = M.map (\rdefs svar -> Set.size (defs M.! svar `Set.intersection` reachIn rdefs) == 1) rdefs
                 isSoleReacher  = M.map (\reachTo svar -> Set.foldl (\a b -> a && (hasSoleReacher M.! b $ svar)) True $ (uses M.! svar) `Set.intersection` reachTo) reachTo
-
-
         maxID :: NodeID
         maxID = M.foldlWithKey (\a k (_, b) -> max k $ Set.foldl max a b) start adj
 

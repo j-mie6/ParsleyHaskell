@@ -141,15 +141,6 @@ insertSub :: forall rs hs ys s o a x. MVar x  -- ^ The name of the binding.
           -> Ctx s o a                        -- ^ The new context.
 insertSub μ q regs hregs rregs ctx = ctx {μs = DMap.insert μ (QSubroutine q regs hregs rregs) (μs ctx)}
 
-{-
-insertLoop :: MVar x                         -- ^ The name of the binding.
-           -> StaSubroutine xs hs ys s o a x -- ^ The binding to register.
-           -> Regs xs                        -- ^ Free registers in loop.
-           -> Regs hs                        -- ^ Free registers of handler
-           -> Ctx s o a                      -- ^ The current context.
-           -> Ctx s o a                      -- ^ The new context.
-insertLoop μ q regs hregs ctx = ctx {μLoops = DMap.insert μ (QLooproutine q regs hregs) (μLoops ctx)}
--}
 {-|
 Fetches a binding from the context according to its name (See `Parsley.Internal.Core.Identifiers.MVar`).
 In the (hopefully impossible!) event that it is not found in the map, will throw a @MissingDependency@

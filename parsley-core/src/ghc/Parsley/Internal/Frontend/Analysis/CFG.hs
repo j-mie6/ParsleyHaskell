@@ -1,5 +1,4 @@
-{-# LANGUAGE OverloadedStrings, DerivingStrategies #-}
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedStrings, DerivingStrategies, NamedFieldPuns #-}
 
 module Parsley.Internal.Frontend.Analysis.CFG (TaggedCombinator, NodeID, CFG(..), ΣNodeData(..), tagCombinator, buildCFG) where
 
@@ -36,40 +35,20 @@ data ΣNodeData = ΣMake {use :: Set.Set SomeΣVar, which :: SomeΣVar}
 -}
 type TaggedCombinator = Tag NodeID Combinator
 
-instance Show (Fix TaggedCombinator a) where
-  show = ($ "") . getConst1 . cata (Const1 . alg)
-    where
-      alg (Tag t (Pure x))                                  = "{" . shows t . "} pure " . shows x
-      alg (Tag t (Satisfy f))                               = "{" . shows t . "} satisfy " . shows f
-      alg (Tag t (Const1 pf :<*>: Const1 px))               = "{" . shows t . "} (" . pf . " <*> " .  px . ")"
-      alg (Tag t (Const1 p :*>: Const1 q))                  = "{" . shows t . "} (" . p . " *> " . q . ")"
-      alg (Tag t (Const1 p :<*: Const1 q))                  = "{" . shows t . "} (" . p . " <* " . q . ")"
-      alg (Tag t (Const1 p :<|>: Const1 q))                 = "{" . shows t . "} (" . p . " <|> " . q . ")"
-      alg (Tag t Empty)                                     = "{" . shows t . "} empty"
-      alg (Tag t (Try (Const1 p)))                          = "{" . shows t . "} try (". p . ")"
-      alg (Tag t (LookAhead (Const1 p)))                    = "{" . shows t . "} lookAhead (" . p . ")"
-      alg (Tag t (Let v))                                   = "{" . shows t . "} let-bound " . shows v
-      alg (Tag t (NotFollowedBy (Const1 p)))                = "{" . shows t . "} notFollowedBy (" . p . ")"
-      alg (Tag t (Branch (Const1 b) (Const1 p) (Const1 q))) = "{" . shows t . "} branch (" . b . ") (" . p . ") (" . q . ")"
-      alg (Tag t (Match (Const1 p) fs qs (Const1 def)))     = "{" . shows t . "} match (" . p . ") " . shows fs . " [" . intercalateDiff ", " (map getConst1 qs) . "] ("  . def . ")"
-      alg (Tag t (Loop (Const1 body) (Const1 exit)))        = "{" . shows t . "} loop (" . body . ") (" . exit . ")"
-      alg (Tag t (MakeRegister σ (Const1 p) (Const1 q)))    = "{" . shows t . "} make " . shows σ . " (" . p . ") (" . q . ")"
-      alg (Tag t (GetRegister σ))                           = "{" . shows t . "} get " . shows σ
-      alg (Tag t (PutRegister σ (Const1 p)))                = "{" . shows t . "} put " . shows σ . " (" . p . ")"
-      alg (Tag t (Position Line))                           = "{" . shows t . "} line"
-      alg (Tag t (Position Col))                            = "{" . shows t . "} col"
-      alg (Tag t (Debug _ (Const1 p)))                      = "{" . shows t . "} " . p
-      alg (Tag t (MetaCombinator m (Const1 p)))             =  "{" . shows t . "} " .p . " [" . shows m . "]"
+newtype Grapher a = Grapher { unGraph :: (CFG, DList (NodeID, IMVar)) }
 
 buildCFG :: Fix TaggedCombinator a -> DM.DMap MVar (Fix TaggedCombinator) -> CFG
 buildCFG p mus = cfg
     where
         -- a. Create CFGs for each let-bound AST
-        (initCFG, initCalls) = graph p
+        makeGraph :: Fix TaggedCombinator a -> (CFG, DList (NodeID, IMVar))
+        makeGraph p = unGraph $ cata (Grapher . (\Tag{tag, tagged} -> alg tag tagged)) p 
+    
+        (initCFG, initCalls) = makeGraph p
         (cfgForest, calls) = DM.foldlWithKey
                                 (\(m, c) (MVar imvar) p ->
                                         let
-                                            (cfg', calls') = graph p
+                                            (cfg', calls') = makeGraph p
                                         in (M.insert imvar cfg' m, c <> calls'))
                                         (M.empty, mempty)
                                         mus
@@ -98,11 +77,6 @@ buildCFG p mus = cfg
                 m = mergeEdges m1 m2
 
 
-        -- Main entry point for creating a CFG for a given tagged CAST. Recurse through tree and construct the CFG. 
-        -- We do this inside `Writer` monad because we need to keep track of `Let` nodes that perform a call to 
-        graph :: Fix TaggedCombinator a -> (CFG, DList (NodeID, IMVar))
-        graph (In Tag{tag, tagged})= graph' tag tagged
-
         leaf :: NodeID -> CFG
         leaf t = CFG t (Set.singleton t) (M.fromList [(t, (Nothing, Set.empty))])
 
@@ -113,80 +87,79 @@ buildCFG p mus = cfg
                 Nothing -> m)
             Set.empty
 
-        -- Handle each node type in our CAST. Optimistically cull any tags that are purely transitionary (e.g. tagged metacombinators)       
-        graph' :: NodeID -> Combinator (Fix TaggedCombinator) a -> (CFG, DList (NodeID, IMVar))
-        graph' _ (pf :<*>: px) = let
-            (pfg, calls1) = graph pf
-            (pxg, calls2) = graph px
+        -- CFG construction Algebra for what to do for each combinator constructor
+        alg :: NodeID -> Combinator Grapher a -> (CFG, DList (NodeID, IMVar))
+        alg _ (pf :<*>: px) = let
+            (pfg, calls1) = unGraph pf
+            (pxg, calls2) = unGraph px
             in (pfg `seqCFG` pxg, calls1 <> calls2)
-        graph' _ (p :*>: q) = let
-            (pg, calls1) = graph p
-            (qg, calls2) = graph q
+        alg _ (p :*>: q) = let
+            (pg, calls1) = unGraph p
+            (qg, calls2) = unGraph q
             in (pg `seqCFG` qg, calls1 <> calls2)
-        graph' _ (p :<*: q) = let
-            (pg, calls1) = graph p
-            (qg, calls2) = graph q
+        alg _ (p :<*: q) = let
+            (pg, calls1) = unGraph p
+            (qg, calls2) = unGraph q
             in (pg `seqCFG` qg, calls1 <> calls2)
-        graph' t (p :<|>: q) = let
-            -- TODO: currently we add edges for all nodes in p to qs. This is not efficient as we only need edges from nodes that can fail.
-            (CFG ps pts mp, calls1) = graph p
-            (CFG qs qts mq, calls2) = graph q
+        alg t (p :<|>: q) = let
+            (CFG ps pts mp, calls1) = unGraph p
+            (CFG qs qts mq, calls2) = unGraph q
             pexits = M.foldlWithKey (\a k(_, x) -> a `Set.union` x `Set.union` Set.singleton k) pts mp
             m = mp `mergeEdges` mq
                    `mergeEdges` M.fromSet (const (Nothing, Set.singleton qs)) pexits -- 
                    `mergeEdges` M.fromList [(t, (Nothing, Set.fromList [qs, ps]))] -- root node to the start of both
             in (CFG t (Set.union pts qts) m, calls1 <> calls2)
-        graph' _ (Try p) = graph p
-        graph' _ (LookAhead p) = graph p
-        graph' t (Let (MVar im)) = (leaf t, DList.fromList [(t, im)])
-        graph' _ (NotFollowedBy p) = graph p
-        graph' _ (Branch b p q) = let
-            (CFG bs bts mb, calls1) = graph b
-            (CFG ps pts mp, calls2) = graph p
-            (CFG qs qts mq, calls3) = graph q
+        alg _ (Try p) = unGraph p
+        alg _ (LookAhead p) = unGraph p
+        alg t (Let (MVar im)) = (leaf t, DList.fromList [(t, im)])
+        alg _ (NotFollowedBy p) = unGraph p
+        alg _ (Branch b p q) = let
+            (CFG bs bts mb, calls1) = unGraph b
+            (CFG ps pts mp, calls2) = unGraph p
+            (CFG qs qts mq, calls3) = unGraph q
             m = mb `mergeEdges` mp `mergeEdges` mq
             m' = Set.foldl (\x n -> addEdge n qs (addEdge n ps x)) m bts
             in (CFG bs (Set.union pts qts) m', calls1 <> calls2 <> calls3)
-        graph' _ (Match p _ qs def) = let -- TODO: double check this works
-            (CFG ps pts mp, callsp) = graph p
-            (CFG ds dts md, callsdef) = graph def
-            qsGraphs = map graph qs
+        alg _ (Match p _ qs def) = let
+            (CFG ps pts mp, callsp) = unGraph p
+            (CFG ds dts md, callsdef) = unGraph def
+            qsGraphs = map unGraph qs
             qsCalls = map snd qsGraphs
             qsCFGs = map fst qsGraphs
             qsTerminals = foldl (\a (CFG _ t _) -> Set.union t a) Set.empty qsCFGs
             m = foldl (\a (CFG s _ m') -> a `mergeEdges` M.fromSet (const (Nothing, Set.singleton s)) pts `mergeEdges`  m')
                     (M.fromSet (const (Nothing, Set.singleton ds)) pts `mergeEdges` mp `mergeEdges` md) qsCFGs
             in (CFG ps (Set.union qsTerminals dts) m, foldl (<>) callsp qsCalls <> callsdef)
-        graph' _ (Loop body exit) = let
-            (CFG bs bts bm, calls1) = graph body
-            (CFG es ets em, calls2) = graph exit
+        alg _ (Loop body exit) = let
+            (CFG bs bts bm, calls1) = unGraph body
+            (CFG es ets em, calls2) = unGraph exit
             m = bm `mergeEdges` em
             -- add exit edges (can be anywhere in the body due to failure)
             bexits = M.foldlWithKey (\a k(_, x) -> a `Set.union` x `Set.union` Set.singleton k) bts bm
             m' = m `mergeEdges` M.fromSet (const (Nothing, Set.singleton es)) bexits 
             m'' = Set.foldl (\x n -> addEdge n bs x) m' bts -- add loopback edges
             in (CFG bs ets m'', calls1 <> calls2)
-        graph' t (MakeRegister σ p q) = let
+        alg t (MakeRegister σ p q) = let
             -- leaf node that just defines σ 
             g = CFG t (Set.singleton t) (M.fromList [(t, (Just $ ΣMake{use=usages, which=SomeΣVar σ}, Set.empty))])
             -- find uses of any registers in `p` by parsing the use-defs gathereed
             usages = findUsages pm
-            (gp@(CFG _ _ pm), calls1) = graph p
-            (gq, calls2) = graph q
+            (gp@(CFG _ _ pm), calls1) = unGraph p
+            (gq, calls2) = unGraph q
             in (gp `seqCFG` g `seqCFG` gq, calls1 <> calls2)
-        graph' t (GetRegister σ) = (CFG t (Set.singleton t) (M.fromList [(t, (Just $ ΣGet{use=Set.singleton $ SomeΣVar σ, which=SomeΣVar σ}, Set.empty))]), mempty)
-        graph' t (PutRegister σ p) = let
+        alg t (GetRegister σ) = (CFG t (Set.singleton t) (M.fromList [(t, (Just $ ΣGet{use=Set.singleton $ SomeΣVar σ, which=SomeΣVar σ}, Set.empty))]), mempty)
+        alg t (PutRegister σ p) = let
             g = CFG t (Set.singleton t) (M.fromList [(t, (Just $ ΣPut{use=usages, which=SomeΣVar σ}, Set.empty))])
             -- find uses of any registers in `p` by parsing the use-defs gathereed
             usages = findUsages pm
-            (gp@(CFG _ _ pm), calls) = graph p
+            (gp@(CFG _ _ pm), calls) = unGraph p
             in (gp `seqCFG` g, calls)
-        graph' t (Position _) = (leaf t, mempty)
-        graph' _ (Debug _ p) = graph p -- skip annotational combinator
-        graph' _ (MetaCombinator _ p) = graph p -- skip annotational combinator 
-        graph' t Empty = (leaf t, mempty)
+        alg t (Position _) = (leaf t, mempty)
+        alg _ (Debug _ p) = unGraph p -- skip annotational combinator
+        alg _ (MetaCombinator _ p) = unGraph p -- skip annotational combinator 
+        alg t Empty = (leaf t, mempty)
         -- left-over dead-end cases: Pure, Satisfy 
-        graph' t _ = (leaf t, mempty)
+        alg t _ = (leaf t, mempty)
 
 {-|
 Tag every node of the parser AST with a unique identifier of type `NodeID`. Returns tagged forest and max `NodeID` assigned.

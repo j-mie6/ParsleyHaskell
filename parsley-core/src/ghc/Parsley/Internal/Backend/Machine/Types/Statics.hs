@@ -21,7 +21,7 @@ call boundaries.
 -}
 module Parsley.Internal.Backend.Machine.Types.Statics (
     -- * Register stacks
-    StaRegisterStack#, toDynRegStack, 
+    StaRegisterStack#, StaGenRegisterStack#, toDynRegStack, 
     -- * Handlers
     StaHandler#, StaHandler(..), AugmentedStaHandler, QAugmentedStaHandler(..), StaHandlerCase, StaSameHandler,
 
@@ -68,6 +68,10 @@ import qualified Parsley.Internal.Opt as Opt
 type family StaRegisterStack# (rs :: [Type]) x where 
   StaRegisterStack# '[] x      = Code x
   StaRegisterStack# (r : rs) x = Code r -> StaRegisterStack# rs x
+
+type family StaGenRegisterStack# (rs :: [Type]) x where 
+  StaGenRegisterStack# '[] x      = x
+  StaGenRegisterStack# (r : rs) x = Code r -> StaGenRegisterStack# rs x
 
 fromDynRegStack :: forall rs x. DynRegisterStack rs x -> Regs rs -> StaRegisterStack# rs x
 fromDynRegStack drs NoRegs      = drs

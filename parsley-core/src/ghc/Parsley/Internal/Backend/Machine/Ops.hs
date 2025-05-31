@@ -441,13 +441,12 @@ callWithContinuation ctx sub hregs ret retregs input (VCons h _) = case h of
   where
     -- Take a handler with input regs hs, transform this into a handler with inputs hs' such that all necessary 
     -- registers from hs' are piped and others are gathered from the given callsite context (i.e. they have not changed in the call)
+
     fitHandler :: forall hs hs' s o a. Ctx s o a -> Regs hs' -> DynHandler hs s o a -> Regs hs -> DynHandler hs' s o a
     fitHandler ctx regs dh hregs  = provide @hs' @hs regs ctx dh hregs  
       where
         -- Find intersection
-        hregsSet = fromRegs hregs 
-        regsSet = fromRegs regs
-        sharedRegs = hregsSet `Set.intersection` regsSet
+        sharedRegs = fromRegs regs `Set.intersection` fromRegs hregs
 
         provide :: forall rs' rs. Regs rs' -> Ctx s o a -> DynHandler rs s o a -> Regs rs -> DynHandler rs' s o a
         provide NoRegs ctx dh rs = supplyAllFromContext ctx dh rs
@@ -633,7 +632,7 @@ bindHandlerInline# :: forall o s a b hs. HandlerOps o
                    -> Regs hs
                    -> (StaHandler hs s o a -> Code b)
                    -> Code b
-bindHandlerInline# True  h regs k = bindHandler# @o (\bregs -> feedHandlerBoundRegs @hs @s @o @a bregs h) regs (k . fromDynHandler @hs @s @o @a regs)
+bindHandlerInline# True  h regs k = bindHandler# @o h (Proxy @s) (Proxy @a) regs (k . fromDynHandler @hs @s @o @a regs)
 bindHandlerInline# False h _ k = k (fromStaHandler# h)
 
 bindYesInline# :: forall hs s a b. Bool -> StaSameHandler hs s a -> Regs hs -> (StaSameHandler hs s a -> Code b) -> Code b

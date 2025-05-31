@@ -101,6 +101,10 @@ feedRegNames :: forall rs x. RegBindNames rs -> StaRegisterStack# rs x -> Code x
 feedRegNames NoName k              = k 
 feedRegNames (RegName _ name rs) k = feedRegNames rs (k name) 
 
+feedRegNamesHandler :: forall rs s o a. RegBindNames rs -> StaHandler# rs s o a -> (Input# o -> Code (ST s (Maybe a)))
+feedRegNamesHandler NoName k              = k 
+feedRegNamesHandler (RegName _ name rs) k = feedRegNamesHandler rs (k name) 
+
 
 {-|
 Used to generate a binding for a handler.
@@ -113,14 +117,15 @@ class HandlerOps o where
 
   @since 1.4.0.0
   -}
-  bindHandler# :: (RegBindNames hs -> StaHandler# '[] s o a) -- ^ Static handler to bind, waiting to capture the register binds
+  bindHandler# :: StaHandler# hs s o a -- ^ Static handler to bind, waiting to capture the register binds
+               -> Proxy s -> Proxy a
                -> Regs hs                                    -- ^ Registers required by handler, and which to bind in handler definition.
                -> (DynHandler hs s o a -> Code b)            -- ^ The continuation that expects the bound handler
                -> Code b
 
 -- Function to create the bind for in `HandlerOps`
 
-createHandlerDef :: forall hs s o a b. (RegBindNames hs -> StaHandler# '[] s o a) -> Regs hs -> Q Pat -> (DynHandler hs s o a -> Code b) -> Code b
+createHandlerDef :: forall hs s o a b. StaHandler# hs s o a  -> Regs hs -> Q Pat -> (DynHandler hs s o a -> Code b) -> Code b
 createHandlerDef hbody regs qoff k = unsafeCodeCoerce $ do 
         handlerName <- newName "handler"
         regNames <- nameRegs' regs
@@ -129,7 +134,7 @@ createHandlerDef hbody regs qoff k = unsafeCodeCoerce $ do
         let makebind = do
                         let posE = pure $ VarE $ extractNameFromPat pos
                         let offE = pure $ VarE $ extractNameFromPat off
-                        body <- unTypeCode $ hbody (convertNamesToCode regNames) (Input# (unsafeCodeCoerce offE) (unsafeCodeCoerce posE))
+                        body <- unTypeCode $ feedRegNamesHandler @hs @s @o @a (convertNamesToCode regNames) hbody (Input# (unsafeCodeCoerce offE) (unsafeCodeCoerce posE))
                         return $ FunD handlerName [Clause (namesToArgList regNames [pos, off]) (NormalB body) [] ]
         k' <- unTypeCode $ k (unsafeCodeCoerce $ return (VarE handlerName))
         bind <- makebind
@@ -138,7 +143,8 @@ createHandlerDef hbody regs qoff k = unsafeCodeCoerce $ do
 #define deriveHandlerOps(_o)                                                                \
 instance HandlerOps _o where                                                                \
 {                                                                                           \
-  bindHandler# h freeRegs = createHandlerDef @_ @_ @_o h freeRegs [p| (!o# :: DynRep _o) |] \
+  bindHandler# :: forall hs s a b. StaHandler# hs s _o a -> Proxy s -> Proxy a -> Regs hs -> (DynHandler hs s _o a -> Code b)  -> Code b; \
+  bindHandler# h _ _ freeRegs = createHandlerDef @hs @s @_o @a h freeRegs [p| (!o# :: DynRep _o) |] \
 };
 inputInstances(deriveHandlerOps);
 

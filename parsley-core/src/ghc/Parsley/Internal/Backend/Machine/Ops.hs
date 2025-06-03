@@ -450,9 +450,9 @@ callWithContinuation ctx sub hregs ret retregs input (VCons h _) = case h of
 
         provide :: forall rs' rs. Regs rs' -> Ctx s o a -> DynHandler rs s o a -> Regs rs -> DynHandler rs' s o a
         provide NoRegs ctx dh rs = supplyAllFromContext ctx dh rs
-        provide (Regs σ rs') ctx dh rs = if Set.member (SomeΣVar σ) sharedRegs
-                                         then [|| \hr -> $$(provide rs' (bindΣ σ [|| hr ||] ctx )  dh rs) ||] -- Supply
-                                         else [|| \_ -> $$(provide rs' ctx dh rs) ||] -- Ignore
+        provide (Regs σ rs') ctx dh rs
+          | Set.member (SomeΣVar σ) sharedRegs = [|| \hr -> $$(provide rs' (bindΣ σ [|| hr ||] ctx )  dh rs) ||] -- Supply
+          | otherwise                          = [|| \_ -> $$(provide rs' ctx dh rs) ||] -- Ignore
 
         supplyAllFromContext :: forall rs. Ctx s o a -> DynHandler rs s o a -> Regs rs -> DynHandler '[] s o a
         supplyAllFromContext _ dh NoRegs = dh 

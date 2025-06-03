@@ -206,12 +206,10 @@ dataFlowOptimise p mus
     mustagged' = DM.map (cata tenderisationAlg) mustagged
     invalidTag = -1 -- We do not care about tags on metacombinators TODO: this is fugly
     tenderisationAlg :: TaggedCombinator (Fix TaggedCombinator) v -> Fix TaggedCombinator v
-    tenderisationAlg (Tag t c@(GetRegister σ))   = if (hasSoleReacher reacherData M.! t) (SomeΣVar σ)
-                                                 then In $ Tag invalidTag (MetaCombinator Tenderise (In $ Tag t c)) 
-                                                 else In $ Tag t c
-    tenderisationAlg (Tag t c@(PutRegister σ _)) = if (isSoleReacher reacherData M.! t) (SomeΣVar σ)
-                                                 then In $ Tag invalidTag (MetaCombinator Tenderise (In $ Tag t c)) 
-                                                 else In $ Tag t c
+    tenderisationAlg (Tag t c@(GetRegister σ))   | (hasSoleReacher reacherData M.! t) (SomeΣVar σ) = In $ Tag invalidTag (MetaCombinator Tenderise (In $ Tag t c)) 
+                                                 | otherwise                                       = In $ Tag t c
+    tenderisationAlg (Tag t c@(PutRegister σ _)) | (isSoleReacher reacherData M.! t) (SomeΣVar σ)  = In $ Tag invalidTag (MetaCombinator Tenderise (In $ Tag t c)) 
+                                                 | otherwise                                       = In $ Tag t c 
     tenderisationAlg (Tag t comb)                = In $ Tag t comb
 
     -- Perform liveness Analysis and dead-code elim.

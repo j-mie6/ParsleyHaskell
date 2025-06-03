@@ -18,8 +18,9 @@ module Parsley.Internal.Backend.ReferenceBinds (bindReferences) where
 
 import Control.Monad                                    (unless)
 import Control.Monad.Writer                             (Writer, MonadWriter (..), runWriter)
-import Control.Monad.State                              (State, StateT (..), MonadTrans (..), MonadState (..), when, evalState, gets, execState)
+import Control.Monad.State                              (State, StateT (..), MonadTrans (..), MonadState (..), when, evalState, gets, execState, modify)
 import Data.Foldable                                    (traverse_)
+import Data.Functor                                     (($>))
 import Parsley.Internal.Backend.Machine.LetBindings     (LetBinding (..))
 import Parsley.Internal.Common                          (One)
 import Parsley.Internal.Common.Fresh                    (HFresh, MonadFresh(..), runFresh)
@@ -743,6 +744,10 @@ markRegisterBinds freeRegsData (p, μs) = (pResult, μsResult)
         wrap t instrs = do
                         markLastTag t
                         return $ In4 (Tag4 t instrs)
+
+
+        wrap' :: InstrID -> Instr o (Fix4 (TaggedInstr o)) xs n r a -> State RegMarkerState (Fix4 (TaggedInstr o) xs n r a)
+        wrap' t instrs = modify (\state -> state{lastTag=t}) $> In4 (Tag4 t instrs)
 
         doHandler :: Handler o (RegMarker o) xs n r a -> State RegMarkerState (Handler o (Fix4 (TaggedInstr o)) xs n r a)
         doHandler (Same _ x k1 y k2) = do

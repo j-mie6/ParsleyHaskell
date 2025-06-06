@@ -57,8 +57,8 @@ brainfuck' = newRegister_ EMPTY $ \acc ->
       -- not to inline something to make them otherwise identical). That's wild.
       walk = eof *> gets_ acc QQ(reverse)
          <|> lookAhead (char ']') *> gets_ acc QQ(reverse)
-         <|> {- try (-} match "><+-.,[" item op walk  --)
-         -- <|> gets_ acc QQ(reverse)
+         <|> try ( match "><+-.,[" item op walk  )
+         <|> gets_ acc QQ(reverse)
       op :: Char -> Parser [BrainFuckOp]
       op '>' = modify_ acc (APP_H CONS (LIFTED RightPointer)) *> walk
       op '<' = modify_ acc (APP_H CONS (LIFTED LeftPointer)) *> walk

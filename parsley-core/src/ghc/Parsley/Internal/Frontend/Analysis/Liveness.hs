@@ -1,57 +1,89 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
-module Parsley.Internal.Frontend.Analysis.Liveness (livenessAnalysis, LivenessData(..), LivenessAnalysisResult) where
+module Parsley.Internal.Frontend.Analysis.Liveness (livenessAnalysis, LivenessData (..), LivenessAnalysisResult) where
 
-import Data.Set (Set)
-import qualified Data.Set as S
-import qualified Data.Map as M
-import Parsley.Internal.Backend.Machine.Identifiers ()
-import Parsley.Internal.Frontend.Analysis.CFG (NodeID, CFG(..), ΣNodeData (..))
-import Parsley.Internal.Core.Identifiers (SomeΣVar)
-import Control.Monad.Fix (fix)
 import Control.Monad (when)
-import qualified Data.Set as Set
-import Control.Monad.State (State, get, put, runState)
+import Control.Monad.Fix (fix)
+import Control.Monad.State (State, get, put, runState, execState, gets)
 import Data.Foldable (sequenceA_)
+import qualified Data.Map as Map
+import Data.Set (Set)
+import Data.Map (Map)
+import qualified Data.Set as S
+import qualified Data.Set as Set
+import Parsley.Internal.Backend.Machine.Identifiers ()
+import Parsley.Internal.Core.Identifiers (SomeΣVar)
+import Parsley.Internal.Frontend.Analysis.CFG (CFG (..), NodeID, ΣNodeData (..))
+import Control.Monad (unless)
+import Data.Maybe (fromJust, isNothing, isJust)
 
-{-|
-    Pertinent liveness data associated with each CFG node.
--}
-data LivenessData = LivenessData { liveIn :: Set SomeΣVar, liveOut :: Set SomeΣVar } deriving stock Show
+-- |
+--    Pertinent liveness data associated with each CFG node.
+data LivenessData = LivenessData {liveIn :: Set SomeΣVar, liveOut :: Set SomeΣVar} deriving stock (Show)
 
-type LivenessAnalysisResult = M.Map NodeID LivenessData
+type LivenessAnalysisResult = Map NodeID LivenessData
 
-{-| 
-Given a CFG of the parser, compute the liveIn and liveOut for each node.
--}
+data LivenessState = LivenessState { worklist :: [NodeID], livenessSets :: LivenessAnalysisResult}
+
+popWL :: State LivenessState NodeID
+popWL = do
+      LivenessState{worklist, livenessSets} <- get
+      let (a : as) = worklist
+      put $ LivenessState as livenessSets
+      return a
+emptyWL :: State LivenessState Bool
+emptyWL = gets (null . worklist) 
+
+addToWL :: Set NodeID -> State LivenessState ()
+addToWL preds = do
+      state@LivenessState{worklist} <- get
+      put $ state{worklist=foldl (flip (:)) worklist preds}
+
+updateLivenessSets :: NodeID -> LivenessData -> State LivenessState () 
+updateLivenessSets id sets = do 
+  state@LivenessState{livenessSets} <- get 
+  put $ state{livenessSets=Map.insert id sets livenessSets}
+
+
+
 livenessAnalysis :: CFG -> LivenessAnalysisResult
-livenessAnalysis cfg@(CFG start _ adj) = snd . fst $ flip Control.Monad.State.runState (False, initSets)  $ do
-        fix $ \loop -> do
-            (_, m) <- Control.Monad.State.get
-            Control.Monad.State.put (False, m)
-            round cfg
-            (change, _) <- Control.Monad.State.get
-            when change loop
-        Control.Monad.State.get
-    where
-        maxID :: NodeID
-        maxID = M.foldlWithKey (\a k (_, b) -> max k $ S.foldl max a b) start adj
-        
-        initSets :: LivenessAnalysisResult
-        initSets = M.fromList [(i, LivenessData Set.empty Set.empty) | i <- [0..maxID]]
-
-        round :: CFG -> Control.Monad.State.State (Bool, LivenessAnalysisResult) ()
-        round (CFG _ _ m) = sequenceA_ (M.mapWithKey update m)
-
-        update :: NodeID -> (Maybe ΣNodeData, Set NodeID) -> Control.Monad.State.State (Bool, LivenessAnalysisResult) ()
-        update t (info, succ) = do
-            (_, m) <- Control.Monad.State.get
-            let curr = m M.! t
-            let liveIn' = case info of 
-                    Just ΣGet{use} -> Set.union use (Set.difference (liveOut curr) Set.empty) -- get
-                    Just x -> Set.union (use x) (Set.difference (liveOut curr) (Set.singleton $ which x)) -- make/put
-                    Nothing -> liveOut curr -- Not ΣVar op
-            let liveOut' = Set.foldl (\l s -> Set.union l $ liveIn (m M.! s)) Set.empty succ
-            let mNew = M.adjust (\_ -> LivenessData liveIn' liveOut') t m
-            when (liveIn curr /= liveIn' || liveOut curr /= liveOut') $ Control.Monad.State.put (True, mNew)
+livenessAnalysis (CFG start _ adj) = livenessSets $ execState iter initState
+  where
+    maxID = Map.foldlWithKey (\a k (_, b) -> max k $ S.foldl max a b) start adj
+    succ = Map.map snd adj
+    useDefs = Map.map fromJust $ Map.filter isJust $ Map.map fst adj
+    pred =
+      Map.foldlWithKey
+        ( \g n nsucc ->
+            foldl
+              (\g s -> Map.insertWith Set.union s (Set.singleton n) g)
+              g
+              nsucc
+        )
+        (Map.fromList [(x, mempty) | x <- [0 .. maxID]])
+        succ
+    initWL = Map.keys succ
+    initLiveSets = foldl (\a k -> a <> Map.singleton k (LivenessData mempty mempty)) Map.empty [0 .. maxID]
+    initState = LivenessState initWL initLiveSets
+    
+    iter :: State LivenessState ()
+    iter = do 
+      node <- popWL
+      propNode node 
+      isEmpty <- emptyWL
+      unless isEmpty iter 
+    propNode :: NodeID -> State LivenessState ()
+    propNode nodeid = do 
+      LivenessState{livenessSets} <- get 
+      let LivenessData{liveIn=currIn, liveOut=currOut} = livenessSets Map.! nodeid
+      let succs = Map.findWithDefault Set.empty nodeid succ
+      let liveout' = Set.foldl (\l s -> Set.union l $ liveIn (livenessSets Map.! s)) Set.empty succs
+      let livein' = case Map.lookup nodeid useDefs of
+            Just (ΣGet{use}) -> Set.union use currOut
+            Just x -> Set.union (use x) (Set.delete (which x) liveout') -- use eqn.
+            Nothing -> liveout' -- No use/def data
+      updateLivenessSets nodeid LivenessData{liveIn=livein', liveOut=liveout'}
+      when (livein' /= currIn || liveout' /= currOut) $ do
+        -- update worklist as necessary
+        addToWL $ Map.findWithDefault (error "could not find pred") nodeid pred

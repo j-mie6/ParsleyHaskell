@@ -5,7 +5,7 @@ module Parsley.Internal.Frontend.Analysis.Liveness (livenessAnalysis, LivenessDa
 
 import Control.Monad (when)
 import Control.Monad.Fix (fix)
-import Control.Monad.State (State, get, put, runState, execState, gets)
+import Control.Monad.State (State, get, put, runState, execState, gets, modify)
 import Data.Foldable (sequenceA_)
 import qualified Data.Map as Map
 import Data.Set (Set)
@@ -28,10 +28,12 @@ data LivenessState = LivenessState { worklist :: [NodeID], livenessSets :: Liven
 
 popWL :: State LivenessState NodeID
 popWL = do
-      LivenessState{worklist, livenessSets} <- get
-      let (a : as) = worklist
-      put $ LivenessState as livenessSets
-      return a
+      LivenessState{worklist} <- get 
+      let (head : tail) = worklist
+      modify (\state -> state{worklist=tail})
+      return head
+  
+
 emptyWL :: State LivenessState Bool
 emptyWL = gets (null . worklist) 
 
@@ -41,9 +43,7 @@ addToWL preds = do
       put $ state{worklist=foldl (flip (:)) worklist preds}
 
 updateLivenessSets :: NodeID -> LivenessData -> State LivenessState () 
-updateLivenessSets id sets = do 
-  state@LivenessState{livenessSets} <- get 
-  put $ state{livenessSets=Map.insert id sets livenessSets}
+updateLivenessSets id sets = modify (\state@LivenessState{livenessSets} -> state{livenessSets=Map.insert id sets livenessSets})
 
 
 
@@ -80,10 +80,9 @@ livenessAnalysis (CFG start _ adj) = livenessSets $ execState iter initState
       let succs = Map.findWithDefault Set.empty nodeid succ
       let liveout' = Set.foldl (\l s -> Set.union l $ liveIn (livenessSets Map.! s)) Set.empty succs
       let livein' = case Map.lookup nodeid useDefs of
-            Just (ΣGet{use}) -> Set.union use currOut
+            Just (ΣGet{which}) -> Set.insert which currOut
             Just x -> Set.union (use x) (Set.delete (which x) liveout') -- use eqn.
             Nothing -> liveout' -- No use/def data
       updateLivenessSets nodeid LivenessData{liveIn=livein', liveOut=liveout'}
-      when (livein' /= currIn || liveout' /= currOut) $ do
-        -- update worklist as necessary
+      when (livein' /= currIn || liveout' /= currOut) $ 
         addToWL $ Map.findWithDefault (error "could not find pred") nodeid pred

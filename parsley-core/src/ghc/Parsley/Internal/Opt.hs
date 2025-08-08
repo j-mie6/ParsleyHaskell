@@ -22,7 +22,6 @@ data Flags = Flags { lawBasedOptimisations    :: !Bool
                    , factorAheadOfJoins       :: !Bool
                    , reclaimInput             :: !Bool
                    , deduceFailPath           :: !Bool
-                   , deadCodeElimination      :: !Bool
                    }
 
 none, fast, full :: Flags
@@ -35,7 +34,6 @@ none = Flags { lawBasedOptimisations    = off
              , factorAheadOfJoins       = off
              , reclaimInput             = off
              , deduceFailPath           = off
-             , deadCodeElimination      = off
              }
 fast = full  --{ }
 full = Flags { lawBasedOptimisations    = on
@@ -47,5 +45,4 @@ full = Flags { lawBasedOptimisations    = on
              , factorAheadOfJoins       = on
              , reclaimInput             = on
              , deduceFailPath           = on
-             , deadCodeElimination      = on
              }

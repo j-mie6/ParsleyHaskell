@@ -37,7 +37,7 @@ import Parsley.Internal.Core.Identifiers   (IMVar, MVar(..), IΣVar, ΣVar(..), 
 import Parsley.Internal.Common.Fresh       (HFreshT, newVar, runFreshT)
 import Parsley.Internal.Common.Indexed     (Fix(In), cata, cata', Tag(..), (:+:)(..), (\/), Const1(..))
 import Parsley.Internal.Common.State       (State, get, gets, runState, execState, modify', MonadState)
-import Parsley.Internal.Frontend.Optimiser (optimise, dataFlowOptimise)
+import Parsley.Internal.Frontend.Optimiser (optimise)
 import Parsley.Internal.Frontend.Analysis  (analyse, emptyFlags, dependencyAnalysis, inliner)
 import Parsley.Internal.Trace              (Trace(trace))
 import System.IO.Unsafe                    (unsafePerformIO)
@@ -48,7 +48,6 @@ import qualified Data.HashSet         as HashSet (member, insert, empty)
 import qualified Data.Map             as Map     ((!))
 import qualified Data.Set             as Set     (empty)
 import qualified Parsley.Internal.Opt as Opt
-import Data.Map (Map)
 
 {-|
 Given a user's parser, this will analyse it, extract bindings and then compile them with a given function
@@ -67,8 +66,7 @@ compile (Parser p) codeGen optimiser = trace ("COMPILING NEW PARSER WITH " ++ sh
   where
     (p', μs, maxV) = preprocess p
     (μs', frs) = dependencyAnalysis p' μs
-    (p'', μs'') = dataFlowOptimise p' μs'
-    compiled = (codeGen' Nothing p'', DMap.mapWithKey (codeGen' . Just) μs'')
+    compiled = (codeGen' Nothing p', DMap.mapWithKey (codeGen' . Just) μs')
 
 
     freeRegs :: Maybe (MVar x) -> Set SomeΣVar

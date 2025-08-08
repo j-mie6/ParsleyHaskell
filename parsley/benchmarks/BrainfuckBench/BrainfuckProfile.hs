@@ -14,7 +14,7 @@ module Main where
 import Parsley hiding (pure)
 import Data.ByteString     (ByteString)
 import qualified Data.ByteString as BS
-import Control.DeepSeq (deepseq,rnf,NFData)
+import Control.DeepSeq (deepseq,rnf,NFData, rwhnf)
 import GHC.Generics        (Generic)
 import Control.Monad (replicateM_)
 
@@ -23,7 +23,6 @@ import BrainfuckBench.Shared (BrainFuckOp(..))
 
 
 deriving instance Generic BrainFuckOp
-deriving instance NFData BrainFuckOp
 
 parser :: ByteString -> Maybe [BrainFuckOp]
 parser = $$(parse brainfuck')

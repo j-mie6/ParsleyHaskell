@@ -18,9 +18,8 @@ module Parsley.Internal.Backend.ReferenceBinds (bindReferences) where
 
 import Control.Monad                                    (unless)
 import Control.Monad.Writer                             (Writer, MonadWriter (..), runWriter)
-import Control.Monad.State                              (State, StateT (..), MonadTrans (..), MonadState (..), when, evalState, gets, execState, modify)
+import Control.Monad.State                              (State, StateT (..), MonadTrans (..), MonadState (..), when, evalState, gets, execState)
 import Data.Foldable                                    (traverse_)
-import Data.Functor                                     (($>))
 import Parsley.Internal.Backend.Machine.LetBindings     (LetBinding (..))
 import Parsley.Internal.Common                          (One)
 import Parsley.Internal.Common.Fresh                    (HFresh, MonadFresh(..), runFresh)
@@ -64,8 +63,8 @@ bindReferences (p, μs) =  (pOptimised, μsOptimised)
         (!pTagged', !μsTagged') = markRegisterBinds freeRegData (TaggedBinding pTagged, μsTagged)
 
         -- 5. Unwrap tags, reattach freeRegs and meta of original bind
-        letHandlerRegs = fst $ callAndHandlerRegs freeRegData
-        letReturnRegs = returnContinuations freeRegData
+        -- letHandlerRegs = fst $ callAndHandlerRegs freeRegData
+        -- letReturnRegs = returnContinuations freeRegData
         rewrap :: MVar x -> Fix4 (Instr input) '[] One x a -> LetBinding input a x
         rewrap μ new = let old = μs DMap.! μ
                          in old {body = new,
@@ -277,9 +276,9 @@ constructCFG (p, μs) = cfg
         starts = DMap.foldlWithKey (\m (MVar k) b -> Map.insert k (skimTopTag $ taggedBody b) m) Map.empty μs
 
         -- 2. Construct the global CFG from the top-level and let-bound parsers
-        (cfg, handlerStumpData) = DMap.foldlWithKey (\(cfg, handls) (MVar k) b -> let (cfg', handls') = constructMachineCFG starts (Just k) (taggedBody b)
-                                                               in (cfg `mergeCFGs` cfg', joinHandlerStumpData handls handls') ) 
-                                                               (constructMachineCFG starts Nothing (taggedBody p)) μs
+        (cfg, _) = DMap.foldlWithKey (\(cfg, handls) (MVar k) b -> let (cfg', handls') = constructMachineCFG starts (Just k) (taggedBody b)
+                                                                   in (cfg `mergeCFGs` cfg', joinHandlerStumpData handls handls') )
+                                                                   (constructMachineCFG starts Nothing (taggedBody p)) μs
 
         -- NOTE: Commented below is a bunch of redundant code for when I constructed a global CFG instead of small CFGs per each let bound. This required a lot
         -- of messing around with joining hanging handler entries to their respective places. It is kept here for posterity in case such a construction is required
@@ -548,11 +547,13 @@ constructMachineCFG starts mvar instrs = (cfg, handlerStumpData)
                         let GraphConstructionState{collectedRetTags} = state
                         put $ state{collectedRetTags = Set.insert t collectedRetTags}
 
+        {-
         addTag :: InstrID -> StateT GraphConstructionState (Writer GraphConstruction) ()
         addTag t = do
                     state <- get
                     let GraphConstructionState{collectedTags} = state
                     put state {collectedTags = Set.insert t collectedTags}
+        -}
 
 algamateGraphs :: CFG -> CFGGraph 
 algamateGraphs CFG{graph, subs} = Map.foldl (Map.unionWith Set.union) graph subs 
@@ -680,7 +681,7 @@ markRegisterBinds freeRegsData (p, μs) = (pResult, μsResult)
 
         -- `frees`: set of free registers
         livesets = livenessSets freeRegsData
-        (_, handlerRegs) = callAndHandlerRegs freeRegsData
+        -- (_, handlerRegs) = callAndHandlerRegs freeRegsData
 
         -- 1. Mark all free registers
         emptyRegMarkerState = RegMarkerState 0
@@ -755,8 +756,8 @@ markRegisterBinds freeRegsData (p, μs) = (pResult, μsResult)
                         return $ In4 (Tag4 t instrs)
 
 
-        wrap' :: InstrID -> Instr o (Fix4 (TaggedInstr o)) xs n r a -> State RegMarkerState (Fix4 (TaggedInstr o) xs n r a)
-        wrap' t instrs = modify (\state -> state{lastTag=t}) $> In4 (Tag4 t instrs)
+        -- wrap' :: InstrID -> Instr o (Fix4 (TaggedInstr o)) xs n r a -> State RegMarkerState (Fix4 (TaggedInstr o) xs n r a)
+        -- wrap' t instrs = modify (\state -> state{lastTag=t}) $> In4 (Tag4 t instrs)
 
         doHandler :: Handler o (RegMarker o) xs n r a -> State RegMarkerState (Handler o (Fix4 (TaggedInstr o)) xs n r a)
         doHandler (Same _ x k1 y k2) = do

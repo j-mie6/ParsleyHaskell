@@ -28,7 +28,7 @@ import Data.STRef                           (newSTRef, readSTRef, writeSTRef)
 import Parsley.Internal.Common.Indexed      (Fix, cata, Const1(..), (:*:)(..), zipper)
 import Parsley.Internal.Common.State        (State, MonadState (get), execState, modify')
 import Parsley.Internal.Core.CombinatorAST  (Combinator(..), traverseCombinator, traverseCombinatorRev)
-import Parsley.Internal.Core.Identifiers    (IMVar(..), MVar(..), ΣVar, SomeΣVar(..))
+import Parsley.Internal.Core.Identifiers    (IMVar, MVar(..), ΣVar, SomeΣVar(..))
 
 import qualified Data.Dependent.Map as DMap   (foldrWithKey, filterWithKey)
 import qualified Data.Map.Strict    as Map    ((!), empty, insert, insertWith, findMax, elems, maxView, fromList, fromDistinctAscList, foldlWithKey)

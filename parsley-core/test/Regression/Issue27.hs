@@ -16,7 +16,6 @@ import Parsley.Internal.Backend.Machine.Instructions
 import Parsley.Internal.Frontend.Analysis.Cut (cutAnalysis)
 
 import qualified Data.Set as Set (empty)
-import qualified Data.Map as Map
 import qualified Parsley.Internal.Opt   as Opt
 
 import Parsley.Internal.Verbose

@@ -8,15 +8,17 @@
 module ABCBench.Parsley.Parser where
 
 import Prelude hiding (fmap, pure, (<*), (*>), (<*>), (<$>), (<$), pred)
+
 import Parsley
-import Parsley.Combinator (eof, more)
+import Parsley.Combinator       (eof, more)
 import Parsley.Defunctionalized
-import Parsley.Char(noneOf, token)
+import Parsley.Char             (noneOf, token)
 import Parsley.Fold
 import Language.Haskell.TH.Syntax (Lift(..))
 
 import Parsley.Register
 import Parsley.Defunctionalized
+
 #define QQ(x) (makeQ (x) [||(x)||])
 
 count :: Parser a -> Parser Int

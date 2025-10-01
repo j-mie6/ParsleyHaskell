@@ -27,12 +27,12 @@ data Regs (rs :: [Type]) where
 Represents a collection of registers and their respective `Code` bindings at a given moment
 -}
 data RegBindNames (rs :: [Type]) where 
-  NoName :: RegBindNames '[]
+  NoName  :: RegBindNames '[]
   RegName :: ΣVar x -> Code x -> RegBindNames xs -> RegBindNames (x:xs)
 
 
 data RegTHNames (rs :: [Type]) where 
-  NoTHName :: RegTHNames '[]
+  NoTHName  :: RegTHNames '[]
   RegTHName :: ΣVar x -> Name -> RegTHNames xs -> RegTHNames (x:xs)
 
 
@@ -45,10 +45,17 @@ heterogeneous list of free registers.
 makeRegs :: Set SomeΣVar -> Some Regs
 makeRegs = foldr (\(SomeΣVar σ) (Some rs) -> Some (Regs σ rs)) (Some NoRegs)
 
+{-|
+Forgetfully mush `Regs rs` into `Set SomeΣVar`, removing the type-level data of `rs`.
+-}
 fromRegs :: Regs rs -> Set SomeΣVar
-fromRegs NoRegs = Set.empty 
+fromRegs NoRegs      = Set.empty
 fromRegs (Regs r rs) = Set.insert (SomeΣVar r) $ fromRegs rs
 
+{-|
+Debug printing function for `Regs rs` instances.
+
+-}
 debugRegsList :: forall rs. Regs rs -> String
-debugRegsList NoRegs = ""
+debugRegsList NoRegs      = ""
 debugRegsList (Regs s rs) = "reg " ++ show s ++ ", " ++ debugRegsList rs

@@ -18,8 +18,8 @@ module Parsley.Internal.Backend.Machine.Types.Dynamics (
 import Parsley.Internal.Backend.Machine.Types.Base (Handler#, Cont#, Subroutine#, Func, RegisterStack#)
 import Parsley.Internal.Common.Utils               (Code)
 
-{-| 
-TODO: write comment
+{-|
+Template Haskell representation of `Parsley.Internal.Backend.Machine.Types.Base.RegisterStack#`
 -}
 type DynRegisterStack rs x = Code (RegisterStack# rs x)
 

@@ -48,7 +48,7 @@ but @Handler#@ is used at the boundaries, such as for recursion.
 @since 1.4.0.0
 -}
 type family Handler# (hs :: [Type]) s o a where 
-  Handler# '[] s o a      = Pos             --  The current position
+  Handler# '[] s o a      = Pos              --  The current position
                            -> DynRep o       -- The current input on failure
                            -> ST s (Maybe a)
   Handler# (h : hs) s o a = h -> Handler# hs s o a
@@ -80,10 +80,10 @@ NB: has been made into a type family to allow for n-ary binds
 @since 1.4.0.0
 -}
 type family Subroutine# (xs :: [Type]) (hs :: [Type]) (ys :: [Type]) s o a y where 
-  Subroutine# '[] hs ys s o a y      = Cont# ys s o a y  -- What to do when this parser returns
+  Subroutine# '[] hs ys s o a y      = Cont# ys s o a y   -- What to do when this parser returns
                                      -> Handler# hs s o a -- How to handle failure within the call
-                                     -> Pos            -- The current position
-                                     -> DynRep o       -- The input on entry to the call
+                                     -> Pos               -- The current position
+                                     -> DynRep o          -- The input on entry to the call
                                      -> ST s (Maybe a)
   Subroutine# (x : xs) hs ys s o a y = x -> Subroutine# xs hs ys s o a y
 
@@ -92,4 +92,4 @@ A @Func@ is a type alias for `Subroutine#`.
 
 @since 1.4.0.0
 -}
-type Func rs hs ys s o a x  = Subroutine# rs hs ys s o a x 
+type Func rs hs ys s o a x  = Subroutine# rs hs ys s o a x

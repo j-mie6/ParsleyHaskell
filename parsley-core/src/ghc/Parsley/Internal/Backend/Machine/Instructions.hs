@@ -139,10 +139,10 @@ data Instr (o :: Type)                                  -- The FIXED input type
   {-| Sets up a new join point binding.
 
   @since 1.0.0.0 -}
-  MkJoin    :: ΦVar x           {- ^ The name of the binding that can be referred to later. -}
+  MkJoin    :: ΦVar x             {- ^ The name of the binding that can be referred to later. -}
             -> Maybe (Some Regs)  {- ^ Registers that are free in the control flow of the join. -}
-            -> k (x : xs) n r a {- ^ The body of the join point binding. -}
-            -> k xs n r a       {- ^ The scope within which the binding is valid.  -}
+            -> k (x : xs) n r a   {- ^ The body of the join point binding. -}
+            -> k xs n r a         {- ^ The scope within which the binding is valid.  -}
             -> Instr o k xs n r a
   {-| Swaps the top two elements on the stack
 
@@ -209,18 +209,18 @@ data Handler (o :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Ty
 
   @since 1.4.0.0 -}
   Same :: Maybe (Some Regs) -- ^ Free registers needed to run (if determined)
-       -> Bool             -- ^ Whether the input matches handler should generate a binding
-       -> k xs n r a       -- ^ Execute when the input matches, notice that the captured offset is discarded since it is equal to the current.
-       -> Bool             -- ^ Whether the input does not match handler should generate a binding
-       -> k (o : xs) n r a -- ^ Execute when the input does not match, the resulting behaviour could use the captured or current input.
+       -> Bool              -- ^ Whether the input matches handler should generate a binding
+       -> k xs n r a        -- ^ Execute when the input matches, notice that the captured offset is discarded since it is equal to the current.
+       -> Bool              -- ^ Whether the input does not match handler should generate a binding
+       -> k (o : xs) n r a  -- ^ Execute when the input does not match, the resulting behaviour could use the captured or current input.
        -> Handler o k (o : xs) n r a
   {-| These handlers are unconditional on the input, and will always do the same
       thing regardless of the input provided.
 
   @since 1.7.0.0 -}
   Always :: Maybe (Some Regs) -- ^ Free registers needed to run (if determined)
-         -> Bool             -- ^ Whether the handler should generate a binding
-         -> k (o : xs) n r a -- ^ The handler
+         -> Bool              -- ^ Whether the handler should generate a binding
+         -> k (o : xs) n r a  -- ^ The handler
          -> Handler o k (o : xs) n r a
 
 {-|
@@ -229,8 +229,8 @@ in the generated code or not.
 
 @since 1.0.0.0
 -}
-data Access = Hard -- ^ Register exists at runtime and this interaction will use it.
-            | Soft -- ^ Register may not exist, and the interaction should be with cache regardless.
+data Access = Hard  -- ^ Register exists at runtime and this interaction will use it.
+            | Soft  -- ^ Register may not exist, and the interaction should be with cache regardless.
             | Bound -- ^ Register that is bound to a local variable, a la `let reg = val in ...`
             deriving stock Show
 

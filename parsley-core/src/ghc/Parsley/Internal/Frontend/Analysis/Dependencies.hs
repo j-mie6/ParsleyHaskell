@@ -49,7 +49,7 @@ Given a top-level parser and a collection of its let-bound subjects performs the
 * Propogate the free registers according to transitive need via the dependency graph.
 
 Returns the non-dead bindings, the information about each bindings free registers, and the next
-free index for any registers created in code generation. 
+free index for any registers created in code generation.
 
 @since 1.5.0.0
 -}

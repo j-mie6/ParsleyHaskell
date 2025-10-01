@@ -76,7 +76,7 @@ readyMachine = trace "starting readymachine" $ cata4 (Machine . alg)
   where
     alg :: (?ops :: InputOps (StaRep o), Ops o, ?flags :: Opt.Flags) => Instr o (Machine s o) xs n r a -> MachineMonad s o xs n r a
     alg Ret                 = evalRet
-    alg (Call μ k)        = evalCall μ k
+    alg (Call μ k)          = evalCall μ k
     alg (Push x k)          = evalPush x k
     alg (Pop k)             = evalPop k
     alg (Lift2 f k)         = evalLift2 f k

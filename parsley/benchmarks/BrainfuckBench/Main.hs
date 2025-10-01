@@ -6,7 +6,6 @@
              TypeFamilies,
              UnboxedTuples,
              TypeApplications #-}
-{-# OPTIONS_GHC -ddump-simpl -ddump-to-file #-}
 
 module Main where
 import Gauge.Main          (Benchmark, bgroup)
@@ -14,8 +13,9 @@ import Control.DeepSeq     (NFData)
 import GHC.Generics        (Generic)
 import Data.ByteString     (ByteString)
 import Data.Text           (Text)
---import Parsley.Internal.Verbose ()
-import qualified BrainfuckBench.Parsley.Parser
+import BrainfuckBench.Shared
+import Shared.BenchmarkUtils
+
 import qualified BrainfuckBench.Parsec.Parser
 import qualified BrainfuckBench.Megaparsec.Parser
 import qualified BrainfuckBench.Attoparsec.Parser
@@ -23,8 +23,6 @@ import qualified BrainfuckBench.Handrolled.Parser
 import qualified BrainfuckBench.Happy.Parser
 import qualified Parsley
 import qualified Data.ByteString.Lazy
-import BrainfuckBench.Shared
-import Shared.BenchmarkUtils
 import qualified BrainfuckBench.Parsley.Parser
 
 main :: IO ()
@@ -68,16 +66,16 @@ brainfuck =
       bfTest = benchmark ["benchmarks/inputs/helloworld.bf", "benchmarks/inputs/helloworld_golfed.bf", "benchmarks/inputs/compiler.bf"]
   in bgroup "Brainfuck"
        [ bfTest string          "Parsley (String)"          brainfuckParsleyS
-       , bfTest string          "Parsley (two loops)" brainfuckParsleySTwoLoops
+       , bfTest string          "Parsley (two loops)"       brainfuckParsleySTwoLoops
        , bfTest string          "Parsley (two loops prime)" brainfuckParsleySTwoLoops'
-       , bfTest string          "Parsley (one maybe)" brainfuckParsleySOneMaybe
-       , bfTest string          "Parsley (one rec)" brainfuckParsleySOneRec
-       , bfTest string          "Parsley (one reg)" brainfuckParsleySOneReg
-       , bfTest string          "Parsley (one reg prime)" brainfuckParsleySOneReg'
-       --, bfTest text            "Parsley (Text)"            brainfuckParsleyT
-       --, bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB
+       , bfTest string          "Parsley (one maybe)"       brainfuckParsleySOneMaybe
+       , bfTest string          "Parsley (one rec)"         brainfuckParsleySOneRec
+       , bfTest string          "Parsley (one reg)"         brainfuckParsleySOneReg
+       , bfTest string          "Parsley (one reg prime)"   brainfuckParsleySOneReg'
+       -- , bfTest text            "Parsley (Text)"            brainfuckParsleyT
+       -- , bfTest bytestring      "Parsley (ByteString)"      brainfuckParsleyB
        -- , bfTest lazy_bytestring "Parsley (Lazy ByteString)" brainfuckParsleyLB
-      --  , bfTest string          "Handrolled"                BrainfuckBench.Handrolled.Parser.brainfuck
+       -- , bfTest string          "Handrolled"                BrainfuckBench.Handrolled.Parser.brainfuck
        -- , bfTest string          "Happy"                     BrainfuckBench.Happy.Parser.brainfuck
        -- , bfTest string          "Parsec (String)"           (parsecParse BrainfuckBench.Parsec.Parser.brainfuck)
        -- , bfTest text            "Parsec (Text)"             (parsecParse BrainfuckBench.Parsec.Parser.brainfuck)

@@ -12,14 +12,13 @@ Exposes the analysis passes defined within the analysis submodules via `analyse`
 module Parsley.Internal.Frontend.Analysis (
     analyse, dependencyAnalysis, inliner,
     module Flags
-    ) where
+   ) where
 
 import Parsley.Internal.Common.Indexed                 (Fix)
 import Parsley.Internal.Core.CombinatorAST             (Combinator)
 import Parsley.Internal.Frontend.Analysis.Cut          (cutAnalysis)
 import Parsley.Internal.Frontend.Analysis.Dependencies (dependencyAnalysis)
 import Parsley.Internal.Frontend.Analysis.Inliner      (inliner)
-
 
 import Parsley.Internal.Frontend.Analysis.Flags as Flags (emptyFlags, AnalysisFlags)
 

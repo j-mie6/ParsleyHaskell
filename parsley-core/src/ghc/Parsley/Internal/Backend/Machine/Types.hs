@@ -25,8 +25,8 @@ import Parsley.Internal.Backend.Machine.Types.Base      (Func)
 import Parsley.Internal.Backend.Machine.Types.Registers (Regs)
 import Parsley.Internal.Backend.Machine.Types.Context   (Ctx)
 import Parsley.Internal.Backend.Machine.Types.State     (Γ)
-import Parsley.Internal.Backend.Machine.Types.Statics (QSubroutine, qSubroutine)
-import Parsley.Internal.Common.Utils                  (Code)
+import Parsley.Internal.Backend.Machine.Types.Statics   (QSubroutine, qSubroutine)
+import Parsley.Internal.Common.Utils                    (Code)
 
 {-|
 The monad stack used to evaluate a parser machine, see `run`.

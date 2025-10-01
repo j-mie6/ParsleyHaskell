@@ -78,7 +78,7 @@ fromDynRegStack drs NoRegs      = drs
 fromDynRegStack drs (Regs _ rs) = \r -> fromDynRegStack @_ @x [|| $$drs $$r ||] rs  
 
 toDynRegStack :: forall rs x. Regs rs ->  StaRegisterStack# rs x -> DynRegisterStack rs x
-toDynRegStack NoRegs f = f 
+toDynRegStack NoRegs f      = f
 toDynRegStack (Regs _ rs) f = [|| \r -> $$(toDynRegStack @_ @x rs (f [|| r ||])) ||]
 
 -- Handlers
@@ -416,7 +416,6 @@ data QSubroutine s o a x = forall rs hs ys. QSubroutine !(StaFunc rs hs ys s o a
 
 {-|
 Wraps a `StaSubroutine` with its free registers, handler registers, and return continuation registers are kept existential.
-
 -}
 data QLooproutine s o a x = forall xs hs ys. QLooproutine !(StaSubroutine xs hs ys s o a x) !(Regs xs) !(Regs hs) !(Regs ys)
 

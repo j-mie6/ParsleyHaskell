@@ -210,19 +210,20 @@ type PhiData = (DList (InstrID, IΦVar), DList (IΦVar, InstrID))
 type CFGGraph = Map InstrID (Set InstrID)
 
 {-|
-Keep graph and use-def data together. 
+Keep graph and use-def data together.
+FIXME: a lot of the data recorded in `CFG` could be simplified or neatified.
 -}
 data CFG = CFG {
       graph          :: !CFGGraph
-    , subs           :: !(Map IMVar CFGGraph) -- ^ graph of the CFG
-    , start          :: !InstrID                              -- ^ Start node of the CFG
-    , useDefs        :: !UseDefData                           -- ^ The use-defs, duh!
-    , calleeTags     :: !(Map IMVar InstrID)                  -- ^ Which tag each μ-bound parser starts at.
-    , handlerTags    :: !(Set InstrID)                        -- ^ The tags that are entry points of a handler 
+    , subs           :: !(Map IMVar CFGGraph)                              -- ^ graph of the CFG
+    , start          :: !InstrID                                           -- ^ Start node of the CFG
+    , useDefs        :: !UseDefData                                        -- ^ The use-defs, duh!
+    , calleeTags     :: !(Map IMVar InstrID)                               -- ^ Which tag each μ-bound parser starts at.
+    , handlerTags    :: !(Set InstrID)                                     -- ^ The tags that are entry points of a handler
     , callerTags     :: !(Map IMVar (Set (Maybe IMVar, InstrID, InstrID))) -- ^ Each node that is a call to a given let-bound, along the ret. cont. tag
-    , letBoundStarts :: !(Map IMVar InstrID)                  -- ^ InstrID of the start for each let bound parser
-    , letBoundTags   :: !(Map IMVar (Set InstrID))            -- ^ Which instruction tags belong to which let bound parser 
-    , returnTags     :: !(Map IMVar (Set InstrID))            -- ^ Which tags are return calls from let-bound parsers.
+    , letBoundStarts :: !(Map IMVar InstrID)                               -- ^ InstrID of the start for each let bound parser
+    , letBoundTags   :: !(Map IMVar (Set InstrID))                         -- ^ Which instruction tags belong to which let bound parser
+    , returnTags     :: !(Map IMVar (Set InstrID))                         -- ^ Which tags are return calls from let-bound parsers.
 }
 
 instance Semigroup GraphConstruction where
@@ -241,6 +242,10 @@ data HandlerEntry = SameH InstrID InstrID | AlwaysH InstrID deriving stock Show
 
 type HandlerEntries = [HandlerEntry]
 
+{-|
+State that we carry around for the construction of a graph.
+FIXME: another messy struct that could be simplified somewhat.
+-}
 data GraphConstructionState = GraphConstructionState {
       loopTags               :: !(Map IMVar InstrID)
     , handlerStack           :: !HandlerEntries
@@ -275,10 +280,13 @@ constructCFG (p, μs) = cfg
         (cfg, handlerStumpData) = DMap.foldlWithKey (\(cfg, handls) (MVar k) b -> let (cfg', handls') = constructMachineCFG starts (Just k) (taggedBody b)
                                                                in (cfg `mergeCFGs` cfg', joinHandlerStumpData handls handls') ) 
                                                                (constructMachineCFG starts Nothing (taggedBody p)) μs
-        
-        {- 
-        -- Below is redundant code for when I constructed a global CFG instead of small CFGs per each let bound. This required a lot of messing around with
-        -- joining hanging handler entries to their respective places.    
+
+        -- NOTE: Commented below is a bunch of redundant code for when I constructed a global CFG instead of small CFGs per each let bound. This required a lot
+        -- of messing around with joining hanging handler entries to their respective places. It is kept here for posterity in case such a construction is required
+        -- in the future.
+        -- This code is partially responsible for the messy graph structs aforementioned above comments.
+        -- FIXME?: get rid of this code for good.
+        {-
 
         -- 3. propagate handlers to each callee's starts and handler stumps using `handlerStumpData`
 
@@ -352,6 +360,7 @@ constructCFG (p, μs) = cfg
         -- join for handler stump data
         joinHandlerStumpData :: HandlerStumpData -> HandlerStumpData -> HandlerStumpData
         joinHandlerStumpData (HandlerStumpData a b) (HandlerStumpData a' b') = HandlerStumpData (Map.unionWith Set.union a a') (Map.unionWith Set.union b b')
+
 {-
 When we have a call instruction, we transfer the handler to the callee parser. This means that any other non-top-level 
 parser can have failures without a local handler in scope which means that handler needs to be inherited from one of
@@ -367,10 +376,10 @@ data HandlerStumpData = HandlerStumpData (Map IMVar (Set (InstrID, Maybe InstrID
                                          (Map IMVar (Set InstrID))                  -- ^ Set of stumped instructions per each let-bound parser
                         deriving stock Show
 
-constructMachineCFG :: forall o xs n r a. Map IMVar InstrID -- ^ Map of MVar -> tag of the first instruction of machine
-                    -> Maybe IMVar -- ^ Which let-bound parser are we constructing now?
-                    -> Fix4 (TaggedInstr o) xs n r a  -- ^ Machine instructions
-                    -> (CFG, HandlerStumpData)
+constructMachineCFG :: forall o xs n r a. Map IMVar InstrID                 -- ^ Map of MVar -> tag of the first instruction of machine
+                                          -> Maybe IMVar                    -- ^ Which let-bound parser are we constructing now?
+                                          -> Fix4 (TaggedInstr o) xs n r a  -- ^ Machine instructions
+                                          -> (CFG, HandlerStumpData)
 constructMachineCFG starts mvar instrs = (cfg, handlerStumpData)
     where
         cfg = CFG{
@@ -612,8 +621,9 @@ cfgAnalysis maxID cfg = CFGAnalysisData { livenessSets = livesets
             (wl, ref) <- get
             put (foldl (flip (:)) wl preds, ref)
 
-        -- 2. use the live sets to find out over which registers are live-out of each sub through their handlers
+        -- NOTE: even _more_ redundant code being kept in this code base like a fossil in a museum...
         {-
+        -- 2. use the live sets to find out over which registers are live-out of each sub through their handlers
         --    a) Which handlers reach which let bound parsers. During construction, we make an edge from the start of each let-bound parser that is called
         --       with all possible handlers it is called under.
         callHandlerConns = Map.foldlWithKey (\hconns k start -> Map.insert k (getHandlerAttached start) hconns ) Map.empty letBoundStarts
@@ -646,8 +656,7 @@ cfgAnalysis maxID cfg = CFGAnalysisData { livenessSets = livesets
         letboundUses = Map.map (\tags -> Set.foldl (\b tag -> b `Set.union` (fst $ Map.findWithDefault (mempty, mempty) tag  useDefs)) Set.empty tags) letBoundTags
         -}
 
-
-{- 
+{-
 State for `markRegisterBinds` that keeps track of a few things. 
 Used to contain a lot more before the completion of total binds.
 -}
@@ -660,8 +669,8 @@ Use the computed `FreeRegisters` to populate our instructions with the free regi
 Significant steps: 
     1. Find all loops and make sure we make all registers bound within all loop bodies, properly
     2. Mark handlers and calls with the proper registers that pass through them 
-    3. Mark our return continuation registers as well (TODO)
-    4. Mark join point free registers (TODO)
+    3. Mark our return continuation registers as well
+    4. Mark join point free registers
 -}
 markRegisterBinds :: CFGAnalysisData -> (TaggedBinding input a a, DMap MVar (TaggedBinding input a)) -> (TaggedBinding input a a, DMap MVar (TaggedBinding input a))
 markRegisterBinds freeRegsData (p, μs) = (pResult, μsResult)
@@ -778,7 +787,7 @@ unTag = cata4 alg
         alg :: TaggedInstr o (Fix4 (Instr o)) xs n r a -> Fix4 (Instr o) xs n r a
         alg Tag4{tagged} = In4 tagged
 
--- Compute the DOT program of a given graph. Slow, but useful for debugging CFG problems
+-- Compute the DOT program of a given graph. Slow, but useful for debugging CFG problems via visualisation
 _computeDOT :: CFG -> CFGAnalysisData -> String
 _computeDOT cfg CFGAnalysisData{livenessSets} = computedCFG ""
     where

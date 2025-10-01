@@ -20,8 +20,9 @@ module Parsley.Internal (
     parse, parseWithOpts
   ) where
 
-import Parsley.Internal.Backend  (codeGen, eval)
-import Parsley.Internal.Frontend (compile)
+import Parsley.Internal.Backend                (codeGen, eval)
+import Parsley.Internal.Frontend               (compile)
+import Parsley.Internal.Backend.ReferenceBinds (bindReferences)
 
 import Parsley.Internal.Backend         as Backend    (
     Input,
@@ -41,7 +42,6 @@ import Parsley.Internal.Common.Utils    as THUtils    (Quapplicative(..), WQ, Co
 import Parsley.Internal.Trace           as Trace      (Trace(trace))
 
 import qualified Parsley.Internal.Opt   as Opt
-import Parsley.Internal.Backend.ReferenceBinds (bindReferences)
 
 parse :: (Trace, Input input) => Parser a -> Code (input -> Maybe a)
 parse = parseWithOpts Opt.fast

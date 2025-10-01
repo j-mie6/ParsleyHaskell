@@ -25,7 +25,7 @@ import Parsley.Internal.Common.Fresh       (VFreshT, VFresh, evalFreshT, evalFre
 import Parsley.Internal.Common.Indexed     (Fix, Fix4(In4), Cofree(..), Nat(..), imap, histo, extract, (|>))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..), MetaCombinator(..))
 import Parsley.Internal.Core.Defunc        (pattern UNIT)
-import Parsley.Internal.Trace              (Trace(..))
+import Parsley.Internal.Trace              (Trace(trace))
 
 import Parsley.Internal.Core.Defunc as Core (Defunc)
 import qualified Parsley.Internal.Opt as Opt
@@ -44,10 +44,10 @@ Translates a parser represented with combinators into its machine representation
 -}
 {-# INLINEABLE codeGen #-}
 codeGen :: (Trace, ?flags :: Opt.Flags)
-        => Maybe (MVar x)           -- ^ The name of the parser, if it exists.
-        -> Fix Combinator x         -- ^ The definition of the parser.
-        -> Set SomeΣVar             -- ^ The free registers it requires to run.
-        -> IMVar                    -- ^ The binding identifier to start name generation from.
+        => Maybe (MVar x)   -- ^ The name of the parser, if it exists.
+        -> Fix Combinator x -- ^ The definition of the parser.
+        -> Set SomeΣVar     -- ^ The free registers it requires to run.
+        -> IMVar            -- ^ The binding identifier to start name generation from.
         -> LetBinding o a x
 codeGen letBound p rs μ0 = trace ("GENERATING " ++ name ++ ": " ++ show p ++ "\nMACHINE: " ++ show (elems rs) ++ " => " ++ show m) $ makeLetBinding m rs newMeta
   where

@@ -71,7 +71,6 @@ library
 
                        Parsley.Internal.Frontend.Analysis,
                        Parsley.Internal.Frontend.Analysis.Cut,
- 
                        Parsley.Internal.Frontend.Analysis.Dependencies,
                        Parsley.Internal.Frontend.Analysis.Flags,
                        Parsley.Internal.Frontend.Analysis.Inliner,
@@ -85,7 +84,6 @@ library
                        Parsley.Internal.Backend.Analysis.Inliner,
                        Parsley.Internal.Backend.Analysis.Relevancy,
                        Parsley.Internal.Backend.ReferenceBinds,
-
 
                        Parsley.Internal.Backend.Machine,
                        Parsley.Internal.Backend.Machine.BindingOps,
@@ -106,7 +104,6 @@ library
                        Parsley.Internal.Backend.Machine.Types.Context,
                        Parsley.Internal.Backend.Machine.Types.Dynamics,
                        Parsley.Internal.Backend.Machine.Types.Registers,
-
                        Parsley.Internal.Backend.Machine.Types.Input,
                        Parsley.Internal.Backend.Machine.Types.InputCharacteristic,
                        Parsley.Internal.Backend.Machine.Types.State,

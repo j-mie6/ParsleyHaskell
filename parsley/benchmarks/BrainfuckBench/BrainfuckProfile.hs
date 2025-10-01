@@ -8,18 +8,18 @@
              OverloadedStrings,
              TypeApplications, 
              FlexibleContexts #-}
---{-# OPTIONS_GHC -prof #-}
-module Main where 
+module Main where
 
 import Parsley hiding (pure)
-import Data.ByteString     (ByteString)
-import qualified Data.ByteString as BS
-import Control.DeepSeq (deepseq,rnf,NFData, rwhnf)
-import GHC.Generics        (Generic)
-import Control.Monad (replicateM_)
 
+import Data.ByteString               (ByteString)
+import GHC.Generics                  (Generic)
+import Control.DeepSeq               (deepseq,rnf,NFData, rwhnf)
+import Control.Monad                 (replicateM_)
 import BrainfuckBench.Parsley.Parser (brainfuck, brainfuck')
-import BrainfuckBench.Shared (BrainFuckOp(..))
+import BrainfuckBench.Shared         (BrainFuckOp(..))
+
+import qualified Data.ByteString as BS
 
 
 deriving instance Generic BrainFuckOp

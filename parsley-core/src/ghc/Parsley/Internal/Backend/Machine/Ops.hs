@@ -47,8 +47,8 @@ module Parsley.Internal.Backend.Machine.Ops (
     -- ** Join Point Operations
     setupJoinPoint,
     -- ** Iteration Operations
-    bindIterAlways, -- TODO: rename to remove aposth
-    bindIterSame,   -- TODO: ^
+    bindIterAlways,
+    bindIterSame,
     -- ** Recursion Operations
     buildRec,
     -- ** Marshalling Operations
@@ -247,21 +247,21 @@ raise ctx γ = let VCons h _ = handlers γ in case h of (QAugmentedStaHandler h 
 Finds the current bound names of given registers from a given context
 -}
 gatherBinds :: forall rs s o a. Regs rs -> Ctx s o a -> RegBindNames rs
-gatherBinds NoRegs _ = NoName
+gatherBinds NoRegs _        = NoName
 gatherBinds (Regs σ rs) ctx = RegName σ (boundΣ σ ctx ) (gatherBinds rs ctx)
 
 {-|
 Feed a `RegBindNames` list to a register stack.
 -}
 feedBinds :: forall rs x. RegBindNames rs -> StaRegisterStack# rs x -> Code x
-feedBinds NoName f             = f
+feedBinds NoName f              = f
 feedBinds (RegName _ name rs) f = feedBinds rs (f name)
 
 {-|
 Modify a context by accepting a list of new bind names for the registers. 
 -}
 bindRegsToCtx :: forall rs s o a x. Regs rs -> Ctx s o a -> (Ctx s o a -> Code x) -> StaRegisterStack# rs x
-bindRegsToCtx NoRegs ctx k = k ctx
+bindRegsToCtx NoRegs ctx k      = k ctx
 bindRegsToCtx (Regs σ rs) ctx k = \r -> bindRegsToCtx rs (bindΣ σ r ctx) k 
 
 
@@ -287,13 +287,6 @@ buildHandler γ ctx h regs u c = fromStaHandler# $ acceptNames regs ctx
     acceptNames NoRegs ctx = \inp -> run h γ {operands = Op (INPUT c) (operands γ), input = toInput u inp} ctx
     acceptNames (Regs σ rs) ctx = \regName -> acceptNames rs (bindΣ σ regName ctx)
 
-{-
-  fromStaHandler# $ lambdafy regs h
-  where 
-    lambdafy :: forall hs. Regs hs -> (Γ s o (o : xs) n r a -> Code (ST s (Maybe a))) -> StaHandler# hs s o a 
-    lambdafy NoRegs h = \inp -> h (γ {operands = Op (INPUT c) (operands γ), input = toInput u inp})
-    lambdafy (Regs _ rs) h = \r -> lambdafy rs h
--}
 {-|
 Converts a partially evaluated parser into a "yes" handler: this means that
 the handler /always/ knows that the inputs are equal, so does not require
@@ -608,12 +601,12 @@ each time round.
 buildRec :: forall rs hs ys s o a r. (RecBuilder o, DynOps o)
          => MVar r                   -- ^ The name of the binding.
          -> DynFunc rs hs ys s o a r -- ^ Top level bound name for parser.
-         -> Regs rs                 -- ^ The registers required by the binding.
-         -> Regs hs                 -- ^ The registers required by the dynamic handler.
-         -> Regs ys                 -- ^ The registers required by the return continuation.
-         -> Ctx s o a               -- ^ The context to re-insert the register-less binding
-         -> Machine s o '[] One r a -- ^ The body of the binding.
-         -> Metadata                -- ^ The metadata associated with the binding
+         -> Regs rs                  -- ^ The registers required by the binding.
+         -> Regs hs                  -- ^ The registers required by the dynamic handler.
+         -> Regs ys                  -- ^ The registers required by the return continuation.
+         -> Ctx s o a                -- ^ The context to re-insert the register-less binding
+         -> Machine s o '[] One r a  -- ^ The body of the binding.
+         -> Metadata                 -- ^ The metadata associated with the binding
          -> Q Dec
 buildRec μ func rs hs rregs ctx k meta =
       bindRec# @o @rs @hs @ys @s @a @r func rs (Proxy @hs) (Proxy @ys) $ \bregs qret (qh :: DynHandler hs s o a) inp -> 

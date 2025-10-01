@@ -140,9 +140,9 @@ createHandlerDef hbody regs qoff k = unsafeCodeCoerce $ do
         bind <- makebind
         return (LetE [bind] k')
 
-#define deriveHandlerOps(_o)                                                                \
-instance HandlerOps _o where                                                                \
-{                                                                                           \
+#define deriveHandlerOps(_o)                                                                                                              \
+instance HandlerOps _o where                                                                                                              \
+{                                                                                                                                         \
   bindHandler# :: forall hs s a b. StaHandler# hs s _o a -> Proxy s -> Proxy a -> Regs hs -> (DynHandler hs s _o a -> Code b)  -> Code b; \
   bindHandler# h _ _ freeRegs = createHandlerDef @hs @s @_o @a h freeRegs [p| (!o# :: DynRep _o) |] \
 };

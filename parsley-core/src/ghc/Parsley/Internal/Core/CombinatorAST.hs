@@ -6,7 +6,7 @@ import Parsley.Internal.Common           (IFunctor(..), Fix, Const1(..), cata, i
 import Parsley.Internal.Core.Identifiers (MVar, ΣVar)
 import Parsley.Internal.Core.CharPred    (CharPred)
 import Parsley.Internal.Core.Defunc      (Defunc)
-import Control.Applicative ((<**>))
+import Control.Applicative               ((<**>))
 
 {-|
 The opaque datatype that represents parsers.

@@ -19,7 +19,6 @@ module Parsley.Internal.Backend.Machine.Types.Base (
   ) where
 
 import Control.Monad.ST                          (ST)
-import Data.STRef                                (STRef)
 import Data.Kind                                 (Type)
 import GHC.Prim                                  (Word#)
 import Parsley.Internal.Backend.Machine.InputRep (DynRep)
@@ -48,9 +47,18 @@ but @Handler#@ is used at the boundaries, such as for recursion.
 
 @since 1.4.0.0
 -}
-type Handler# s o a =  Pos            -- ^ The current position
-                    -> DynRep o       -- ^ The current input on failure
-                    -> ST s (Maybe a)
+type family Handler# (hs :: [Type]) s o a where 
+  Handler# '[] s o a      = Pos              --  The current position
+                           -> DynRep o       -- The current input on failure
+                           -> ST s (Maybe a)
+  Handler# (h : hs) s o a = h -> Handler# hs s o a
+
+{-|
+Generic type encompassing pieces of `ST` monads that are wrapped over some list of input registers.
+-}
+type family RegisterStack# (rs :: [Type]) x where 
+  RegisterStack# '[] x      = x
+  RegisterStack# (r : rs) x = r -> RegisterStack# rs x
 
 {-|
 @Cont#@ represents return continuation from recursive parsers. They
@@ -58,30 +66,30 @@ feed back their result @x@ back to the caller as well as the updated input.
 
 @since 1.4.0.0
 -}
-type Cont# s o a x =  x              -- ^ The value to be returned to the caller
-                   -> Pos            -- ^ The current position
-                   -> DynRep o       -- ^ The new input after the call is executed
-                   -> ST s (Maybe a)
+type Cont# (rs :: [Type]) s o a x = x            -- ^ The value to be returned to the caller
+                                  -> Pos         -- ^ The current position
+                                  -> DynRep o    -- ^ The new input after the call is executed
+                                  -> RegisterStack# rs (ST s (Maybe a))
 
 {-|
 @Subroutine#@ represents top-level parsers, which require a return continuation,
 input, an error handler in order to produce (or contribute to) a result of type @a@.
 
+NB: has been made into a type family to allow for n-ary binds
+
 @since 1.4.0.0
 -}
-type Subroutine# s o a x =  Cont# s o a x  -- ^ What to do when this parser returns
-                         -> Handler# s o a -- ^ How to handle failure within the call
-                         -> Pos            -- ^ The current position
-                         -> DynRep o       -- ^ The input on entry to the call
-                         -> ST s (Maybe a)
+type family Subroutine# (xs :: [Type]) (hs :: [Type]) (ys :: [Type]) s o a y where 
+  Subroutine# '[] hs ys s o a y      = Cont# ys s o a y   -- What to do when this parser returns
+                                     -> Handler# hs s o a -- How to handle failure within the call
+                                     -> Pos               -- The current position
+                                     -> DynRep o          -- The input on entry to the call
+                                     -> ST s (Maybe a)
+  Subroutine# (x : xs) hs ys s o a y = x -> Subroutine# xs hs ys s o a y
 
 {-|
-A @Func@ is a `Subroutine#` augmented with extra arguments with which to handle over
-the required free-registers of the parser. These are registers that are not created
-by the parser, but are used to execute it.
+A @Func@ is a type alias for `Subroutine#`. 
 
 @since 1.4.0.0
 -}
-type family Func (rs :: [Type]) s o a x where
-  Func '[] s o a x      = Subroutine# s o a x
-  Func (r : rs) s o a x = STRef s r -> Func rs s o a x
+type Func rs hs ys s o a x  = Subroutine# rs hs ys s o a x

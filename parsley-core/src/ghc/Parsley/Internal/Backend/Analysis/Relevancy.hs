@@ -59,9 +59,9 @@ alg (Tell k)           n         = let VCons _ xs = getStack k (SSucc n) in xs
 alg (Seek k)           (SSucc n) = VCons True (getStack k n)
 alg (Case p q)         n         = VCons True (let VCons _ xs = zipRelevancy (getStack p n) (getStack q n) in xs)
 alg (Choices _ ks def) (SSucc n) = VCons True (foldr (zipRelevancy . (`getStack` n)) (getStack def n) ks)
-alg (Iter _ _ h)       n         = let VCons _ xs = algHandler h (SSucc n) in xs
+alg (Iter _ _ _ h)       n       = let VCons _ xs = algHandler h (SSucc n) in xs
 alg (Join _)           (SSucc n) = VCons True (replicateVec n False)
-alg (MkJoin _ b _)     n         = let VCons _ xs = getStack b (SSucc n) in xs
+alg (MkJoin _ _ b _)     n       = let VCons _ xs = getStack b (SSucc n) in xs
 alg (Swap k)           n         = let VCons rel1 (VCons rel2 xs) = getStack k n in VCons rel2 (VCons rel1 xs)
 alg (Dup k)            n         = let VCons rel1 (VCons rel2 xs) = getStack k (SSucc n) in VCons (rel1 || rel2) xs
 alg (Make _ _ k)       (SSucc n) = VCons False (getStack k n)
@@ -73,5 +73,5 @@ alg (LogExit _ k)      n         = getStack k n
 alg (MetaInstr _ k)    n         = getStack k n
 
 algHandler :: Handler o RelevancyStack xs n r a -> SNat (Length xs) -> Vec (Length xs) Bool
-algHandler (Same _ yes _ no) (SSucc n) = VCons True (let VCons _ xs = zipRelevancy (VCons False (getStack yes n)) (getStack no (SSucc n)) in xs)
-algHandler (Always _ k) n = getStack k n
+algHandler (Same _ _ yes _ no) (SSucc n) = VCons True (let VCons _ xs = zipRelevancy (VCons False (getStack yes n)) (getStack no (SSucc n)) in xs)
+algHandler (Always _ _ k) n = getStack k n

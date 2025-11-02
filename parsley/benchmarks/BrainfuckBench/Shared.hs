@@ -1,6 +1,9 @@
 module BrainfuckBench.Shared where
 import Data.Int
 import Data.Char (ord, chr)
+import Control.DeepSeq
+
+instance NFData BrainFuckOp where rnf = rwhnf
 
 data BrainFuckOp = RightPointer | LeftPointer | Increment | Decrement | Output | Input | Loop [BrainFuckOp] deriving Show
 

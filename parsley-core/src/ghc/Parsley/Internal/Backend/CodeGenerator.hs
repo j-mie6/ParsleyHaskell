@@ -17,7 +17,7 @@ module Parsley.Internal.Backend.CodeGenerator (codeGen) where
 import Data.Set                            (Set, elems)
 import Control.Monad.Trans                 (lift)
 import Parsley.Internal.Backend.Machine    (user, LetBinding, makeLetBinding, newMeta, Instr(..), Handler(..),
-                                            _Fmap, _App, _Get, _Put, _Make, _Jump,
+                                            _Fmap, _App, _Get, _Put, _Make, _GetSoft, _PutSoft, _MakeSoft, _Jump,
                                             addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
                                             IMVar, IΦVar, MVar(..), ΦVar(..), SomeΣVar)
 import Parsley.Internal.Backend.Analysis   (coinsNeeded, shouldInline, reclaimable)
@@ -28,7 +28,6 @@ import Parsley.Internal.Core.Defunc        (pattern UNIT)
 import Parsley.Internal.Trace              (Trace(trace))
 
 import Parsley.Internal.Core.Defunc as Core (Defunc)
-
 import qualified Parsley.Internal.Opt as Opt
 
 type CodeGenStack a = VFreshT IΦVar (VFresh IMVar) a
@@ -70,13 +69,13 @@ pattern TryOrElse p q <- (_ :< Try (p :< _)) :<|>: (q :< _)
 -- it would be nice to generate `yesSame` handler bindings for Try, perhaps a special flag?
 -- relevancy analysis might help too I guess, for a more general one?
 rollbackHandler :: Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
-rollbackHandler = Always False (In4 (Seek (In4 Empt)))
+rollbackHandler = Always Nothing False (In4 (Seek (In4 Empt)))
 
 parsecHandler :: (?flags :: Opt.Flags) => Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a
-parsecHandler k = Same (not (shouldInline k)) k False (In4 Empt)
+parsecHandler k = Same Nothing (not (shouldInline k)) k False (In4 Empt)
 
 recoverHandler :: (?flags :: Opt.Flags) => Fix4 (Instr o) xs n r a -> Handler o (Fix4 (Instr o)) (o : xs) n r a
-recoverHandler = Always . not . shouldInline <*> In4 . Seek
+recoverHandler = Always Nothing . not . shouldInline <*> In4 . Seek
 
 altCompile :: (Trace, ?flags :: Opt.Flags) => CodeGen o a y -> CodeGen o a x
            -> (forall n xs r. Fix4 (Instr o) xs (Succ n) r a -> Handler o (Fix4 (Instr o)) (o : xs) (Succ n) r a)
@@ -94,6 +93,10 @@ deep (f :<$>: (p :< _)) = Just $ CodeGen $ \m -> runCodeGen p (In4 (_Fmap (user 
 deep (TryOrElse p q) = Just $ CodeGen $ altCompile p q recoverHandler id
 deep ((_ :< (Try (p :< _) :$>: x)) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . Pop . In4 . Push (user x))
 deep ((_ :< (f :<$>: (_ :< Try (p :< _)))) :<|>: (q :< _)) = Just $ CodeGen $ altCompile p q recoverHandler (In4 . _Fmap (user f))
+-- Handle tenderisation of makes/gets/puts: same as regular yet with `Soft` access
+deep (MetaCombinator Tenderise (_ :< (MakeRegister σ (p :< _) (q :< _)))) = Just $ CodeGen $ \m -> do qc <- runCodeGen q m; runCodeGen p (In4 (_MakeSoft σ qc))
+deep (MetaCombinator Tenderise (_ :< (GetRegister σ)))                    = Just $ CodeGen $ \m -> do return $! In4 (_GetSoft σ m)
+deep (MetaCombinator Tenderise (_ :< PutRegister σ (p :< _)))             = Just $ CodeGen $ \m -> do runCodeGen p (In4 (_PutSoft σ (In4 (Push (user UNIT) (blockCoins False m)))))
 deep _ = Nothing
 
 addCoinsNeeded :: Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a
@@ -115,7 +118,7 @@ shallow (LookAhead p) m =
 shallow (NotFollowedBy p) m =
   do pc <- runCodeGen p (In4 (Pop (In4 (Seek (In4 (Commit (In4 Empt)))))))
      -- it should never be the case that factored input can commute out of the lookahead
-     return $! In4 (Catch (blockCoins True (addCoinsNeeded (In4 (Tell pc)))) (Always (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
+     return $! In4 (Catch (blockCoins True (addCoinsNeeded (In4 (Tell pc)))) (Always Nothing (not (shouldInline m)) (In4 (Seek (In4 (Push (user UNIT) m))))))
 shallow (Branch b p q) m =
   do (binder, φ) <- makeΦ m
      pc <- freshΦ (runCodeGen p (In4 (Swap (In4 (_App φ)))))
@@ -133,7 +136,7 @@ shallow (Loop body exit)             m =
   do μ <- askM
      bodyc <- freshM (runCodeGen body (In4 (Pop (In4 (_Jump μ)))))
      exitc <- freshM (runCodeGen exit m)
-     return $! In4 (Iter μ (addCoinsNeeded bodyc) (parsecHandler (addCoinsNeeded exitc)))
+     return $! In4 (Iter μ Nothing (addCoinsNeeded bodyc) (parsecHandler (addCoinsNeeded exitc)))
 shallow (MakeRegister σ p q)         m = do qc <- runCodeGen q m; runCodeGen p (In4 (_Make σ qc))
 shallow (GetRegister σ)              m = do return $! In4 (_Get σ m)
 -- seems effective: blocks upstream coins from commuting down, but allows them to self factor
@@ -142,6 +145,7 @@ shallow (Position sel)               m = do return $! In4 (SelectPos sel m)
 shallow (Debug name p)               m = do fmap (In4 . LogEnter name) (runCodeGen p (In4 (Commit (In4 (LogExit name m)))))
 -- make sure to issue the fence after `p` is generated, to allow for a (safe) single character factor
 shallow (MetaCombinator Cut p)       m = do runCodeGen p (blockCoins False (addCoinsNeeded m))
+shallow (MetaCombinator Tenderise p) m = do runCodeGen p m
 
 -- Thanks to the optimisation applied to the K stack, commit is deadcode before Ret
 -- However, I'm not yet sure about the interactions with try yet...
@@ -165,6 +169,6 @@ freshΦ = newScope
 makeΦ :: (Trace, ?flags :: Opt.Flags) => Fix4 (Instr o) (x ': xs) (Succ n) r a -> CodeGenStack (Fix4 (Instr o) xs (Succ n) r a -> Fix4 (Instr o) xs (Succ n) r a, Fix4 (Instr o) (x : xs) (Succ n) r a)
 makeΦ m
   | shouldInline m                = trace ("eliding " ++ show m) $ return (id, m)
-  | Opt.factorAheadOfJoins ?flags = fmap (\φ -> (In4 . MkJoin φ (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
-  | otherwise                     = fmap (\φ -> (In4 . MkJoin φ (addCoins n m), In4 (Join φ))) askΦ
+  | Opt.factorAheadOfJoins ?flags = fmap (\φ -> (In4 . MkJoin φ Nothing (giveBursary n m), drainCoins n (In4 (Join φ)))) askΦ
+  | otherwise                     = fmap (\φ -> (In4 . MkJoin φ Nothing (addCoins n m), In4 (Join φ))) askΦ
   where n = coinsNeeded m

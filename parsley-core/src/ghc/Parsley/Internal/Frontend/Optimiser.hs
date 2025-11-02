@@ -2,6 +2,7 @@
              LambdaCase,
              PatternSynonyms,
              ViewPatterns #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-|
 Module      : Parsley.Internal.Frontend.Optimiser
 Description : Combinator law optimisation.
@@ -16,11 +17,10 @@ Exposes the `optimise` algebra, which is used for optimisations based on the law
 module Parsley.Internal.Frontend.Optimiser (optimise) where
 
 import Prelude hiding                      ((<$>))
-import Parsley.Internal.Common             (Fix(In), Quapplicative(..))
+import Parsley.Internal.Common             (Fix(..), Quapplicative(..))
 import Parsley.Internal.Core.CombinatorAST (Combinator(..))
 import Parsley.Internal.Core.Defunc        (Defunc(..), pattern FLIP_H, pattern COMPOSE_H, pattern FLIP_CONST, pattern UNIT)
-
-import qualified Parsley.Internal.Opt   as Opt
+import qualified Parsley.Internal.Opt as Opt
 
 pattern (:<$>:) :: Defunc (a -> b) -> Fix Combinator a -> Combinator (Fix Combinator) b
 pattern f :<$>: p = In (Pure f) :<*>: p

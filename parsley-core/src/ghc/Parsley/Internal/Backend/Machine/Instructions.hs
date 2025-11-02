@@ -22,25 +22,26 @@ module Parsley.Internal.Backend.Machine.Instructions (
     Access(..),
     MetaInstr(..),
     -- * Smart Instructions
-    _App, _Fmap, _Modify, _Make, _Put, _Get, _Jump,
+    _App, _Fmap, _Modify, _Make, _Put, _Get, _MakeSoft, _PutSoft, _GetSoft, _Jump,
     -- * Smart Meta-Instructions
     addCoins, refundCoins, drainCoins, giveBursary, blockCoins,
     -- * Re-exports
     PosSelector(..)
   ) where
 
-import Data.Kind                                    (Type)
-import Data.Void                                    (Void)
-import Parsley.Internal.Backend.Machine.Identifiers (MVar, ΦVar, ΣVar)
-import Parsley.Internal.Backend.Machine.Types.Coins (Coins(willConsume))
-import Parsley.Internal.Common                      (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
-import Parsley.Internal.Core.CombinatorAST          (PosSelector(..))
-import Parsley.Internal.Core.CharPred               (CharPred)
+import Data.Kind                                        (Type)
+import Data.Void                                        (Void)
+import Data.Some                                        (Some)
+import Parsley.Internal.Backend.Machine.Identifiers     (MVar, ΦVar, ΣVar)
+import Parsley.Internal.Backend.Machine.Types.Coins     (Coins(willConsume))
+import Parsley.Internal.Backend.Machine.Types.Registers (Regs)
+import Parsley.Internal.Common                          (IFunctor4, Fix4(In4), Const4(..), imap4, cata4, Nat(..), One, intercalateDiff)
+import Parsley.Internal.Core.CombinatorAST              (PosSelector(..))
+import Parsley.Internal.Core.CharPred                   (CharPred)
 
-import Parsley.Internal.Backend.Machine.Defunc as Machine (Defunc, user)
-import Parsley.Internal.Core.Defunc            as Core    (Defunc(ID), pattern FLIP_H)
-
-import qualified Parsley.Internal.Backend.Machine.Types.Coins as Coins (pattern Zero)
+import           Parsley.Internal.Backend.Machine.Defunc      as Machine (Defunc, user)
+import           Parsley.Internal.Core.Defunc                 as Core    (Defunc(ID), pattern FLIP_H)
+import qualified Parsley.Internal.Backend.Machine.Types.Coins as Coins   (pattern Zero)
 
 {-|
 This represents the instructions of the machine, in CPS form as an indexed functor.
@@ -127,6 +128,7 @@ data Instr (o :: Type)                                  -- The FIXED input type
 
   @since 1.0.0.0 -}
   Iter      :: MVar Void                  {- ^ The name of the binding. -}
+            -> Maybe (Some Regs)          {- ^ Set of references body needs-}
             -> k '[] One Void a           {- ^ The body of the loop: it cannot return "normally". -}
             -> Handler o k (o : xs) n r a {- ^ The handler for the loop's exit. -}
             -> Instr o k xs n r a
@@ -137,9 +139,10 @@ data Instr (o :: Type)                                  -- The FIXED input type
   {-| Sets up a new join point binding.
 
   @since 1.0.0.0 -}
-  MkJoin    :: ΦVar x           {- ^ The name of the binding that can be referred to later. -}
-            -> k (x : xs) n r a {- ^ The body of the join point binding. -}
-            -> k xs n r a       {- ^ The scope within which the binding is valid.  -}
+  MkJoin    :: ΦVar x             {- ^ The name of the binding that can be referred to later. -}
+            -> Maybe (Some Regs)  {- ^ Registers that are free in the control flow of the join. -}
+            -> k (x : xs) n r a   {- ^ The body of the join point binding. -}
+            -> k xs n r a         {- ^ The scope within which the binding is valid.  -}
             -> Instr o k xs n r a
   {-| Swaps the top two elements on the stack
 
@@ -205,17 +208,19 @@ data Handler (o :: Type) (k :: [Type] -> Nat -> Type -> Type -> Type) (xs :: [Ty
       captured offset matches the current offset or not.
 
   @since 1.4.0.0 -}
-  Same :: Bool             -- ^ Whether the input matches handler should generate a binding
-       -> k xs n r a       -- ^ Execute when the input matches, notice that the captured offset is discarded since it is equal to the current.
-       -> Bool             -- ^ Whether the input does not match handler should generate a binding
-       -> k (o : xs) n r a -- ^ Execute when the input does not match, the resulting behaviour could use the captured or current input.
+  Same :: Maybe (Some Regs) -- ^ Free registers needed to run (if determined)
+       -> Bool              -- ^ Whether the input matches handler should generate a binding
+       -> k xs n r a        -- ^ Execute when the input matches, notice that the captured offset is discarded since it is equal to the current.
+       -> Bool              -- ^ Whether the input does not match handler should generate a binding
+       -> k (o : xs) n r a  -- ^ Execute when the input does not match, the resulting behaviour could use the captured or current input.
        -> Handler o k (o : xs) n r a
   {-| These handlers are unconditional on the input, and will always do the same
       thing regardless of the input provided.
 
   @since 1.7.0.0 -}
-  Always :: Bool             -- ^ Whether the handler should generate a binding
-         -> k (o : xs) n r a -- ^ The handler
+  Always :: Maybe (Some Regs) -- ^ Free registers needed to run (if determined)
+         -> Bool              -- ^ Whether the handler should generate a binding
+         -> k (o : xs) n r a  -- ^ The handler
          -> Handler o k (o : xs) n r a
 
 {-|
@@ -224,8 +229,9 @@ in the generated code or not.
 
 @since 1.0.0.0
 -}
-data Access = Hard -- ^ Register exists at runtime and this interaction will use it.
-            | Soft -- ^ Register may not exist, and the interaction should be with cache regardless.
+data Access = Hard  -- ^ Register exists at runtime and this interaction will use it.
+            | Soft  -- ^ Register may not exist, and the interaction should be with cache regardless.
+            | Bound -- ^ Register that is bound to a local variable, a la `let reg = val in ...`
             deriving stock Show
 
 {-|
@@ -360,8 +366,32 @@ Smart-instruction for `Get` that uses a `Hard` access.
 _Get :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
 _Get σ = Get σ Hard
 
+{-|
+Smart-instruction for `Make` that uses a `Soft` access.
+
+@since 1.0.0.0
+-}
+_MakeSoft :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+_MakeSoft σ = Make σ Soft
+
+{-|
+Smart-instruction for `Put` that uses a `Soft` access.
+
+@since 1.0.0.0
+-}
+_PutSoft :: ΣVar x -> k xs n r a -> Instr o k (x : xs) n r a
+_PutSoft σ = Put σ Soft
+
+{-|
+Smart-instruction for `Get` that uses a `Soft` access.
+
+@since 1.0.0.0
+-}
+_GetSoft :: ΣVar x -> k (x : xs) n r a -> Instr o k xs n r a
+_GetSoft σ = Get σ Soft
+
 _Jump :: MVar x -> Instr o (Fix4 (Instr o)) '[] (Succ n) x a
-_Jump = flip Call (In4 Ret)
+_Jump x = Call x (In4 Ret)
 
 -- Instances
 instance IFunctor4 (Instr o) where
@@ -378,9 +408,9 @@ instance IFunctor4 (Instr o) where
   imap4 f (Seek k)            = Seek (f k)
   imap4 f (Case p q)          = Case (f p) (f q)
   imap4 f (Choices fs ks def) = Choices fs (map f ks) (f def)
-  imap4 f (Iter μ l h)        = Iter μ (f l) (imap4 f h)
+  imap4 f (Iter μ frs l h)    = Iter μ frs (f l) (imap4 f h)
   imap4 _ (Join φ)            = Join φ
-  imap4 f (MkJoin φ p k)      = MkJoin φ (f p) (f k)
+  imap4 f (MkJoin φ rs p k)   = MkJoin φ rs (f p) (f k)
   imap4 f (Swap k)            = Swap (f k)
   imap4 f (Dup k)             = Dup (f k)
   imap4 f (Make σ a k)        = Make σ a (f k)
@@ -392,15 +422,15 @@ instance IFunctor4 (Instr o) where
   imap4 f (MetaInstr m k)     = MetaInstr m (f k)
 
 instance IFunctor4 (Handler o) where
-  imap4 f (Same gyes yes gno no) = Same gyes (f yes) gno (f no)
-  imap4 f (Always gk k)          = Always gk (f k)
+  imap4 f (Same rs gyes yes gno no) = Same rs gyes (f yes) gno (f no)
+  imap4 f (Always rs gk k)          = Always rs gk (f k)
 
 instance Show (Fix4 (Instr o) xs n r a) where
   show = ($ "") . getConst4 . cata4 (Const4 . alg)
     where
       alg :: forall xs n r a. Instr o (Const4 (String -> String)) xs n r a -> String -> String
       alg Ret                        = "Ret"
-      alg (Call μ k)                 = "(Call " . shows μ . " " . getConst4 k . ")"
+      alg (Call μ k)                 = "(Call " . shows μ . getConst4 k . ")"
       alg (Push x k)                 = "(Push " . shows x . " " . getConst4 k . ")"
       alg (Pop k)                    = "(Pop " . getConst4 k . ")"
       alg (Lift2 f k)                = "(Lift2 " . shows f . " " . getConst4 k . ")"
@@ -412,9 +442,9 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (Seek k)                   = "(Seek " . getConst4 k . ")"
       alg (Case p q)                 = "(Case " . getConst4 p . " " . getConst4 q . ")"
       alg (Choices fs ks def)        = "(Choices " . shows fs . " [" . intercalateDiff ", " (map getConst4 ks) . "] " . getConst4 def . ")"
-      alg (Iter μ l h)               = "{Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
+      alg (Iter μ _ l h)             = "{Iter " . shows μ . " " . getConst4 l . " " . shows h . "}"
       alg (Join φ)                   = shows φ
-      alg (MkJoin φ p k)             = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
+      alg (MkJoin φ _ p k)           = "(let " . shows φ . " = " . getConst4 p . " in " . getConst4 k . ")"
       alg (Swap k)                   = "(Swap " . getConst4 k . ")"
       alg (Dup k)                    = "(Dup " . getConst4 k . ")"
       alg (Make σ a k)               = "(Make " . shows σ . " " . shows a . " " . getConst4 k . ")"
@@ -428,8 +458,8 @@ instance Show (Fix4 (Instr o) xs n r a) where
       alg (MetaInstr m k)            = "[" . shows m . "] " . getConst4 k
 
 instance Show (Handler o (Const4 (String -> String)) (o : xs) n r a) where
-  show (Same _ yes _ no) = "(Dup (Tell (Lift2 same (If " (getConst4 yes (" " (getConst4 no "))))")))
-  show (Always _ k)      = getConst4 k ""
+  show (Same _ _ yes _ no) = "(Dup (Tell (Lift2 same (If " (getConst4 yes (" " (getConst4 no "))))")))
+  show (Always _ _ k)      = getConst4 k ""
 
 instance Show (MetaInstr n) where
   show (AddCoins n)    = "Add " ++ show n ++ " coins"

@@ -13,18 +13,17 @@ free registers.
 -}
 module Parsley.Internal.Backend.Machine.LetBindings (
     LetBinding(..), Metadata,
-    Regs(..),
     makeLetBinding, newMeta,
     successInputCharacteristic, failureInputCharacteristic,
     Binding
   ) where
 
 import Prelude hiding                                             (foldr)
-import Data.Kind                                                  (Type)
-import Data.Set                                                   (Set, foldr)
+import Data.Set                                                   (Set)
 import Data.Some                                                  (Some, pattern Some)
-import Parsley.Internal.Backend.Machine.Identifiers               (ΣVar, SomeΣVar(..))
+import Parsley.Internal.Backend.Machine.Identifiers               (SomeΣVar(..))
 import Parsley.Internal.Backend.Machine.Instructions              (Instr)
+import Parsley.Internal.Backend.Machine.Types.Registers           (Regs (..), makeRegs)
 import Parsley.Internal.Backend.Machine.Types.InputCharacteristic (InputCharacteristic(..))
 import Parsley.Internal.Common                                    (Fix4, One)
 
@@ -39,7 +38,7 @@ the one of type @`Binding` o a a@.
 type Binding o a x = Fix4 (Instr o) '[] One x a
 
 {-|
-Packages a binding along with its free registers that are required
+Packages a binding along with its (and handler's) free registers that are required
 for it, which are left existential. This is possible since the `Regs`
 datatype serves as a singleton-style witness of the original registers
 and their types. It also requires `Metadata` to be provided, sourced
@@ -50,6 +49,8 @@ from analysis.
 data LetBinding o a x = LetBinding {
     body :: Binding o a x,
     freeRegs :: Some Regs,
+    handlerFrees :: Some Regs,
+    returnFrees :: Some Regs,
     meta :: Metadata
   }
 
@@ -83,7 +84,7 @@ Given a `Binding` , a set of existential `ΣVar`s, and some `Metadata`, produces
 @since 1.5.0.0
 -}
 makeLetBinding :: Binding o a x -> Set SomeΣVar -> Metadata -> LetBinding o a x
-makeLetBinding m rs = LetBinding m (makeRegs rs)
+makeLetBinding m rs = LetBinding m (makeRegs rs) (Some NoRegs) (Some NoRegs)
 
 {-|
 Produces a new `Metadata` object, with fields initialised to sensible conservative
@@ -96,22 +97,3 @@ newMeta = Metadata {
     successInputCharacteristic = MayConsume,
     failureInputCharacteristic = MayConsume
   }
-
-{-|
-Represents a collection of free registers, preserving their type
-information as a heterogeneous list.
-
-@since 1.0.0.0
--}
-data Regs (rs :: [Type]) where
-  NoRegs :: Regs '[]
-  FreeReg :: ΣVar r -> Regs rs -> Regs (r : rs)
-
-{-|
-Converts a set of existential `ΣVar`s into an existential
-heterogeneous list of free registers.
-
-@since 1.4.0.0
--}
-makeRegs :: Set SomeΣVar -> Some Regs
-makeRegs = foldr (\(SomeΣVar σ) (Some rs) -> Some (FreeReg σ rs)) (Some NoRegs)

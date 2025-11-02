@@ -11,18 +11,13 @@ template haskell as a lower, combinator-based, level.
 
 @since 2.3.0.0
 -}
-module Parsley.Internal.Common.THUtils (eta, unsafeCodeCoerce, unTypeCode) where
+module Parsley.Internal.Common.THUtils (eta, unsafeCodeCoerce, unTypeCode, debugTH) where
 
-import Data.Generics                 (everything, mkQ)
 import Control.Arrow                 (first)
-import Language.Haskell.TH.Syntax    ( Exp(AppE, LamE, VarE), Pat(VarP, BangP, SigP)
-#if __GLASGOW_HASKELL__ < 900
-                                     , Q, unTypeQ, unsafeTExpCoerce
-#else
-                                     , unTypeCode, unsafeCodeCoerce
-#endif
-                                     )
+import Data.Generics                 (everything, mkQ)
+import Language.Haskell.TH           (Q, Exp(AppE, LamE, VarE), Pat(VarP, BangP, SigP), unTypeCode, unsafeCodeCoerce, runQ)
 import Parsley.Internal.Common.Utils (Code)
+import GHC.IO                        (unsafePerformIO)
 
 {-|
 Given a function (of arbitrarily many arguments, but it must at /least/ have 1), eta-reduces
@@ -48,16 +43,17 @@ eta = unsafeCodeCoerce . fmap checkEtaMulti . unTypeCode
 
     checkOccurrence x body = everything (&&) (mkQ True (/= x)) body
 
-    checkEtaMulti (LamE args body)  = uncurry LamE $
-      foldr (\arg (args, body) -> first (maybe args (: args)) (checkEta arg body))
-            ([], body)
-            args
+    checkEtaMulti (LamE args body) = if null args' then body' else LamE args' body'
+      where
+        (args', body') = foldr (\arg (args, body) -> first (maybe args (: args)) (checkEta arg body))
+                         ([], body)
+                         args
     checkEtaMulti qf = qf
 
-#if __GLASGOW_HASKELL__ < 900
-unsafeCodeCoerce :: Q Exp -> Code a
-unsafeCodeCoerce = unsafeTExpCoerce
-
-unTypeCode :: Code a -> Q Exp
-unTypeCode = unTypeQ
-#endif
+-- Debug: print TH AST at "pure" site
+debugTH :: Q Exp -> a -> a
+debugTH qexp result =
+  unsafePerformIO $ do
+    expr <- runQ qexp
+    print expr
+    return result

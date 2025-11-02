@@ -127,37 +127,44 @@ test-suite regression-test
   main-is:             Regression/Tests.hs
   other-modules:       Regression.Parsers
 
---common benchmark-common
---  build-tool-depends:  happy:happy
---  build-depends:       base >=4.12 && <5,
---                       parsley,
---                       gauge,
---                       deepseq,
---                       template-haskell,
---                       parsec,
---                       attoparsec,
---                       megaparsec,
---                       text,
---                       bytestring,
---                       mtl,
---                       array,
---                       containers
---  hs-source-dirs:      benchmarks
---  other-extensions:    TemplateHaskellQuotes, TemplateHaskell
---  other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
---  default-language:    Haskell2010
---  ghc-options:         -rtsopts -ddump-splices -ddump-to-file
---  if false && impl(ghc < 9)
---    build-depends:     dump-core
---    ghc-options:       -fplugin=DumpCore
+common benchmark-common
+  build-tool-depends:  happy:happy
+  build-depends:       base >= 4.12 && <5,
+                       parsley,
+                       gauge,
+                       deepseq,
+                       template-haskell,
+                       parsec,
+                       attoparsec,
+                       megaparsec, 
+                       gigaparsec,
+                       text,
+                       bytestring,
+                       mtl,
+                       array,
+                       containers
+  hs-source-dirs:      benchmarks
+  other-extensions:    TemplateHaskellQuotes, TemplateHaskell
+  other-modules:       Shared.BenchmarkUtils, Shared.Attoparsec.Extended, Shared.Megaparsec.Extended, Shared.Parsec.Extended
+  ghc-options:         -rtsopts -ddump-splices -ddump-to-file
+  default-language:    Haskell2010
 
---benchmark brainfuck-bench
---  import:              benchmark-common
---  type:                exitcode-stdio-1.0
---  other-modules:       BrainfuckBench.Shared, BrainfuckBench.Parsley.Parser, BrainfuckBench.Parsec.Parser, BrainfuckBench.Megaparsec.Parser,
---                       BrainfuckBench.Attoparsec.Parser, BrainfuckBench.Handrolled.Parser, BrainfuckBench.Happy.Parser
---  main-is:             BrainfuckBench/Main.hs
+benchmark brainfuck-bench
+   import:              benchmark-common
+   type:                exitcode-stdio-1.0
+   other-modules:       BrainfuckBench.Shared, BrainfuckBench.Parsley.Parser, BrainfuckBench.Parsec.Parser, BrainfuckBench.Megaparsec.Parser,
+                        BrainfuckBench.Attoparsec.Parser, BrainfuckBench.Handrolled.Parser, BrainfuckBench.Happy.Parser
+   ghc-options: -O0
+   main-is:             BrainfuckBench/Main.hs
 
+
+-- benchmark abc-bench
+--   import:              benchmark-common
+--   type:                exitcode-stdio-1.0
+--   ghc-options:         -O0
+--   other-modules:       ABCBench.Shared, ABCBench.Parsley.Parser, ABCBench.Gigaparsec.Parser
+--   main-is:             ABCBench/Main.hs 
+-- 
 --benchmark javascript-bench
 --  import:              benchmark-common
 --  type:                exitcode-stdio-1.0
@@ -168,7 +175,22 @@ test-suite regression-test
 --benchmark nandlang-bench
 --  import:              benchmark-common
 --  type:                exitcode-stdio-1.0
-  --cc-options:          -O3
+--  cc-options:          -O3
 --  other-modules:       NandlangBench.Parsley.Parser, NandlangBench.Parsley.Functions, NandlangBench.Bison.Parser
 --  c-sources:           benchmarks/NandlangBench/Bison/lex.yy.c, benchmarks/NandlangBench/Bison/Nandlang.tab.c
 --  main-is:             NandlangBench/Main.hs
+
+executable brainfuck-profile 
+  build-depends:    base >=4.12 && <5,
+                    parsley,
+                    parsley-core,
+                    tasty,
+                    bytestring,
+                    template-haskell,
+                    deepseq
+  hs-source-dirs:   benchmarks
+  other-extensions: TemplateHaskellQuotes, TemplateHaskell
+  ghc-options:      -O2 -auto
+  default-language: Haskell2010
+  other-modules:    BrainfuckBench.Shared, BrainfuckBench.Parsley.Parser
+  main-is:          BrainfuckBench/BrainfuckProfile.hs

@@ -43,8 +43,8 @@ algCatch (Zero, True) k = k
 algCatch (k1, _) (k2, _) = (minCoins k1 k2, False)
 
 algHandler :: Handler o (Const4 (Coins, Bool)) xs n r a -> (Coins, Bool)
-algHandler (Same _ yes _ no) = algCatch (getConst4 yes) (getConst4 no)
-algHandler (Always _ k) = getConst4 k
+algHandler (Same _ _ yes _ no) = algCatch (getConst4 yes) (getConst4 no)
+algHandler (Always _ _ k) = getConst4 k
 
 -- Bool represents if an empty is found in a branch (of a Catch)
 -- This helps to get rid of `min` being used for `Try` where min is always 0
@@ -64,7 +64,7 @@ alg _     (Lift2 _ (Const4 k))                      = k
 alg _     (Commit (Const4 k))                       = k
 alg _     (Tell (Const4 k))                         = k
 alg _     (Seek (Const4 k))                         = k
-alg _     (MkJoin _ _ (Const4 k))                   = k
+alg _     (MkJoin _ _ _ (Const4 k))                 = k
 alg _     (Swap (Const4 k))                         = k
 alg _     (Dup (Const4 k))                          = k
 alg _     (Make _ _ (Const4 k))                     = k

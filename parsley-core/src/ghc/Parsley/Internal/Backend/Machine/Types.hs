@@ -15,16 +15,18 @@ module Parsley.Internal.Backend.Machine.Types (
     module Parsley.Internal.Backend.Machine.Types,
     -- * Compatibility Re-exports
     module Parsley.Internal.Backend.Machine.Types.Base,
+    module Parsley.Internal.Backend.Machine.Types.Registers,
     module Parsley.Internal.Backend.Machine.Types.Statics
   ) where
 
-import Control.Monad.Reader                           (Reader, runReader)
-import Control.Monad.ST                               (ST)
-import Parsley.Internal.Backend.Machine.Types.Base    (Func)
-import Parsley.Internal.Backend.Machine.Types.Context (Ctx)
-import Parsley.Internal.Backend.Machine.Types.State   (Γ)
-import Parsley.Internal.Backend.Machine.Types.Statics (QSubroutine, qSubroutine)
-import Parsley.Internal.Common.Utils                  (Code)
+import Control.Monad.Reader                             (Reader, runReader)
+import Control.Monad.ST                                 (ST)
+import Parsley.Internal.Backend.Machine.Types.Base      (Func)
+import Parsley.Internal.Backend.Machine.Types.Registers (Regs)
+import Parsley.Internal.Backend.Machine.Types.Context   (Ctx)
+import Parsley.Internal.Backend.Machine.Types.State     (Γ)
+import Parsley.Internal.Backend.Machine.Types.Statics   (QSubroutine, qSubroutine)
+import Parsley.Internal.Common.Utils                    (Code)
 
 {-|
 The monad stack used to evaluate a parser machine, see `run`.

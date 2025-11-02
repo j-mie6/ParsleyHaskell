@@ -83,6 +83,7 @@ library
                        Parsley.Internal.Backend.Analysis.Coins,
                        Parsley.Internal.Backend.Analysis.Inliner,
                        Parsley.Internal.Backend.Analysis.Relevancy,
+                       Parsley.Internal.Backend.ReferenceBinds,
 
                        Parsley.Internal.Backend.Machine,
                        Parsley.Internal.Backend.Machine.BindingOps,
@@ -102,6 +103,7 @@ library
                        Parsley.Internal.Backend.Machine.Types.Coins,
                        Parsley.Internal.Backend.Machine.Types.Context,
                        Parsley.Internal.Backend.Machine.Types.Dynamics,
+                       Parsley.Internal.Backend.Machine.Types.Registers,
                        Parsley.Internal.Backend.Machine.Types.Input,
                        Parsley.Internal.Backend.Machine.Types.InputCharacteristic,
                        Parsley.Internal.Backend.Machine.Types.State,
@@ -141,6 +143,7 @@ library
                        bytestring           >= 0.10.8  && < 0.12,
                        rangeset             >= 0.0.1   && < 0.2,
                        syb                  >= 0.1     && < 0.8,
+                       dlist                >= 1.0
   build-tool-depends:  cpphs:cpphs          >= 1.18.8  && < 1.21
   hs-source-dirs:      src/ghc
   default-language:    Haskell2010

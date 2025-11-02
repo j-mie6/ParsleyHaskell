@@ -87,6 +87,26 @@ zygo alg aux = ifst . mutu alg (aux . imap isnd)
 zipper :: IFunctor f => (forall j. f a j -> a j) -> (forall j. f b j -> b j) -> Fix f i -> (a :*: b) i
 zipper algl algr = mutu (algl . imap ifst) (algr . imap isnd)
 
+-- Cooking something diabolical: a zygo4. The naming is a bit ridiculous :^)
+data (f :****: g) i j k x = f i j k x :****: g i j k x
+
+{-# INLINE (/\/\/\/\) #-}
+(/\/\/\/\) :: (a -> f i j k x) -> (a -> g i j k x) -> (a -> (f :****: g) i j k x)
+(f /\/\/\/\ g) x = f x :****: g x
+
+{-# INLINE ifst4 #-}
+ifst4 :: (f :****: g) i j k x -> f i j k x
+ifst4 (x :****: _) = x
+{-# INLINE isnd4 #-}
+isnd4 :: (f :****: g) i j k x -> g i j k x
+isnd4 (_ :****: y) = y
+
+mutu4 :: IFunctor4 f => (forall i' j' k' x'. f (a :****: b) i' j' k' x' -> a i' j' k' x') -> (forall i' j' k' x'. f (a :****: b) i' j' k' x' -> b i' j' k' x') -> Fix4 f i j k x -> (a :****: b) i j k x
+mutu4 algl algr = cata4 (algl /\/\/\/\ algr)
+
+zygo4 :: IFunctor4 f => (forall i' j' k' x'. f (a :****: b) i' j' k' x' -> a i' j' k' x') -> (forall i' j' k' x'. f b i' j' k' x' -> b i' j' k' x') -> Fix4 f i j k x -> a i j k x
+zygo4 alg aux = ifst4 . mutu4 alg (aux . imap4 isnd4)
+
 class                         Chain r k         where (|>) :: (a -> Maybe r) -> (a -> k) -> a -> k
 instance {-# OVERLAPPABLE #-} Chain a a         where (|>) = liftA2 (flip fromMaybe)
 instance {-# OVERLAPS #-}     Chain a (Maybe a) where (|>) = liftA2 (<|>)
@@ -96,3 +116,9 @@ newtype Const1 a k = Const1 {getConst1 :: a}
 
 data Unit4 i j k l = Unit4
 newtype Const4 a i j k l = Const4 {getConst4 :: a}
+
+data Tag t f (k :: Type -> Type) a = Tag {tag :: t, tagged :: f k a}
+
+
+instance IFunctor f => IFunctor (Tag t f) where
+  imap f (Tag t k) = Tag t (imap f k)

@@ -2,6 +2,7 @@
              MagicHash,
              DerivingStrategies,
              UnboxedTuples,
+             TypeApplications,
              PatternSynonyms #-}
 {-|
 Module      : Parsley.Internal.Backend.Machine.Types.Context
@@ -18,7 +19,7 @@ used to aid code generation.
 module Parsley.Internal.Backend.Machine.Types.Context (
     -- * Core Data-types
     Ctx,
-    QJoin,
+    QJoin(..),
     emptyCtx,
 
     -- * Subroutines
@@ -33,9 +34,9 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     -- $reg-doc
 
     -- ** Putters
-    insertNewΣ, cacheΣ,
+    insertNewΣ, cacheΣ, bindΣ, unbindΣ,
     -- ** Getters
-    concreteΣ, cachedΣ,
+    concreteΣ, cachedΣ, boundΣ, isBoundΣ,
     takeFreeRegisters,
 
     -- * Debug Level Tracking
@@ -57,27 +58,28 @@ module Parsley.Internal.Backend.Machine.Types.Context (
     addChar, readChar
   ) where
 
-import Control.Exception                               (Exception, throw)
-import Control.Monad                                   ((<=<))
-import Control.Monad.Reader                            (asks, local, MonadReader)
-import Data.STRef                                      (STRef)
-import Data.Dependent.Map                              (DMap)
-import Data.Maybe                                      (fromMaybe, isNothing)
-import Parsley.Internal.Backend.Machine.Defunc         (Defunc)
-import Parsley.Internal.Backend.Machine.Identifiers    (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
-import Parsley.Internal.Backend.Machine.LetBindings    (Regs(..))
-import Parsley.Internal.Backend.Machine.Types.Coins    (Coins(Coins, willConsume))
-import Parsley.Internal.Backend.Machine.Types.Dynamics (DynFunc, DynSubroutine)
+import Control.Exception                                   (Exception, throw)
+import Control.Monad                                       ((<=<))
+import Control.Monad.Reader                                (asks, local, MonadReader)
+import Data.STRef                                          (STRef)
+import Data.Dependent.Map                                  (DMap)
+import Data.Maybe                                          (fromMaybe, isNothing, isJust)
+import Parsley.Internal.Backend.Machine.Defunc             (Defunc)
+import Parsley.Internal.Backend.Machine.Identifiers        (MVar(..), ΣVar(..), ΦVar, IMVar, IΣVar)
+import Parsley.Internal.Backend.Machine.Types.Registers    (Regs(..))
+import Parsley.Internal.Backend.Machine.Types.Coins        (Coins(Coins, willConsume))
+import Parsley.Internal.Backend.Machine.Types.Dynamics     (DynFunc, DynSubroutine)
 import Parsley.Internal.Backend.Machine.Types.Input.Offset (Offset)
-import Parsley.Internal.Backend.Machine.Types.Statics  (QSubroutine(..), StaFunc, StaSubroutine, StaCont)
-import Parsley.Internal.Common                         (Queue, enqueue, dequeue, poke, Code, RewindQueue)
-import Parsley.Internal.Core.CharPred                  (CharPred, pattern Item, andPred)
+import Parsley.Internal.Backend.Machine.Types.Statics      (QSubroutine(..), StaSubroutine (staSubroutine#), StaCont, SomeCallableSubroutine (..))
+import Parsley.Internal.Common                             (Queue, enqueue, dequeue, poke, Code, RewindQueue)
+import Parsley.Internal.Core.CharPred                      (CharPred, pattern Item, andPred)
 
 import qualified Data.Dependent.Map                           as DMap  ((!), insert, empty, lookup)
 import qualified Parsley.Internal.Common.QueueLike            as Queue (empty, null)
 import qualified Parsley.Internal.Common.RewindQueue          as Queue (rewind)
 
 -- Core Data-types
+
 {-|
 The `Ctx` stores information that aids or facilitates the generation of parser code,
 but its components are fully static and do not materialise as runtime values, but
@@ -102,7 +104,7 @@ as a `Parsley.Internal.Backend.Machine.Types.Statics.StaCont`.
 
 @since 1.0.0.0
 -}
-newtype QJoin s o a x = QJoin { unwrapJoin :: StaCont s o a x }
+data QJoin s o a x = forall ys. QJoin { unwrapJoin :: StaCont ys s o a x, joinRegs :: Regs ys }
 
 {-|
 Creates an empty `Ctx` populated with a map of the top-level (recursive)
@@ -130,23 +132,28 @@ according to "local" @Reader@ semantics.
 
 @since 1.2.0.0
 -}
-insertSub :: MVar x                -- ^ The name of the binding.
-          -> StaSubroutine s o a x -- ^ The binding to register.
-          -> Ctx s o a             -- ^ The current context.
-          -> Ctx s o a             -- ^ The new context.
-insertSub μ q ctx = ctx {μs = DMap.insert μ (QSubroutine q NoRegs) (μs ctx)}
+insertSub :: forall rs hs ys s o a x. MVar x  -- ^ The name of the binding.
+          -> StaSubroutine rs hs ys s o a x   -- ^ The binding to register.
+          -> Regs rs                          -- ^ Witnesses for required free registers of sub.
+          -> Regs hs                          -- ^ Witnesses for handler's free registers.
+          -> Regs ys                          -- ^ Witnesses for return continuation's free registers.
+          -> Ctx s o a                        -- ^ The current context.
+          -> Ctx s o a                        -- ^ The new context.
+insertSub μ q regs hregs rregs ctx = ctx {μs = DMap.insert μ (QSubroutine q regs hregs rregs) (μs ctx)}
 
 {-|
 Fetches a binding from the context according to its name (See `Parsley.Internal.Core.Identifiers.MVar`).
 In the (hopefully impossible!) event that it is not found in the map, will throw a @MissingDependency@
 exception. If this binding had free registers, these are generously provided by the `Ctx`.
 
+Witnesses for the expected handler's types are returned alongside 
+
 @since 1.2.0.0
 -}
-askSub :: MonadReader (Ctx s o a) m => MVar x -> m (StaSubroutine s o a x)
+askSub :: MonadReader (Ctx s o a) m => MVar x -> m (SomeCallableSubroutine s o a x)
 askSub μ =
-  do QSubroutine sub rs <- askSubUnbound μ
-     asks (provideFreeRegisters sub rs)
+  do QSubroutine sub rs hs ys <- askSubUnbound μ
+     asks (\c -> SomeCallableSubroutine (provideBoundRegisters sub rs c) hs ys)
 
 askSubUnbound :: MonadReader (Ctx s o a) m => MVar x -> m (QSubroutine s o a x)
 askSubUnbound μ = asks (fromMaybe (throw (missingDependency μ)) . DMap.lookup μ . μs)
@@ -163,19 +170,20 @@ expires according to "local" @Reader@ semantics.
 
 @since 1.0.0.0
 -}
-insertΦ :: ΦVar x          -- ^ The name of the new binding.
-        -> StaCont s o a x -- ^ The binding to add.
-        -> Ctx s o a       -- ^ The old context.
-        -> Ctx s o a       -- ^ The new context.
-insertΦ φ qjoin ctx = ctx {φs = DMap.insert φ (QJoin qjoin) (φs ctx)}
+insertΦ :: ΦVar x             -- ^ The name of the new binding.
+        -> StaCont ys s o a x -- ^ The binding to add.
+        -> Regs ys            -- ^ Free registers of the `StaCont` 
+        -> Ctx s o a          -- ^ The old context.
+        -> Ctx s o a          -- ^ The new context.
+insertΦ φ qjoin regs ctx = ctx {φs = DMap.insert φ (QJoin qjoin regs) (φs ctx)}
 
 {-|
 Fetches a binding from the `Ctx`.
 
 @since 1.2.0.0
 -}
-askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (StaCont s o a x)
-askΦ φ = asks (unwrapJoin . (DMap.! φ) . φs)
+askΦ :: MonadReader (Ctx s o a) m => ΦVar x -> m (QJoin s o a x)
+askΦ φ = asks ((DMap.! φ) . φs)
 
 -- Registers
 {- $reg-doc
@@ -190,6 +198,7 @@ that registers do not exist at runtime. Both forms of register data can be extra
 however exceptions will guard against mis-management.
 -}
 data Reg s x = Reg { getReg    :: Maybe (Code (STRef s x)) -- ^ The "true" register
+                   , getBound  :: Maybe (Code x)           -- ^ The bound variable of the register's value 
                    , getCached :: Maybe (Defunc x) }       -- ^ The "most-recently known" value
 
 {-|
@@ -200,10 +209,11 @@ the original value in the register, which is injected into the cache.
 -}
 insertNewΣ :: ΣVar x                   -- ^ The name of the register.
            -> Maybe (Code (STRef s x)) -- ^ The runtime representation, if available.
+           -> Maybe (Code x)           -- ^ The bound representation, if available.
            -> Defunc x                 -- ^ The initial value stored into the register.
            -> Ctx s o a                -- ^ The old context.
            -> Ctx s o a                -- ^ The new context.
-insertNewΣ σ qref x ctx = ctx {σs = DMap.insert σ (Reg qref (Just x)) (σs ctx)}
+insertNewΣ σ qref bref x ctx = ctx {σs = DMap.insert σ (Reg qref bref (Just x)) (σs ctx)}
 
 {-|
 Updated the "last-known value" of a register in the cache.
@@ -212,8 +222,24 @@ Updated the "last-known value" of a register in the cache.
 -}
 cacheΣ :: ΣVar x -> Defunc x -> Ctx s o a -> Ctx s o a
 cacheΣ σ x ctx = case DMap.lookup σ (σs ctx) of
-  Just (Reg ref _) -> ctx {σs = DMap.insert σ (Reg ref (Just x)) (σs ctx)}
+  Just (Reg ref b _) -> ctx {σs = DMap.insert σ (Reg ref b (Just x)) (σs ctx)}
   Nothing          -> throw (outOfScopeRegister σ)
+
+{-| 
+Update the last-known bound variable name of a register. Does not clear/update cache.
+-}
+bindΣ :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
+bindΣ σ bref ctx = case DMap.lookup σ (σs ctx) of
+  Just (Reg ref _ c) -> ctx {σs = DMap.insert σ (Reg ref (Just bref) c) (σs ctx)}
+  Nothing            -> ctx {σs = DMap.insert σ (Reg Nothing (Just bref) Nothing) (σs ctx)}
+
+{-| 
+Remove the binding for a register.
+-}
+unbindΣ :: ΣVar x -> Ctx s o a -> Ctx s o a
+unbindΣ σ ctx = case DMap.lookup σ (σs ctx) of
+  Just (Reg ref _ c) -> ctx {σs = DMap.insert σ (Reg ref Nothing c) (σs ctx)}
+  Nothing            -> throw (outOfScopeRegister σ)
 
 {-|
 Fetches a known to be concrete register (i.e. one that must be materialised
@@ -235,6 +261,21 @@ cachedΣ :: ΣVar x -> Ctx s o a -> Defunc x
 cachedΣ σ = fromMaybe (throw (registerFault σ)) . (getCached <=< (DMap.lookup σ . σs))
 
 {-|
+Fetches the bound variable of a register. If the register is not bound, a 
+@RegisterFault@ exception is thrown.
+
+-}
+boundΣ :: ΣVar x -> Ctx s o a -> Code x
+boundΣ σ = fromMaybe (throw (registerBindFault σ)) . (getBound <=< (DMap.lookup σ . σs))
+
+{-|
+Checks if given ΣVar is bound in the current context.
+TODO: can be removed when we fully bind everything. Here to facilitate backwards compatibiltiy between different iterations.
+-}
+isBoundΣ :: ΣVar x -> Ctx s o a -> Bool
+isBoundΣ σ = isJust . (getBound <=< (DMap.lookup σ . σs))
+
+{-|
 When a binding is generated, it needs to generate function arguments for each of the
 free registers it requires. This is performed by this function, which also adds each
 of these freshly bound registers into the `Ctx`. Has the effect of converting a
@@ -244,20 +285,25 @@ of these freshly bound registers into the `Ctx`. Has the effect of converting a
 @since 1.2.0.0
 -}
 -- This needs to return a DynFunc: it is fed back to shared territory
-takeFreeRegisters :: Regs rs                              -- ^ The free registers demanded by the binding.
-                  -> Ctx s o a                            -- ^ The old context.
-                  -> (Ctx s o a -> DynSubroutine s o a x) -- ^ Given the new context, function that produces the subroutine.
-                  -> DynFunc rs s o a x                   -- ^ The newly produced dynamic function.
-takeFreeRegisters NoRegs ctx body = body ctx
-takeFreeRegisters (FreeReg σ σs) ctx body = [||\(!reg) -> $$(takeFreeRegisters σs (insertScopedΣ σ [||reg||] ctx) body)||]
+takeFreeRegisters :: forall rs hs ys s o a x. Regs rs               -- ^ The free registers demanded by the binding.
+                  -> Regs hs                                        -- ^ Registers needed by handler. Left as witnesses.
+                  -> Regs ys                                        -- ^ Witnesses for the return continuation registers.
+                  -> Ctx s o a                                      -- ^ The old context.
+                  -> (Ctx s o a -> DynSubroutine '[] hs ys s o a x) -- ^ Given the new context, function that produces the subroutine.
+                  -> DynFunc rs hs ys s o a x                       -- ^ The newly produced dynamic function.
+takeFreeRegisters NoRegs _ _ ctx body = body ctx
+takeFreeRegisters (Regs σ σs) hregs retregs ctx body = [||\reg -> $$(takeFreeRegisters σs hregs retregs (insertScopedΣ' σ [||reg||] ctx) body)||]
 
 insertScopedΣ :: ΣVar x -> Code (STRef s x) -> Ctx s o a -> Ctx s o a
-insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing) (σs ctx)}
+insertScopedΣ σ qref ctx = ctx {σs = DMap.insert σ (Reg (Just qref) Nothing Nothing) (σs ctx)}
 
--- This needs to take a StaFunc, it is fed back via `askSub`
-provideFreeRegisters :: StaFunc rs s o a x -> Regs rs -> Ctx s o a -> StaSubroutine s o a x
-provideFreeRegisters sub NoRegs _ = sub
-provideFreeRegisters f (FreeReg σ σs) ctx = provideFreeRegisters (f (concreteΣ σ ctx)) σs ctx
+insertScopedΣ' :: ΣVar x -> Code x -> Ctx s o a -> Ctx s o a
+insertScopedΣ' σ qref ctx = ctx {σs = DMap.insert σ (Reg Nothing (Just qref) Nothing) (σs ctx)}
+
+-- Feed all the free registers of a `StaSubroutine`
+provideBoundRegisters :: StaSubroutine rs hs ys s o a x -> Regs rs -> Ctx s o a -> StaSubroutine '[] hs ys s o a x
+provideBoundRegisters sub NoRegs _ = sub
+provideBoundRegisters sub (Regs σ σs) ctx = provideBoundRegisters (sub{staSubroutine# = staSubroutine# sub (boundΣ σ ctx)}) σs ctx
 
 -- Debug Level Tracking
 {- $debug-doc
@@ -466,6 +512,8 @@ newtype MissingDependency = MissingDependency IMVar deriving anyclass Exception
 newtype OutOfScopeRegister = OutOfScopeRegister IΣVar deriving anyclass Exception
 newtype IntangibleRegister = IntangibleRegister IΣVar deriving anyclass Exception
 newtype RegisterFault = RegisterFault IΣVar deriving anyclass Exception
+newtype RegisterBindFault = RegisterBindFault IΣVar deriving anyclass Exception
+
 
 missingDependency :: MVar x -> MissingDependency
 missingDependency (MVar v) = MissingDependency v
@@ -475,8 +523,11 @@ intangibleRegister :: ΣVar x -> IntangibleRegister
 intangibleRegister (ΣVar σ) = IntangibleRegister σ
 registerFault :: ΣVar x -> RegisterFault
 registerFault (ΣVar σ) = RegisterFault σ
+registerBindFault :: ΣVar x -> RegisterBindFault
+registerBindFault (ΣVar σ) = RegisterBindFault σ
 
 instance Show MissingDependency where show (MissingDependency μ) = "Dependency μ" ++ show μ ++ " has not been compiled"
 instance Show OutOfScopeRegister where show (OutOfScopeRegister σ) = "Register r" ++ show σ ++ " is out of scope"
 instance Show IntangibleRegister where show (IntangibleRegister σ) = "Register r" ++ show σ ++ " is intangible in this scope"
 instance Show RegisterFault where show (RegisterFault σ) = "Attempting to access register r" ++ show σ ++ " from cache has failed"
+instance Show RegisterBindFault where show (RegisterBindFault σ) = "Attempting to access bound version of r" ++ show σ ++ " from context has failed"

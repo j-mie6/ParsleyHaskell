@@ -12,7 +12,7 @@ Exposes the analysis passes defined within the analysis submodules via `analyse`
 module Parsley.Internal.Frontend.Analysis (
     analyse, dependencyAnalysis, inliner,
     module Flags
-  ) where
+   ) where
 
 import Parsley.Internal.Common.Indexed                 (Fix)
 import Parsley.Internal.Core.CombinatorAST             (Combinator)

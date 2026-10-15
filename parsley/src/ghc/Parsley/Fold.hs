@@ -13,7 +13,7 @@ this includes the traditional `many` and `some` combinators.
 -}
 module Parsley.Fold (
     many, some, manyN,
-    skipMany, skipSome, skipManyN, --loop,
+    skipMany, skipSome, skipManyN, loop,
     sepBy, sepBy1, endBy, endBy1, sepEndBy, sepEndBy1,
     chainl1, chainr1, chainl, chainr,
     infixl1, infixr1, prefix, postfix,
